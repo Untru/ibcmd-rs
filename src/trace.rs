@@ -456,8 +456,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        GroupAccumulator, analyze_one_file, extract_table_names, normalize_sql,
-        transaction_boundary_kind,
+        GroupAccumulator, analyze_one_file, analyze_trace_files, extract_table_names,
+        normalize_sql, transaction_boundary_kind,
     };
 
     #[test]
@@ -692,6 +692,77 @@ mod tests {
         assert_eq!(rollback_group.rollback_transaction_count, 1);
 
         let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn analyze_trace_files_merges_multiple_inputs() {
+        let dir =
+            std::env::temp_dir().join(format!("ibcmd-rs-trace-merge-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let first = dir.join("first.xml");
+        let second = dir.join("second.xml");
+        fs::write(
+            &first,
+            r#"
+<RingBufferTarget>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>4</value></data>
+    <data name="row_count"><value>1</value></data>
+    <data name="statement"><value>SELECT * FROM dbo.TableY WHERE ID = 1</value></data>
+    <action name="session_id"><value>101</value></action>
+  </event>
+</RingBufferTarget>
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &second,
+            r#"
+<RingBufferTarget>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>6</value></data>
+    <data name="row_count"><value>3</value></data>
+    <data name="statement"><value>SELECT * FROM dbo.TableY WHERE ID = 2</value></data>
+    <action name="session_id"><value>101</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>1</value></data>
+    <data name="statement"><value>COMMIT TRANSACTION</value></data>
+  </event>
+</RingBufferTarget>
+"#,
+        )
+        .unwrap();
+
+        let analysis = analyze_trace_files(&[first.clone(), second.clone()]).unwrap();
+        assert_eq!(analysis.files, vec![first.clone(), second.clone()]);
+        assert_eq!(analysis.events_seen, 3);
+        assert_eq!(analysis.groups.len(), 2);
+
+        let query_group = analysis
+            .groups
+            .iter()
+            .find(|group| group.normalized_sql == "select * from dbo.tabley where id = ?")
+            .unwrap();
+        assert_eq!(query_group.count, 2);
+        assert_eq!(query_group.total_duration_us, 10);
+        assert_eq!(query_group.total_row_count, 4);
+        assert_eq!(query_group.max_row_count, 3);
+        assert_eq!(query_group.session_ids, vec!["101".to_string()]);
+
+        let commit_group = analysis
+            .groups
+            .iter()
+            .find(|group| group.normalized_sql == "commit transaction")
+            .unwrap();
+        assert_eq!(commit_group.count, 1);
+        assert_eq!(commit_group.commit_transaction_count, 1);
+        assert_eq!(commit_group.begin_transaction_count, 0);
+        assert_eq!(commit_group.rollback_transaction_count, 0);
+
+        let _ = fs::remove_file(first);
+        let _ = fs::remove_file(second);
         let _ = fs::remove_dir(dir);
     }
 }
