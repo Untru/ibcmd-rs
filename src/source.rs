@@ -185,6 +185,7 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
                 SourceKind::MetadataXml
             }
             Some("DefinedType") => SourceKind::MetadataXml,
+            _ if has_metadata_collection_folder(&lower) => SourceKind::MetadataXml,
             _ if is_metadata_subfile(&lower) => SourceKind::MetadataXml,
             _ => SourceKind::OtherXml,
         };
@@ -221,48 +222,49 @@ fn infer_object_hint(relative: &str, kind: &SourceKind, xml_root: Option<&str>) 
 }
 
 fn is_metadata_collection(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
     matches!(
-        value,
-        "Catalogs"
-            | "Documents"
-            | "InformationRegisters"
-            | "AccumulationRegisters"
-            | "AccountingRegisters"
-            | "CalculationRegisters"
-            | "ChartsOfCharacteristicTypes"
-            | "ChartsOfAccounts"
-            | "ChartsOfCalculationTypes"
-            | "ChartsOfCalculationRegisters"
-            | "CommonModules"
-            | "CommonForms"
-            | "CommonPictures"
-            | "CommonTemplates"
-            | "CommonAttributes"
-            | "CommandGroups"
-            | "DocumentJournals"
-            | "Reports"
-            | "DataProcessors"
-            | "Enums"
-            | "ExchangePlans"
-            | "EventSubscriptions"
-            | "FilterCriteria"
-            | "FunctionalOptions"
-            | "FunctionalOptionsParameters"
-            | "HTTPServices"
-            | "Languages"
-            | "ScheduledJobs"
-            | "SessionParameters"
-            | "SettingsStorages"
-            | "StyleItems"
-            | "Subsystems"
-            | "Roles"
-            | "CommonCommands"
-            | "BusinessProcesses"
-            | "DefinedTypes"
-            | "Tasks"
-            | "Constants"
-            | "WebServices"
-            | "XDTOPackages"
+        value.as_str(),
+        "catalogs"
+            | "documents"
+            | "informationregisters"
+            | "accumulationregisters"
+            | "accountingregisters"
+            | "calculationregisters"
+            | "chartsofcharacteristictypes"
+            | "chartsofaccounts"
+            | "chartsofcalculationtypes"
+            | "chartsofcalculationregisters"
+            | "commonmodules"
+            | "commonforms"
+            | "commonpictures"
+            | "commontemplates"
+            | "commonattributes"
+            | "commandgroups"
+            | "documentjournals"
+            | "reports"
+            | "dataprocessors"
+            | "enums"
+            | "exchangeplans"
+            | "eventsubscriptions"
+            | "filtercriteria"
+            | "functionaloptions"
+            | "functionaloptionsparameters"
+            | "httpservices"
+            | "languages"
+            | "scheduledjobs"
+            | "sessionparameters"
+            | "settingsstorages"
+            | "styleitems"
+            | "subsystems"
+            | "roles"
+            | "commoncommands"
+            | "businessprocesses"
+            | "definedtypes"
+            | "tasks"
+            | "constants"
+            | "webservices"
+            | "xdtopackages"
     )
 }
 
@@ -280,6 +282,13 @@ fn is_ignored(path: &Path) -> bool {
 
 fn is_metadata_subfile(relative_lower: &str) -> bool {
     relative_lower.starts_with("ext/") || relative_lower.contains("/ext/")
+}
+
+fn has_metadata_collection_folder(relative_lower: &str) -> bool {
+    let parts: Vec<&str> = relative_lower.split('/').collect();
+    parts
+        .windows(2)
+        .any(|window| is_metadata_collection(window[0]))
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -598,6 +607,14 @@ mod tests {
                 "Help.xml".as_ref(),
                 "Catalogs/Валюты/Ext/Help.xml",
                 Some("Help")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "SettingsStorage.xml".as_ref(),
+                "SettingsStorages/ХранилищеВариантовОтчетов.xml",
+                Some("SettingsStorage")
             ),
             SourceKind::MetadataXml
         );
