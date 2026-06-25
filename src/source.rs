@@ -244,6 +244,7 @@ fn is_metadata_collection(value: &str) -> bool {
             | "HTTPServices"
             | "Languages"
             | "ScheduledJobs"
+            | "SessionParameters"
             | "SettingsStorages"
             | "StyleItems"
             | "Subsystems"
@@ -366,6 +367,14 @@ mod tests {
                 Some("MetaDataObject")
             ),
             Some("Roles/АдминистраторСистемы".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "SessionParameters/АвторизованныйПользователь.xml",
+                &SourceKind::MetadataXml,
+                Some("SessionParameter")
+            ),
+            Some("SessionParameters/АвторизованныйПользователь".to_string())
         );
     }
 
