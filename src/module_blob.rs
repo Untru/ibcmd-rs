@@ -3622,7 +3622,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     fn patches_command_group_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
-            r#"{1,
+            br#"{1,
 {3,
 {4,0,{0},"",-1,-1,1,0,""},4,3,
 {0},
@@ -3630,8 +3630,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 {3,
 {1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldGroup",
 {1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
-},0}"#
-                .as_bytes(),
+},0}"#,
         );
         let base_blob = deflate_raw(&active).unwrap();
         let xml = r#"
@@ -3686,7 +3685,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
-            r#"{1,
+            br#"{1,
 {3,
 {4,0,{0},"",-1,-1,1,0,""},4,3,
 {0},
@@ -3694,8 +3693,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 {3,
 {1,0,c59e11f3-6bcb-404a-9d76-1416c12be354},"OldGroup",
 {1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
-},0}"#
-                .as_bytes(),
+},0}"#,
         );
         let base_blob = deflate_raw(&active)?;
         let xml = r#"
@@ -3858,6 +3856,88 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert!(inflated.contains("{1,c59e11f3-6bcb-404a-9d76-1416c12be354}"));
         assert!(inflated.contains("{\"Pattern\",{\"#\",cccccccc-cccc-4ccc-cccc-cccccccccccc}}"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn patches_common_command_metadata_blob_from_lab_xml() -> anyhow::Result<()> {
+        let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let source = super::MetadataSourceContext::new(source_root);
+
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,becf53b6-3fbc-4c70-822f-4a70b0434353,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,cb50f5c0-8013-4262-93a2-f0db379d6b6b},
+{"Pattern"},
+{3,
+{1,0,becf53b6-3fbc-4c70-822f-4a70b0434353},"OldCommand",
+{1,"ru","Old synonym"},"Old comment",{1,cb50f5c0-8013-4262-93a2-f0db379d6b6b},3,{0,0,0},0,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active)?;
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommonCommand uuid="becf53b6-3fbc-4c70-822f-4a70b0434353">
+    <Properties>
+      <Name>ДополнительныеСведенияКоманднаяПанель</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Дополнительные сведения</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>FormCommandBarImportant</Group>
+      <Representation>Picture</Representation>
+      <ToolTip>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Дополнительные сведения</v8:content>
+        </v8:item>
+      </ToolTip>
+      <Picture>
+        <xr:Ref>CommonPicture.ДополнительныеСведения</xr:Ref>
+        <xr:LoadTransparent>false</xr:LoadTransparent>
+      </Picture>
+      <Shortcut/>
+      <IncludeHelpInContents>false</IncludeHelpInContents>
+      <CommandParameterType>
+        <v8:TypeSet>cfg:DefinedType.ВладелецДополнительныхСведений</v8:TypeSet>
+      </CommandParameterType>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_simple_metadata_blob_from_xml_with_source(&base_blob, xml, Some(&source))?;
+        let inflated = String::from_utf8(inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(packed.properties.kind, "CommonCommand");
+        assert!(inflated.contains("\"ДополнительныеСведенияКоманднаяПанель\""));
+        assert!(inflated.contains("{1,\"ru\",\"Дополнительные сведения\"}"));
+        assert!(
+            inflated.contains("{4,1,{0,a755cb43-492d-4069-9b6a-29b92ebb5b0e},\"\",-1,-1,0,0,\"\"}")
+        );
+        assert!(inflated.contains("{1,cb50f5c0-8013-4262-93a2-f0db379d6b6b}"));
+        assert!(inflated.contains("{\"Pattern\",{\"#\",2da879f6-1141-480b-b647-fdf6698f8aba}}"));
 
         Ok(())
     }
