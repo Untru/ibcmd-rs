@@ -34,6 +34,7 @@ pub struct QueryGroup {
     pub attach_activity_ids: Vec<String>,
     pub attach_activity_id_xfers: Vec<String>,
     pub object_names: Vec<String>,
+    pub table_names: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -60,6 +61,7 @@ struct GroupAccumulator {
     attach_activity_ids: BTreeSet<String>,
     attach_activity_id_xfers: BTreeSet<String>,
     object_names: BTreeSet<String>,
+    table_names: BTreeSet<String>,
 }
 
 pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
@@ -98,6 +100,7 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
                 attach_activity_ids: group.attach_activity_ids.into_iter().collect(),
                 attach_activity_id_xfers: group.attach_activity_id_xfers.into_iter().collect(),
                 object_names: group.object_names.into_iter().collect(),
+                table_names: group.table_names.into_iter().collect(),
             }
         })
         .collect::<Vec<_>>();
@@ -254,6 +257,9 @@ fn record_event(event: EventState, groups: &mut BTreeMap<String, GroupAccumulato
         &mut entry.attach_activity_id_xfers,
     );
     collect_field(&event.fields, "object_name", &mut entry.object_names);
+    for table_name in extract_table_names(sql) {
+        entry.table_names.insert(table_name);
+    }
 }
 
 fn normalize_sql(sql: &str) -> String {
@@ -333,6 +339,65 @@ fn decode_xml_text(text: &str) -> String {
         .replace("&apos;", "'")
 }
 
+fn extract_table_names(sql: &str) -> BTreeSet<String> {
+    let tokens = sql
+        .split_whitespace()
+        .map(normalize_sql_token)
+        .collect::<Vec<_>>();
+    let mut tables = BTreeSet::new();
+
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index].to_ascii_lowercase();
+        let next = tokens
+            .get(index + 1)
+            .map(|value| value.to_ascii_lowercase());
+        let candidate = match token.as_str() {
+            "from" | "join" | "into" | "update" => tokens.get(index + 1),
+            "delete" if next.as_deref() == Some("from") => tokens.get(index + 2),
+            _ => None,
+        };
+
+        if let Some(table) = candidate {
+            if let Some(table) = table
+                .split_whitespace()
+                .next()
+                .map(strip_sql_table_token)
+                .map(normalize_sql_table_name)
+                .filter(|value| !value.is_empty())
+            {
+                tables.insert(table);
+            }
+        }
+
+        index += 1;
+    }
+
+    tables
+}
+
+fn normalize_sql_token(token: &str) -> String {
+    token
+        .trim_matches(|ch: char| matches!(ch, ',' | ';' | '(' | ')' | '\''))
+        .replace(['[', ']'], "")
+}
+
+fn strip_sql_table_token(token: &str) -> String {
+    token
+        .trim_matches(|ch: char| matches!(ch, ',' | ';' | '(' | ')'))
+        .replace(['[', ']'], "")
+}
+
+fn normalize_sql_table_name(token: String) -> String {
+    if token.contains("..") {
+        token
+    } else if let Some((_, last)) = token.rsplit_once('.') {
+        last.to_string()
+    } else {
+        token
+    }
+}
+
 fn collect_field(
     fields: &BTreeMap<String, String>,
     field_name: &str,
@@ -352,13 +417,31 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
 
-    use super::{GroupAccumulator, analyze_one_file, normalize_sql};
+    use super::{GroupAccumulator, analyze_one_file, extract_table_names, normalize_sql};
 
     #[test]
     fn normalizes_literals_and_numbers() {
         assert_eq!(
             normalize_sql("SELECT * FROM T WHERE ID = 42 AND NAME = 'ABC'"),
             "select * from t where id = ? and name = ?"
+        );
+    }
+
+    #[test]
+    fn extracts_table_names_from_common_statements() {
+        let tables = extract_table_names(
+            "SELECT * FROM dbo.Table1 JOIN [dbo].[Table2] ON 1=1; INSERT INTO ConfigSave (...) VALUES (1); DELETE FROM master..sysdatabases WHERE name = N'x'; UPDATE [dbo].[ConfigSave] SET A = 1",
+        );
+        assert_eq!(
+            tables,
+            [
+                "ConfigSave".to_string(),
+                "Table1".to_string(),
+                "Table2".to_string(),
+                "master..sysdatabases".to_string(),
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
         );
     }
 
@@ -446,6 +529,10 @@ mod tests {
             ["sp_executesql".to_string()]
                 .into_iter()
                 .collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.table_names,
+            ["T".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
 
         let _ = fs::remove_file(path);
