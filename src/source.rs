@@ -356,6 +356,14 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml",
+                &SourceKind::MetadataXml,
+                Some("CommandInterface")
+            ),
+            Some("CommonCommands/АвтономнаяРабота".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "ScheduledJobs/ЗагрузкаКурсовВалют.xml",
                 &SourceKind::MetadataXml,
                 Some("MetaDataObject")
@@ -503,6 +511,22 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "Tasks/ЗадачаИсполнителя/Ext/Help.xml",
+                &SourceKind::MetadataXml,
+                Some("Help")
+            ),
+            Some("Tasks/ЗадачаИсполнителя".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Tasks/ЗадачаИсполнителя/Ext/Help/ru.html",
+                &SourceKind::Other,
+                None
+            ),
+            Some("Tasks/ЗадачаИсполнителя".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "CommandGroups/Органайзер.xml",
                 &SourceKind::MetadataXml,
                 Some("MetaDataObject")
@@ -576,6 +600,22 @@ mod tests {
                 Some("CommandInterface")
             ),
             SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Help.xml".as_ref(),
+                "Tasks/ЗадачаИсполнителя/Ext/Help.xml",
+                Some("Help")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "ru.html".as_ref(),
+                "Tasks/ЗадачаИсполнителя/Ext/Help/ru.html",
+                None
+            ),
+            SourceKind::Other
         );
         assert_eq!(
             classify(
