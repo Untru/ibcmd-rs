@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
@@ -50,7 +51,7 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
 
     let canonical_root = fs::canonicalize(root)
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
-    let mut files = Vec::new();
+    let mut entries = Vec::new();
 
     for entry in WalkDir::new(&canonical_root)
         .into_iter()
@@ -65,9 +66,13 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
         let relative = path
             .strip_prefix(&canonical_root)
             .with_context(|| format!("failed to make relative path for {}", path.display()))?;
-        files.push(scan_file(path, relative)?);
+        entries.push((path.to_path_buf(), relative.to_path_buf()));
     }
 
+    let mut files = entries
+        .into_par_iter()
+        .map(|(path, relative)| scan_file(&path, &relative))
+        .collect::<Result<Vec<_>>>()?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
 
     Ok(SourceManifest {
@@ -290,7 +295,7 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceKind, classify, infer_object_hint};
+    use super::{SourceKind, classify, infer_object_hint, scan_sources};
 
     #[test]
     fn classifies_common_1c_source_files() {
@@ -685,5 +690,88 @@ mod tests {
             ),
             SourceKind::Form
         );
+    }
+
+    #[test]
+    fn scans_nested_object_and_service_subtrees() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
+
+        std::fs::write(
+            root.join("Tasks/ЗадачаИсполнителя.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Task uuid="3ad08f4a-6202-4099-b6cc-bc116e6731a0">
+    <Properties>
+      <Name>ЗадачаИсполнителя</Name>
+    </Properties>
+  </Task>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Tasks/ЗадачаИсполнителя/Ext/Help.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+  <Page>ru</Page>
+</Help>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl"),
+            "Procedure Test()\nEndProcedure\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml",
+            SourceKind::MetadataXml,
+            Some("CommonCommands/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя.xml",
+            SourceKind::MetadataXml,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
     }
 }
