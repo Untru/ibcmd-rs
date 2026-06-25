@@ -371,6 +371,46 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "FunctionalOptions/ВыполнятьЗамерыПроизводительности.xml",
+                &SourceKind::MetadataXml,
+                Some("FunctionalOption")
+            ),
+            Some("FunctionalOptions/ВыполнятьЗамерыПроизводительности".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "FunctionalOptionsParameters/ОбщиеНастройкиУзлов.xml",
+                &SourceKind::MetadataXml,
+                Some("FunctionalOptionsParameter")
+            ),
+            Some("FunctionalOptionsParameters/ОбщиеНастройкиУзлов".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Languages/Русский.xml",
+                &SourceKind::MetadataXml,
+                Some("Language")
+            ),
+            Some("Languages/Русский".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "SettingsStorages/ХранилищеВариантовОтчетов.xml",
+                &SourceKind::MetadataXml,
+                Some("SettingsStorage")
+            ),
+            Some("SettingsStorages/ХранилищеВариантовОтчетов".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "WebServices/Сервис.xml",
+                &SourceKind::MetadataXml,
+                Some("WebService")
+            ),
+            Some("WebServices/Сервис".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "SessionParameters/АвторизованныйПользователь.xml",
                 &SourceKind::MetadataXml,
                 Some("SessionParameter")
