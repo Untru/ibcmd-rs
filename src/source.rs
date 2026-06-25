@@ -179,6 +179,7 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
             Some(root) if root.contains("MetaDataObject") || root.contains("Configuration") => {
                 SourceKind::MetadataXml
             }
+            _ if is_metadata_subfile(&lower) => SourceKind::MetadataXml,
             _ => SourceKind::OtherXml,
         };
     }
@@ -264,6 +265,12 @@ fn is_ignored(path: &Path) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
         .is_some_and(|name| matches!(name, ".git" | "target" | ".idea" | ".vscode"))
+}
+
+fn is_metadata_subfile(relative_lower: &str) -> bool {
+    relative_lower.contains("/ext/")
+        || relative_lower.ends_with("/rights.xml")
+        || relative_lower.ends_with("/schedule.xml")
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -361,6 +368,34 @@ mod tests {
                 Some("MetaDataObject")
             ),
             Some("Roles/АдминистраторСистемы".to_string())
+        );
+    }
+
+    #[test]
+    fn classifies_metadata_subfiles_as_metadata_xml() {
+        assert_eq!(
+            classify(
+                "Rights.xml".as_ref(),
+                "Roles/АдминистраторСистемы/Ext/Rights.xml",
+                Some("Rights")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Schedule.xml".as_ref(),
+                "ScheduledJobs/ЗагрузкаКурсовВалют/Ext/Schedule.xml",
+                Some("JobSchedule")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Form.xml".as_ref(),
+                "CommonForms/АвтономнаяРабота/Ext/Form.xml",
+                Some("Form")
+            ),
+            SourceKind::Form
         );
     }
 }
