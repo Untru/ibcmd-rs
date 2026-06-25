@@ -739,6 +739,7 @@ mod tests {
         std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Ext")).unwrap();
         std::fs::create_dir_all(root.join("BusinessProcesses/Задание/Ext")).unwrap();
         std::fs::create_dir_all(root.join("DefinedTypes")).unwrap();
+        std::fs::create_dir_all(root.join("CommonAttributes")).unwrap();
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
 
         std::fs::write(
@@ -800,6 +801,17 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
+            root.join("CommonAttributes/ДопРеквизит.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<CommonAttribute xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Properties>
+    <Name>ДопРеквизит</Name>
+  </Properties>
+</CommonAttribute>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
             root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml"),
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
@@ -846,6 +858,11 @@ mod tests {
             "DefinedTypes/ВладелецДополнительныхСведений.xml",
             SourceKind::MetadataXml,
             Some("DefinedTypes/ВладелецДополнительныхСведений")
+        )));
+        assert!(files.contains(&(
+            "CommonAttributes/ДопРеквизит.xml",
+            SourceKind::MetadataXml,
+            Some("CommonAttributes/ДопРеквизит")
         )));
         assert!(files.contains(&(
             "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
