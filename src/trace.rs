@@ -765,4 +765,131 @@ mod tests {
         let _ = fs::remove_file(second);
         let _ = fs::remove_dir(dir);
     }
+
+    #[test]
+    fn groups_load_experiment_sql_patterns() {
+        let dir = std::env::temp_dir().join(format!(
+            "ibcmd-rs-trace-load-pattern-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("events.xml");
+        fs::write(
+            &path,
+            r#"
+<RingBufferTarget>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>12</value></data>
+    <data name="row_count"><value>0</value></data>
+    <data name="statement"><value>SELECT COUNT_BIG(*) FROM ConfigSave WHERE FileName = N'Config' AND PartNo = 0</value></data>
+    <action name="session_id"><value>41</value></action>
+    <action name="transaction_id"><value>111</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>17</value></data>
+    <data name="row_count"><value>1</value></data>
+    <data name="statement"><value>UPDATE ConfigSave SET BinaryData = 0x01 WHERE FileName = N'Module' AND PartNo = 0</value></data>
+    <action name="session_id"><value>41</value></action>
+    <action name="transaction_id"><value>111</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>19</value></data>
+    <data name="row_count"><value>1</value></data>
+    <data name="statement"><value>UPDATE ConfigSave SET Attributes = 0x02 WHERE FileName = N'Metadata' AND PartNo = 0</value></data>
+    <action name="session_id"><value>41</value></action>
+    <action name="transaction_id"><value>111</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>23</value></data>
+    <data name="row_count"><value>1</value></data>
+    <data name="statement"><value>INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo) VALUES (N'NewObject', SYSUTCDATETIME(), SYSUTCDATETIME(), 0x03, 128, 0x04, 0)</value></data>
+    <action name="session_id"><value>41</value></action>
+    <action name="transaction_id"><value>111</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>3</value></data>
+    <data name="statement"><value>BEGIN TRANSACTION</value></data>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>4</value></data>
+    <data name="statement"><value>COMMIT TRANSACTION</value></data>
+  </event>
+</RingBufferTarget>
+"#,
+        )
+        .unwrap();
+
+        let analysis = analyze_trace_files(&[path.clone()]).unwrap();
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(dir);
+
+        assert_eq!(analysis.events_seen, 6);
+        assert_eq!(analysis.groups.len(), 6);
+
+        let noop = analysis
+            .groups
+            .iter()
+            .find(|group| {
+                group
+                    .normalized_sql
+                    .starts_with("select count_big(*) from configsave")
+            })
+            .unwrap();
+        assert_eq!(noop.count, 1);
+        assert_eq!(noop.table_names, vec!["ConfigSave".to_string()]);
+        assert_eq!(noop.begin_transaction_count, 0);
+        assert_eq!(noop.commit_transaction_count, 0);
+
+        let body_change = analysis
+            .groups
+            .iter()
+            .find(|group| {
+                group
+                    .normalized_sql
+                    .starts_with("update configsave set binarydata = ?x?")
+            })
+            .unwrap();
+        assert_eq!(body_change.count, 1);
+        assert_eq!(body_change.table_names, vec!["ConfigSave".to_string()]);
+
+        let attr_change = analysis
+            .groups
+            .iter()
+            .find(|group| {
+                group
+                    .normalized_sql
+                    .starts_with("update configsave set attributes = ?x?")
+            })
+            .unwrap();
+        assert_eq!(attr_change.count, 1);
+        assert_eq!(attr_change.table_names, vec!["ConfigSave".to_string()]);
+
+        let insert = analysis
+            .groups
+            .iter()
+            .find(|group| group.normalized_sql.starts_with("insert into configsave"))
+            .unwrap();
+        assert_eq!(insert.count, 1);
+        assert_eq!(insert.table_names, vec!["ConfigSave".to_string()]);
+
+        let begin = analysis
+            .groups
+            .iter()
+            .find(|group| group.normalized_sql == "begin transaction")
+            .unwrap();
+        assert_eq!(begin.begin_transaction_count, 1);
+        assert_eq!(begin.commit_transaction_count, 0);
+
+        let commit = analysis
+            .groups
+            .iter()
+            .find(|group| group.normalized_sql == "commit transaction")
+            .unwrap();
+        assert_eq!(commit.begin_transaction_count, 0);
+        assert_eq!(commit.commit_transaction_count, 1);
+    }
 }
