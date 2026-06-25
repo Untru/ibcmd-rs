@@ -180,9 +180,6 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
                 SourceKind::MetadataXml
             }
             _ if is_metadata_subfile(&lower) => SourceKind::MetadataXml,
-            _ if lower.ends_with("/help.xml") || lower.ends_with("/ext/help.xml") => {
-                SourceKind::MetadataXml
-            }
             _ => SourceKind::OtherXml,
         };
     }
@@ -272,8 +269,6 @@ fn is_ignored(path: &Path) -> bool {
 
 fn is_metadata_subfile(relative_lower: &str) -> bool {
     relative_lower.contains("/ext/")
-        || relative_lower.ends_with("/rights.xml")
-        || relative_lower.ends_with("/schedule.xml")
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -413,6 +408,30 @@ mod tests {
                 "Help.xml".as_ref(),
                 "Catalogs/Валюты/Ext/Help.xml",
                 Some("Help")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Predefined.xml".as_ref(),
+                "Catalogs/ВидыКонтактнойИнформации/Ext/Predefined.xml",
+                Some("PredefinedData")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Flowchart.xml".as_ref(),
+                "BusinessProcesses/Задание/Ext/Flowchart.xml",
+                Some("GraphicalSchema")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "CommandInterface.xml".as_ref(),
+                "CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml",
+                Some("CommandInterface")
             ),
             SourceKind::MetadataXml
         );
