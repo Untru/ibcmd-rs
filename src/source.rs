@@ -395,6 +395,57 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some(
+                "EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            infer_object_hint(
+                "FilterCriteria/СвязанныеДокументы.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("FilterCriteria/СвязанныеДокументы".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "HTTPServices/exchange_dsl_1_0_0_1.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("HTTPServices/exchange_dsl_1_0_0_1".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "StyleItems/ВажнаяНадписьШрифт.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("StyleItems/ВажнаяНадписьШрифт".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "WebServices/EnterpriseDataExchange_1_0_1_1.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("WebServices/EnterpriseDataExchange_1_0_1_1".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "SettingsStorages/ХранилищеВариантовОтчетов.xml",
                 &SourceKind::MetadataXml,
                 Some("SettingsStorage")
