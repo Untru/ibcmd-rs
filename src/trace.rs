@@ -35,6 +35,9 @@ pub struct QueryGroup {
     pub attach_activity_id_xfers: Vec<String>,
     pub object_names: Vec<String>,
     pub table_names: Vec<String>,
+    pub begin_transaction_count: usize,
+    pub commit_transaction_count: usize,
+    pub rollback_transaction_count: usize,
 }
 
 #[derive(Debug, Default)]
@@ -62,6 +65,9 @@ struct GroupAccumulator {
     attach_activity_id_xfers: BTreeSet<String>,
     object_names: BTreeSet<String>,
     table_names: BTreeSet<String>,
+    begin_transaction_count: usize,
+    commit_transaction_count: usize,
+    rollback_transaction_count: usize,
 }
 
 pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
@@ -101,6 +107,9 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
                 attach_activity_id_xfers: group.attach_activity_id_xfers.into_iter().collect(),
                 object_names: group.object_names.into_iter().collect(),
                 table_names: group.table_names.into_iter().collect(),
+                begin_transaction_count: group.begin_transaction_count,
+                commit_transaction_count: group.commit_transaction_count,
+                rollback_transaction_count: group.rollback_transaction_count,
             }
         })
         .collect::<Vec<_>>();
@@ -260,6 +269,13 @@ fn record_event(event: EventState, groups: &mut BTreeMap<String, GroupAccumulato
     for table_name in extract_table_names(sql) {
         entry.table_names.insert(table_name);
     }
+    if let Some(boundary) = transaction_boundary_kind(sql) {
+        match boundary {
+            TransactionBoundaryKind::Begin => entry.begin_transaction_count += 1,
+            TransactionBoundaryKind::Commit => entry.commit_transaction_count += 1,
+            TransactionBoundaryKind::Rollback => entry.rollback_transaction_count += 1,
+        }
+    }
 }
 
 fn normalize_sql(sql: &str) -> String {
@@ -412,12 +428,37 @@ fn collect_field(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransactionBoundaryKind {
+    Begin,
+    Commit,
+    Rollback,
+}
+
+fn transaction_boundary_kind(sql: &str) -> Option<TransactionBoundaryKind> {
+    let normalized = normalize_sql(sql);
+    let first_two = normalized
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+    match first_two.as_str() {
+        "begin transaction" => Some(TransactionBoundaryKind::Begin),
+        "commit transaction" => Some(TransactionBoundaryKind::Commit),
+        "rollback transaction" => Some(TransactionBoundaryKind::Rollback),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
 
-    use super::{GroupAccumulator, analyze_one_file, extract_table_names, normalize_sql};
+    use super::{
+        GroupAccumulator, analyze_one_file, extract_table_names, normalize_sql,
+        transaction_boundary_kind,
+    };
 
     #[test]
     fn normalizes_literals_and_numbers() {
@@ -443,6 +484,23 @@ mod tests {
             .into_iter()
             .collect::<BTreeSet<_>>()
         );
+    }
+
+    #[test]
+    fn detects_transaction_boundaries() {
+        assert!(matches!(
+            transaction_boundary_kind("BEGIN TRANSACTION"),
+            Some(super::TransactionBoundaryKind::Begin)
+        ));
+        assert!(matches!(
+            transaction_boundary_kind("COMMIT TRANSACTION"),
+            Some(super::TransactionBoundaryKind::Commit)
+        ));
+        assert!(matches!(
+            transaction_boundary_kind("ROLLBACK TRANSACTION"),
+            Some(super::TransactionBoundaryKind::Rollback)
+        ));
+        assert!(transaction_boundary_kind("SELECT 1").is_none());
     }
 
     #[test]
@@ -476,6 +534,10 @@ mod tests {
     <action name="database_name"><value>DemoDb</value></action>
     <action name="client_hostname"><value>WS01</value></action>
   </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>5</value></data>
+    <data name="statement"><value>BEGIN TRANSACTION</value></data>
+  </event>
 </RingBufferTarget>
 "#,
         )
@@ -485,53 +547,60 @@ mod tests {
         let mut groups = BTreeMap::<String, GroupAccumulator>::new();
         analyze_one_file(&path, &mut events_seen, &mut groups).unwrap();
 
-        assert_eq!(events_seen, 2);
-        assert_eq!(groups.len(), 1);
-        let group = groups.values().next().unwrap();
-        assert_eq!(group.count, 2);
-        assert_eq!(group.total_duration_us, 30);
-        assert_eq!(group.total_row_count, 10);
-        assert_eq!(group.max_row_count, 7);
+        assert_eq!(events_seen, 3);
+        assert_eq!(groups.len(), 2);
+        let begin_group = groups.get("begin transaction").unwrap();
+        assert_eq!(begin_group.count, 1);
+        assert_eq!(begin_group.total_duration_us, 5);
+        assert_eq!(begin_group.begin_transaction_count, 1);
+        assert_eq!(begin_group.commit_transaction_count, 0);
+        assert_eq!(begin_group.rollback_transaction_count, 0);
+
+        let query_group = groups.get("select * from t where id = ?").unwrap();
+        assert_eq!(query_group.count, 2);
+        assert_eq!(query_group.total_duration_us, 30);
+        assert_eq!(query_group.total_row_count, 10);
+        assert_eq!(query_group.max_row_count, 7);
         assert_eq!(
-            group.session_ids,
+            query_group.session_ids,
             ["56".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.database_names,
+            query_group.database_names,
             ["DemoDb".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.client_hostnames,
+            query_group.client_hostnames,
             ["WS01".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.client_app_names,
+            query_group.client_app_names,
             ["1C".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.usernames,
+            query_group.usernames,
             ["Pavel".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.transaction_ids,
+            query_group.transaction_ids,
             ["12345".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.attach_activity_ids,
+            query_group.attach_activity_ids,
             ["ABC".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.attach_activity_id_xfers,
+            query_group.attach_activity_id_xfers,
             ["XYZ".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.object_names,
+            query_group.object_names,
             ["sp_executesql".to_string()]
                 .into_iter()
                 .collect::<BTreeSet<_>>()
         );
         assert_eq!(
-            group.table_names,
+            query_group.table_names,
             ["T".to_string()].into_iter().collect::<BTreeSet<_>>()
         );
 
