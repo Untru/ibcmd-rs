@@ -251,6 +251,7 @@ fn is_metadata_collection(value: &str) -> bool {
             | "Subsystems"
             | "Roles"
             | "CommonCommands"
+            | "Tasks"
             | "Constants"
             | "WebServices"
             | "XDTOPackages"
@@ -478,6 +479,22 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "Tasks/ЗадачаИсполнителя.xml",
+                &SourceKind::MetadataXml,
+                None
+            ),
+            Some("Tasks/ЗадачаИсполнителя".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
+                &SourceKind::Module,
+                None
+            ),
+            Some("Tasks/ЗадачаИсполнителя".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "CommandGroups/Органайзер.xml",
                 &SourceKind::MetadataXml,
                 Some("MetaDataObject")
@@ -603,6 +620,14 @@ mod tests {
                 None
             ),
             SourceKind::Binary
+        );
+        assert_eq!(
+            classify(
+                "CommandModule.bsl".as_ref(),
+                "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
+                None
+            ),
+            SourceKind::Module
         );
     }
 }

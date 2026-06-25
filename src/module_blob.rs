@@ -3786,6 +3786,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::metadata_type_source_folder("SettingsStorageManager.Settings"),
             Some("SettingsStorages")
         );
+        assert_eq!(
+            super::metadata_type_source_folder("TaskObject.ExecutorTask"),
+            Some("Tasks")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("TaskRef.ExecutorTask"),
+            Some("Tasks")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("TaskSelection.ExecutorTask"),
+            Some("Tasks")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("TaskList.ExecutorTask"),
+            Some("Tasks")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("TaskManager.ExecutorTask"),
+            Some("Tasks")
+        );
     }
 
     #[test]
