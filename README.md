@@ -99,8 +99,8 @@ cargo run -- mssql-stage-metadata-objects --database target_db --source-root C:\
    stages supported `Type` patterns (`boolean`, `string`, `decimal`,
    `dateTime`) and `UseStandardCommands`. For `DefinedType`, it stages builtin
    `Type` patterns with one or more `boolean`, `string`, `decimal`, and
-   `dateTime` entries; `cfg:*` reference types are intentionally rejected until
-   their ID mapping is captured. For `CommonCommand`, it stages
+   `dateTime` entries, plus `cfg:*` reference types resolved from
+   generated `TypeId` values under `--source-root`. For `CommonCommand`, it stages
    `Representation`, `ToolTip`, `IncludeHelpInContents`, `ParameterUseMode`,
    `ModifiesData`, `Picture` for empty or `CommonPicture.<name>` refs,
    `CommandParameterType` for empty or a single `cfg:DefinedType.<name>`, and

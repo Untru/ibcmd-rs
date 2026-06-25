@@ -161,6 +161,28 @@ impl MetadataSourceContext {
         parse_defined_type_type_id(&xml, name)
             .with_context(|| format!("failed to resolve TypeId from {}", path.display()))
     }
+
+    fn resolve_metadata_type_id(&self, reference: &str) -> Result<String> {
+        let generated_type_name = reference
+            .trim()
+            .strip_prefix("cfg:")
+            .unwrap_or_else(|| reference.trim());
+        if is_defined_type_reference(reference) {
+            return self.resolve_defined_type_type_id(reference);
+        }
+        let folder = metadata_type_source_folder(generated_type_name).ok_or_else(|| {
+            anyhow!("unsupported metadata type reference for source resolution: {reference}")
+        })?;
+        let name = generated_type_name
+            .split_once('.')
+            .map(|(_, name)| name)
+            .ok_or_else(|| anyhow!("invalid metadata type reference: {reference}"))?;
+        let path = self.source_root.join(folder).join(format!("{name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read metadata XML {}", path.display()))?;
+        parse_generated_type_type_id(&xml, generated_type_name)
+            .with_context(|| format!("failed to resolve TypeId from {}", path.display()))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -316,11 +338,11 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
     let text = String::from_utf8(plain).context("metadata blob is not valid UTF-8")?;
     let patched = match properties.kind.as_str() {
         "Constant" => {
-            let constant = parse_constant_xml_properties(xml)?;
+            let constant = parse_constant_xml_properties(xml, source)?;
             patch_constant_metadata_text(text, &constant)?
         }
         "DefinedType" => {
-            let defined_type = parse_defined_type_xml_properties(xml)?;
+            let defined_type = parse_defined_type_xml_properties(xml, source)?;
             patch_defined_type_metadata_text(text, &defined_type)?
         }
         "CommonCommand" => {
@@ -380,6 +402,9 @@ enum MetadataTypePatternElement {
         allowed_sign_flag: u8,
     },
     DateTime,
+    Reference {
+        type_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -415,7 +440,10 @@ enum CommonCommandParameterType {
     DefinedType { type_id: String },
 }
 
-fn parse_constant_xml_properties(xml: &[u8]) -> Result<ConstantXmlProperties> {
+fn parse_constant_xml_properties(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<ConstantXmlProperties> {
     let simple = parse_simple_metadata_xml_properties(xml)?;
     if simple.kind != "Constant" {
         return Err(anyhow!(
@@ -507,6 +535,7 @@ fn parse_constant_xml_properties(xml: &[u8]) -> Result<ConstantXmlProperties> {
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        source,
     )?;
     let use_standard_commands =
         parse_required_metadata_bool("Constant", "UseStandardCommands", use_standard_commands)?;
@@ -518,7 +547,10 @@ fn parse_constant_xml_properties(xml: &[u8]) -> Result<ConstantXmlProperties> {
     })
 }
 
-fn parse_defined_type_xml_properties(xml: &[u8]) -> Result<DefinedTypeXmlProperties> {
+fn parse_defined_type_xml_properties(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<DefinedTypeXmlProperties> {
     let simple = parse_simple_metadata_xml_properties(xml)?;
     if simple.kind != "DefinedType" {
         return Err(anyhow!(
@@ -610,6 +642,7 @@ fn parse_defined_type_xml_properties(xml: &[u8]) -> Result<DefinedTypeXmlPropert
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        source,
         true,
     )?;
 
@@ -1360,6 +1393,7 @@ fn parse_constant_value_type(
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<MetadataTypePatternElement> {
     let mut elements = parse_metadata_type_pattern_elements(
         "Constant",
@@ -1369,6 +1403,7 @@ fn parse_constant_value_type(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        source,
         false,
     )?;
     elements
@@ -1384,6 +1419,7 @@ fn parse_metadata_type_pattern_elements(
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    source: Option<&MetadataSourceContext>,
     allow_multiple: bool,
 ) -> Result<Vec<MetadataTypePatternElement>> {
     if types.is_empty() {
@@ -1407,6 +1443,7 @@ fn parse_metadata_type_pattern_elements(
                 number_digits.as_deref(),
                 number_fraction_digits.as_deref(),
                 number_allowed_sign.as_deref(),
+                source,
             )
         })
         .collect()
@@ -1420,6 +1457,7 @@ fn parse_metadata_type_pattern_element(
     number_digits: Option<&str>,
     number_fraction_digits: Option<&str>,
     number_allowed_sign: Option<&str>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<MetadataTypePatternElement> {
     match type_name.trim() {
         "xs:boolean" => Ok(MetadataTypePatternElement::Boolean),
@@ -1440,6 +1478,14 @@ fn parse_metadata_type_pattern_element(
             allowed_sign_flag: parse_number_allowed_sign_flag(number_allowed_sign)?,
         }),
         "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime),
+        other if other.starts_with("cfg:") => {
+            let source = source.ok_or_else(|| {
+                anyhow!("{kind} type {other} requires --source-root to resolve TypeId")
+            })?;
+            Ok(MetadataTypePatternElement::Reference {
+                type_id: source.resolve_metadata_type_id(other)?,
+            })
+        }
         other => Err(anyhow!("{kind} type is not supported yet: {other}")),
     }
 }
@@ -1641,6 +1687,7 @@ fn format_metadata_type_pattern_element(value_type: &MetadataTypePatternElement)
             allowed_sign_flag,
         } => format!(r#"{{"N",{digits},{fraction_digits},{allowed_sign_flag}}}"#),
         MetadataTypePatternElement::DateTime => r#"{"D"}"#.to_string(),
+        MetadataTypePatternElement::Reference { type_id } => format!("{{\"#\",{type_id}}}"),
     }
 }
 
@@ -2156,8 +2203,52 @@ fn defined_type_name_from_reference(reference: &str) -> Result<&str> {
     }
 }
 
+fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str> {
+    let prefix = generated_type_name.split_once('.')?.0;
+    match prefix {
+        "BusinessProcessObject"
+        | "BusinessProcessRef"
+        | "BusinessProcessSelection"
+        | "BusinessProcessList"
+        | "BusinessProcessManager" => Some("BusinessProcesses"),
+        "CatalogObject" | "CatalogRef" | "CatalogSelection" | "CatalogList" | "CatalogManager" => {
+            Some("Catalogs")
+        }
+        "ChartOfCharacteristicTypesObject"
+        | "ChartOfCharacteristicTypesRef"
+        | "ChartOfCharacteristicTypesSelection"
+        | "ChartOfCharacteristicTypesList"
+        | "ChartOfCharacteristicTypesManager" => Some("ChartsOfCharacteristicTypes"),
+        "DataProcessorObject" | "DataProcessorManager" => Some("DataProcessors"),
+        "DefinedType" => Some("DefinedTypes"),
+        "DocumentObject" | "DocumentRef" | "DocumentSelection" | "DocumentList"
+        | "DocumentManager" => Some("Documents"),
+        "DocumentJournalSelection" | "DocumentJournalList" | "DocumentJournalManager" => {
+            Some("DocumentJournals")
+        }
+        "EnumRef" | "EnumList" | "EnumManager" => Some("Enums"),
+        "ExchangePlanObject"
+        | "ExchangePlanRef"
+        | "ExchangePlanSelection"
+        | "ExchangePlanList"
+        | "ExchangePlanManager" => Some("ExchangePlans"),
+        "InformationRegisterRecordSet"
+        | "InformationRegisterRecordKey"
+        | "InformationRegisterSelection"
+        | "InformationRegisterList"
+        | "InformationRegisterManager" => Some("InformationRegisters"),
+        "ReportObject" | "ReportManager" => Some("Reports"),
+        "TaskObject" | "TaskRef" | "TaskSelection" | "TaskList" | "TaskManager" => Some("Tasks"),
+        _ => None,
+    }
+}
+
 fn parse_defined_type_type_id(xml: &[u8], expected_name: &str) -> Result<String> {
     let expected_generated_name = format!("DefinedType.{expected_name}");
+    parse_generated_type_type_id(xml, &expected_generated_name)
+}
+
+fn parse_generated_type_type_id(xml: &[u8], expected_generated_name: &str) -> Result<String> {
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
@@ -2169,9 +2260,7 @@ fn parse_defined_type_type_id(xml: &[u8], expected_name: &str) -> Result<String>
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 let is_matching_generated_type = local == "GeneratedType"
-                    && xml_attr_value(&event, "category").as_deref() == Some("DefinedType")
-                    && xml_attr_value(&event, "name").as_deref()
-                        == Some(expected_generated_name.as_str());
+                    && xml_attr_value(&event, "name").as_deref() == Some(expected_generated_name);
                 path.push(local);
                 if is_matching_generated_type {
                     generated_type_depth = Some(path.len());
@@ -2212,7 +2301,7 @@ fn parse_defined_type_type_id(xml: &[u8], expected_name: &str) -> Result<String>
     }
 
     let type_id = type_id.ok_or_else(|| {
-        anyhow!("DefinedType {expected_name} GeneratedType/TypeId not found in XML")
+        anyhow!("GeneratedType {expected_generated_name} TypeId not found in XML")
     })?;
     normalize_uuid_text(&type_id)
 }
@@ -2788,6 +2877,71 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("\"NewType\""), "{inflated}");
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
         assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,1}}"#));
+    }
+
+    #[test]
+    fn patches_defined_type_cfg_reference_type_pattern() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs").join("TestUsers.xml"),
+            br#"
+<MetaDataObject>
+  <Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <InternalInfo>
+      <xr:GeneratedType xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" name="CatalogRef.TestUsers" category="Ref">
+        <xr:TypeId>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</xr:TypeId>
+      </xr:GeneratedType>
+    </InternalInfo>
+    <Properties>
+      <Name>TestUsers</Name>
+      <Synonym/>
+      <Comment/>
+    </Properties>
+  </Catalog>
+</MetaDataObject>
+"#,
+        )?;
+
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{0,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldType",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",{"S",10,1}}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active)?;
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <DefinedType uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewType</Name>
+      <Synonym/>
+      <Comment/>
+      <Type>
+        <v8:Type>cfg:CatalogRef.TestUsers</v8:Type>
+      </Type>
+    </Properties>
+  </DefinedType>
+</MetaDataObject>
+"#;
+        let source = super::MetadataSourceContext::new(root.clone());
+
+        let packed =
+            super::pack_simple_metadata_blob_from_xml_with_source(&base_blob, xml, Some(&source))?;
+        let inflated = String::from_utf8(inflate_raw(&packed.blob)?)?;
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(packed.properties.kind, "DefinedType");
+        assert!(inflated.contains("{\"Pattern\",{\"#\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}}"));
+
+        Ok(())
     }
 
     #[test]
