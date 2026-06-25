@@ -171,7 +171,7 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
     if lower.contains("/forms/") || lower.ends_with("/form.xml") {
         return SourceKind::Form;
     }
-    if lower.contains("/templates/") || extension == "mxl" {
+    if lower.contains("/templates/") || lower.ends_with("/template.xml") || extension == "mxl" {
         return SourceKind::Template;
     }
     if extension == "xml" {
@@ -180,6 +180,9 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
                 SourceKind::MetadataXml
             }
             _ if is_metadata_subfile(&lower) => SourceKind::MetadataXml,
+            _ if lower.ends_with("/help.xml") || lower.ends_with("/ext/help.xml") => {
+                SourceKind::MetadataXml
+            }
             _ => SourceKind::OtherXml,
         };
     }
@@ -396,6 +399,22 @@ mod tests {
                 Some("Form")
             ),
             SourceKind::Form
+        );
+        assert_eq!(
+            classify(
+                "Template.xml".as_ref(),
+                "Catalogs/МашиночитаемыеДоверенности/Templates/ПФ_MXL_Доверенность/Ext/Template.xml",
+                Some("document")
+            ),
+            SourceKind::Template
+        );
+        assert_eq!(
+            classify(
+                "Help.xml".as_ref(),
+                "Catalogs/Валюты/Ext/Help.xml",
+                Some("Help")
+            ),
+            SourceKind::MetadataXml
         );
     }
 }
