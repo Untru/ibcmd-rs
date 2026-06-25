@@ -1,0 +1,1924 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Serialize};
+
+use crate::cli::{
+    MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs, MssqlDeltaImportArgs,
+    MssqlStageCommonModuleArgs, MssqlStageCommonModuleMetadataArgs,
+    MssqlStageCommonModuleObjectArgs, MssqlStageCommonModuleObjectsArgs,
+    MssqlStageCommonModulesArgs, MssqlStageMetadataObjectsArgs, MssqlStorageExportArgs,
+    MssqlStorageImportArgs,
+};
+use crate::module_blob::{
+    CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
+    VersionReplacement, pack_common_module_metadata_blob_from_xml, pack_module_blob_bytes,
+    pack_simple_metadata_blob_from_xml_with_source, parse_common_module_xml_properties,
+    parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
+};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MssqlCompareReport {
+    pub left: String,
+    pub right: String,
+    pub same: bool,
+    pub summary: MssqlCompareSummary,
+    pub differences: Vec<MssqlDifference>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct MssqlCompareSummary {
+    pub left_tables: usize,
+    pub right_tables: usize,
+    pub missing_in_left: usize,
+    pub missing_in_right: usize,
+    pub row_count_differences: usize,
+    pub column_differences: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MssqlDifference {
+    pub kind: String,
+    pub table: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MssqlCloneReport {
+    pub source: String,
+    pub target: String,
+    pub backup: PathBuf,
+    pub restored: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StorageBundleManifest {
+    pub source_database: Option<String>,
+    pub format: String,
+    pub tables: Vec<StorageTableManifest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageTableManifest {
+    pub table_name: String,
+    #[serde(default)]
+    pub file_name: String,
+    pub row_count: i64,
+    pub binary_bytes: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StorageBundleExportReport {
+    pub database: String,
+    pub output_dir: PathBuf,
+    pub manifest: StorageBundleManifest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StorageBundleImportReport {
+    pub database: String,
+    pub input_dir: PathBuf,
+    pub before: Vec<StorageTableManifest>,
+    pub after: Vec<StorageTableManifest>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeltaBundleManifest {
+    pub source_database: Option<String>,
+    pub format: String,
+    pub table: StorageTableManifest,
+    pub rows: Vec<ConfigSaveRowDigest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfigSaveRowDigest {
+    pub file_name: String,
+    pub part_no: i32,
+    pub data_size: i64,
+    pub binary_bytes: i64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeltaBundleExportReport {
+    pub database: String,
+    pub output_dir: PathBuf,
+    pub manifest: DeltaBundleManifest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeltaBundleImportReport {
+    pub database: String,
+    pub input_dir: PathBuf,
+    pub manifest_rows: i64,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageCommonModuleReport {
+    pub database: String,
+    pub module_id: String,
+    pub module_body_id: String,
+    pub text: PathBuf,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub module_blob: GeneratedBlobReport,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageCommonModulesReport {
+    pub database: String,
+    pub modules: Vec<StagedCommonModuleReport>,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageCommonModuleMetadataReport {
+    pub database: String,
+    pub module_id: String,
+    pub xml: PathBuf,
+    pub properties: CommonModuleXmlProperties,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub metadata_plain_bytes: usize,
+    pub metadata_blob: GeneratedBlobReport,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageCommonModuleObjectReport {
+    pub database: String,
+    pub module_id: String,
+    pub module_body_id: String,
+    pub xml: PathBuf,
+    pub text: PathBuf,
+    pub properties: CommonModuleXmlProperties,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub metadata_plain_bytes: usize,
+    pub metadata_blob: GeneratedBlobReport,
+    pub text_bytes: usize,
+    pub module_blob: GeneratedBlobReport,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageCommonModuleObjectsReport {
+    pub database: String,
+    pub modules: Vec<StagedCommonModuleObjectReport>,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StagedCommonModuleObjectReport {
+    pub module_id: String,
+    pub module_body_id: String,
+    pub xml: PathBuf,
+    pub text: PathBuf,
+    pub properties: CommonModuleXmlProperties,
+    pub metadata_plain_bytes: usize,
+    pub metadata_blob: GeneratedBlobReport,
+    pub text_bytes: usize,
+    pub module_blob: GeneratedBlobReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StagedCommonModuleReport {
+    pub module_id: String,
+    pub module_body_id: String,
+    pub text: PathBuf,
+    pub text_bytes: usize,
+    pub module_blob: GeneratedBlobReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageMetadataObjectsReport {
+    pub database: String,
+    pub objects: Vec<StagedMetadataObjectReport>,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StagedMetadataObjectReport {
+    pub object_id: String,
+    pub kind: String,
+    pub xml: PathBuf,
+    pub properties: SimpleMetadataXmlProperties,
+    pub metadata_plain_bytes: usize,
+    pub metadata_blob: GeneratedBlobReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GeneratedBlobReport {
+    pub bytes: usize,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TableShape {
+    table_name: String,
+    row_count: i64,
+    #[serde(default)]
+    columns: Vec<ColumnShape>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct ColumnShape {
+    name: String,
+    type_name: String,
+    max_length: i16,
+    precision: u8,
+    scale: u8,
+    is_nullable: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct DatabaseFile {
+    name: String,
+    type_desc: String,
+    physical_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BinaryBlobRow {
+    file_name: String,
+    data_size: i64,
+    binary_hex: String,
+}
+
+#[derive(Debug, Clone)]
+struct CommonModuleStageSpec {
+    module_id: String,
+    text: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedCommonModuleStage {
+    spec: CommonModuleStageSpec,
+    module_body_id: String,
+    text_bytes: usize,
+    blob: Vec<u8>,
+    blob_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedCommonModuleObjectStage {
+    module_id: String,
+    module_body_id: String,
+    xml: PathBuf,
+    text: PathBuf,
+    properties: CommonModuleXmlProperties,
+    metadata_plain_bytes: usize,
+    metadata_blob: Vec<u8>,
+    metadata_blob_sha256: String,
+    text_bytes: usize,
+    module_blob: Vec<u8>,
+    module_blob_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedMetadataObjectStage {
+    object_id: String,
+    kind: String,
+    xml: PathBuf,
+    properties: SimpleMetadataXmlProperties,
+    metadata_plain_bytes: usize,
+    metadata_blob: Vec<u8>,
+    metadata_blob_sha256: String,
+}
+
+pub fn compare_databases(args: &MssqlCompareArgs) -> Result<MssqlCompareReport> {
+    let left = load_table_shapes(&args.sqlcmd, &args.server, &args.left)?;
+    let right = load_table_shapes(&args.sqlcmd, &args.server, &args.right)?;
+    Ok(compare_shapes(&args.left, &args.right, &left, &right))
+}
+
+pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Result<()> {
+    let json = serde_json::to_string_pretty(report)?;
+    fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
+}
+
+pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
+    let backup = args.backup.clone().unwrap_or_else(|| {
+        PathBuf::from(format!(
+            r"C:\temp\ibcmd-rs\{}_to_{}.bak",
+            args.source, args.target
+        ))
+    });
+    if let Some(parent) = backup.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    if database_exists(&args.sqlcmd, &args.server, &args.target)? {
+        if !args.overwrite {
+            return Err(anyhow!(
+                "target database {} already exists; pass --overwrite to replace it",
+                args.target
+            ));
+        }
+        let drop_sql = format!(
+            "ALTER DATABASE {target} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {target};",
+            target = quote_ident(&args.target)
+        );
+        run_sql(&args.sqlcmd, &args.server, &drop_sql)?;
+    }
+
+    let files = load_database_files(&args.sqlcmd, &args.server, &args.source)?;
+    let data_file = files
+        .iter()
+        .find(|file| file.type_desc.eq_ignore_ascii_case("ROWS"))
+        .ok_or_else(|| anyhow!("source database has no ROWS file"))?;
+    let log_file = files
+        .iter()
+        .find(|file| file.type_desc.eq_ignore_ascii_case("LOG"))
+        .ok_or_else(|| anyhow!("source database has no LOG file"))?;
+
+    let data_target = sibling_path(&data_file.physical_name, &format!("{}.mdf", args.target))?;
+    let log_target = sibling_path(&log_file.physical_name, &format!("{}_log.ldf", args.target))?;
+
+    let sql = format!(
+        "BACKUP DATABASE {source} TO DISK = N'{backup}' WITH INIT, COPY_ONLY, STATS = 10;\n\
+         RESTORE DATABASE {target} FROM DISK = N'{backup}' WITH \
+         MOVE N'{data_logical}' TO N'{data_target}', \
+         MOVE N'{log_logical}' TO N'{log_target}', \
+         REPLACE, RECOVERY, STATS = 10;",
+        source = quote_ident(&args.source),
+        target = quote_ident(&args.target),
+        backup = quote_string_path(&backup),
+        data_logical = quote_string(&data_file.name),
+        log_logical = quote_string(&log_file.name),
+        data_target = quote_string(&data_target),
+        log_target = quote_string(&log_target),
+    );
+    run_sql(&args.sqlcmd, &args.server, &sql)?;
+
+    Ok(MssqlCloneReport {
+        source: args.source.clone(),
+        target: args.target.clone(),
+        backup,
+        restored: true,
+    })
+}
+
+pub fn export_storage_bundle(args: &MssqlStorageExportArgs) -> Result<StorageBundleExportReport> {
+    fs::create_dir_all(&args.output_dir)
+        .with_context(|| format!("failed to create {}", args.output_dir.display()))?;
+
+    let mut tables = Vec::new();
+    for table in storage_tables() {
+        let target = args.output_dir.join(format!("{table}.bcp"));
+        if target.exists() && !args.overwrite {
+            return Err(anyhow!(
+                "{} already exists; pass --overwrite to replace bundle files",
+                target.display()
+            ));
+        }
+        run_bcp_out(&args.bcp, &args.server, &args.database, table, &target)?;
+        let stats = storage_table_stats(&args.sqlcmd, &args.server, &args.database, table)?;
+        tables.push(StorageTableManifest {
+            table_name: table.to_string(),
+            file_name: target
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string(),
+            row_count: stats.row_count,
+            binary_bytes: stats.binary_bytes,
+        });
+    }
+
+    let manifest = StorageBundleManifest {
+        source_database: Some(args.database.clone()),
+        format: "mssql-native-bcp-v1".to_string(),
+        tables,
+    };
+    write_storage_manifest(&args.output_dir, &manifest)?;
+
+    Ok(StorageBundleExportReport {
+        database: args.database.clone(),
+        output_dir: args.output_dir.clone(),
+        manifest,
+    })
+}
+
+pub fn import_storage_bundle(args: &MssqlStorageImportArgs) -> Result<StorageBundleImportReport> {
+    if !args.replace {
+        return Err(anyhow!(
+            "storage import deletes Config, ConfigSave and Params rows; pass --replace"
+        ));
+    }
+
+    let manifest = read_storage_manifest(&args.input_dir)?;
+    validate_storage_manifest(&manifest)?;
+
+    let before = storage_tables()
+        .iter()
+        .map(|table| storage_table_stats(&args.sqlcmd, &args.server, &args.database, table))
+        .collect::<Result<Vec<_>>>()?;
+
+    let reset_sql = format!(
+        "USE {db}; DELETE FROM ConfigSave; DELETE FROM Config; DELETE FROM Params;",
+        db = quote_ident(&args.database)
+    );
+    run_sql(&args.sqlcmd, &args.server, &reset_sql)?;
+
+    for table in storage_tables() {
+        let file = args.input_dir.join(format!("{table}.bcp"));
+        if !file.is_file() {
+            return Err(anyhow!("bundle file not found: {}", file.display()));
+        }
+        run_bcp_in(&args.bcp, &args.server, &args.database, table, &file)?;
+    }
+
+    let after = storage_tables()
+        .iter()
+        .map(|table| storage_table_stats(&args.sqlcmd, &args.server, &args.database, table))
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(StorageBundleImportReport {
+        database: args.database.clone(),
+        input_dir: args.input_dir.clone(),
+        before,
+        after,
+    })
+}
+
+pub fn export_delta_bundle(args: &MssqlDeltaExportArgs) -> Result<DeltaBundleExportReport> {
+    fs::create_dir_all(&args.output_dir)
+        .with_context(|| format!("failed to create {}", args.output_dir.display()))?;
+
+    let target = args.output_dir.join("ConfigSave.bcp");
+    if target.exists() && !args.overwrite {
+        return Err(anyhow!(
+            "{} already exists; pass --overwrite to replace bundle files",
+            target.display()
+        ));
+    }
+
+    run_bcp_out(
+        &args.bcp,
+        &args.server,
+        &args.database,
+        "ConfigSave",
+        &target,
+    )?;
+    let table = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let rows = configsave_row_digests(&args.sqlcmd, &args.server, &args.database)?;
+
+    let manifest = DeltaBundleManifest {
+        source_database: Some(args.database.clone()),
+        format: "mssql-configsave-delta-v1".to_string(),
+        table: StorageTableManifest {
+            file_name: "ConfigSave.bcp".to_string(),
+            ..table
+        },
+        rows,
+    };
+    write_delta_manifest(&args.output_dir, &manifest)?;
+
+    Ok(DeltaBundleExportReport {
+        database: args.database.clone(),
+        output_dir: args.output_dir.clone(),
+        manifest,
+    })
+}
+
+pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImportReport> {
+    let manifest = read_delta_manifest(&args.input_dir)?;
+    validate_delta_manifest(&manifest)?;
+
+    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    if before.row_count != 0 && !args.replace_config_save {
+        return Err(anyhow!(
+            "target ConfigSave has {} rows; pass --replace-config-save to delete them first",
+            before.row_count
+        ));
+    }
+
+    if args.replace_config_save {
+        let reset_sql = format!(
+            "USE {db}; DELETE FROM ConfigSave;",
+            db = quote_ident(&args.database)
+        );
+        run_sql(&args.sqlcmd, &args.server, &reset_sql)?;
+    }
+
+    let file = args.input_dir.join("ConfigSave.bcp");
+    if !file.is_file() {
+        return Err(anyhow!("bundle file not found: {}", file.display()));
+    }
+    run_bcp_in(&args.bcp, &args.server, &args.database, "ConfigSave", &file)?;
+
+    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    if after.row_count != manifest.table.row_count
+        || after.binary_bytes != manifest.table.binary_bytes
+    {
+        return Err(anyhow!(
+            "imported ConfigSave stats do not match manifest: rows {} vs {}, bytes {} vs {}",
+            after.row_count,
+            manifest.table.row_count,
+            after.binary_bytes,
+            manifest.table.binary_bytes
+        ));
+    }
+
+    Ok(DeltaBundleImportReport {
+        database: args.database.clone(),
+        input_dir: args.input_dir.clone(),
+        manifest_rows: manifest.table.row_count,
+        before,
+        after,
+    })
+}
+
+pub fn stage_common_module(args: &MssqlStageCommonModuleArgs) -> Result<StageCommonModuleReport> {
+    let report = stage_common_module_specs(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        vec![CommonModuleStageSpec {
+            module_id: args.module_id.clone(),
+            text: args.text.clone(),
+        }],
+        args.replace_config_save,
+        args.script_output.clone(),
+    )?;
+    let module = report
+        .modules
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("stage report did not contain the requested module"))?;
+
+    Ok(StageCommonModuleReport {
+        database: report.database,
+        module_id: module.module_id,
+        module_body_id: module.module_body_id,
+        text: module.text,
+        script: report.script,
+        before: report.before,
+        after: report.after,
+        module_blob: module.module_blob,
+        versions_blob: report.versions_blob,
+        version_replacements: report.version_replacements,
+    })
+}
+
+pub fn stage_common_modules(
+    args: &MssqlStageCommonModulesArgs,
+) -> Result<StageCommonModulesReport> {
+    let specs = parse_common_module_specs(&args.modules)?;
+    stage_common_module_specs(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        specs,
+        args.replace_config_save,
+        args.script_output.clone(),
+    )
+}
+
+pub fn stage_common_module_metadata(
+    args: &MssqlStageCommonModuleMetadataArgs,
+) -> Result<StageCommonModuleMetadataReport> {
+    if !args.replace_config_save {
+        return Err(anyhow!(
+            "staging deletes existing ConfigSave rows; pass --replace-config-save"
+        ));
+    }
+
+    let module_id = normalize_uuid_arg(&args.module_id)?;
+    let xml = fs::read(&args.xml)
+        .with_context(|| format!("failed to read XML {}", args.xml.display()))?;
+    let base_metadata_blob =
+        fetch_config_blob(&args.sqlcmd, &args.server, &args.database, &module_id)?;
+    let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
+    if packed_metadata.properties.uuid != module_id {
+        return Err(anyhow!(
+            "XML CommonModule uuid {} does not match --module-id {}",
+            packed_metadata.properties.uuid,
+            module_id
+        ));
+    }
+
+    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let patched_versions = patch_versions_blob_bytes(&versions_blob, &[module_id.clone()], true)?;
+
+    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let script = args.script_output.clone().unwrap_or_else(|| {
+        default_stage_script_path(
+            &args.database,
+            &format!("common_module_metadata_{module_id}"),
+        )
+    });
+    if let Some(parent) = script.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let sql = build_stage_common_module_metadata_sql(
+        &args.database,
+        &module_id,
+        &packed_metadata.blob,
+        &patched_versions.blob,
+    );
+    fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
+    run_sql_file(&args.sqlcmd, &args.server, &script)?;
+
+    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+
+    Ok(StageCommonModuleMetadataReport {
+        database: args.database.clone(),
+        module_id,
+        xml: args.xml.clone(),
+        properties: packed_metadata.properties,
+        script,
+        before,
+        after,
+        metadata_plain_bytes: packed_metadata.plain_bytes,
+        metadata_blob: GeneratedBlobReport {
+            bytes: packed_metadata.blob.len(),
+            sha256: packed_metadata.output_sha256,
+        },
+        versions_blob: GeneratedBlobReport {
+            bytes: patched_versions.blob.len(),
+            sha256: patched_versions.output_sha256,
+        },
+        version_replacements: patched_versions.replacements,
+    })
+}
+
+pub fn stage_common_module_object(
+    args: &MssqlStageCommonModuleObjectArgs,
+) -> Result<StageCommonModuleObjectReport> {
+    let prepared = prepare_common_module_object_stage(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        args.xml.clone(),
+        args.text.clone(),
+    )?;
+    if let Some(expected_module_id) = args
+        .module_id
+        .as_deref()
+        .map(normalize_uuid_arg)
+        .transpose()?
+        .as_deref()
+    {
+        if expected_module_id != prepared.module_id {
+            return Err(anyhow!(
+                "XML CommonModule uuid {} does not match --module-id {}",
+                prepared.module_id,
+                expected_module_id
+            ));
+        }
+    }
+
+    let default_name = format!("common_module_object_{}", prepared.module_id);
+    let report = stage_prepared_common_module_objects(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        vec![prepared],
+        args.replace_config_save,
+        args.script_output.clone(),
+        &default_name,
+    )?;
+    let module = report
+        .modules
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("stage report did not contain the requested module"))?;
+
+    Ok(StageCommonModuleObjectReport {
+        database: report.database,
+        module_id: module.module_id,
+        module_body_id: module.module_body_id,
+        xml: module.xml,
+        text: module.text,
+        properties: module.properties,
+        script: report.script,
+        before: report.before,
+        after: report.after,
+        metadata_plain_bytes: module.metadata_plain_bytes,
+        metadata_blob: module.metadata_blob,
+        text_bytes: module.text_bytes,
+        module_blob: module.module_blob,
+        versions_blob: report.versions_blob,
+        version_replacements: report.version_replacements,
+    })
+}
+
+pub fn stage_common_module_objects(
+    args: &MssqlStageCommonModuleObjectsArgs,
+) -> Result<StageCommonModuleObjectsReport> {
+    if args.xmls.is_empty() {
+        return Err(anyhow!("at least one common module XML must be staged"));
+    }
+
+    let mut prepared = Vec::with_capacity(args.xmls.len());
+    for xml in &args.xmls {
+        prepared.push(prepare_common_module_object_stage(
+            &args.sqlcmd,
+            &args.server,
+            &args.database,
+            xml.clone(),
+            None,
+        )?);
+    }
+    ensure_unique_common_module_object_ids(&prepared)?;
+
+    stage_prepared_common_module_objects(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        prepared,
+        args.replace_config_save,
+        args.script_output.clone(),
+        &format!("common_module_objects_{}", args.xmls.len()),
+    )
+}
+
+pub fn stage_metadata_objects(
+    args: &MssqlStageMetadataObjectsArgs,
+) -> Result<StageMetadataObjectsReport> {
+    if !args.replace_config_save {
+        return Err(anyhow!(
+            "staging deletes existing ConfigSave rows; pass --replace-config-save"
+        ));
+    }
+    if args.xmls.is_empty() {
+        return Err(anyhow!("at least one metadata XML must be staged"));
+    }
+
+    let source = args.source_root.clone().map(MetadataSourceContext::new);
+    let mut prepared = Vec::with_capacity(args.xmls.len());
+    for xml in &args.xmls {
+        prepared.push(prepare_metadata_object_stage(
+            &args.sqlcmd,
+            &args.server,
+            &args.database,
+            xml.clone(),
+            source.as_ref(),
+        )?);
+    }
+    ensure_unique_metadata_object_ids(&prepared)?;
+
+    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let changes = prepared
+        .iter()
+        .map(|object| object.object_id.clone())
+        .collect::<Vec<_>>();
+    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+
+    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let script = args.script_output.clone().unwrap_or_else(|| {
+        default_stage_script_path(
+            &args.database,
+            &format!("metadata_objects_{}", prepared.len()),
+        )
+    });
+    if let Some(parent) = script.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let sql = build_stage_metadata_objects_sql(&args.database, &prepared, &patched_versions.blob);
+    fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
+    run_sql_file(&args.sqlcmd, &args.server, &script)?;
+
+    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let objects = prepared
+        .into_iter()
+        .map(|object| StagedMetadataObjectReport {
+            object_id: object.object_id,
+            kind: object.kind,
+            xml: object.xml,
+            properties: object.properties,
+            metadata_plain_bytes: object.metadata_plain_bytes,
+            metadata_blob: GeneratedBlobReport {
+                bytes: object.metadata_blob.len(),
+                sha256: object.metadata_blob_sha256,
+            },
+        })
+        .collect();
+
+    Ok(StageMetadataObjectsReport {
+        database: args.database.clone(),
+        objects,
+        script,
+        before,
+        after,
+        versions_blob: GeneratedBlobReport {
+            bytes: patched_versions.blob.len(),
+            sha256: patched_versions.output_sha256,
+        },
+        version_replacements: patched_versions.replacements,
+    })
+}
+
+fn prepare_metadata_object_stage(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: PathBuf,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PreparedMetadataObjectStage> {
+    let xml = fs::read(&xml_path)
+        .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
+    let properties = parse_simple_metadata_xml_properties(&xml)?;
+    let object_id = properties.uuid.clone();
+    let base_metadata_blob = fetch_config_blob(sqlcmd, server, database, &object_id)?;
+    let packed_metadata =
+        pack_simple_metadata_blob_from_xml_with_source(&base_metadata_blob, &xml, source)?;
+    if packed_metadata.properties.uuid != object_id {
+        return Err(anyhow!(
+            "XML metadata uuid {} changed while packing {}",
+            packed_metadata.properties.uuid,
+            object_id
+        ));
+    }
+
+    Ok(PreparedMetadataObjectStage {
+        object_id,
+        kind: packed_metadata.properties.kind.clone(),
+        xml: xml_path,
+        properties: packed_metadata.properties,
+        metadata_plain_bytes: packed_metadata.plain_bytes,
+        metadata_blob: packed_metadata.blob,
+        metadata_blob_sha256: packed_metadata.output_sha256,
+    })
+}
+
+fn prepare_common_module_object_stage(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: PathBuf,
+    text_path: Option<PathBuf>,
+) -> Result<PreparedCommonModuleObjectStage> {
+    let xml = fs::read(&xml_path)
+        .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
+    let properties = parse_common_module_xml_properties(&xml)?;
+    let module_id = properties.uuid.clone();
+    let text_path = text_path.unwrap_or_else(|| infer_common_module_text_path(&xml_path));
+    let text = fs::read(&text_path)
+        .with_context(|| format!("failed to read BSL text {}", text_path.display()))?;
+
+    let base_metadata_blob = fetch_config_blob(sqlcmd, server, database, &module_id)?;
+    let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
+    let module_body_id = format!("{module_id}.0");
+    let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
+    let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
+
+    Ok(PreparedCommonModuleObjectStage {
+        module_id,
+        module_body_id,
+        xml: xml_path,
+        text: text_path,
+        properties: packed_metadata.properties,
+        metadata_plain_bytes: packed_metadata.plain_bytes,
+        metadata_blob: packed_metadata.blob,
+        metadata_blob_sha256: packed_metadata.output_sha256,
+        text_bytes: text.len(),
+        module_blob: packed_module.blob,
+        module_blob_sha256: packed_module.output_sha256,
+    })
+}
+
+fn stage_prepared_common_module_objects(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    prepared: Vec<PreparedCommonModuleObjectStage>,
+    replace_config_save: bool,
+    script_output: Option<PathBuf>,
+    default_script_name: &str,
+) -> Result<StageCommonModuleObjectsReport> {
+    if !replace_config_save {
+        return Err(anyhow!(
+            "staging deletes existing ConfigSave rows; pass --replace-config-save"
+        ));
+    }
+    if prepared.is_empty() {
+        return Err(anyhow!("at least one common module object must be staged"));
+    }
+    ensure_unique_common_module_object_ids(&prepared)?;
+
+    let versions_blob = fetch_config_blob(sqlcmd, server, database, "versions")?;
+    let changes = prepared
+        .iter()
+        .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()])
+        .collect::<Vec<_>>();
+    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+
+    let before = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let script =
+        script_output.unwrap_or_else(|| default_stage_script_path(database, default_script_name));
+    if let Some(parent) = script.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let sql = build_stage_common_module_objects_sql(database, &prepared, &patched_versions.blob);
+    fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
+    run_sql_file(sqlcmd, server, &script)?;
+
+    let after = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let modules = prepared
+        .into_iter()
+        .map(|module| StagedCommonModuleObjectReport {
+            module_id: module.module_id,
+            module_body_id: module.module_body_id,
+            xml: module.xml,
+            text: module.text,
+            properties: module.properties,
+            metadata_plain_bytes: module.metadata_plain_bytes,
+            metadata_blob: GeneratedBlobReport {
+                bytes: module.metadata_blob.len(),
+                sha256: module.metadata_blob_sha256,
+            },
+            text_bytes: module.text_bytes,
+            module_blob: GeneratedBlobReport {
+                bytes: module.module_blob.len(),
+                sha256: module.module_blob_sha256,
+            },
+        })
+        .collect();
+
+    Ok(StageCommonModuleObjectsReport {
+        database: database.to_string(),
+        modules,
+        script,
+        before,
+        after,
+        versions_blob: GeneratedBlobReport {
+            bytes: patched_versions.blob.len(),
+            sha256: patched_versions.output_sha256,
+        },
+        version_replacements: patched_versions.replacements,
+    })
+}
+
+fn stage_common_module_specs(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    specs: Vec<CommonModuleStageSpec>,
+    replace_config_save: bool,
+    script_output: Option<PathBuf>,
+) -> Result<StageCommonModulesReport> {
+    if !replace_config_save {
+        return Err(anyhow!(
+            "staging deletes existing ConfigSave rows; pass --replace-config-save"
+        ));
+    }
+    if specs.is_empty() {
+        return Err(anyhow!("at least one common module must be staged"));
+    }
+    ensure_unique_module_ids(&specs)?;
+
+    let mut prepared = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let module_body_id = format!("{}.0", spec.module_id);
+        let text = fs::read(&spec.text)
+            .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
+        let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
+        let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
+        prepared.push(PreparedCommonModuleStage {
+            spec,
+            module_body_id,
+            text_bytes: text.len(),
+            blob_sha256: packed_module.output_sha256,
+            blob: packed_module.blob,
+        });
+    }
+
+    let versions_blob = fetch_config_blob(sqlcmd, server, database, "versions")?;
+    let changes = prepared
+        .iter()
+        .flat_map(|module| [module.spec.module_id.clone(), module.module_body_id.clone()])
+        .collect::<Vec<_>>();
+    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+
+    let before = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let script = script_output.unwrap_or_else(|| {
+        default_stage_script_path(database, &format!("common_modules_{}", prepared.len()))
+    });
+    if let Some(parent) = script.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let sql = build_stage_common_modules_sql(database, &prepared, &patched_versions.blob);
+    fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
+    run_sql_file(sqlcmd, server, &script)?;
+
+    let after = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let modules = prepared
+        .into_iter()
+        .map(|module| StagedCommonModuleReport {
+            module_id: module.spec.module_id,
+            module_body_id: module.module_body_id,
+            text: module.spec.text,
+            text_bytes: module.text_bytes,
+            module_blob: GeneratedBlobReport {
+                bytes: module.blob.len(),
+                sha256: module.blob_sha256,
+            },
+        })
+        .collect();
+
+    Ok(StageCommonModulesReport {
+        database: database.to_string(),
+        modules,
+        script,
+        before,
+        after,
+        versions_blob: GeneratedBlobReport {
+            bytes: patched_versions.blob.len(),
+            sha256: patched_versions.output_sha256,
+        },
+        version_replacements: patched_versions.replacements,
+    })
+}
+
+fn parse_common_module_specs(values: &[String]) -> Result<Vec<CommonModuleStageSpec>> {
+    values
+        .iter()
+        .map(|value| {
+            let (module_id, text) = value.split_once('=').ok_or_else(|| {
+                anyhow!("module value must have the form <metadata-uuid>=<path>, got {value}")
+            })?;
+            let module_id = module_id.trim();
+            if module_id.is_empty() {
+                return Err(anyhow!("module id cannot be empty in {value}"));
+            }
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(anyhow!("module text path cannot be empty in {value}"));
+            }
+            Ok(CommonModuleStageSpec {
+                module_id: module_id.to_string(),
+                text: PathBuf::from(text),
+            })
+        })
+        .collect()
+}
+
+fn normalize_uuid_arg(value: &str) -> Result<String> {
+    Ok(uuid::Uuid::parse_str(value.trim())?
+        .hyphenated()
+        .to_string())
+}
+
+fn ensure_unique_module_ids(specs: &[CommonModuleStageSpec]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for spec in specs {
+        if !seen.insert(spec.module_id.as_str()) {
+            return Err(anyhow!("duplicate module id: {}", spec.module_id));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_unique_common_module_object_ids(
+    modules: &[PreparedCommonModuleObjectStage],
+) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for module in modules {
+        if !seen.insert(module.module_id.as_str()) {
+            return Err(anyhow!(
+                "duplicate common module object id: {}",
+                module.module_id
+            ));
+        }
+        if !seen.insert(module.module_body_id.as_str()) {
+            return Err(anyhow!(
+                "duplicate common module body id: {}",
+                module.module_body_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_unique_metadata_object_ids(objects: &[PreparedMetadataObjectStage]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for object in objects {
+        if !seen.insert(object.object_id.as_str()) {
+            return Err(anyhow!(
+                "duplicate metadata object id: {}",
+                object.object_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn compare_shapes(
+    left_name: &str,
+    right_name: &str,
+    left: &[TableShape],
+    right: &[TableShape],
+) -> MssqlCompareReport {
+    let left_by_name = by_table_name(left);
+    let right_by_name = by_table_name(right);
+    let all_names = left_by_name
+        .keys()
+        .chain(right_by_name.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    let mut summary = MssqlCompareSummary {
+        left_tables: left.len(),
+        right_tables: right.len(),
+        ..MssqlCompareSummary::default()
+    };
+    let mut differences = Vec::new();
+
+    for name in all_names {
+        match (left_by_name.get(&name), right_by_name.get(&name)) {
+            (None, Some(_)) => {
+                summary.missing_in_left += 1;
+                differences.push(MssqlDifference {
+                    kind: "missing_in_left".to_string(),
+                    table: name,
+                    detail: format!("exists in {right_name} only"),
+                });
+            }
+            (Some(_), None) => {
+                summary.missing_in_right += 1;
+                differences.push(MssqlDifference {
+                    kind: "missing_in_right".to_string(),
+                    table: name,
+                    detail: format!("exists in {left_name} only"),
+                });
+            }
+            (Some(left), Some(right)) => {
+                if left.row_count != right.row_count {
+                    summary.row_count_differences += 1;
+                    differences.push(MssqlDifference {
+                        kind: "row_count".to_string(),
+                        table: name.clone(),
+                        detail: format!("{} rows vs {} rows", left.row_count, right.row_count),
+                    });
+                }
+                if left.columns != right.columns {
+                    summary.column_differences += 1;
+                    differences.push(MssqlDifference {
+                        kind: "columns".to_string(),
+                        table: name,
+                        detail: "column definitions differ".to_string(),
+                    });
+                }
+            }
+            (None, None) => unreachable!("table union cannot produce an empty match"),
+        }
+    }
+
+    MssqlCompareReport {
+        left: left_name.to_string(),
+        right: right_name.to_string(),
+        same: differences.is_empty(),
+        summary,
+        differences,
+    }
+}
+
+fn load_table_shapes(sqlcmd: &Path, server: &str, database: &str) -> Result<Vec<TableShape>> {
+    let sql = format!(
+        "SET NOCOUNT ON; USE {db};\n\
+         SELECT t.name AS table_name,\n\
+                ISNULL(SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.row_count ELSE 0 END), 0) AS row_count,\n\
+                JSON_QUERY((\n\
+                    SELECT c.name,\n\
+                           TYPE_NAME(c.user_type_id) AS type_name,\n\
+                           c.max_length,\n\
+                           c.precision,\n\
+                           c.scale,\n\
+                           CONVERT(bit, c.is_nullable) AS is_nullable\n\
+                    FROM sys.columns c\n\
+                    WHERE c.object_id = t.object_id\n\
+                    ORDER BY c.column_id\n\
+                    FOR JSON PATH\n\
+                )) AS columns\n\
+         FROM sys.tables t\n\
+         LEFT JOIN sys.dm_db_partition_stats ps ON ps.object_id = t.object_id AND ps.index_id IN (0, 1)\n\
+         GROUP BY t.object_id, t.name\n\
+         ORDER BY t.name\n\
+         FOR JSON PATH;",
+        db = quote_ident(database)
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let json = extract_json_array(&stdout)?;
+    serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse table JSON for {database}"))
+}
+
+fn load_database_files(sqlcmd: &Path, server: &str, database: &str) -> Result<Vec<DatabaseFile>> {
+    let sql = format!(
+        "SET NOCOUNT ON; USE {db}; SELECT name, type_desc, physical_name FROM sys.database_files FOR JSON PATH;",
+        db = quote_ident(database)
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let json = extract_json_array(&stdout)?;
+    serde_json::from_str(&json).with_context(|| format!("failed to parse file JSON for {database}"))
+}
+
+fn storage_table_stats(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+) -> Result<StorageTableManifest> {
+    let sql = format!(
+        "SET NOCOUNT ON; USE {db}; SELECT N'{table}' AS table_name, COUNT_BIG(*) AS row_count, ISNULL(SUM(CONVERT(bigint, DATALENGTH(BinaryData))), 0) AS binary_bytes FROM {table_ident} FOR JSON PATH;",
+        db = quote_ident(database),
+        table = quote_string(table),
+        table_ident = quote_ident(table),
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let json = extract_json_array(&stdout)?;
+    let mut values: Vec<StorageTableManifest> = serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse storage stats JSON for {table}"))?;
+    let mut value = values
+        .pop()
+        .ok_or_else(|| anyhow!("storage stats query returned no rows for {table}"))?;
+    value.file_name = format!("{table}.bcp");
+    Ok(value)
+}
+
+fn configsave_row_digests(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+) -> Result<Vec<ConfigSaveRowDigest>> {
+    let sql = format!(
+        "SET NOCOUNT ON; USE {db};\n\
+         SELECT FileName AS file_name,\n\
+                PartNo AS part_no,\n\
+                DataSize AS data_size,\n\
+                DATALENGTH(BinaryData) AS binary_bytes,\n\
+                CONVERT(varchar(64), HASHBYTES('SHA2_256', BinaryData), 2) AS sha256\n\
+         FROM ConfigSave\n\
+         ORDER BY FileName, PartNo\n\
+         FOR JSON PATH;",
+        db = quote_ident(database),
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let json = extract_json_array(&stdout)?;
+    serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse ConfigSave digests JSON for {database}"))
+}
+
+fn fetch_config_blob(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    file_name: &str,
+) -> Result<Vec<u8>> {
+    let sql = format!(
+        "SET NOCOUNT ON; USE {db};\n\
+         SELECT FileName AS file_name,\n\
+                DataSize AS data_size,\n\
+                CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
+         FROM Config\n\
+         WHERE FileName = N'{file_name}' AND PartNo = 0\n\
+         FOR JSON PATH;",
+        db = quote_ident(database),
+        file_name = quote_string(file_name),
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let json = extract_json_array(&stdout)?;
+    let mut rows: Vec<BinaryBlobRow> = serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse Config blob JSON for {file_name}"))?;
+    let row = rows
+        .pop()
+        .ok_or_else(|| anyhow!("Config row not found: {file_name}"))?;
+    let bytes = decode_hex(&row.binary_hex)?;
+    if bytes.len() != row.data_size as usize {
+        return Err(anyhow!(
+            "Config row {} DataSize {} does not match BinaryData length {}",
+            row.file_name,
+            row.data_size,
+            bytes.len()
+        ));
+    }
+    Ok(bytes)
+}
+
+fn database_exists(sqlcmd: &Path, server: &str, database: &str) -> Result<bool> {
+    let sql = format!(
+        "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.databases WHERE name = N'{}';",
+        quote_string(database)
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    Ok(first_i32(&stdout).unwrap_or_default() > 0)
+}
+
+fn by_table_name(tables: &[TableShape]) -> BTreeMap<String, &TableShape> {
+    tables
+        .iter()
+        .map(|table| (table.table_name.clone(), table))
+        .collect()
+}
+
+fn run_sql(sqlcmd: &Path, server: &str, sql: &str) -> Result<()> {
+    let output = sqlcmd_command(sqlcmd, server, sql).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "sqlcmd failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
+    let output = sqlcmd_command(sqlcmd, server, sql).output()?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "sqlcmd failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn run_sql_file(sqlcmd: &Path, server: &str, script: &Path) -> Result<()> {
+    let output = sqlcmd_file_command(sqlcmd, server, script).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "sqlcmd script failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn run_bcp_out(bcp: &Path, server: &str, database: &str, table: &str, output: &Path) -> Result<()> {
+    let table_name = qualified_table(database, table);
+    let command = bcp_command(bcp, &table_name, "out", output, server);
+    run_bcp(command)
+}
+
+fn run_bcp_in(bcp: &Path, server: &str, database: &str, table: &str, input: &Path) -> Result<()> {
+    let table_name = qualified_table(database, table);
+    let command = bcp_command(bcp, &table_name, "in", input, server);
+    run_bcp(command)
+}
+
+fn bcp_command(
+    bcp: &Path,
+    table_name: &str,
+    direction: &str,
+    file: &Path,
+    server: &str,
+) -> Command {
+    let mut command = Command::new(bcp);
+    command
+        .arg(table_name)
+        .arg(direction)
+        .arg(file)
+        .arg("-S")
+        .arg(server)
+        .arg("-T")
+        .arg("-n")
+        .arg("-u")
+        .arg("-b")
+        .arg("1000");
+    command
+}
+
+fn run_bcp(mut command: Command) -> Result<()> {
+    let output = command.output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "bcp failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn sqlcmd_command(sqlcmd: &Path, server: &str, sql: &str) -> Command {
+    let mut command = Command::new(sqlcmd);
+    command
+        .arg("-S")
+        .arg(server)
+        .arg("-E")
+        .arg("-C")
+        .arg("-f")
+        .arg("65001")
+        .arg("-b")
+        .arg("-w")
+        .arg("65535")
+        .arg("-y")
+        .arg("0")
+        .arg("-Y")
+        .arg("0")
+        .arg("-Q")
+        .arg(sql);
+    command
+}
+
+fn sqlcmd_file_command(sqlcmd: &Path, server: &str, script: &Path) -> Command {
+    let mut command = Command::new(sqlcmd);
+    command
+        .arg("-S")
+        .arg(server)
+        .arg("-E")
+        .arg("-C")
+        .arg("-f")
+        .arg("65001")
+        .arg("-b")
+        .arg("-w")
+        .arg("65535")
+        .arg("-y")
+        .arg("0")
+        .arg("-Y")
+        .arg("0")
+        .arg("-i")
+        .arg(script);
+    command
+}
+
+fn first_i32(stdout: &str) -> Option<i32> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.parse::<i32>().ok())
+}
+
+fn extract_json_array(stdout: &str) -> Result<String> {
+    let start = stdout
+        .find('[')
+        .ok_or_else(|| anyhow!("sqlcmd output does not contain JSON array"))?;
+    let end = stdout
+        .rfind(']')
+        .ok_or_else(|| anyhow!("sqlcmd output does not contain JSON array end"))?;
+    Ok(stdout[start..=end]
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .collect())
+}
+
+fn write_storage_manifest(output_dir: &Path, manifest: &StorageBundleManifest) -> Result<()> {
+    let json = serde_json::to_string_pretty(manifest)?;
+    fs::write(output_dir.join("bundle.json"), json).with_context(|| {
+        format!(
+            "failed to write {}",
+            output_dir.join("bundle.json").display()
+        )
+    })
+}
+
+fn write_delta_manifest(output_dir: &Path, manifest: &DeltaBundleManifest) -> Result<()> {
+    let json = serde_json::to_string_pretty(manifest)?;
+    fs::write(output_dir.join("delta.json"), json).with_context(|| {
+        format!(
+            "failed to write {}",
+            output_dir.join("delta.json").display()
+        )
+    })
+}
+
+fn read_storage_manifest(input_dir: &Path) -> Result<StorageBundleManifest> {
+    let path = input_dir.join("bundle.json");
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn read_delta_manifest(input_dir: &Path) -> Result<DeltaBundleManifest> {
+    let path = input_dir.join("delta.json");
+    let text =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn validate_storage_manifest(manifest: &StorageBundleManifest) -> Result<()> {
+    if manifest.format != "mssql-native-bcp-v1" {
+        return Err(anyhow!(
+            "unsupported storage bundle format: {}",
+            manifest.format
+        ));
+    }
+    let names = manifest
+        .tables
+        .iter()
+        .map(|table| table.table_name.as_str())
+        .collect::<BTreeSet<_>>();
+    for required in storage_tables() {
+        if !names.contains(required) {
+            return Err(anyhow!("bundle is missing required table {required}"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_delta_manifest(manifest: &DeltaBundleManifest) -> Result<()> {
+    if manifest.format != "mssql-configsave-delta-v1" {
+        return Err(anyhow!(
+            "unsupported delta bundle format: {}",
+            manifest.format
+        ));
+    }
+    if manifest.table.table_name != "ConfigSave" {
+        return Err(anyhow!(
+            "delta bundle must contain ConfigSave, got {}",
+            manifest.table.table_name
+        ));
+    }
+    if manifest.table.file_name != "ConfigSave.bcp" {
+        return Err(anyhow!(
+            "delta bundle points to unexpected file {}",
+            manifest.table.file_name
+        ));
+    }
+    if manifest.table.row_count != manifest.rows.len() as i64 {
+        return Err(anyhow!(
+            "delta manifest row_count {} does not match digest rows {}",
+            manifest.table.row_count,
+            manifest.rows.len()
+        ));
+    }
+    Ok(())
+}
+
+fn storage_tables() -> [&'static str; 2] {
+    ["ConfigSave", "Params"]
+}
+
+fn build_stage_common_modules_sql(
+    database: &str,
+    modules: &[PreparedCommonModuleStage],
+    versions_blob: &[u8],
+) -> String {
+    let versions_blob_hex = encode_hex(versions_blob);
+    let expected_stable_rows = modules.len() + 2;
+    let expected_total_rows = modules.len() * 2 + 3;
+    let module_ids = modules
+        .iter()
+        .map(|module| format!("N'{}'", quote_string(&module.spec.module_id)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut sql = format!(
+        "SET NOCOUNT ON;\n\
+         SET XACT_ABORT ON;\n\
+         USE {db};\n\
+         BEGIN TRAN;\n\
+         DELETE FROM ConfigSave;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, DataSize, BinaryData, PartNo\n\
+         FROM Config\n\
+         WHERE FileName IN (N'root', N'version'{module_filter}) AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> {expected_stable_rows} THROW 51000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n",
+        db = quote_ident(database),
+        module_filter = if module_ids.is_empty() {
+            String::new()
+        } else {
+            format!(", {module_ids}")
+        },
+        expected_stable_rows = expected_stable_rows,
+    );
+
+    for (index, module) in modules.iter().enumerate() {
+        let module_blob_hex = encode_hex(&module.blob);
+        let error_number = 51001 + index;
+        sql.push_str(&format!(
+            "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {error_number}, 'Expected to insert module body row into ConfigSave', 1;\n",
+            module_body_id = quote_string(&module.module_body_id),
+            module_blob_len = module.blob.len(),
+            module_blob_hex = module_blob_hex,
+            error_number = error_number,
+        ));
+    }
+
+    sql.push_str(&format!(
+        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'versions' AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 1 THROW 51998, 'Expected to insert versions row into ConfigSave', 1;\n\
+         IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> {expected_total_rows} THROW 51999, 'Unexpected ConfigSave row count after staging', 1;\n\
+         COMMIT;\n",
+        versions_blob_len = versions_blob.len(),
+        versions_blob_hex = versions_blob_hex,
+        expected_total_rows = expected_total_rows,
+    ));
+
+    sql
+}
+
+fn build_stage_common_module_metadata_sql(
+    database: &str,
+    module_id: &str,
+    metadata_blob: &[u8],
+    versions_blob: &[u8],
+) -> String {
+    let metadata_blob_hex = encode_hex(metadata_blob);
+    let versions_blob_hex = encode_hex(versions_blob);
+    format!(
+        "SET NOCOUNT ON;\n\
+         SET XACT_ABORT ON;\n\
+         USE {db};\n\
+         BEGIN TRAN;\n\
+         DELETE FROM ConfigSave;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, DataSize, BinaryData, PartNo\n\
+         FROM Config\n\
+         WHERE FileName IN (N'root', N'version') AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 2 THROW 52000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'{module_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'{module_id}' AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 1 THROW 52001, 'Expected to insert common module metadata row into ConfigSave', 1;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'versions' AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 1 THROW 52002, 'Expected to insert versions row into ConfigSave', 1;\n\
+         IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 4 THROW 52003, 'Unexpected ConfigSave row count after metadata staging', 1;\n\
+         COMMIT;\n",
+        db = quote_ident(database),
+        module_id = quote_string(module_id),
+        metadata_blob_len = metadata_blob.len(),
+        metadata_blob_hex = metadata_blob_hex,
+        versions_blob_len = versions_blob.len(),
+        versions_blob_hex = versions_blob_hex,
+    )
+}
+
+fn build_stage_common_module_objects_sql(
+    database: &str,
+    modules: &[PreparedCommonModuleObjectStage],
+    versions_blob: &[u8],
+) -> String {
+    let versions_blob_hex = encode_hex(versions_blob);
+    let expected_total_rows = modules.len() * 2 + 3;
+    let mut sql = format!(
+        "SET NOCOUNT ON;\n\
+         SET XACT_ABORT ON;\n\
+         USE {db};\n\
+         BEGIN TRAN;\n\
+         DELETE FROM ConfigSave;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, DataSize, BinaryData, PartNo\n\
+         FROM Config\n\
+         WHERE FileName IN (N'root', N'version') AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 2 THROW 53000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n",
+        db = quote_ident(database),
+    );
+
+    for (index, module) in modules.iter().enumerate() {
+        let metadata_blob_hex = encode_hex(&module.metadata_blob);
+        let module_blob_hex = encode_hex(&module.module_blob);
+        let metadata_error = 53001 + index * 2;
+        let body_error = metadata_error + 1;
+        sql.push_str(&format!(
+            "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{module_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{module_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {metadata_error}, 'Expected to insert common module metadata row into ConfigSave', 1;\n\
+             INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {body_error}, 'Expected to insert common module body row into ConfigSave', 1;\n",
+            module_id = quote_string(&module.module_id),
+            module_body_id = quote_string(&module.module_body_id),
+            metadata_blob_len = module.metadata_blob.len(),
+            metadata_blob_hex = metadata_blob_hex,
+            module_blob_len = module.module_blob.len(),
+            module_blob_hex = module_blob_hex,
+            metadata_error = metadata_error,
+            body_error = body_error,
+        ));
+    }
+
+    sql.push_str(&format!(
+        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'versions' AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 1 THROW 53998, 'Expected to insert versions row into ConfigSave', 1;\n\
+         IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> {expected_total_rows} THROW 53999, 'Unexpected ConfigSave row count after common module object staging', 1;\n\
+         COMMIT;\n",
+        versions_blob_len = versions_blob.len(),
+        versions_blob_hex = versions_blob_hex,
+        expected_total_rows = expected_total_rows,
+    ));
+
+    sql
+}
+
+fn build_stage_metadata_objects_sql(
+    database: &str,
+    objects: &[PreparedMetadataObjectStage],
+    versions_blob: &[u8],
+) -> String {
+    let versions_blob_hex = encode_hex(versions_blob);
+    let expected_total_rows = objects.len() + 3;
+    let mut sql = format!(
+        "SET NOCOUNT ON;\n\
+         SET XACT_ABORT ON;\n\
+         USE {db};\n\
+         BEGIN TRAN;\n\
+         DELETE FROM ConfigSave;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, DataSize, BinaryData, PartNo\n\
+         FROM Config\n\
+         WHERE FileName IN (N'root', N'version') AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 2 THROW 54000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n",
+        db = quote_ident(database),
+    );
+
+    for (index, object) in objects.iter().enumerate() {
+        let metadata_blob_hex = encode_hex(&object.metadata_blob);
+        let error_number = 54001 + index;
+        sql.push_str(&format!(
+            "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{object_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{object_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {error_number}, 'Expected to insert metadata object row into ConfigSave', 1;\n",
+            object_id = quote_string(&object.object_id),
+            metadata_blob_len = object.metadata_blob.len(),
+            metadata_blob_hex = metadata_blob_hex,
+            error_number = error_number,
+        ));
+    }
+
+    sql.push_str(&format!(
+        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'versions' AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 1 THROW 54998, 'Expected to insert versions row into ConfigSave', 1;\n\
+         IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> {expected_total_rows} THROW 54999, 'Unexpected ConfigSave row count after metadata object staging', 1;\n\
+         COMMIT;\n",
+        versions_blob_len = versions_blob.len(),
+        versions_blob_hex = versions_blob_hex,
+        expected_total_rows = expected_total_rows,
+    ));
+
+    sql
+}
+
+fn default_stage_script_path(database: &str, name: &str) -> PathBuf {
+    PathBuf::from(format!(
+        r"C:\temp\ibcmd-rs\stage_{}_{}.sql",
+        sanitize_file_part(database),
+        sanitize_file_part(name)
+    ))
+}
+
+fn sanitize_file_part(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn infer_common_module_text_path(xml: &Path) -> PathBuf {
+    let module_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(module_name)
+        .join("Ext")
+        .join("Module.bsl")
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0F) as usize] as char);
+    }
+    output
+}
+
+fn decode_hex(value: &str) -> Result<Vec<u8>> {
+    let bytes = value.as_bytes();
+    if bytes.len() % 2 != 0 {
+        return Err(anyhow!("hex string has odd length"));
+    }
+    let mut output = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        output.push((high << 4) | low);
+    }
+    Ok(output)
+}
+
+fn hex_nibble(value: u8) -> Result<u8> {
+    match value {
+        b'0'..=b'9' => Ok(value - b'0'),
+        b'a'..=b'f' => Ok(value - b'a' + 10),
+        b'A'..=b'F' => Ok(value - b'A' + 10),
+        _ => Err(anyhow!("invalid hex digit {}", value as char)),
+    }
+}
+
+fn qualified_table(database: &str, table: &str) -> String {
+    format!("{}.dbo.{}", quote_ident(database), quote_ident(table))
+}
+
+fn sibling_path(source: &str, file_name: &str) -> Result<String> {
+    let parent = Path::new(source)
+        .parent()
+        .ok_or_else(|| anyhow!("cannot find parent path for {source}"))?;
+    Ok(parent.join(file_name).to_string_lossy().to_string())
+}
+
+fn quote_ident(value: &str) -> String {
+    format!("[{}]", value.replace(']', "]]"))
+}
+
+fn quote_string(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+fn quote_string_path(path: &Path) -> String {
+    quote_string(&path.to_string_lossy())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ColumnShape, TableShape, compare_shapes, infer_common_module_text_path, quote_ident,
+        quote_string,
+    };
+
+    #[test]
+    fn quotes_sql_identifier_and_string() {
+        assert_eq!(quote_ident("a]b"), "[a]]b]");
+        assert_eq!(quote_string("a'b"), "a''b");
+    }
+
+    #[test]
+    fn compare_detects_same_shapes() {
+        let table = TableShape {
+            table_name: "Config".to_string(),
+            row_count: 1,
+            columns: vec![ColumnShape {
+                name: "FileName".to_string(),
+                type_name: "nvarchar".to_string(),
+                max_length: 256,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+            }],
+        };
+
+        let report = compare_shapes("left", "right", &[table.clone()], &[table]);
+        assert!(report.same);
+        assert_eq!(report.summary.left_tables, 1);
+        assert_eq!(report.summary.right_tables, 1);
+    }
+
+    #[test]
+    fn infers_common_module_text_path_from_xml_path() {
+        assert_eq!(
+            infer_common_module_text_path(r"CommonModules\РаботаСБанкамиВызовСервера.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonModules\РаботаСБанкамиВызовСервера\Ext\Module.bsl")
+        );
+    }
+}
