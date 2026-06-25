@@ -607,4 +607,91 @@ mod tests {
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir(dir);
     }
+
+    #[test]
+    fn groups_transaction_boundaries_and_repeated_sql_fields() {
+        let dir = std::env::temp_dir().join(format!(
+            "ibcmd-rs-trace-boundary-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("events.xml");
+        fs::write(
+            &path,
+            r#"
+<RingBufferTarget>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>11</value></data>
+    <data name="row_count"><value>2</value></data>
+    <data name="statement"><value>SELECT * FROM dbo.TableX WHERE ID = 10</value></data>
+    <action name="session_id"><value>77</value></action>
+    <action name="transaction_id"><value>9001</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>13</value></data>
+    <data name="row_count"><value>4</value></data>
+    <data name="statement"><value>SELECT * FROM dbo.TableX WHERE ID = 11</value></data>
+    <action name="session_id"><value>77</value></action>
+    <action name="transaction_id"><value>9001</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>5</value></data>
+    <data name="statement"><value>BEGIN TRANSACTION</value></data>
+  </event>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>7</value></data>
+    <data name="statement"><value>ROLLBACK TRANSACTION</value></data>
+  </event>
+</RingBufferTarget>
+"#,
+        )
+        .unwrap();
+
+        let mut events_seen = 0;
+        let mut groups = BTreeMap::<String, GroupAccumulator>::new();
+        analyze_one_file(&path, &mut events_seen, &mut groups).unwrap();
+
+        assert_eq!(events_seen, 4);
+        assert_eq!(groups.len(), 3);
+
+        let query_group = groups.get("select * from dbo.tablex where id = ?").unwrap();
+        assert_eq!(query_group.count, 2);
+        assert_eq!(query_group.total_duration_us, 24);
+        assert_eq!(query_group.total_row_count, 6);
+        assert_eq!(query_group.max_row_count, 4);
+        assert_eq!(query_group.begin_transaction_count, 0);
+        assert_eq!(query_group.commit_transaction_count, 0);
+        assert_eq!(query_group.rollback_transaction_count, 0);
+        assert_eq!(
+            query_group.session_ids,
+            ["77".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            query_group.transaction_ids,
+            ["9001".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            query_group.object_names,
+            ["sp_executesql".to_string()]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+        );
+
+        let begin_group = groups.get("begin transaction").unwrap();
+        assert_eq!(begin_group.count, 1);
+        assert_eq!(begin_group.begin_transaction_count, 1);
+        assert_eq!(begin_group.commit_transaction_count, 0);
+        assert_eq!(begin_group.rollback_transaction_count, 0);
+
+        let rollback_group = groups.get("rollback transaction").unwrap();
+        assert_eq!(rollback_group.count, 1);
+        assert_eq!(rollback_group.begin_transaction_count, 0);
+        assert_eq!(rollback_group.commit_transaction_count, 0);
+        assert_eq!(rollback_group.rollback_transaction_count, 1);
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(dir);
+    }
 }

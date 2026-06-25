@@ -495,6 +495,14 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Form.xml",
+                &SourceKind::Form,
+                Some("Form")
+            ),
+            Some("Tasks/ЗадачаИсполнителя".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "CommandGroups/Органайзер.xml",
                 &SourceKind::MetadataXml,
                 Some("MetaDataObject")
@@ -628,6 +636,14 @@ mod tests {
                 None
             ),
             SourceKind::Module
+        );
+        assert_eq!(
+            classify(
+                "Form.xml".as_ref(),
+                "Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form.xml",
+                Some("Form")
+            ),
+            SourceKind::Form
         );
     }
 }
