@@ -185,7 +185,7 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
     }
     if matches!(
         extension.as_str(),
-        "bin" | "png" | "jpg" | "jpeg" | "gif" | "ico"
+        "bin" | "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "zip"
     ) {
         return SourceKind::Binary;
     }
@@ -443,6 +443,22 @@ mod tests {
                 Some("CommandInterface")
             ),
             SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Picture.svg".as_ref(),
+                "CommonPictures/ТранспортHTTP/Ext/Picture.svg",
+                None
+            ),
+            SourceKind::Binary
+        );
+        assert_eq!(
+            classify(
+                "Picture.zip".as_ref(),
+                "CommonPictures/ФорматPDF/Ext/Picture.zip",
+                None
+            ),
+            SourceKind::Binary
         );
     }
 }
