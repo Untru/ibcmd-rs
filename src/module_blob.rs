@@ -2595,7 +2595,8 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "BusinessProcessRef"
         | "BusinessProcessSelection"
         | "BusinessProcessList"
-        | "BusinessProcessManager" => Some("BusinessProcesses"),
+        | "BusinessProcessManager"
+        | "BusinessProcessRoutePointRef" => Some("BusinessProcesses"),
         "AccumulationRegisterObject"
         | "AccumulationRegisterRecordSet"
         | "AccumulationRegisterRecordKey"
@@ -2611,11 +2612,15 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         "CatalogObject" | "CatalogRef" | "CatalogSelection" | "CatalogList" | "CatalogManager" => {
             Some("Catalogs")
         }
+        "CatalogTabularSection" | "CatalogTabularSectionRow" => Some("Catalogs"),
         "ChartOfCharacteristicTypesObject"
         | "ChartOfCharacteristicTypesRef"
         | "ChartOfCharacteristicTypesSelection"
         | "ChartOfCharacteristicTypesList"
-        | "ChartOfCharacteristicTypesManager" => Some("ChartsOfCharacteristicTypes"),
+        | "ChartOfCharacteristicTypesManager"
+        | "ChartOfCharacteristicTypesTabularSection"
+        | "ChartOfCharacteristicTypesTabularSectionRow"
+        | "Characteristic" => Some("ChartsOfCharacteristicTypes"),
         "ChartOfAccountsObject"
         | "ChartOfAccountsRef"
         | "ChartOfAccountsSelection"
@@ -2631,10 +2636,14 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "ChartOfCalculationRegistersSelection"
         | "ChartOfCalculationRegistersList"
         | "ChartOfCalculationRegistersManager" => Some("ChartsOfCalculationRegisters"),
-        "DataProcessorObject" | "DataProcessorManager" => Some("DataProcessors"),
+        "DataProcessorObject"
+        | "DataProcessorManager"
+        | "DataProcessorTabularSection"
+        | "DataProcessorTabularSectionRow" => Some("DataProcessors"),
         "DefinedType" => Some("DefinedTypes"),
         "DocumentObject" | "DocumentRef" | "DocumentSelection" | "DocumentList"
         | "DocumentManager" => Some("Documents"),
+        "DocumentTabularSection" | "DocumentTabularSectionRow" => Some("Documents"),
         "DocumentJournalSelection" | "DocumentJournalList" | "DocumentJournalManager" => {
             Some("DocumentJournals")
         }
@@ -2648,7 +2657,12 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "InformationRegisterRecordKey"
         | "InformationRegisterSelection"
         | "InformationRegisterList"
-        | "InformationRegisterManager" => Some("InformationRegisters"),
+        | "InformationRegisterManager"
+        | "InformationRegisterRecord"
+        | "InformationRegisterRecordManager" => Some("InformationRegisters"),
+        "FilterCriterionList" | "FilterCriterionManager" => Some("FilterCriteria"),
+        "ConstantManager" | "ConstantValueManager" | "ConstantValueKey" => Some("Constants"),
+        "SettingsStorageManager" => Some("SettingsStorages"),
         "ReportObject" | "ReportManager" => Some("Reports"),
         "TaskObject" | "TaskRef" | "TaskSelection" | "TaskList" | "TaskManager" => Some("Tasks"),
         _ => None,
@@ -3674,6 +3688,42 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(
             super::metadata_type_source_folder("ChartOfCalculationRegistersRef.Accruals"),
             Some("ChartsOfCalculationRegisters")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("BusinessProcessRoutePointRef.Sales"),
+            Some("BusinessProcesses")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("CatalogTabularSection.Goods.Items"),
+            Some("Catalogs")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("Characteristic.Dimension"),
+            Some("ChartsOfCharacteristicTypes")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("DataProcessorTabularSection.Batch.Items"),
+            Some("DataProcessors")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("DocumentTabularSection.Invoice.Rows"),
+            Some("Documents")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("FilterCriterionList.Criteria"),
+            Some("FilterCriteria")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("InformationRegisterRecord.RegisterItem"),
+            Some("InformationRegisters")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("ConstantValueKey.SomeConstant"),
+            Some("Constants")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("SettingsStorageManager.Settings"),
+            Some("SettingsStorages")
         );
     }
 
