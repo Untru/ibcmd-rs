@@ -774,4 +774,80 @@ mod tests {
             Some("Tasks/ЗадачаИсполнителя")
         )));
     }
+
+    #[test]
+    fn scans_real_common_form_template_and_package_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-lab-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonForms")).unwrap();
+        std::fs::create_dir_all(root.join("CommonTemplates")).unwrap();
+        std::fs::create_dir_all(
+            root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext"),
+        )
+        .unwrap();
+
+        std::fs::copy(
+            lab_root.join("CommonForms/АвтономнаяРабота.xml"),
+            root.join("CommonForms/АвтономнаяРабота.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml"),
+            root.join("CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1.xml"),
+            root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext/Package.bin"),
+            root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext/Package.bin"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "CommonForms/АвтономнаяРабота.xml",
+            SourceKind::MetadataXml,
+            Some("CommonForms/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml",
+            SourceKind::MetadataXml,
+            Some("CommonTemplates/ВидыДокументовУдостоверяющихЛичность")
+        )));
+        assert!(files.contains(&(
+            "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1.xml",
+            SourceKind::MetadataXml,
+            Some("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1")
+        )));
+        assert!(files.contains(&(
+            "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext/Package.bin",
+            SourceKind::Binary,
+            Some("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1")
+        )));
+    }
 }
