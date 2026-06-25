@@ -23,6 +23,17 @@ pub struct QueryGroup {
     pub max_duration_us: u64,
     pub average_duration_us: u64,
     pub event_names: Vec<String>,
+    pub total_row_count: u64,
+    pub max_row_count: u64,
+    pub session_ids: Vec<String>,
+    pub database_names: Vec<String>,
+    pub client_hostnames: Vec<String>,
+    pub client_app_names: Vec<String>,
+    pub usernames: Vec<String>,
+    pub transaction_ids: Vec<String>,
+    pub attach_activity_ids: Vec<String>,
+    pub attach_activity_id_xfers: Vec<String>,
+    pub object_names: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -38,6 +49,17 @@ struct GroupAccumulator {
     total_duration_us: u64,
     max_duration_us: u64,
     event_names: BTreeSet<String>,
+    total_row_count: u64,
+    max_row_count: u64,
+    session_ids: BTreeSet<String>,
+    database_names: BTreeSet<String>,
+    client_hostnames: BTreeSet<String>,
+    client_app_names: BTreeSet<String>,
+    usernames: BTreeSet<String>,
+    transaction_ids: BTreeSet<String>,
+    attach_activity_ids: BTreeSet<String>,
+    attach_activity_id_xfers: BTreeSet<String>,
+    object_names: BTreeSet<String>,
 }
 
 pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
@@ -65,6 +87,17 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
                 max_duration_us: group.max_duration_us,
                 average_duration_us,
                 event_names: group.event_names.into_iter().collect(),
+                total_row_count: group.total_row_count,
+                max_row_count: group.max_row_count,
+                session_ids: group.session_ids.into_iter().collect(),
+                database_names: group.database_names.into_iter().collect(),
+                client_hostnames: group.client_hostnames.into_iter().collect(),
+                client_app_names: group.client_app_names.into_iter().collect(),
+                usernames: group.usernames.into_iter().collect(),
+                transaction_ids: group.transaction_ids.into_iter().collect(),
+                attach_activity_ids: group.attach_activity_ids.into_iter().collect(),
+                attach_activity_id_xfers: group.attach_activity_id_xfers.into_iter().collect(),
+                object_names: group.object_names.into_iter().collect(),
             }
         })
         .collect::<Vec<_>>();
@@ -176,6 +209,11 @@ fn record_event(event: EventState, groups: &mut BTreeMap<String, GroupAccumulato
         .get("duration")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or_default();
+    let row_count = event
+        .fields
+        .get("row_count")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_default();
 
     let entry = groups
         .entry(normalized)
@@ -186,9 +224,36 @@ fn record_event(event: EventState, groups: &mut BTreeMap<String, GroupAccumulato
     entry.count += 1;
     entry.total_duration_us += duration;
     entry.max_duration_us = entry.max_duration_us.max(duration);
+    entry.total_row_count += row_count;
+    entry.max_row_count = entry.max_row_count.max(row_count);
     if let Some(name) = event.event_name {
         entry.event_names.insert(name);
     }
+    collect_field(&event.fields, "session_id", &mut entry.session_ids);
+    collect_field(&event.fields, "database_name", &mut entry.database_names);
+    collect_field(
+        &event.fields,
+        "client_hostname",
+        &mut entry.client_hostnames,
+    );
+    collect_field(
+        &event.fields,
+        "client_app_name",
+        &mut entry.client_app_names,
+    );
+    collect_field(&event.fields, "username", &mut entry.usernames);
+    collect_field(&event.fields, "transaction_id", &mut entry.transaction_ids);
+    collect_field(
+        &event.fields,
+        "attach_activity_id",
+        &mut entry.attach_activity_ids,
+    );
+    collect_field(
+        &event.fields,
+        "attach_activity_id_xfer",
+        &mut entry.attach_activity_id_xfers,
+    );
+    collect_field(&event.fields, "object_name", &mut entry.object_names);
 }
 
 fn normalize_sql(sql: &str) -> String {
@@ -268,9 +333,23 @@ fn decode_xml_text(text: &str) -> String {
         .replace("&apos;", "'")
 }
 
+fn collect_field(
+    fields: &BTreeMap<String, String>,
+    field_name: &str,
+    target: &mut BTreeSet<String>,
+) {
+    if let Some(value) = fields
+        .get(field_name)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        target.insert(value.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
 
     use super::{GroupAccumulator, analyze_one_file, normalize_sql};
@@ -292,13 +371,27 @@ mod tests {
             &path,
             r#"
 <RingBufferTarget>
-  <event name="sql_batch_completed">
+  <event name="sql_statement_completed">
     <data name="duration"><value>10</value></data>
-    <data name="batch_text"><value>SELECT * FROM T WHERE ID = 1</value></data>
+    <data name="row_count"><value>3</value></data>
+    <data name="statement"><value>SELECT * FROM T WHERE ID = 1</value></data>
+    <action name="session_id"><value>56</value></action>
+    <action name="database_name"><value>DemoDb</value></action>
+    <action name="client_hostname"><value>WS01</value></action>
+    <action name="client_app_name"><value>1C</value></action>
+    <action name="username"><value>Pavel</value></action>
+    <action name="transaction_id"><value>12345</value></action>
+    <action name="attach_activity_id"><value>ABC</value></action>
+    <action name="attach_activity_id_xfer"><value>XYZ</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
   </event>
   <event name="sql_batch_completed">
     <data name="duration"><value>20</value></data>
+    <data name="row_count"><value>7</value></data>
     <data name="batch_text"><value>SELECT * FROM T WHERE ID = 2</value></data>
+    <action name="session_id"><value>56</value></action>
+    <action name="database_name"><value>DemoDb</value></action>
+    <action name="client_hostname"><value>WS01</value></action>
   </event>
 </RingBufferTarget>
 "#,
@@ -314,6 +407,46 @@ mod tests {
         let group = groups.values().next().unwrap();
         assert_eq!(group.count, 2);
         assert_eq!(group.total_duration_us, 30);
+        assert_eq!(group.total_row_count, 10);
+        assert_eq!(group.max_row_count, 7);
+        assert_eq!(
+            group.session_ids,
+            ["56".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.database_names,
+            ["DemoDb".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.client_hostnames,
+            ["WS01".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.client_app_names,
+            ["1C".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.usernames,
+            ["Pavel".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.transaction_ids,
+            ["12345".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.attach_activity_ids,
+            ["ABC".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.attach_activity_id_xfers,
+            ["XYZ".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.object_names,
+            ["sp_executesql".to_string()]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+        );
 
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir(dir);

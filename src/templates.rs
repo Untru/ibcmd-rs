@@ -24,8 +24,11 @@ ADD EVENT sqlserver.rpc_completed(
         sqlserver.client_hostname,
         sqlserver.database_name,
         sqlserver.session_id,
+        sqlserver.transaction_id,
         sqlserver.sql_text,
-        sqlserver.username
+        sqlserver.username,
+        package0.attach_activity_id,
+        package0.attach_activity_id_xfer
     )
     WHERE ([sqlserver].[database_name] = N'$(DATABASE_NAME)')
 ),
@@ -35,8 +38,11 @@ ADD EVENT sqlserver.sql_batch_completed(
         sqlserver.client_hostname,
         sqlserver.database_name,
         sqlserver.session_id,
+        sqlserver.transaction_id,
         sqlserver.sql_text,
-        sqlserver.username
+        sqlserver.username,
+        package0.attach_activity_id,
+        package0.attach_activity_id_xfer
     )
     WHERE ([sqlserver].[database_name] = N'$(DATABASE_NAME)')
 ),
@@ -45,7 +51,10 @@ ADD EVENT sqlserver.lock_deadlock(
         sqlserver.client_app_name,
         sqlserver.database_name,
         sqlserver.session_id,
-        sqlserver.sql_text
+        sqlserver.transaction_id,
+        sqlserver.sql_text,
+        package0.attach_activity_id,
+        package0.attach_activity_id_xfer
     )
     WHERE ([sqlserver].[database_name] = N'$(DATABASE_NAME)')
 )
