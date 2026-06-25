@@ -184,6 +184,32 @@ impl MetadataSourceContext {
         Ok(properties.uuid)
     }
 
+    #[cfg(test)]
+    fn resolve_simple_metadata_uuid(
+        &self,
+        reference: &str,
+        expected_kind: &str,
+        folder: &str,
+        prefix: &str,
+    ) -> Result<String> {
+        let name = reference
+            .trim()
+            .strip_prefix(prefix)
+            .ok_or_else(|| anyhow!("unsupported {expected_kind} reference: {reference}"))?;
+        let path = self.source_root.join(folder).join(format!("{name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read {expected_kind} XML {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)?;
+        if properties.kind != expected_kind {
+            return Err(anyhow!(
+                "expected {expected_kind} XML at {}, got {}",
+                path.display(),
+                properties.kind
+            ));
+        }
+        Ok(properties.uuid)
+    }
+
     fn resolve_metadata_type_id(&self, reference: &str) -> Result<String> {
         let generated_type_name = reference
             .trim()
@@ -204,6 +230,15 @@ impl MetadataSourceContext {
             .with_context(|| format!("failed to read metadata XML {}", path.display()))?;
         parse_generated_type_type_id(&xml, generated_type_name)
             .with_context(|| format!("failed to resolve TypeId from {}", path.display()))
+    }
+
+    #[cfg(test)]
+    fn resolve_metadata_reference_uuid(&self, reference: &str) -> Result<String> {
+        let reference = reference.trim();
+        let (prefix, folder) = metadata_reference_source_folder(reference).ok_or_else(|| {
+            anyhow!("unsupported metadata reference for source resolution: {reference}")
+        })?;
+        self.resolve_simple_metadata_uuid(reference, prefix, folder, &format!("{prefix}."))
     }
 }
 
@@ -2669,6 +2704,29 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
     }
 }
 
+#[cfg(test)]
+fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'static str)> {
+    let prefix = reference.split_once('.')?.0;
+    match prefix {
+        "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
+        "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
+        "FilterCriterion" => Some(("FilterCriterion", "FilterCriteria")),
+        "FunctionalOption" => Some(("FunctionalOption", "FunctionalOptions")),
+        "FunctionalOptionsParameter" => {
+            Some(("FunctionalOptionsParameter", "FunctionalOptionsParameters"))
+        }
+        "HTTPService" => Some(("HTTPService", "HTTPServices")),
+        "Language" => Some(("Language", "Languages")),
+        "Role" => Some(("Role", "Roles")),
+        "ScheduledJob" => Some(("ScheduledJob", "ScheduledJobs")),
+        "SettingsStorage" => Some(("SettingsStorage", "SettingsStorages")),
+        "StyleItem" => Some(("StyleItem", "StyleItems")),
+        "WebService" => Some(("WebService", "WebServices")),
+        "XDTOPackage" => Some(("XDTOPackage", "XDTOPackages")),
+        _ => None,
+    }
+}
+
 fn parse_defined_type_type_id(xml: &[u8], expected_name: &str) -> Result<String> {
     let expected_generated_name = format!("DefinedType.{expected_name}");
     parse_generated_type_type_id(xml, &expected_generated_name)
@@ -3037,7 +3095,10 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_INFO, build_module_inner, deflate_raw, inflate_raw, parse_v8_container};
+    use super::{
+        DEFAULT_INFO, MetadataSourceContext, build_module_inner, deflate_raw, inflate_raw,
+        parse_v8_container,
+    };
     use crate::module_blob::ModuleElement;
 
     #[test]
@@ -3725,6 +3786,105 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::metadata_type_source_folder("SettingsStorageManager.Settings"),
             Some("SettingsStorages")
         );
+    }
+
+    #[test]
+    fn resolves_metadata_references_from_lab_sources() {
+        let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let source = MetadataSourceContext::new(source_root);
+
+        for (reference, expected_uuid) in [
+            (
+                "Role.АдминистраторСистемы",
+                "76702e9e-fa7a-4b98-befa-f9b37db2dae0",
+            ),
+            ("Language.Русский", "db4a9ccb-9ef5-4b3c-8577-b6fe5db1b62e"),
+            (
+                "ScheduledJob.ЗагрузкаКурсовВалют",
+                "c7ffd8ab-15e9-4cf1-a7fd-d05534dff000",
+            ),
+            (
+                "FunctionalOption.ВыполнятьЗамерыПроизводительности",
+                "7f06703e-24cd-4db7-be88-3fbd65e5c252",
+            ),
+            (
+                "FunctionalOptionsParameter.ОбщиеНастройкиУзлов",
+                "f9479915-cdee-40d5-ba53-101132aac672",
+            ),
+            (
+                "EventSubscription.ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных",
+                "a64b15fa-fc34-43fe-a366-d27c0f1c3df2",
+            ),
+            (
+                "FilterCriterion.СвязанныеДокументы",
+                "18bf6916-83cc-41e5-a35b-1489450ae632",
+            ),
+            (
+                "SettingsStorage.ХранилищеВариантовОтчетов",
+                "14512818-58b0-44cc-b00d-d37913c57aad",
+            ),
+            (
+                "StyleItem.ВажнаяНадписьШрифт",
+                "fa2a9ef2-00a1-44f4-a82c-6c7288dd62dc",
+            ),
+            (
+                "HTTPService.exchange_dsl_1_0_0_1",
+                "c09df096-f9cc-4b2f-a44e-69147339dc8c",
+            ),
+            (
+                "WebService.EnterpriseDataUpload_1_0_1_1",
+                "9ad3b432-5b49-44ee-9d8d-83c36458d927",
+            ),
+            (
+                "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1",
+                "ac7ea771-4b10-4d43-9c0a-9cd36e4c49a4",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_reference_uuid(reference).unwrap(),
+                expected_uuid
+            );
+        }
+
+        for (reference, expected_uuid) in [
+            (
+                "CommonPicture.Предупреждение",
+                "ac2e5217-aaeb-4b6f-b063-538c84f2da06",
+            ),
+            (
+                "CommonPicture.Взаимодействия",
+                "44cf6d0a-0a5b-4ca1-b91e-af61f40fb825",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_common_picture_uuid(reference).unwrap(),
+                expected_uuid
+            );
+        }
+
+        for (reference, expected_uuid) in [
+            (
+                "CommandGroup.Взаимодействия",
+                "e4842271-4fc0-4e15-afef-876f05af78c0",
+            ),
+            (
+                "CommandGroup.Информация",
+                "31ee6430-b65d-42fa-859b-c4f1c40686ae",
+            ),
+            (
+                "CommandGroup.Органайзер",
+                "c59e11f3-6bcb-404a-9d76-1416c12be354",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_command_group_uuid(reference).unwrap(),
+                expected_uuid
+            );
+        }
     }
 
     #[test]
