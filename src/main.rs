@@ -31,6 +31,14 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
             }
         }
+        Commands::Compatibility(args) => {
+            let report = ibcmd_rs::compatibility::current_compatibility_report();
+            if let Some(output) = args.output {
+                ibcmd_rs::compatibility::write_compatibility_report(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::ProfileRun(args) => {
             let report = ibcmd_rs::profile::run_profiled(args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);

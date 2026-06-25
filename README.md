@@ -24,6 +24,7 @@ cargo run -- plan current-manifest.json -b baseline-manifest.json -o load-plan.j
 cargo run -- profile-run --capture-output -- ibcmd infobase config load ...
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
+cargo run -- compatibility
 cargo run -- mssql-compare --left ref_db --right target_db -o compare.json
 cargo run -- mssql-clone --source target_db --target ours_db --overwrite
 cargo run -- mssql-storage-export --database import_only_db -o storage-bundle --overwrite

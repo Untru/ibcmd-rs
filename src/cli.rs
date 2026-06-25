@@ -19,6 +19,8 @@ pub enum Commands {
     Scan(ScanArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
+    /// Print the current compatibility matrix for implemented operations.
+    Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
     ProfileRun(ProfileRunArgs),
     /// Write SQL Server and tech-log trace templates for an ibcmd run.
@@ -78,6 +80,13 @@ pub struct PlanArgs {
     /// Baseline manifest JSON. If omitted, all current files are planned as upserts.
     #[arg(short, long)]
     pub baseline: Option<PathBuf>,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct CompatibilityArgs {
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,

@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod compatibility;
 pub mod module_blob;
 pub mod mssql;
 pub mod plan;
