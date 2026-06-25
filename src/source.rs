@@ -1020,4 +1020,127 @@ mod tests {
             Some("ScheduledJobs/ЗагрузкаКурсовВалют")
         )));
     }
+
+    #[test]
+    fn scans_real_common_picture_asset_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-picture-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonPictures/Адрес/Ext/Picture")).unwrap();
+        std::fs::create_dir_all(root.join("CommonPictures/ТранспортHTTP/Ext/Picture")).unwrap();
+        std::fs::create_dir_all(root.join("CommonPictures/ФорматPDF/Ext/Picture")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("CommonPictures/Адрес.xml"),
+            root.join("CommonPictures/Адрес.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/Адрес/Ext/Picture.xml"),
+            root.join("CommonPictures/Адрес/Ext/Picture.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/Адрес/Ext/Picture/Picture.zip"),
+            root.join("CommonPictures/Адрес/Ext/Picture/Picture.zip"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/ТранспортHTTP.xml"),
+            root.join("CommonPictures/ТранспортHTTP.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/ТранспортHTTP/Ext/Picture.xml"),
+            root.join("CommonPictures/ТранспортHTTP/Ext/Picture.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/ТранспортHTTP/Ext/Picture/Picture.svg"),
+            root.join("CommonPictures/ТранспортHTTP/Ext/Picture/Picture.svg"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/ФорматPDF.xml"),
+            root.join("CommonPictures/ФорматPDF.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/ФорматPDF/Ext/Picture.xml"),
+            root.join("CommonPictures/ФорматPDF/Ext/Picture.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/ФорматPDF/Ext/Picture/Picture.zip"),
+            root.join("CommonPictures/ФорматPDF/Ext/Picture/Picture.zip"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "CommonPictures/Адрес.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/Адрес")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/Адрес/Ext/Picture.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/Адрес")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/Адрес/Ext/Picture/Picture.zip",
+            SourceKind::Binary,
+            Some("CommonPictures/Адрес")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/ТранспортHTTP.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/ТранспортHTTP")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/ТранспортHTTP/Ext/Picture.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/ТранспортHTTP")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/ТранспортHTTP/Ext/Picture/Picture.svg",
+            SourceKind::Binary,
+            Some("CommonPictures/ТранспортHTTP")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/ФорматPDF.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/ФорматPDF")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/ФорматPDF/Ext/Picture.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/ФорматPDF")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/ФорматPDF/Ext/Picture/Picture.zip",
+            SourceKind::Binary,
+            Some("CommonPictures/ФорматPDF")
+        )));
+    }
 }
