@@ -82,35 +82,75 @@ client session, transaction boundaries and object/table names.
 
 ### Remaining Work
 
-1. Map every supported metadata family to its concrete generated type prefixes
-   in `module_blob.rs`.
-2. Extend reference resolution so cross-object links work for all supported
-   families, not only the currently special-cased ones.
-3. Add family-specific XML packers where the blob layout is not just a header
-   patch.
-4. Add round-trip tests for each supported family using a real XML sample and a
-   synthetic base blob.
-5. Add source-manifest tests for every remaining folder layout, especially
-   nested `Ext/` subfiles and families that can appear both at object root and
-   as service subtrees.
-6. Add trace-analysis regression tests for the SQL patterns that matter to the
-   load experiments:
+1. Finish the metadata registry in `module_blob.rs` so every supported family
+   has an explicit source-folder mapping, type-prefix mapping, and UUID/source
+   resolution path.
+   - Keep the current families covered: `Catalogs`, `Documents`,
+     `InformationRegisters`, `AccumulationRegisters`, `AccountingRegisters`,
+     `CalculationRegisters`, `ChartsOfCharacteristicTypes`, `ChartsOfAccounts`,
+     `ChartsOfCalculationTypes`, `ChartsOfCalculationRegisters`,
+     `CommonModules`, `CommonForms`, `CommonPictures`, `CommonTemplates`,
+     `CommonAttributes`, `CommandGroups`, `DocumentJournals`, `Reports`,
+     `DataProcessors`, `Enums`, `ExchangePlans`, `EventSubscriptions`,
+     `FilterCriteria`, `FunctionalOptions`, `FunctionalOptionsParameters`,
+     `HTTPServices`, `Languages`, `ScheduledJobs`, `SessionParameters`,
+     `SettingsStorages`, `StyleItems`, `Subsystems`, `Roles`,
+     `CommonCommands`, `Tasks`, `Constants`, `WebServices`, and
+     `XDTOPackages`.
+   - Extend cross-object resolution for `CommonPicture`, `DefinedType`,
+     `CommandGroup`, `CommonCommand`, `SettingsStorage`, `FunctionalOption`,
+     `FunctionalOptionsParameter`, `EventSubscription`, `FilterCriterion`,
+     `HTTPService`, `WebService`, `Language`, `Role`, `ScheduledJob`,
+     `StyleItem`, and `XDTOPackage`.
+   - Cover nested service subtrees and object-owned children, including
+     `Forms`, `Commands`, `Templates`, `Ext`, `Rights`, `Schedule`,
+     `CommandInterface`, `Package.bin`, `Picture.svg`, `Picture.zip`, and
+     object-specific XML assets.
+2. Add family-specific blob packers for the layouts that are not just header
+   patches.
+   - Keep the simple patchers for `Constant`, `SessionParameter`,
+     `SettingsStorage`, `DefinedType`, `CommonCommand`, and `CommandGroup`.
+   - Add the remaining object-shaped packers for form/template/rights-style
+     subtrees and any metadata family whose binary payload is versioned or
+     structurally encoded.
+   - Preserve untouched fields exactly so the output stays stable across
+     round-trips.
+3. Add round-trip tests for every supported family.
+   - Use one real XML sample from `lab/` per family.
+   - Use one synthetic base blob per layout to prove header patching is
+     independent of the source content.
+   - Add negative tests for unsupported combinations so regressions fail fast.
+4. Expand source-manifest coverage to every remaining folder layout.
+   - Include nested `Ext/` subfiles, object-owned `Forms`, `Commands`, and
+     `Templates` folders, service subtrees, and binary assets.
+   - Add regressions for roots that can exist both as standalone objects and as
+     subtrees under another object.
+5. Lock the write path with trace-analysis regressions for the SQL patterns that
+   matter to the load experiments:
    - no-op load
    - module-body-only change
    - metadata-attribute change
    - new object insert
-7. Run the four experiments against disposable databases and record the SQL
-   table touch set for each platform build we want to support.
-8. Compare the SQL traces and timings against `ibcmd` and mark any remaining
+6. Run the four experiments against disposable databases and record the SQL
+   table-touch set for each platform build we want to support.
+7. Compare the SQL traces and timings against `ibcmd` and mark the remaining
    divergence by family, operation, and platform version.
-9. Turn the experimental results into an implementation matrix so future
+8. Turn the experimental results into an implementation matrix so future
    platform upgrades only require filling specific gaps, not rediscovering the
    whole model.
+9. Add performance work after correctness is stable:
+   - multithreaded scan/pack stages where the data model is independent per
+     object;
+   - bounded worker pools for expensive source parsing;
+   - explicit safety gates before any non-lab destructive write path.
+10. Keep the compatibility matrix current for platform build, DBMS, source tree
+    shape, and supported operation set.
 
 ### Delivery Order
 
 1. Finish the type-prefix map and source resolution.
-2. Expand patchers for the remaining blob layouts.
-3. Lock the coverage with tests.
-4. Re-run the trace experiments.
-5. Commit the validated changes in small atomic steps.
+2. Add the remaining blob packers.
+3. Lock the coverage with tests and fixtures.
+4. Re-run the trace experiments and compare against `ibcmd`.
+5. Fill the compatibility matrix and performance notes.
+6. Commit the validated changes in small atomic steps.

@@ -3676,6 +3676,68 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn patches_command_group_metadata_blob_from_lab_xml() -> anyhow::Result<()> {
+        let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let source = super::MetadataSourceContext::new(source_root);
+
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            r#"{1,
+{3,
+{4,0,{0},"",-1,-1,1,0,""},4,3,
+{0},
+{0},
+{3,
+{1,0,c59e11f3-6bcb-404a-9d76-1416c12be354},"OldGroup",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
+},0}"#
+                .as_bytes(),
+        );
+        let base_blob = deflate_raw(&active)?;
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommandGroup uuid="c59e11f3-6bcb-404a-9d76-1416c12be354">
+    <Properties>
+      <Name>Органайзер</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Органайзер</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture>
+        <xr:Ref>CommonPicture.Органайзер</xr:Ref>
+        <xr:LoadTransparent>false</xr:LoadTransparent>
+      </Picture>
+      <Category>FormCommandBar</Category>
+    </Properties>
+  </CommandGroup>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_simple_metadata_blob_from_xml_with_source(&base_blob, xml, Some(&source))?;
+        let inflated = String::from_utf8(inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(packed.properties.kind, "CommandGroup");
+        assert!(inflated.contains("\"Органайзер\""), "{inflated}");
+        assert!(inflated.contains("{1,\"ru\",\"Органайзер\"}"));
+        assert!(
+            inflated.contains("{4,1,{0,dce82d28-9a7b-4d4c-af13-90f459cf4af2},\"\",-1,-1,0,0,\"\"}")
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn patches_common_command_picture_and_parameter_type() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-source-{}",
