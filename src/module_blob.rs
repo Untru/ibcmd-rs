@@ -162,6 +162,28 @@ impl MetadataSourceContext {
             .with_context(|| format!("failed to resolve TypeId from {}", path.display()))
     }
 
+    fn resolve_command_group_uuid(&self, reference: &str) -> Result<String> {
+        let name = reference
+            .trim()
+            .strip_prefix("CommandGroup.")
+            .ok_or_else(|| anyhow!("unsupported CommandGroup reference: {reference}"))?;
+        let path = self
+            .source_root
+            .join("CommandGroups")
+            .join(format!("{name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read CommandGroup XML {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)?;
+        if properties.kind != "CommandGroup" {
+            return Err(anyhow!(
+                "expected CommandGroup XML at {}, got {}",
+                path.display(),
+                properties.kind
+            ));
+        }
+        Ok(properties.uuid)
+    }
+
     fn resolve_metadata_type_id(&self, reference: &str) -> Result<String> {
         let generated_type_name = reference
             .trim()
@@ -349,6 +371,10 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
             let command = parse_common_command_xml_properties(xml, source)?;
             patch_common_command_metadata_text(text, &command)?
         }
+        "CommandGroup" => {
+            let command_group = parse_command_group_xml_properties(xml, source)?;
+            patch_command_group_metadata_text(text, &command_group)?
+        }
         _ => patch_simple_metadata_header_text(text, &properties)?,
     };
     let plain = patched.into_bytes();
@@ -383,10 +409,20 @@ struct CommonCommandXmlProperties {
     representation: CommonCommandRepresentation,
     tooltip: Vec<LocalizedString>,
     include_help_in_contents: bool,
+    group: CommonCommandGroupReference,
     command_parameter_type: CommonCommandParameterType,
     parameter_use_mode: CommonCommandParameterUseMode,
     modifies_data: bool,
     on_main_server_unavailable_behavior: CommonCommandOnMainServerUnavailableBehavior,
+}
+
+#[derive(Debug, Clone)]
+struct CommandGroupXmlProperties {
+    simple: SimpleMetadataXmlProperties,
+    picture: CommandGroupPicture,
+    representation: CommonCommandRepresentation,
+    tooltip: Vec<LocalizedString>,
+    category: CommandGroupCategory,
 }
 
 #[derive(Debug, Clone)]
@@ -435,9 +471,31 @@ enum CommonCommandPicture {
 }
 
 #[derive(Debug, Clone)]
+enum CommonCommandGroupReference {
+    BuiltIn { uuid: String },
+    CommandGroup { uuid: String },
+}
+
+#[derive(Debug, Clone)]
 enum CommonCommandParameterType {
     Empty,
     DefinedType { type_id: String },
+}
+
+#[derive(Debug, Clone)]
+enum CommandGroupPicture {
+    Empty,
+    CommonPicture {
+        uuid: String,
+        load_transparent: bool,
+    },
+    StdPicturePrint,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CommandGroupCategory {
+    ActionsPanel,
+    FormCommandBar,
 }
 
 fn parse_constant_xml_properties(
@@ -675,6 +733,7 @@ fn parse_common_command_xml_properties(
     let mut pending_tooltip_lang = None::<String>;
     let mut pending_tooltip_content = None::<String>;
     let mut include_help_in_contents = None::<String>;
+    let mut group = None::<String>;
     let mut command_parameter_types = Vec::<String>::new();
     let mut parameter_use_mode = None::<String>;
     let mut modifies_data = None::<String>;
@@ -704,6 +763,7 @@ fn parse_common_command_xml_properties(
                     &mut pending_tooltip_lang,
                     &mut pending_tooltip_content,
                     &mut include_help_in_contents,
+                    &mut group,
                     &mut command_parameter_types,
                     &mut parameter_use_mode,
                     &mut modifies_data,
@@ -720,6 +780,7 @@ fn parse_common_command_xml_properties(
                     &mut pending_tooltip_lang,
                     &mut pending_tooltip_content,
                     &mut include_help_in_contents,
+                    &mut group,
                     &mut command_parameter_types,
                     &mut parameter_use_mode,
                     &mut modifies_data,
@@ -744,6 +805,7 @@ fn parse_common_command_xml_properties(
                     &mut pending_tooltip_lang,
                     &mut pending_tooltip_content,
                     &mut include_help_in_contents,
+                    &mut group,
                     &mut command_parameter_types,
                     &mut parameter_use_mode,
                     &mut modifies_data,
@@ -782,6 +844,7 @@ fn parse_common_command_xml_properties(
             "IncludeHelpInContents",
             include_help_in_contents,
         )?,
+        group: parse_common_command_group_reference(group, source)?,
         command_parameter_type: parse_common_command_parameter_type(
             &command_parameter_types,
             source,
@@ -796,6 +859,119 @@ fn parse_common_command_xml_properties(
             parse_common_command_on_main_server_unavailable_behavior(
                 on_main_server_unavailable_behavior,
             )?,
+    })
+}
+
+fn parse_command_group_xml_properties(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<CommandGroupXmlProperties> {
+    let simple = parse_simple_metadata_xml_properties(xml)?;
+    if simple.kind != "CommandGroup" {
+        return Err(anyhow!(
+            "expected CommandGroup XML, got metadata kind {}",
+            simple.kind
+        ));
+    }
+
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+
+    let mut representation = None::<String>;
+    let mut picture_ref = None::<String>;
+    let mut picture_load_transparent = None::<String>;
+    let mut tooltip = Vec::<LocalizedString>::new();
+    let mut pending_tooltip_lang = None::<String>;
+    let mut pending_tooltip_content = None::<String>;
+    let mut category = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["CommandGroup", "Properties", "ToolTip"])
+                    && local == "item"
+                {
+                    pending_tooltip_lang = None;
+                    pending_tooltip_content = None;
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                let value = text.xml_content()?;
+                let value = unescape(value.as_ref())?;
+                append_command_group_xml_text(
+                    &path,
+                    value.as_ref(),
+                    &mut representation,
+                    &mut picture_ref,
+                    &mut picture_load_transparent,
+                    &mut pending_tooltip_lang,
+                    &mut pending_tooltip_content,
+                    &mut category,
+                );
+            }
+            Ok(Event::CData(text)) => {
+                append_command_group_xml_text(
+                    &path,
+                    text.xml_content()?.as_ref(),
+                    &mut representation,
+                    &mut picture_ref,
+                    &mut picture_load_transparent,
+                    &mut pending_tooltip_lang,
+                    &mut pending_tooltip_content,
+                    &mut category,
+                );
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                let value = if let Some(ch) = reference.resolve_char_ref()? {
+                    ch.to_string()
+                } else {
+                    let entity = reference.decode()?;
+                    resolve_xml_entity(entity.as_ref())
+                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                        .to_string()
+                };
+                append_command_group_xml_text(
+                    &path,
+                    &value,
+                    &mut representation,
+                    &mut picture_ref,
+                    &mut picture_load_transparent,
+                    &mut pending_tooltip_lang,
+                    &mut pending_tooltip_content,
+                    &mut category,
+                );
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "item"
+                    && path_ends_with(&path, &["CommandGroup", "Properties", "ToolTip", "item"])
+                {
+                    if let Some(lang) = pending_tooltip_lang.take() {
+                        tooltip.push(LocalizedString {
+                            lang,
+                            content: pending_tooltip_content.take().unwrap_or_default(),
+                        });
+                    }
+                    pending_tooltip_content = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(CommandGroupXmlProperties {
+        simple,
+        picture: parse_command_group_picture(picture_ref, picture_load_transparent, source)?,
+        representation: parse_common_command_representation(representation)?,
+        tooltip,
+        category: parse_command_group_category(category)?,
     })
 }
 
@@ -1327,6 +1503,10 @@ fn patch_common_command_metadata_text(
             format_common_command_parameter_type(&properties.command_parameter_type),
         ),
         (
+            fields[7].clone(),
+            format_common_command_group_reference(&properties.group),
+        ),
+        (
             fields[6].clone(),
             bool_flag(properties.include_help_in_contents).to_string(),
         ),
@@ -1338,6 +1518,57 @@ fn patch_common_command_metadata_text(
         (
             fields[1].clone(),
             format_common_command_picture(&properties.picture),
+        ),
+    ];
+
+    for (range, replacement) in replacements {
+        text.replace_range(range, &replacement);
+    }
+
+    Ok(text)
+}
+
+fn patch_command_group_metadata_text(
+    mut text: String,
+    properties: &CommandGroupXmlProperties,
+) -> Result<String> {
+    text = patch_simple_metadata_header_text(text, &properties.simple)?;
+
+    let marker = format!("{{1,0,{}}}", properties.simple.uuid);
+    let marker_start = text
+        .find(&marker)
+        .ok_or_else(|| anyhow!("metadata tuple not found for {}", properties.simple.uuid))?;
+    let inner_object_start = text[..marker_start]
+        .rfind("{3,")
+        .ok_or_else(|| anyhow!("command group inner metadata marker not found"))?;
+    let command_group_start = text[..inner_object_start]
+        .rfind("{3,")
+        .ok_or_else(|| anyhow!("command group object marker not found"))?;
+    let fields = scan_braced_fields(&text, command_group_start)?;
+    if fields.len() < 7 {
+        return Err(anyhow!(
+            "command group object has {} fields, expected at least 7",
+            fields.len()
+        ));
+    }
+
+    let inner_text = text[fields[6].clone()].to_string();
+    let inner_text = patch_simple_metadata_header_text(inner_text, &properties.simple)?;
+    let replacements = [
+        (fields[6].clone(), inner_text),
+        (fields[5].clone(), r#"{0}"#.to_string()),
+        (fields[4].clone(), format_1c_synonyms(&properties.tooltip)),
+        (
+            fields[3].clone(),
+            common_command_representation_code(properties.representation).to_string(),
+        ),
+        (
+            fields[2].clone(),
+            command_group_category_code(properties.category).to_string(),
+        ),
+        (
+            fields[1].clone(),
+            format_command_group_picture(&properties.picture),
         ),
     ];
 
@@ -1527,6 +1758,62 @@ fn parse_common_command_picture(
     })
 }
 
+fn parse_command_group_picture(
+    reference: Option<String>,
+    load_transparent: Option<String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<CommandGroupPicture> {
+    let Some(reference) = reference.map(|value| value.trim().to_string()) else {
+        return Ok(CommandGroupPicture::Empty);
+    };
+    if reference.is_empty() {
+        return Ok(CommandGroupPicture::Empty);
+    }
+    if reference == "StdPicture.Print" {
+        return Ok(CommandGroupPicture::StdPicturePrint);
+    }
+    if !reference.starts_with("CommonPicture.") {
+        return Err(anyhow!(
+            "unsupported CommandGroup Picture reference: {reference}"
+        ));
+    }
+    let source = source.ok_or_else(|| {
+        anyhow!(
+            "CommandGroup Picture {reference} requires --source-root to resolve CommonPicture UUID"
+        )
+    })?;
+    let uuid = source.resolve_common_picture_uuid(&reference)?;
+    let load_transparent =
+        parse_required_metadata_bool("CommandGroup", "Picture/LoadTransparent", load_transparent)?;
+    Ok(CommandGroupPicture::CommonPicture {
+        uuid,
+        load_transparent,
+    })
+}
+
+fn parse_common_command_group_reference(
+    value: Option<String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<CommonCommandGroupReference> {
+    let value = value.ok_or_else(|| anyhow!("CommonCommand Properties/Group not found in XML"))?;
+    let reference = value.trim();
+    if reference.is_empty() {
+        return Err(anyhow!("CommonCommand Properties/Group is empty"));
+    }
+    if reference.starts_with("CommandGroup.") {
+        let source = source.ok_or_else(|| {
+            anyhow!(
+                "CommonCommand Group {reference} requires --source-root to resolve CommandGroup UUID"
+            )
+        })?;
+        let uuid = source.resolve_command_group_uuid(reference)?;
+        return Ok(CommonCommandGroupReference::CommandGroup { uuid });
+    }
+    let uuid = common_command_group_uuid(reference)
+        .ok_or_else(|| anyhow!("unsupported CommonCommand Group: {reference}"))?;
+    Ok(CommonCommandGroupReference::BuiltIn { uuid })
+}
+
 fn parse_common_command_parameter_type(
     types: &[String],
     source: Option<&MetadataSourceContext>,
@@ -1597,6 +1884,16 @@ fn parse_common_command_on_main_server_unavailable_behavior(
     }
 }
 
+fn parse_command_group_category(value: Option<String>) -> Result<CommandGroupCategory> {
+    let value =
+        value.ok_or_else(|| anyhow!("CommandGroup Properties/Category not found in XML"))?;
+    match value.trim() {
+        "ActionsPanel" => Ok(CommandGroupCategory::ActionsPanel),
+        "FormCommandBar" => Ok(CommandGroupCategory::FormCommandBar),
+        other => Err(anyhow!("unsupported CommandGroup Category: {other}")),
+    }
+}
+
 fn common_command_representation_code(value: CommonCommandRepresentation) -> u8 {
     match value {
         CommonCommandRepresentation::Picture => 1,
@@ -1617,6 +1914,28 @@ fn common_command_on_main_server_unavailable_behavior_code(
 ) -> u8 {
     match value {
         CommonCommandOnMainServerUnavailableBehavior::Auto => 0,
+    }
+}
+
+fn command_group_category_code(value: CommandGroupCategory) -> u8 {
+    match value {
+        CommandGroupCategory::ActionsPanel => 4,
+        CommandGroupCategory::FormCommandBar => 8,
+    }
+}
+
+fn common_command_group_uuid(reference: &str) -> Option<String> {
+    match reference.trim() {
+        "NavigationPanelOrdinary" => Some("77ea1b8f-dd79-4717-9dba-5628e7f348cf".to_string()),
+        "NavigationPanelSeeAlso" => Some("bc80566a-86a5-4e87-acd4-872239385a2e".to_string()),
+        "ActionsPanelCreate" => Some("4f499c31-050b-47c5-aa84-d0366c0a0da8".to_string()),
+        "ActionsPanelReports" => Some("5b360bff-01a1-49b6-93d2-26e7e8e3a038".to_string()),
+        "ActionsPanelTools" => Some("aabb34e1-98c1-4bd0-bf7f-243f95437b44".to_string()),
+        "FormCommandBarCreateBasedOn" => Some("dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0".to_string()),
+        "FormCommandBarImportant" => Some("cb50f5c0-8013-4262-93a2-f0db379d6b6b".to_string()),
+        "FormNavigationPanelGoTo" => Some("eacad741-96b9-4b3a-bf79-dde9ecead1a1".to_string()),
+        "FormNavigationPanelImportant" => Some("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2".to_string()),
+        _ => None,
     }
 }
 
@@ -1704,12 +2023,33 @@ fn format_common_command_picture(picture: &CommonCommandPicture) -> String {
     }
 }
 
+fn format_command_group_picture(picture: &CommandGroupPicture) -> String {
+    match picture {
+        CommandGroupPicture::Empty => r#"{4,0,{0},"",-1,-1,1,0,""}"#.to_string(),
+        CommandGroupPicture::StdPicturePrint => r#"{4,1,{-13},"",-1,-1,1,0,""}"#.to_string(),
+        CommandGroupPicture::CommonPicture {
+            uuid,
+            load_transparent,
+        } => format!(
+            r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
+            bool_flag(*load_transparent)
+        ),
+    }
+}
+
 fn format_common_command_parameter_type(parameter_type: &CommonCommandParameterType) -> String {
     match parameter_type {
         CommonCommandParameterType::Empty => r#"{"Pattern"}"#.to_string(),
         CommonCommandParameterType::DefinedType { type_id } => {
             format!("{{\"Pattern\",{{\"#\",{type_id}}}}}")
         }
+    }
+}
+
+fn format_common_command_group_reference(group: &CommonCommandGroupReference) -> String {
+    match group {
+        CommonCommandGroupReference::BuiltIn { uuid }
+        | CommonCommandGroupReference::CommandGroup { uuid } => format!("{{1,{uuid}}}"),
     }
 }
 
@@ -1928,6 +2268,7 @@ fn append_common_command_xml_text(
     pending_tooltip_lang: &mut Option<String>,
     pending_tooltip_content: &mut Option<String>,
     include_help_in_contents: &mut Option<String>,
+    group: &mut Option<String>,
     command_parameter_types: &mut Vec<String>,
     parameter_use_mode: &mut Option<String>,
     modifies_data: &mut Option<String>,
@@ -1967,6 +2308,8 @@ fn append_common_command_xml_text(
         include_help_in_contents
             .get_or_insert_with(String::new)
             .push_str(value);
+    } else if path_ends_with(path, &["CommonCommand", "Properties", "Group"]) {
+        group.get_or_insert_with(String::new).push_str(value);
     } else if path_ends_with(
         path,
         &[
@@ -1996,6 +2339,48 @@ fn append_common_command_xml_text(
         on_main_server_unavailable_behavior
             .get_or_insert_with(String::new)
             .push_str(value);
+    }
+}
+
+fn append_command_group_xml_text(
+    path: &[String],
+    value: &str,
+    representation: &mut Option<String>,
+    picture_ref: &mut Option<String>,
+    picture_load_transparent: &mut Option<String>,
+    pending_tooltip_lang: &mut Option<String>,
+    pending_tooltip_content: &mut Option<String>,
+    category: &mut Option<String>,
+) {
+    if path_ends_with(path, &["CommandGroup", "Properties", "Representation"]) {
+        representation
+            .get_or_insert_with(String::new)
+            .push_str(value);
+    } else if path_ends_with(path, &["CommandGroup", "Properties", "Picture", "Ref"]) {
+        picture_ref.get_or_insert_with(String::new).push_str(value);
+    } else if path_ends_with(
+        path,
+        &["CommandGroup", "Properties", "Picture", "LoadTransparent"],
+    ) {
+        picture_load_transparent
+            .get_or_insert_with(String::new)
+            .push_str(value);
+    } else if path_ends_with(
+        path,
+        &["CommandGroup", "Properties", "ToolTip", "item", "lang"],
+    ) {
+        pending_tooltip_lang
+            .get_or_insert_with(String::new)
+            .push_str(value);
+    } else if path_ends_with(
+        path,
+        &["CommandGroup", "Properties", "ToolTip", "item", "content"],
+    ) {
+        pending_tooltip_content
+            .get_or_insert_with(String::new)
+            .push_str(value);
+    } else if path_ends_with(path, &["CommandGroup", "Properties", "Category"]) {
+        category.get_or_insert_with(String::new).push_str(value);
     }
 }
 
@@ -3010,6 +3395,63 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn patches_command_group_metadata_blob_from_xml() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            r#"{1,
+{3,
+{4,0,{0},"",-1,-1,1,0,""},4,3,
+{0},
+{0},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldGroup",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
+},0}"#
+                .as_bytes(),
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommandGroup uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewGroup</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>New group</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Representation>Picture</Representation>
+      <ToolTip>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Group tip</v8:content>
+        </v8:item>
+      </ToolTip>
+      <Picture>
+        <xr:Ref>StdPicture.Print</xr:Ref>
+        <xr:LoadTransparent>true</xr:LoadTransparent>
+      </Picture>
+      <Category>ActionsPanel</Category>
+    </Properties>
+  </CommandGroup>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert_eq!(packed.properties.kind, "CommandGroup");
+        assert!(inflated.contains("\"NewGroup\""), "{inflated}");
+        assert!(inflated.contains("{1,\"ru\",\"New group\"}"));
+        assert!(inflated.contains("{1,\"ru\",\"Group tip\"}"));
+        assert!(inflated.contains("{4,1,{-13},\"\",-1,-1,1,0,\"\"}"));
+        assert!(inflated.contains(",4,1,"));
+    }
+
+    #[test]
     fn patches_common_command_picture_and_parameter_type() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-source-{}",
@@ -3017,6 +3459,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         ));
         std::fs::create_dir_all(root.join("CommonPictures"))?;
         std::fs::create_dir_all(root.join("DefinedTypes"))?;
+        std::fs::create_dir_all(root.join("CommandGroups"))?;
         std::fs::write(
             root.join("CommonPictures").join("TestPicture.xml"),
             br#"
@@ -3050,6 +3493,24 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 </MetaDataObject>
 "#,
         )?;
+        std::fs::write(
+            root.join("CommandGroups").join("Органайзер.xml"),
+            r#"
+<MetaDataObject>
+  <CommandGroup uuid="c59e11f3-6bcb-404a-9d76-1416c12be354">
+    <Properties>
+      <Name>Органайзер</Name>
+      <Synonym/>
+      <Comment/>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Category>FormCommandBar</Category>
+    </Properties>
+  </CommandGroup>
+</MetaDataObject>
+"#,
+        )?;
 
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
@@ -3070,14 +3531,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 },0}"#,
         );
         let base_blob = deflate_raw(&active)?;
-        let xml = br#"
+        let xml = r#"
 <MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
   <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
     <Properties>
       <Name>NewCommand</Name>
       <Synonym/>
       <Comment/>
-      <Group>NavigationPanelOrdinary</Group>
+      <Group>CommandGroup.Органайзер</Group>
       <Representation>Picture</Representation>
       <ToolTip/>
       <Picture>
@@ -3095,7 +3556,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     </Properties>
   </CommonCommand>
 </MetaDataObject>
-"#;
+"#
+        .as_bytes();
         let source = super::MetadataSourceContext::new(root.clone());
 
         let packed =
@@ -3108,6 +3570,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             inflated
                 .contains(r#"{4,1,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"",-1,-1,0,0,""},1,"#)
         );
+        assert!(inflated.contains("{1,c59e11f3-6bcb-404a-9d76-1416c12be354}"));
         assert!(inflated.contains("{\"Pattern\",{\"#\",cccccccc-cccc-4ccc-cccc-cccccccccccc}}"));
 
         Ok(())

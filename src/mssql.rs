@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
@@ -738,16 +739,19 @@ pub fn stage_common_module_objects(
         return Err(anyhow!("at least one common module XML must be staged"));
     }
 
-    let mut prepared = Vec::with_capacity(args.xmls.len());
-    for xml in &args.xmls {
-        prepared.push(prepare_common_module_object_stage(
-            &args.sqlcmd,
-            &args.server,
-            &args.database,
-            xml.clone(),
-            None,
-        )?);
-    }
+    let prepared = args
+        .xmls
+        .par_iter()
+        .map(|xml| {
+            prepare_common_module_object_stage(
+                &args.sqlcmd,
+                &args.server,
+                &args.database,
+                xml.clone(),
+                None,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
     ensure_unique_common_module_object_ids(&prepared)?;
 
     stage_prepared_common_module_objects(
@@ -774,16 +778,19 @@ pub fn stage_metadata_objects(
     }
 
     let source = args.source_root.clone().map(MetadataSourceContext::new);
-    let mut prepared = Vec::with_capacity(args.xmls.len());
-    for xml in &args.xmls {
-        prepared.push(prepare_metadata_object_stage(
-            &args.sqlcmd,
-            &args.server,
-            &args.database,
-            xml.clone(),
-            source.as_ref(),
-        )?);
-    }
+    let prepared = args
+        .xmls
+        .par_iter()
+        .map(|xml| {
+            prepare_metadata_object_stage(
+                &args.sqlcmd,
+                &args.server,
+                &args.database,
+                xml.clone(),
+                source.as_ref(),
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
     ensure_unique_metadata_object_ids(&prepared)?;
 
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
@@ -998,21 +1005,23 @@ fn stage_common_module_specs(
     }
     ensure_unique_module_ids(&specs)?;
 
-    let mut prepared = Vec::with_capacity(specs.len());
-    for spec in specs {
-        let module_body_id = format!("{}.0", spec.module_id);
-        let text = fs::read(&spec.text)
-            .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
-        let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
-        let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
-        prepared.push(PreparedCommonModuleStage {
-            spec,
-            module_body_id,
-            text_bytes: text.len(),
-            blob_sha256: packed_module.output_sha256,
-            blob: packed_module.blob,
-        });
-    }
+    let prepared = specs
+        .into_par_iter()
+        .map(|spec| {
+            let module_body_id = format!("{}.0", spec.module_id);
+            let text = fs::read(&spec.text)
+                .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
+            let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
+            let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
+            Ok(PreparedCommonModuleStage {
+                spec,
+                module_body_id,
+                text_bytes: text.len(),
+                blob_sha256: packed_module.output_sha256,
+                blob: packed_module.blob,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let versions_blob = fetch_config_blob(sqlcmd, server, database, "versions")?;
     let changes = prepared
