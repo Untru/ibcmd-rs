@@ -137,6 +137,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "Roles",
             "CommonCommands",
             "BusinessProcesses",
+            "DefinedTypes",
             "Tasks",
             "Constants",
             "WebServices",
@@ -227,6 +228,7 @@ mod tests {
                 .supported_source_families
                 .contains(&"BusinessProcesses")
         );
+        assert!(report.supported_source_families.contains(&"DefinedTypes"));
         assert!(
             report
                 .supported_metadata_families

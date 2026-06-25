@@ -184,6 +184,7 @@ fn classify(path: &Path, relative: &str, xml_root: Option<&str>) -> SourceKind {
             Some(root) if root.contains("MetaDataObject") || root.contains("Configuration") => {
                 SourceKind::MetadataXml
             }
+            Some("DefinedType") => SourceKind::MetadataXml,
             _ if is_metadata_subfile(&lower) => SourceKind::MetadataXml,
             _ => SourceKind::OtherXml,
         };
@@ -257,6 +258,7 @@ fn is_metadata_collection(value: &str) -> bool {
             | "Roles"
             | "CommonCommands"
             | "BusinessProcesses"
+            | "DefinedTypes"
             | "Tasks"
             | "Constants"
             | "WebServices"
@@ -375,6 +377,14 @@ mod tests {
                 Some("GraphicalSchema")
             ),
             Some("BusinessProcesses/Задание".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "DefinedTypes/ВладелецДополнительныхСведений.xml",
+                &SourceKind::MetadataXml,
+                Some("DefinedType")
+            ),
+            Some("DefinedTypes/ВладелецДополнительныхСведений".to_string())
         );
         assert_eq!(
             infer_object_hint(
@@ -711,6 +721,7 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Ext")).unwrap();
         std::fs::create_dir_all(root.join("BusinessProcesses/Задание/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("DefinedTypes")).unwrap();
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
 
         std::fs::write(
@@ -761,6 +772,17 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
+            root.join("DefinedTypes/ВладелецДополнительныхСведений.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<DefinedType xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Properties>
+    <Name>ВладелецДополнительныхСведений</Name>
+  </Properties>
+</DefinedType>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
             root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml"),
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
@@ -802,6 +824,11 @@ mod tests {
             "BusinessProcesses/Задание/Ext/Flowchart.xml",
             SourceKind::MetadataXml,
             Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "DefinedTypes/ВладелецДополнительныхСведений.xml",
+            SourceKind::MetadataXml,
+            Some("DefinedTypes/ВладелецДополнительныхСведений")
         )));
         assert!(files.contains(&(
             "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
