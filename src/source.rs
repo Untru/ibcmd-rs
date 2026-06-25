@@ -446,6 +446,14 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext/Package.bin",
+                &SourceKind::Binary,
+                Some("MetaDataObject")
+            ),
+            Some("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "SettingsStorages/ХранилищеВариантовОтчетов.xml",
                 &SourceKind::MetadataXml,
                 Some("SettingsStorage")
@@ -587,6 +595,14 @@ mod tests {
                 Some("ExtPicture")
             ),
             SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Package.bin".as_ref(),
+                "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext/Package.bin",
+                None
+            ),
+            SourceKind::Binary
         );
     }
 }
