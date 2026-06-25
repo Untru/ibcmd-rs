@@ -269,7 +269,7 @@ fn is_ignored(path: &Path) -> bool {
 }
 
 fn is_metadata_subfile(relative_lower: &str) -> bool {
-    relative_lower.contains("/ext/")
+    relative_lower.starts_with("ext/") || relative_lower.contains("/ext/")
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -459,6 +459,34 @@ mod tests {
                 None
             ),
             SourceKind::Binary
+        );
+        assert_eq!(
+            classify(
+                "Picture.xml".as_ref(),
+                "CommonPictures/Адрес/Ext/Picture.xml",
+                Some("ExtPicture")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Content.xml".as_ref(),
+                "ExchangePlans/ОбновлениеИнформационнойБазы/Ext/Content.xml",
+                Some("ExchangePlanContent")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify("Splash.xml".as_ref(), "Ext/Splash.xml", Some("ExtPicture")),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "MainSectionPicture.xml".as_ref(),
+                "Ext/MainSectionPicture.xml",
+                Some("ExtPicture")
+            ),
+            SourceKind::MetadataXml
         );
     }
 }
