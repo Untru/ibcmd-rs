@@ -3310,6 +3310,45 @@ mod tests {
     }
 
     #[test]
+    fn patches_language_metadata_blob_from_xml() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{3,
+{1,0,db4a9ccb-9ef5-4b3c-8577-b6fe5db1b62e},"OldLanguage",
+{1,"ru","Old language"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Language uuid="db4a9ccb-9ef5-4b3c-8577-b6fe5db1b62e">
+    <Properties>
+      <Name>Русский</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Русский</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <LanguageCode>ru</LanguageCode>
+    </Properties>
+  </Language>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert_eq!(packed.properties.kind, "Language");
+        assert!(inflated.as_bytes().starts_with(b"\xEF\xBB\xBF"));
+        assert!(inflated.contains("\"Русский\""));
+        assert!(inflated.contains("{1,\"ru\",\"Русский\"}"));
+        assert!(inflated.contains("00000000-0000-0000-0000-000000000000"));
+    }
+
+    #[test]
     fn patches_settings_storage_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
