@@ -160,6 +160,9 @@ pub struct MssqlCloneArgs {
     /// Drop target database first when it already exists.
     #[arg(long)]
     pub overwrite: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
 }
 
 #[derive(Debug, Args)]
@@ -204,6 +207,9 @@ pub struct MssqlStorageImportArgs {
     /// Required confirmation: delete existing Config/ConfigSave/Params rows first.
     #[arg(long)]
     pub replace: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
 }
 
 #[derive(Debug, Args)]
@@ -248,6 +254,9 @@ pub struct MssqlDeltaImportArgs {
     /// Delete existing ConfigSave rows before import.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
 }
 
 #[derive(Debug, Args)]
@@ -302,6 +311,9 @@ pub struct MssqlStageCommonModuleArgs {
     /// Required confirmation: delete existing ConfigSave rows first.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -324,6 +336,9 @@ pub struct MssqlStageCommonModulesArgs {
     /// Required confirmation: delete existing ConfigSave rows first.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -349,6 +364,9 @@ pub struct MssqlStageCommonModuleMetadataArgs {
     /// Required confirmation: delete existing ConfigSave rows first.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -377,6 +395,9 @@ pub struct MssqlStageCommonModuleObjectArgs {
     /// Required confirmation: delete existing ConfigSave rows first.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -399,6 +420,9 @@ pub struct MssqlStageCommonModuleObjectsArgs {
     /// Required confirmation: delete existing ConfigSave rows first.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -424,6 +448,9 @@ pub struct MssqlStageMetadataObjectsArgs {
     /// Required confirmation: delete existing ConfigSave rows first.
     #[arg(long)]
     pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,

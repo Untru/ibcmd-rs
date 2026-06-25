@@ -317,12 +317,23 @@ pub fn compare_databases(args: &MssqlCompareArgs) -> Result<MssqlCompareReport> 
     Ok(compare_shapes(&args.left, &args.right, &left, &right))
 }
 
+fn require_non_lab_confirmation(allowed: bool, action: &str) -> Result<()> {
+    if allowed {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "{action} is gated for non-lab runs; pass --allow-non-lab to continue"
+        ))
+    }
+}
+
 pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(report)?;
     fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
 }
 
 pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "database clone")?;
     let backup = args.backup.clone().unwrap_or_else(|| {
         PathBuf::from(format!(
             r"C:\temp\ibcmd-rs\{}_to_{}.bak",
@@ -432,6 +443,7 @@ pub fn import_storage_bundle(args: &MssqlStorageImportArgs) -> Result<StorageBun
             "storage import deletes Config, ConfigSave and Params rows; pass --replace"
         ));
     }
+    require_non_lab_confirmation(args.allow_non_lab, "storage import")?;
 
     let manifest = read_storage_manifest(&args.input_dir)?;
     validate_storage_manifest(&manifest)?;
@@ -509,6 +521,7 @@ pub fn export_delta_bundle(args: &MssqlDeltaExportArgs) -> Result<DeltaBundleExp
 }
 
 pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImportReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "delta import")?;
     let manifest = read_delta_manifest(&args.input_dir)?;
     validate_delta_manifest(&manifest)?;
 
@@ -557,6 +570,7 @@ pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImp
 }
 
 pub fn stage_common_module(args: &MssqlStageCommonModuleArgs) -> Result<StageCommonModuleReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "common module staging")?;
     let report = stage_common_module_specs(
         &args.sqlcmd,
         &args.server,
@@ -591,6 +605,7 @@ pub fn stage_common_module(args: &MssqlStageCommonModuleArgs) -> Result<StageCom
 pub fn stage_common_modules(
     args: &MssqlStageCommonModulesArgs,
 ) -> Result<StageCommonModulesReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "common module batch staging")?;
     let specs = parse_common_module_specs(&args.modules)?;
     stage_common_module_specs(
         &args.sqlcmd,
@@ -610,6 +625,7 @@ pub fn stage_common_module_metadata(
             "staging deletes existing ConfigSave rows; pass --replace-config-save"
         ));
     }
+    require_non_lab_confirmation(args.allow_non_lab, "common module metadata staging")?;
 
     let module_id = normalize_uuid_arg(&args.module_id)?;
     let xml = fs::read(&args.xml)
@@ -674,6 +690,7 @@ pub fn stage_common_module_metadata(
 pub fn stage_common_module_object(
     args: &MssqlStageCommonModuleObjectArgs,
 ) -> Result<StageCommonModuleObjectReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "common module object staging")?;
     let prepared = prepare_common_module_object_stage(
         &args.sqlcmd,
         &args.server,
@@ -738,6 +755,7 @@ pub fn stage_common_module_objects(
     if args.xmls.is_empty() {
         return Err(anyhow!("at least one common module XML must be staged"));
     }
+    require_non_lab_confirmation(args.allow_non_lab, "common module object batch staging")?;
 
     let prepared = args
         .xmls
@@ -773,6 +791,7 @@ pub fn stage_metadata_objects(
             "staging deletes existing ConfigSave rows; pass --replace-config-save"
         ));
     }
+    require_non_lab_confirmation(args.allow_non_lab, "metadata object staging")?;
     if args.xmls.is_empty() {
         return Err(anyhow!("at least one metadata XML must be staged"));
     }
@@ -1893,7 +1912,7 @@ fn quote_string_path(path: &Path) -> String {
 mod tests {
     use super::{
         ColumnShape, TableShape, compare_shapes, infer_common_module_text_path, quote_ident,
-        quote_string,
+        quote_string, require_non_lab_confirmation,
     };
 
     #[test]
@@ -1929,5 +1948,11 @@ mod tests {
             infer_common_module_text_path(r"CommonModules\РаботаСБанкамиВызовСервера.xml".as_ref()),
             std::path::PathBuf::from(r"CommonModules\РаботаСБанкамиВызовСервера\Ext\Module.bsl")
         );
+    }
+
+    #[test]
+    fn rejects_non_lab_destructive_actions_without_confirmation() {
+        let error = require_non_lab_confirmation(false, "storage import").unwrap_err();
+        assert!(error.to_string().contains("--allow-non-lab"));
     }
 }

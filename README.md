@@ -26,19 +26,19 @@ cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
 cargo run -- compatibility
 cargo run -- mssql-compare --left ref_db --right target_db -o compare.json
-cargo run -- mssql-clone --source target_db --target ours_db --overwrite
+cargo run -- mssql-clone --source target_db --target ours_db --overwrite --allow-non-lab
 cargo run -- mssql-storage-export --database import_only_db -o storage-bundle --overwrite
-cargo run -- mssql-storage-import --database empty_target_db -i storage-bundle --replace
+cargo run -- mssql-storage-import --database empty_target_db -i storage-bundle --replace --allow-non-lab
 cargo run -- mssql-delta-export --database staged_db -o delta-bundle --overwrite
-cargo run -- mssql-delta-import --database target_db -i delta-bundle
+cargo run -- mssql-delta-import --database target_db -i delta-bundle --allow-non-lab
 cargo run -- module-blob-pack --text CommonModules\...\Ext\Module.bsl --base-blob module.bin -o module.blob
 cargo run -- versions-blob-patch -i versions.bin -o versions-new.bin --change <metadata-id> --change <metadata-id>.0
-cargo run -- mssql-stage-common-module --database target_db --module-id <metadata-id> --text CommonModules\...\Ext\Module.bsl --replace-config-save
-cargo run -- mssql-stage-common-modules --database target_db --module <metadata-id>=CommonModules\...\Ext\Module.bsl --module <metadata-id>=CommonModules\...\Ext\Module.bsl --replace-config-save
-cargo run -- mssql-stage-common-module-metadata --database target_db --module-id <metadata-id> --xml CommonModules\...\Module.xml --replace-config-save
-cargo run -- mssql-stage-common-module-object --database target_db --xml CommonModules\Module.xml --replace-config-save
-cargo run -- mssql-stage-common-module-objects --database target_db --xml CommonModules\Module1.xml --xml CommonModules\Module2.xml --replace-config-save
-cargo run -- mssql-stage-metadata-objects --database target_db --source-root C:\full\xml-sources --xml Constants\SomeConstant.xml --xml SessionParameters\SomeParameter.xml --replace-config-save
+cargo run -- mssql-stage-common-module --database target_db --module-id <metadata-id> --text CommonModules\...\Ext\Module.bsl --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-common-modules --database target_db --module <metadata-id>=CommonModules\...\Ext\Module.bsl --module <metadata-id>=CommonModules\...\Ext\Module.bsl --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-common-module-metadata --database target_db --module-id <metadata-id> --xml CommonModules\...\Module.xml --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-common-module-object --database target_db --xml CommonModules\Module.xml --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-common-module-objects --database target_db --xml CommonModules\Module1.xml --xml CommonModules\Module2.xml --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-metadata-objects --database target_db --source-root C:\full\xml-sources --xml Constants\SomeConstant.xml --xml SessionParameters\SomeParameter.xml --replace-config-save --allow-non-lab
 ```
 
 ## First ERP Experiment
