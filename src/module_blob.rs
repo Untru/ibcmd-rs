@@ -319,6 +319,10 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
             let constant = parse_constant_xml_properties(xml)?;
             patch_constant_metadata_text(text, &constant)?
         }
+        "DefinedType" => {
+            let defined_type = parse_defined_type_xml_properties(xml)?;
+            patch_defined_type_metadata_text(text, &defined_type)?
+        }
         "CommonCommand" => {
             let command = parse_common_command_xml_properties(xml, source)?;
             patch_common_command_metadata_text(text, &command)?
@@ -340,8 +344,14 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
 #[derive(Debug, Clone)]
 struct ConstantXmlProperties {
     simple: SimpleMetadataXmlProperties,
-    value_type: ConstantValueType,
+    value_type: MetadataTypePatternElement,
     use_standard_commands: bool,
+}
+
+#[derive(Debug, Clone)]
+struct DefinedTypeXmlProperties {
+    simple: SimpleMetadataXmlProperties,
+    value_types: Vec<MetadataTypePatternElement>,
 }
 
 #[derive(Debug, Clone)]
@@ -358,7 +368,7 @@ struct CommonCommandXmlProperties {
 }
 
 #[derive(Debug, Clone)]
-enum ConstantValueType {
+enum MetadataTypePatternElement {
     Boolean,
     String {
         length: Option<u32>,
@@ -505,6 +515,107 @@ fn parse_constant_xml_properties(xml: &[u8]) -> Result<ConstantXmlProperties> {
         simple,
         value_type,
         use_standard_commands,
+    })
+}
+
+fn parse_defined_type_xml_properties(xml: &[u8]) -> Result<DefinedTypeXmlProperties> {
+    let simple = parse_simple_metadata_xml_properties(xml)?;
+    if simple.kind != "DefinedType" {
+        return Err(anyhow!(
+            "expected DefinedType XML, got metadata kind {}",
+            simple.kind
+        ));
+    }
+
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+
+    let mut types = Vec::<String>::new();
+    let mut string_length = None::<String>;
+    let mut string_allowed_length = None::<String>;
+    let mut number_digits = None::<String>;
+    let mut number_fraction_digits = None::<String>;
+    let mut number_allowed_sign = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(xml_local_name(event.local_name().as_ref()));
+            }
+            Ok(Event::Text(text)) => {
+                let value = text.xml_content()?;
+                let value = unescape(value.as_ref())?;
+                append_metadata_type_xml_text(
+                    "DefinedType",
+                    &path,
+                    value.as_ref(),
+                    &mut types,
+                    &mut string_length,
+                    &mut string_allowed_length,
+                    &mut number_digits,
+                    &mut number_fraction_digits,
+                    &mut number_allowed_sign,
+                );
+            }
+            Ok(Event::CData(text)) => {
+                append_metadata_type_xml_text(
+                    "DefinedType",
+                    &path,
+                    text.xml_content()?.as_ref(),
+                    &mut types,
+                    &mut string_length,
+                    &mut string_allowed_length,
+                    &mut number_digits,
+                    &mut number_fraction_digits,
+                    &mut number_allowed_sign,
+                );
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                let value = if let Some(ch) = reference.resolve_char_ref()? {
+                    ch.to_string()
+                } else {
+                    let entity = reference.decode()?;
+                    resolve_xml_entity(entity.as_ref())
+                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                        .to_string()
+                };
+                append_metadata_type_xml_text(
+                    "DefinedType",
+                    &path,
+                    &value,
+                    &mut types,
+                    &mut string_length,
+                    &mut string_allowed_length,
+                    &mut number_digits,
+                    &mut number_fraction_digits,
+                    &mut number_allowed_sign,
+                );
+            }
+            Ok(Event::End(_)) => {
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    let value_types = parse_metadata_type_pattern_elements(
+        "DefinedType",
+        &types,
+        string_length,
+        string_allowed_length,
+        number_digits,
+        number_fraction_digits,
+        number_allowed_sign,
+        true,
+    )?;
+
+    Ok(DefinedTypeXmlProperties {
+        simple,
+        value_types,
     })
 }
 
@@ -1111,6 +1222,33 @@ fn patch_constant_metadata_text(
     Ok(text)
 }
 
+fn patch_defined_type_metadata_text(
+    mut text: String,
+    properties: &DefinedTypeXmlProperties,
+) -> Result<String> {
+    text = patch_simple_metadata_header_text(text, &properties.simple)?;
+
+    let marker = format!("{{1,0,{}}}", properties.simple.uuid);
+    let marker_start = text
+        .find(&marker)
+        .ok_or_else(|| anyhow!("metadata tuple not found for {}", properties.simple.uuid))?;
+    let defined_type_start = text[..marker_start]
+        .rfind("{0,")
+        .ok_or_else(|| anyhow!("defined type object marker not found"))?;
+    let fields = scan_braced_fields(&text, defined_type_start)?;
+    if fields.len() < 5 {
+        return Err(anyhow!(
+            "defined type object has {} fields, expected at least 5",
+            fields.len()
+        ));
+    }
+
+    let type_text = format_metadata_type_pattern(&properties.value_types);
+    text.replace_range(fields[4].clone(), &type_text);
+
+    Ok(text)
+}
+
 fn patch_common_command_metadata_text(
     mut text: String,
     properties: &CommonCommandXmlProperties,
@@ -1222,35 +1360,87 @@ fn parse_constant_value_type(
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
-) -> Result<ConstantValueType> {
-    if types.len() != 1 {
+) -> Result<MetadataTypePatternElement> {
+    let mut elements = parse_metadata_type_pattern_elements(
+        "Constant",
+        types,
+        string_length,
+        string_allowed_length,
+        number_digits,
+        number_fraction_digits,
+        number_allowed_sign,
+        false,
+    )?;
+    elements
+        .pop()
+        .ok_or_else(|| anyhow!("Constant Properties/Type is empty"))
+}
+
+fn parse_metadata_type_pattern_elements(
+    kind: &str,
+    types: &[String],
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
+    allow_multiple: bool,
+) -> Result<Vec<MetadataTypePatternElement>> {
+    if types.is_empty() {
+        return Err(anyhow!("{kind} Properties/Type has no Type entries"));
+    }
+    if !allow_multiple && types.len() != 1 {
         return Err(anyhow!(
-            "only single-type Constant values are supported, got {} types",
+            "only single-type {kind} values are supported, got {} types",
             types.len()
         ));
     }
 
-    match types[0].trim() {
-        "xs:boolean" => Ok(ConstantValueType::Boolean),
+    types
+        .iter()
+        .map(|type_name| {
+            parse_metadata_type_pattern_element(
+                kind,
+                type_name,
+                string_length.as_deref(),
+                string_allowed_length.as_deref(),
+                number_digits.as_deref(),
+                number_fraction_digits.as_deref(),
+                number_allowed_sign.as_deref(),
+            )
+        })
+        .collect()
+}
+
+fn parse_metadata_type_pattern_element(
+    kind: &str,
+    type_name: &str,
+    string_length: Option<&str>,
+    string_allowed_length: Option<&str>,
+    number_digits: Option<&str>,
+    number_fraction_digits: Option<&str>,
+    number_allowed_sign: Option<&str>,
+) -> Result<MetadataTypePatternElement> {
+    match type_name.trim() {
+        "xs:boolean" => Ok(MetadataTypePatternElement::Boolean),
         "xs:string" => {
             let length = parse_optional_u32("StringQualifiers/Length", string_length)?;
-            let allowed_length_flag =
-                parse_string_allowed_length_flag(string_allowed_length.as_deref())?;
-            Ok(ConstantValueType::String {
+            let allowed_length_flag = parse_string_allowed_length_flag(string_allowed_length)?;
+            Ok(MetadataTypePatternElement::String {
                 length: length.filter(|value| *value > 0),
                 allowed_length_flag,
             })
         }
-        "xs:decimal" => Ok(ConstantValueType::Number {
+        "xs:decimal" => Ok(MetadataTypePatternElement::Number {
             digits: parse_required_u32("NumberQualifiers/Digits", number_digits)?,
             fraction_digits: parse_required_u32(
                 "NumberQualifiers/FractionDigits",
                 number_fraction_digits,
             )?,
-            allowed_sign_flag: parse_number_allowed_sign_flag(number_allowed_sign.as_deref())?,
+            allowed_sign_flag: parse_number_allowed_sign_flag(number_allowed_sign)?,
         }),
-        "xs:dateTime" => Ok(ConstantValueType::DateTime),
-        other => Err(anyhow!("unsupported Constant value type: {other}")),
+        "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime),
+        other => Err(anyhow!("{kind} type is not supported yet: {other}")),
     }
 }
 
@@ -1384,23 +1574,23 @@ fn common_command_on_main_server_unavailable_behavior_code(
     }
 }
 
-fn parse_optional_u32(name: &str, value: Option<String>) -> Result<Option<u32>> {
+fn parse_optional_u32(name: &str, value: Option<&str>) -> Result<Option<u32>> {
     value
         .map(|value| {
             value
                 .trim()
                 .parse::<u32>()
-                .with_context(|| format!("invalid Constant {name}: {value}"))
+                .with_context(|| format!("invalid metadata {name}: {value}"))
         })
         .transpose()
 }
 
-fn parse_required_u32(name: &str, value: Option<String>) -> Result<u32> {
+fn parse_required_u32(name: &str, value: Option<&str>) -> Result<u32> {
     value
-        .ok_or_else(|| anyhow!("Constant {name} not found in XML"))?
+        .ok_or_else(|| anyhow!("metadata {name} not found in XML"))?
         .trim()
         .parse::<u32>()
-        .with_context(|| format!("invalid Constant {name}"))
+        .with_context(|| format!("invalid metadata {name}"))
 }
 
 fn parse_string_allowed_length_flag(value: Option<&str>) -> Result<u8> {
@@ -1408,7 +1598,7 @@ fn parse_string_allowed_length_flag(value: Option<&str>) -> Result<u8> {
         "Fixed" => Ok(0),
         "Variable" => Ok(1),
         other => Err(anyhow!(
-            "unsupported Constant StringQualifiers/AllowedLength: {other}"
+            "unsupported metadata StringQualifiers/AllowedLength: {other}"
         )),
     }
 }
@@ -1418,25 +1608,39 @@ fn parse_number_allowed_sign_flag(value: Option<&str>) -> Result<u8> {
         "Any" => Ok(0),
         "Nonnegative" => Ok(1),
         other => Err(anyhow!(
-            "unsupported Constant NumberQualifiers/AllowedSign: {other}"
+            "unsupported metadata NumberQualifiers/AllowedSign: {other}"
         )),
     }
 }
 
-fn format_constant_type_pattern(value_type: &ConstantValueType) -> String {
+fn format_constant_type_pattern(value_type: &MetadataTypePatternElement) -> String {
+    format_metadata_type_pattern(std::slice::from_ref(value_type))
+}
+
+fn format_metadata_type_pattern(value_types: &[MetadataTypePatternElement]) -> String {
+    let mut output = r#"{"Pattern""#.to_string();
+    for value_type in value_types {
+        output.push(',');
+        output.push_str(&format_metadata_type_pattern_element(value_type));
+    }
+    output.push('}');
+    output
+}
+
+fn format_metadata_type_pattern_element(value_type: &MetadataTypePatternElement) -> String {
     match value_type {
-        ConstantValueType::Boolean => r#"{"Pattern",{"B"}}"#.to_string(),
-        ConstantValueType::String {
+        MetadataTypePatternElement::Boolean => r#"{"B"}"#.to_string(),
+        MetadataTypePatternElement::String {
             length: Some(length),
             allowed_length_flag,
-        } => format!(r#"{{"Pattern",{{"S",{length},{allowed_length_flag}}}}}"#),
-        ConstantValueType::String { length: None, .. } => r#"{"Pattern",{"S"}}"#.to_string(),
-        ConstantValueType::Number {
+        } => format!(r#"{{"S",{length},{allowed_length_flag}}}"#),
+        MetadataTypePatternElement::String { length: None, .. } => r#"{"S"}"#.to_string(),
+        MetadataTypePatternElement::Number {
             digits,
             fraction_digits,
             allowed_sign_flag,
-        } => format!(r#"{{"Pattern",{{"N",{digits},{fraction_digits},{allowed_sign_flag}}}}}"#),
-        ConstantValueType::DateTime => r#"{"Pattern",{"D"}}"#.to_string(),
+        } => format!(r#"{{"N",{digits},{fraction_digits},{allowed_sign_flag}}}"#),
+        MetadataTypePatternElement::DateTime => r#"{"D"}"#.to_string(),
     }
 }
 
@@ -1580,17 +1784,41 @@ fn append_constant_xml_text(
     number_allowed_sign: &mut Option<String>,
     use_standard_commands: &mut Option<String>,
 ) {
-    if path_ends_with(path, &["Constant", "Properties", "Type", "Type"]) {
+    append_metadata_type_xml_text(
+        "Constant",
+        path,
+        value,
+        types,
+        string_length,
+        string_allowed_length,
+        number_digits,
+        number_fraction_digits,
+        number_allowed_sign,
+    );
+
+    if path_ends_with(path, &["Constant", "Properties", "UseStandardCommands"]) {
+        use_standard_commands
+            .get_or_insert_with(String::new)
+            .push_str(value);
+    }
+}
+
+fn append_metadata_type_xml_text(
+    kind: &str,
+    path: &[String],
+    value: &str,
+    types: &mut Vec<String>,
+    string_length: &mut Option<String>,
+    string_allowed_length: &mut Option<String>,
+    number_digits: &mut Option<String>,
+    number_fraction_digits: &mut Option<String>,
+    number_allowed_sign: &mut Option<String>,
+) {
+    if path_ends_with(path, &[kind, "Properties", "Type", "Type"]) {
         types.push(value.to_string());
     } else if path_ends_with(
         path,
-        &[
-            "Constant",
-            "Properties",
-            "Type",
-            "StringQualifiers",
-            "Length",
-        ],
+        &[kind, "Properties", "Type", "StringQualifiers", "Length"],
     ) {
         string_length
             .get_or_insert_with(String::new)
@@ -1598,7 +1826,7 @@ fn append_constant_xml_text(
     } else if path_ends_with(
         path,
         &[
-            "Constant",
+            kind,
             "Properties",
             "Type",
             "StringQualifiers",
@@ -1610,13 +1838,7 @@ fn append_constant_xml_text(
             .push_str(value);
     } else if path_ends_with(
         path,
-        &[
-            "Constant",
-            "Properties",
-            "Type",
-            "NumberQualifiers",
-            "Digits",
-        ],
+        &[kind, "Properties", "Type", "NumberQualifiers", "Digits"],
     ) {
         number_digits
             .get_or_insert_with(String::new)
@@ -1624,7 +1846,7 @@ fn append_constant_xml_text(
     } else if path_ends_with(
         path,
         &[
-            "Constant",
+            kind,
             "Properties",
             "Type",
             "NumberQualifiers",
@@ -1637,7 +1859,7 @@ fn append_constant_xml_text(
     } else if path_ends_with(
         path,
         &[
-            "Constant",
+            kind,
             "Properties",
             "Type",
             "NumberQualifiers",
@@ -1645,10 +1867,6 @@ fn append_constant_xml_text(
         ],
     ) {
         number_allowed_sign
-            .get_or_insert_with(String::new)
-            .push_str(value);
-    } else if path_ends_with(path, &["Constant", "Properties", "UseStandardCommands"]) {
-        use_standard_commands
             .get_or_insert_with(String::new)
             .push_str(value);
     }
@@ -2523,6 +2741,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("\"New comment\""));
         assert!(inflated.contains(r#"{"Pattern",{"S",50,1}}"#));
         assert!(inflated.contains(",1,1,{0}"));
+    }
+
+    #[test]
+    fn patches_defined_type_builtin_type_pattern() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldType",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",{"S",10,1}}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <DefinedType uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewType</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>New synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Type>
+        <v8:Type>xs:boolean</v8:Type>
+        <v8:Type>xs:string</v8:Type>
+        <v8:StringQualifiers>
+          <v8:Length>80</v8:Length>
+          <v8:AllowedLength>Variable</v8:AllowedLength>
+        </v8:StringQualifiers>
+      </Type>
+    </Properties>
+  </DefinedType>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert_eq!(packed.properties.kind, "DefinedType");
+        assert!(inflated.contains("\"NewType\""), "{inflated}");
+        assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
+        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,1}}"#));
     }
 
     #[test]
