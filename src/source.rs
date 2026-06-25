@@ -948,4 +948,76 @@ mod tests {
             Some("Tasks/ЗадачаИсполнителя")
         )));
     }
+
+    #[test]
+    fn scans_real_role_and_scheduled_job_ext_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-role-job-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Roles/АдминистраторСистемы/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("ScheduledJobs/ЗагрузкаКурсовВалют/Ext")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("Roles/АдминистраторСистемы.xml"),
+            root.join("Roles/АдминистраторСистемы.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Roles/АдминистраторСистемы/Ext/Rights.xml"),
+            root.join("Roles/АдминистраторСистемы/Ext/Rights.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ScheduledJobs/ЗагрузкаКурсовВалют.xml"),
+            root.join("ScheduledJobs/ЗагрузкаКурсовВалют.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ScheduledJobs/ЗагрузкаКурсовВалют/Ext/Schedule.xml"),
+            root.join("ScheduledJobs/ЗагрузкаКурсовВалют/Ext/Schedule.xml"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "Roles/АдминистраторСистемы.xml",
+            SourceKind::MetadataXml,
+            Some("Roles/АдминистраторСистемы")
+        )));
+        assert!(files.contains(&(
+            "Roles/АдминистраторСистемы/Ext/Rights.xml",
+            SourceKind::MetadataXml,
+            Some("Roles/АдминистраторСистемы")
+        )));
+        assert!(files.contains(&(
+            "ScheduledJobs/ЗагрузкаКурсовВалют.xml",
+            SourceKind::MetadataXml,
+            Some("ScheduledJobs/ЗагрузкаКурсовВалют")
+        )));
+        assert!(files.contains(&(
+            "ScheduledJobs/ЗагрузкаКурсовВалют/Ext/Schedule.xml",
+            SourceKind::MetadataXml,
+            Some("ScheduledJobs/ЗагрузкаКурсовВалют")
+        )));
+    }
 }
