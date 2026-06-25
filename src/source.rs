@@ -232,6 +232,7 @@ fn is_metadata_collection(value: &str) -> bool {
             | "CommonPictures"
             | "CommonTemplates"
             | "CommonAttributes"
+            | "CommandGroups"
             | "DocumentJournals"
             | "Reports"
             | "DataProcessors"
@@ -375,6 +376,14 @@ mod tests {
                 Some("SessionParameter")
             ),
             Some("SessionParameters/АвторизованныйПользователь".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "CommandGroups/Органайзер.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("CommandGroups/Органайзер".to_string())
         );
     }
 
