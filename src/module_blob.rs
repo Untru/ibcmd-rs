@@ -2596,6 +2596,18 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "BusinessProcessSelection"
         | "BusinessProcessList"
         | "BusinessProcessManager" => Some("BusinessProcesses"),
+        "AccumulationRegisterObject"
+        | "AccumulationRegisterRecordSet"
+        | "AccumulationRegisterRecordKey"
+        | "AccumulationRegisterSelection"
+        | "AccumulationRegisterList"
+        | "AccumulationRegisterManager" => Some("AccumulationRegisters"),
+        "AccountingRegisterObject"
+        | "AccountingRegisterRecordSet"
+        | "AccountingRegisterRecordKey"
+        | "AccountingRegisterSelection"
+        | "AccountingRegisterList"
+        | "AccountingRegisterManager" => Some("AccountingRegisters"),
         "CatalogObject" | "CatalogRef" | "CatalogSelection" | "CatalogList" | "CatalogManager" => {
             Some("Catalogs")
         }
@@ -2604,6 +2616,21 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "ChartOfCharacteristicTypesSelection"
         | "ChartOfCharacteristicTypesList"
         | "ChartOfCharacteristicTypesManager" => Some("ChartsOfCharacteristicTypes"),
+        "ChartOfAccountsObject"
+        | "ChartOfAccountsRef"
+        | "ChartOfAccountsSelection"
+        | "ChartOfAccountsList"
+        | "ChartOfAccountsManager" => Some("ChartsOfAccounts"),
+        "ChartOfCalculationTypesObject"
+        | "ChartOfCalculationTypesRef"
+        | "ChartOfCalculationTypesSelection"
+        | "ChartOfCalculationTypesList"
+        | "ChartOfCalculationTypesManager" => Some("ChartsOfCalculationTypes"),
+        "ChartOfCalculationRegistersObject"
+        | "ChartOfCalculationRegistersRef"
+        | "ChartOfCalculationRegistersSelection"
+        | "ChartOfCalculationRegistersList"
+        | "ChartOfCalculationRegistersManager" => Some("ChartsOfCalculationRegisters"),
         "DataProcessorObject" | "DataProcessorManager" => Some("DataProcessors"),
         "DefinedType" => Some("DefinedTypes"),
         "DocumentObject" | "DocumentRef" | "DocumentSelection" | "DocumentList"
@@ -3628,6 +3655,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("{2,\"ru\",\"New \"\"quoted\"\" synonym\",\"en\",\"English\"}"));
         assert!(inflated.contains("\"New comment\""));
         assert!(inflated.contains(",0,1,1,1,1,0,2,0}"));
+    }
+
+    #[test]
+    fn resolves_additional_metadata_source_folders() {
+        assert_eq!(
+            super::metadata_type_source_folder("AccumulationRegisterObject.Sales"),
+            Some("AccumulationRegisters")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("AccountingRegisterManager.Entries"),
+            Some("AccountingRegisters")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("ChartOfCalculationTypesList.Payouts"),
+            Some("ChartsOfCalculationTypes")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("ChartOfCalculationRegistersRef.Accruals"),
+            Some("ChartsOfCalculationRegisters")
+        );
     }
 
     #[test]

@@ -217,9 +217,11 @@ fn is_metadata_collection(value: &str) -> bool {
             | "InformationRegisters"
             | "AccumulationRegisters"
             | "AccountingRegisters"
+            | "CalculationRegisters"
             | "ChartsOfCharacteristicTypes"
             | "ChartsOfAccounts"
             | "ChartsOfCalculationTypes"
+            | "ChartsOfCalculationRegisters"
             | "CommonModules"
             | "Reports"
             | "DataProcessors"
@@ -298,6 +300,26 @@ mod tests {
                 Some("Form")
             ),
             Some("Catalogs/Goods".to_string())
+        );
+    }
+
+    #[test]
+    fn infers_additional_metadata_owners_from_path() {
+        assert_eq!(
+            infer_object_hint(
+                "AccumulationRegisters/Sales/Forms/Report/Form.xml",
+                &SourceKind::Form,
+                Some("Form")
+            ),
+            Some("AccumulationRegisters/Sales".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "ChartsOfCalculationRegisters/Payouts/Forms/ItemForm/Form.xml",
+                &SourceKind::Form,
+                Some("Form")
+            ),
+            Some("ChartsOfCalculationRegisters/Payouts".to_string())
         );
     }
 }
