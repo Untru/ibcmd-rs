@@ -202,6 +202,10 @@ fn infer_object_hint(relative: &str, kind: &SourceKind, xml_root: Option<&str>) 
         let folder = window[0];
         let name = window[1];
         if is_metadata_collection(folder) {
+            let name = Path::new(name)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or(name);
             return Some(format!("{}/{}", folder, name));
         }
     }
@@ -223,17 +227,30 @@ fn is_metadata_collection(value: &str) -> bool {
             | "ChartsOfCalculationTypes"
             | "ChartsOfCalculationRegisters"
             | "CommonModules"
+            | "CommonForms"
+            | "CommonPictures"
+            | "CommonTemplates"
+            | "CommonAttributes"
+            | "DocumentJournals"
             | "Reports"
             | "DataProcessors"
             | "Enums"
             | "ExchangePlans"
-            | "ScheduledJobs"
+            | "EventSubscriptions"
+            | "FilterCriteria"
             | "FunctionalOptions"
+            | "FunctionalOptionsParameters"
+            | "HTTPServices"
+            | "Languages"
+            | "ScheduledJobs"
+            | "SettingsStorages"
+            | "StyleItems"
             | "Subsystems"
             | "Roles"
-            | "CommonForms"
             | "CommonCommands"
             | "Constants"
+            | "WebServices"
+            | "XDTOPackages"
     )
 }
 
@@ -320,6 +337,30 @@ mod tests {
                 Some("Form")
             ),
             Some("ChartsOfCalculationRegisters/Payouts".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "CommonForms/АвтономнаяРабота.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("CommonForms/АвтономнаяРабота".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "ScheduledJobs/ЗагрузкаКурсовВалют.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("ScheduledJobs/ЗагрузкаКурсовВалют".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Roles/АдминистраторСистемы.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("Roles/АдминистраторСистемы".to_string())
         );
     }
 }
