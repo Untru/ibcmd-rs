@@ -256,6 +256,7 @@ fn is_metadata_collection(value: &str) -> bool {
             | "Subsystems"
             | "Roles"
             | "CommonCommands"
+            | "BusinessProcesses"
             | "Tasks"
             | "Constants"
             | "WebServices"
@@ -366,6 +367,14 @@ mod tests {
                 Some("CommandInterface")
             ),
             Some("CommonCommands/АвтономнаяРабота".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "BusinessProcesses/Задание/Ext/Flowchart.xml",
+                &SourceKind::MetadataXml,
+                Some("GraphicalSchema")
+            ),
+            Some("BusinessProcesses/Задание".to_string())
         );
         assert_eq!(
             infer_object_hint(
@@ -701,6 +710,7 @@ mod tests {
         std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext"))
             .unwrap();
         std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("BusinessProcesses/Задание/Ext")).unwrap();
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
 
         std::fs::write(
@@ -728,6 +738,26 @@ mod tests {
         std::fs::write(
             root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl"),
             "Procedure Test()\nEndProcedure\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("BusinessProcesses/Задание.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <BusinessProcess uuid="c1e32bc3-ef8c-44c0-8a50-7b5fef4c2c29">
+    <Properties>
+      <Name>Задание</Name>
+    </Properties>
+  </BusinessProcess>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("BusinessProcesses/Задание/Ext/Flowchart.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
         )
         .unwrap();
         std::fs::write(
@@ -767,6 +797,11 @@ mod tests {
             "Tasks/ЗадачаИсполнителя/Ext/Help.xml",
             SourceKind::MetadataXml,
             Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Ext/Flowchart.xml",
+            SourceKind::MetadataXml,
+            Some("BusinessProcesses/Задание")
         )));
         assert!(files.contains(&(
             "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",

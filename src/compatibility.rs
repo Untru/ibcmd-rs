@@ -136,6 +136,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "Subsystems",
             "Roles",
             "CommonCommands",
+            "BusinessProcesses",
             "Tasks",
             "Constants",
             "WebServices",
@@ -221,6 +222,11 @@ mod tests {
 
         assert!(report.supported_source_families.contains(&"Tasks"));
         assert!(report.supported_source_families.contains(&"CommonCommands"));
+        assert!(
+            report
+                .supported_source_families
+                .contains(&"BusinessProcesses")
+        );
         assert!(
             report
                 .supported_metadata_families
