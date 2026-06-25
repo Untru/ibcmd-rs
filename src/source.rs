@@ -850,4 +850,102 @@ mod tests {
             Some("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1")
         )));
     }
+
+    #[test]
+    fn scans_real_task_form_and_command_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-task-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext"))
+            .unwrap();
+
+        std::fs::copy(
+            lab_root.join("Tasks/ЗадачаИсполнителя.xml"),
+            root.join("Tasks/ЗадачаИсполнителя.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form.xml"),
+            root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help.xml"),
+            root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form/Module.bsl"),
+            root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help/ru.html"),
+            root.join("Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help/ru.html"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl"),
+            root.join("Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя.xml",
+            SourceKind::MetadataXml,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form.xml",
+            SourceKind::Form,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help.xml",
+            SourceKind::Form,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Forms/ФормаЗадачи/Ext/Help/ru.html",
+            SourceKind::Form,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+        assert!(files.contains(&(
+            "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("Tasks/ЗадачаИсполнителя")
+        )));
+    }
 }
