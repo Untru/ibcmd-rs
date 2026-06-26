@@ -168,6 +168,11 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    let type_index = if extract_metadata_xml {
+        build_metadata_type_index(&rows)
+    } else {
+        BTreeMap::new()
+    };
 
     let mut manifests = Vec::new();
     let mut binary_bytes = 0;
@@ -238,7 +243,7 @@ fn dump_table_rows(
         };
 
         let metadata_xml_relative = if extract_metadata_xml {
-            match extract_metadata_source_xml(&bytes, &row.file_name) {
+            match extract_metadata_source_xml(&bytes, &row.file_name, &type_index) {
                 Some(extracted) => {
                     let path = output_dir.join(&extracted.relative_path);
                     if let Some(parent) = path.parent() {
@@ -362,9 +367,71 @@ enum ConstantValueType {
         allowed_sign_flag: u8,
     },
     DateTime,
+    Reference {
+        reference: String,
+    },
 }
 
-fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
+fn build_metadata_type_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some(entries) = parse_generated_type_entries_from_blob(&bytes, &row.file_name) else {
+            continue;
+        };
+        for (type_id, reference) in entries {
+            index.insert(type_id, reference);
+        }
+    }
+    index
+}
+
+fn parse_generated_type_entries_from_blob(
+    blob: &[u8],
+    uuid: &str,
+) -> Option<Vec<(String, String)>> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let object_code = parse_metadata_object_code(text)?;
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let root_fields = split_1c_braced_fields(text, 0)?;
+    let object_text = *root_fields.get(1)?;
+    let fields = split_1c_braced_fields(object_text, 0)?;
+    let mut entries = Vec::new();
+
+    if object_code == 40 {
+        if let Some(type_id) = fields.get(3).copied().and_then(parse_uuid_field) {
+            entries.push((type_id, format!("cfg:DocumentRef.{}", header.name)));
+        }
+    }
+
+    Some(entries)
+}
+
+fn parse_uuid_field(value: &str) -> Option<String> {
+    let value = value.trim();
+    if is_uuid_text(value) {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn is_uuid_text(value: &str) -> bool {
+    value.len() == 36 && value.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-')
+}
+
+fn extract_metadata_source_xml(
+    blob: &[u8],
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
     }
@@ -383,7 +450,7 @@ fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetad
     }
     if object_code == 16 {
         let header = parse_metadata_header_from_text(text, uuid)?;
-        let constant = parse_constant_properties_from_text(text, uuid)?;
+        let constant = parse_constant_properties_from_text(text, uuid, type_index)?;
         let relative_path = PathBuf::from("Constants")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
@@ -392,7 +459,7 @@ fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetad
     }
     if object_code == 0 {
         let header = parse_metadata_header_from_text(text, uuid)?;
-        let defined_type = parse_defined_type_properties_from_text(text, uuid)?;
+        let defined_type = parse_defined_type_properties_from_text(text, uuid, type_index)?;
         let relative_path = PathBuf::from("DefinedTypes")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
@@ -484,13 +551,17 @@ fn parse_return_values_reuse_flag(value: &str) -> Option<ReturnValuesReuseValue>
     }
 }
 
-fn parse_constant_properties_from_text(text: &str, uuid: &str) -> Option<ConstantProperties> {
+fn parse_constant_properties_from_text(
+    text: &str,
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
     let typed_object_start = text[..marker_start].rfind("{2,")?;
     let typed_fields = split_1c_braced_fields(text, typed_object_start)?;
     let type_pattern = typed_fields.get(2)?;
-    let mut value_types = parse_metadata_type_pattern(type_pattern)?;
+    let mut value_types = parse_metadata_type_pattern(type_pattern, type_index)?;
     if value_types.len() != 1 {
         return None;
     }
@@ -509,12 +580,13 @@ fn parse_constant_properties_from_text(text: &str, uuid: &str) -> Option<Constan
 fn parse_defined_type_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
 ) -> Option<DefinedTypeProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
     let defined_type_start = text[..marker_start].rfind("{0,")?;
     let fields = split_1c_braced_fields(text, defined_type_start)?;
-    let value_types = parse_metadata_type_pattern(fields.get(4)?)?;
+    let value_types = parse_metadata_type_pattern(fields.get(4)?, type_index)?;
     if value_types.is_empty() {
         return None;
     }
@@ -522,7 +594,10 @@ fn parse_defined_type_properties_from_text(
     Some(DefinedTypeProperties { value_types })
 }
 
-fn parse_metadata_type_pattern(value: &str) -> Option<Vec<ConstantValueType>> {
+fn parse_metadata_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != r#""Pattern""# {
         return None;
@@ -530,11 +605,14 @@ fn parse_metadata_type_pattern(value: &str) -> Option<Vec<ConstantValueType>> {
     fields
         .iter()
         .skip(1)
-        .map(|field| parse_metadata_type_pattern_element(field))
+        .map(|field| parse_metadata_type_pattern_element(field, type_index))
         .collect()
 }
 
-fn parse_metadata_type_pattern_element(value: &str) -> Option<ConstantValueType> {
+fn parse_metadata_type_pattern_element(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<ConstantValueType> {
     let element = split_1c_braced_fields(value, 0)?;
     match element.first()?.trim() {
         r#""B""# => Some(ConstantValueType::Boolean),
@@ -552,6 +630,11 @@ fn parse_metadata_type_pattern_element(value: &str) -> Option<ConstantValueType>
             allowed_sign_flag: element.get(3)?.trim().parse().ok()?,
         }),
         r#""D""# => Some(ConstantValueType::DateTime),
+        r##""#""## if element.len() >= 2 => {
+            let type_id = parse_uuid_field(element.get(1)?.trim())?;
+            let reference = type_index.get(&type_id)?.clone();
+            Some(ConstantValueType::Reference { reference })
+        }
         _ => None,
     }
 }
@@ -861,12 +944,13 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
     xml
 }
 
-fn metadata_type_xml_name(value_type: &ConstantValueType) -> &'static str {
+fn metadata_type_xml_name(value_type: &ConstantValueType) -> String {
     match value_type {
-        ConstantValueType::Boolean => "xs:boolean",
-        ConstantValueType::String { .. } => "xs:string",
-        ConstantValueType::Number { .. } => "xs:decimal",
-        ConstantValueType::DateTime => "xs:dateTime",
+        ConstantValueType::Boolean => "xs:boolean".to_string(),
+        ConstantValueType::String { .. } => "xs:string".to_string(),
+        ConstantValueType::Number { .. } => "xs:decimal".to_string(),
+        ConstantValueType::DateTime => "xs:dateTime".to_string(),
+        ConstantValueType::Reference { reference, .. } => reference.clone(),
     }
 }
 
@@ -912,6 +996,10 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
             "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\t\t\t</Type>\r\n"
                 .to_string()
         }
+        ConstantValueType::Reference { reference, .. } => format!(
+            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>{}</v8:Type>\r\n\t\t\t</Type>\r\n",
+            escape_xml_text(reference)
+        ),
     }
 }
 
@@ -1347,7 +1435,7 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
 
         assert_eq!(
@@ -1371,7 +1459,7 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
         let properties = parse_common_module_xml_properties(&extracted.xml).unwrap();
 
         assert_eq!(
@@ -1405,7 +1493,7 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
 
@@ -1432,7 +1520,7 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
         let xml = String::from_utf8_lossy(&extracted.xml);
@@ -1449,6 +1537,60 @@ mod tests {
         assert!(xml.contains("<v8:Length>80</v8:Length>"));
         assert!(xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"));
         assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn resolves_defined_type_reference_from_dumped_document_type_index() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let document_ref_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let document_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,{document_ref_type_id},33333333-3333-4333-8333-333333333333,\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let defined_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let defined_type_pattern = format!(r##"{{"Pattern",{{"#",{document_ref_type_id}}}}}"##);
+        let defined_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,\r\n{{3,\r\n{{1,0,{defined_uuid}}},\"InvoiceOwner\",{{1,\"en\",\"Invoice owner\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{defined_type_pattern}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: document_uuid.to_string(),
+                part_no: 0,
+                data_size: document_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&document_blob),
+            },
+            ConfigRow {
+                file_name: defined_uuid.to_string(),
+                part_no: 0,
+                data_size: defined_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&defined_blob),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+        let defined = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == defined_uuid)
+            .unwrap();
+        assert_eq!(
+            defined.metadata_xml_path.as_deref(),
+            Some("DefinedTypes/InvoiceOwner.xml")
+        );
+        let xml = fs::read_to_string(root.join("DefinedTypes").join("InvoiceOwner.xml")).unwrap();
+        assert!(xml.contains("<v8:Type>cfg:DocumentRef.Invoice</v8:Type>"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
