@@ -161,6 +161,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_xdtopackage_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageRoleObject(args) => {
+            let report = ibcmd_rs::mssql::stage_role_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())
