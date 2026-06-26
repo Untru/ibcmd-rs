@@ -293,55 +293,66 @@ fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
         if row.file_name.contains('.') {
             continue;
         }
-        let body_id = format!("{}.0", row.file_name);
-        if !file_names.contains(body_id.as_str()) {
-            continue;
-        }
         let Ok(bytes) = decode_hex(&row.binary_hex) else {
             continue;
         };
-        let Some(path) = parse_module_body_source_path_from_metadata_blob(&bytes, &row.file_name)
+        let Some(entries) =
+            parse_module_body_source_paths_from_metadata_blob(&bytes, &row.file_name, &file_names)
         else {
             continue;
         };
-        paths.insert(body_id, path);
+        paths.extend(entries);
     }
 
     paths
 }
 
-fn parse_module_body_source_path_from_metadata_blob(blob: &[u8], uuid: &str) -> Option<PathBuf> {
+fn parse_module_body_source_paths_from_metadata_blob(
+    blob: &[u8],
+    uuid: &str,
+    file_names: &BTreeSet<&str>,
+) -> Option<BTreeMap<String, PathBuf>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
     let object_code = parse_metadata_object_code(text)?;
     let header = parse_metadata_header_from_text(text, uuid)?;
 
-    if object_code == 12 {
-        return Some(common_module_source_path(&header.name));
+    let (kind, folder) = if object_code == 12 {
+        ("CommonModule", "CommonModules")
+    } else {
+        metadata_source_for_text(object_code, text, uuid)?
+    };
+    let mut paths = BTreeMap::new();
+    for suffix in ["0", "1", "2", "3"] {
+        let body_id = format!("{uuid}.{suffix}");
+        if !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        if let Some(path) = module_owner_source_path(kind, folder, &header.name, suffix) {
+            paths.insert(body_id, path);
+        }
     }
 
-    let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
-    module_owner_source_path(kind, folder, &header.name)
+    Some(paths)
 }
 
-fn common_module_source_path(name: &str) -> PathBuf {
-    PathBuf::from("CommonModules")
-        .join(sanitize_source_path_segment(name))
-        .join("Ext")
-        .join("Module.bsl")
-}
-
-fn module_owner_source_path(kind: &str, folder: &str, name: &str) -> Option<PathBuf> {
-    match kind {
-        "HTTPService" | "WebService" => Some(
-            PathBuf::from(folder)
-                .join(sanitize_source_path_segment(name))
-                .join("Ext")
-                .join("Module.bsl"),
-        ),
+fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
+    let module_file = match (kind, suffix) {
+        ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
+        ("Catalog", "0") => Some("ObjectModule.bsl"),
+        ("Catalog", "3") => Some("ManagerModule.bsl"),
+        ("ExchangePlan", "2") => Some("ObjectModule.bsl"),
+        ("ExchangePlan", "3") => Some("ManagerModule.bsl"),
+        ("InformationRegister", "2") => Some("ManagerModule.bsl"),
         _ => None,
-    }
+    };
+    module_file.map(|module_file| {
+        PathBuf::from(folder)
+            .join(sanitize_source_path_segment(name))
+            .join("Ext")
+            .join(module_file)
+    })
 }
 
 struct ExtractedMetadataSourceXml {
@@ -1395,15 +1406,23 @@ fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
             continue;
         }
         selected.insert(file_name.to_string());
-        if let Some(metadata_id) = file_name.strip_suffix(".0") {
-            if !metadata_id.is_empty() {
-                selected.insert(metadata_id.to_string());
-            }
-        } else {
-            selected.insert(format!("{file_name}.0"));
+        if let Some(metadata_id) = metadata_id_from_module_file_name(file_name) {
+            selected.insert(metadata_id.to_string());
+            continue;
+        }
+        for suffix in ["0", "1", "2", "3"] {
+            selected.insert(format!("{file_name}.{suffix}"));
         }
     }
     selected
+}
+
+fn metadata_id_from_module_file_name(file_name: &str) -> Option<&str> {
+    let (metadata_id, suffix) = file_name.rsplit_once('.')?;
+    if metadata_id.is_empty() || !matches!(suffix, "0" | "1" | "2" | "3") {
+        return None;
+    }
+    Some(metadata_id)
 }
 
 fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
@@ -1581,15 +1600,18 @@ mod tests {
     fn expands_selected_file_names_with_module_pairs() {
         let selected = expand_selected_file_names(&[
             "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
-            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string(),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.2".to_string(),
             "".to_string(),
         ]);
 
         assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
         assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0"));
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1"));
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.2"));
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.3"));
         assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
-        assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0"));
-        assert_eq!(selected.len(), 4);
+        assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.2"));
+        assert_eq!(selected.len(), 7);
     }
 
     #[test]
@@ -1747,6 +1769,79 @@ mod tests {
         assert_eq!(
             web_row.module_text_path.as_deref(),
             Some("WebServices/Exchange/Ext/Module.bsl")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_object_family_module_text_to_source_layout_when_metadata_is_present() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let exchange_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let exchange_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{37,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{{0,\r\n{{3,\r\n{{1,0,{exchange_uuid}}},\"Exchange\",{{1,\"en\",\"Exchange\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let register_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let register_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,77777777-7777-4777-8777-777777777777,88888888-8888-4888-8888-888888888888,99999999-9999-4999-8999-999999999999,aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee,bbbbbbbb-1111-4111-8111-111111111111,cccccccc-2222-4222-8222-222222222222,dddddddd-3333-4333-8333-333333333333,eeeeeeee-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Settings\",{{1,\"en\",\"Settings\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let text = b"Procedure Run()\r\nEndProcedure\r\n";
+        let body = pack_module_blob_bytes(text, None, None).unwrap().blob;
+        let mut rows = Vec::new();
+        for (file_name, data) in [
+            (catalog_uuid.to_string(), catalog_metadata.clone()),
+            (format!("{catalog_uuid}.0"), body.clone()),
+            (format!("{catalog_uuid}.3"), body.clone()),
+            (exchange_uuid.to_string(), exchange_metadata.clone()),
+            (format!("{exchange_uuid}.2"), body.clone()),
+            (format!("{exchange_uuid}.3"), body.clone()),
+            (register_uuid.to_string(), register_metadata.clone()),
+            (format!("{register_uuid}.2"), body.clone()),
+        ] {
+            rows.push(ConfigRow {
+                file_name,
+                part_no: 0,
+                data_size: data.len() as i64,
+                binary_hex: encode_hex_for_test(&data),
+            });
+        }
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 5);
+        assert!(root.join("Catalogs/Products/Ext/ObjectModule.bsl").exists());
+        assert!(
+            root.join("Catalogs/Products/Ext/ManagerModule.bsl")
+                .exists()
+        );
+        assert!(
+            root.join("ExchangePlans/Exchange/Ext/ObjectModule.bsl")
+                .exists()
+        );
+        assert!(
+            root.join("ExchangePlans/Exchange/Ext/ManagerModule.bsl")
+                .exists()
+        );
+        assert!(
+            root.join("InformationRegisters/Settings/Ext/ManagerModule.bsl")
+                .exists()
         );
 
         let _ = fs::remove_dir_all(root);
