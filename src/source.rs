@@ -2529,6 +2529,196 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_information_register_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-information-register-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("InformationRegisters/ВерсииОбъектов/Ext")).unwrap();
+        std::fs::create_dir_all(
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта/Ext"),
+        )
+        .unwrap();
+
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов.xml"),
+            root.join("InformationRegisters/ВерсииОбъектов.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Ext/ManagerModule.bsl"),
+            root.join("InformationRegisters/ВерсииОбъектов/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Ext/RecordSetModule.bsl"),
+            root.join("InformationRegisters/ВерсииОбъектов/Ext/RecordSetModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта.xml"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form.xml",
+            ),
+            root.join(
+                "InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form.xml",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form/Module.bsl"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи.xml"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form.xml"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help.xml"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root
+                .join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form/Module.bsl"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help/ru.html"),
+            root.join("InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help/ru.html"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта.xml",
+            ),
+            root.join(
+                "InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта.xml",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта/Ext/Template.xml",
+            ),
+            root.join(
+                "InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта/Ext/Template.xml",
+            ),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов.xml",
+            SourceKind::MetadataXml,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Ext/ManagerModule.bsl",
+            SourceKind::Module,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Ext/RecordSetModule.bsl",
+            SourceKind::Module,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта.xml",
+            SourceKind::Form,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form.xml",
+            SourceKind::Form,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ВыборРеквизитовОбъекта/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи.xml",
+            SourceKind::Form,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form.xml",
+            SourceKind::Form,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help.xml",
+            SourceKind::Form,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Forms/ФормаЗаписи/Ext/Help/ru.html",
+            SourceKind::Form,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта.xml",
+            SourceKind::Template,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+        assert!(files.contains(&(
+            "InformationRegisters/ВерсииОбъектов/Templates/СтандартныйМакетПредставленияОбъекта/Ext/Template.xml",
+            SourceKind::Template,
+            Some("InformationRegisters/ВерсииОбъектов")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_attribute_and_session_parameter_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
