@@ -292,7 +292,7 @@ fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
         .iter()
         .map(|row| row.file_name.as_str())
         .collect::<BTreeSet<_>>();
-    let mut paths = BTreeMap::new();
+    let mut paths = configuration_module_body_paths(&file_names);
 
     for row in rows {
         if row.file_name.contains('.') {
@@ -311,6 +311,53 @@ fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
 
     paths
 }
+
+fn configuration_module_body_paths(file_names: &BTreeSet<&str>) -> BTreeMap<String, PathBuf> {
+    let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for file_name in file_names {
+        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            continue;
+        };
+        if metadata_id.is_empty() {
+            continue;
+        }
+        suffixes_by_id
+            .entry(metadata_id)
+            .or_default()
+            .insert(suffix);
+    }
+
+    let mut paths = BTreeMap::new();
+    for (metadata_id, suffixes) in suffixes_by_id {
+        if file_names.contains(metadata_id) || !is_configuration_module_group(&suffixes) {
+            continue;
+        }
+        for (suffix, path) in CONFIGURATION_MODULE_SUFFIXES {
+            let body_id = format!("{metadata_id}.{suffix}");
+            if file_names.contains(body_id.as_str()) {
+                paths.insert(body_id, PathBuf::from(path));
+            }
+        }
+    }
+
+    paths
+}
+
+fn is_configuration_module_group(suffixes: &BTreeSet<&str>) -> bool {
+    ["0", "5", "6", "7"]
+        .iter()
+        .all(|suffix| suffixes.contains(suffix))
+        && ["2", "4", "8", "9", "a", "b", "c"]
+            .iter()
+            .any(|suffix| suffixes.contains(suffix))
+}
+
+const CONFIGURATION_MODULE_SUFFIXES: &[(&str, &str)] = &[
+    ("0", "Ext/OrdinaryApplicationModule.bsl"),
+    ("5", "Ext/ExternalConnectionModule.bsl"),
+    ("6", "Ext/ManagedApplicationModule.bsl"),
+    ("7", "Ext/SessionModule.bsl"),
+];
 
 fn parse_module_body_source_paths_from_metadata_blob(
     blob: &[u8],
@@ -454,6 +501,7 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
         ("CommonCommand", "2") => Some("CommandModule.bsl"),
         ("Constant", "0") => Some("ValueManagerModule.bsl"),
         ("Constant", "1") => Some("ManagerModule.bsl"),
+        ("SettingsStorage", "8") => Some("ManagerModule.bsl"),
         ("Catalog", "0") => Some("ObjectModule.bsl"),
         ("Catalog", "3") => Some("ManagerModule.bsl"),
         ("Report", "0") => Some("ObjectModule.bsl"),
@@ -474,6 +522,8 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
         | ("CalculationRegister", "2")
         | ("InformationRegister", "2") => Some("ManagerModule.bsl"),
         ("DocumentJournal", "1") => Some("ManagerModule.bsl"),
+        ("Task", "6") => Some("ObjectModule.bsl"),
+        ("Task", "7") => Some("ManagerModule.bsl"),
         ("BusinessProcess", "6") => Some("ObjectModule.bsl"),
         ("BusinessProcess", "8") => Some("ManagerModule.bsl"),
         ("ChartOfCharacteristicTypes", "15") => Some("ObjectModule.bsl"),
@@ -2108,11 +2158,32 @@ mod tests {
                 PathBuf::from("DocumentJournals/Interactions/Ext/ManagerModule.bsl"),
             ),
             (
+                "SettingsStorage",
+                "SettingsStorages",
+                "ReportVariants",
+                "8",
+                PathBuf::from("SettingsStorages/ReportVariants/Ext/ManagerModule.bsl"),
+            ),
+            (
                 "Enum",
                 "Enums",
                 "Status",
                 "0",
                 PathBuf::from("Enums/Status/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "Task",
+                "Tasks",
+                "PerformerTask",
+                "6",
+                PathBuf::from("Tasks/PerformerTask/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "Task",
+                "Tasks",
+                "PerformerTask",
+                "7",
+                PathBuf::from("Tasks/PerformerTask/Ext/ManagerModule.bsl"),
             ),
             (
                 "BusinessProcess",
@@ -2252,6 +2323,87 @@ mod tests {
             Some("CommonModules/TestModule/Ext/Module.bsl")
         );
         assert_eq!(fs::read(root.join(expected)).unwrap(), text);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_configuration_module_text_to_source_layout_without_metadata_row() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let ordinary_text = b"Procedure OnStart()\r\nEndProcedure\r\n";
+        let external_text = b"Procedure OnConnect()\r\nEndProcedure\r\n";
+        let managed_text = b"Procedure BeforeStart()\r\nEndProcedure\r\n";
+        let session_text = b"Procedure SetSessionParameters(Names)\r\nEndProcedure\r\n";
+        let ordinary_body = pack_module_blob_bytes(ordinary_text, None, None)
+            .unwrap()
+            .blob;
+        let external_body = pack_module_blob_bytes(external_text, None, None)
+            .unwrap()
+            .blob;
+        let managed_body = pack_module_blob_bytes(managed_text, None, None)
+            .unwrap()
+            .blob;
+        let session_body = pack_module_blob_bytes(session_text, None, None)
+            .unwrap()
+            .blob;
+        let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1}}");
+        let rows = vec![
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: ordinary_body.len() as i64,
+                binary_hex: encode_hex_for_test(&ordinary_body),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.2"),
+                part_no: 0,
+                data_size: splash_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&splash_blob),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.5"),
+                part_no: 0,
+                data_size: external_body.len() as i64,
+                binary_hex: encode_hex_for_test(&external_body),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.6"),
+                part_no: 0,
+                data_size: managed_body.len() as i64,
+                binary_hex: encode_hex_for_test(&managed_body),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.7"),
+                part_no: 0,
+                data_size: session_body.len() as i64,
+                binary_hex: encode_hex_for_test(&session_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 4);
+        assert_eq!(
+            fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
+            ordinary_text
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/ExternalConnectionModule.bsl")).unwrap(),
+            external_text
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/ManagedApplicationModule.bsl")).unwrap(),
+            managed_text
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/SessionModule.bsl")).unwrap(),
+            session_text
+        );
 
         let _ = fs::remove_dir_all(root);
     }
