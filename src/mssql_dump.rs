@@ -353,6 +353,7 @@ enum SourceAssetKind {
     InflatedBinary,
     PredefinedData {
         xsi_type: &'static str,
+        type_index: BTreeMap<String, String>,
     },
     RoleRights {
         object_refs: BTreeMap<String, String>,
@@ -371,6 +372,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     let metadata_refs = build_metadata_command_reference_index(rows);
     let object_refs = build_metadata_object_reference_index(rows);
     let field_refs = build_metadata_field_reference_index(rows);
+    let type_index = build_metadata_type_index(rows);
     let form_refs = build_form_source_reference_index(rows);
     let template_refs = build_template_source_reference_index(rows);
     let subsystem_refs = build_subsystem_source_reference_index(rows);
@@ -430,6 +432,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             &metadata_refs,
             &object_refs,
             &field_refs,
+            &type_index,
             &subsystem_refs,
         ) {
             paths.insert(body_id, asset);
@@ -527,6 +530,7 @@ fn source_assets_from_metadata_blob(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Vec<(String, SourceAsset)> {
     source_assets_from_metadata_blob_inner(
@@ -538,6 +542,7 @@ fn source_assets_from_metadata_blob(
         metadata_refs,
         object_refs,
         field_refs,
+        type_index,
         subsystem_refs,
     )
     .unwrap_or_default()
@@ -552,6 +557,7 @@ fn source_assets_from_metadata_blob_inner(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<Vec<(String, SourceAsset)>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
@@ -658,13 +664,16 @@ fn source_assets_from_metadata_blob_inner(
         }
         if let Some(xsi_type) = predefined_data_xsi_type(kind)
             && let Ok(predefined_bytes) = decode_hex(&body_row.binary_hex)
-            && parse_predefined_data_blob(&predefined_bytes).is_some()
+            && parse_predefined_data_blob(&predefined_bytes, type_index).is_some()
         {
             assets.push((
                 (*body_id).to_string(),
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("Predefined.xml"),
-                    kind: SourceAssetKind::PredefinedData { xsi_type },
+                    kind: SourceAssetKind::PredefinedData {
+                        xsi_type,
+                        type_index: type_index.clone(),
+                    },
                 },
             ));
         }
@@ -805,8 +814,11 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, content)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::PredefinedData { xsi_type } => {
-            let items = parse_predefined_data_blob(bytes).with_context(|| {
+        SourceAssetKind::PredefinedData {
+            xsi_type,
+            type_index,
+        } => {
+            let items = parse_predefined_data_blob(bytes, type_index).with_context(|| {
                 format!(
                     "failed to extract predefined data from source asset {}",
                     asset.primary_path.display()
@@ -890,6 +902,7 @@ struct PredefinedItem {
     name: String,
     code: String,
     description: String,
+    value_types: Vec<ConstantValueType>,
     is_folder: bool,
     children: Vec<PredefinedItem>,
 }
@@ -1983,20 +1996,23 @@ fn predefined_data_xsi_type(kind: &str) -> Option<&'static str> {
     }
 }
 
-fn parse_predefined_data_blob(bytes: &[u8]) -> Option<Vec<PredefinedItem>> {
+fn parse_predefined_data_blob(
+    bytes: &[u8],
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<PredefinedItem>> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "0" {
+    if !matches!(fields.first()?.trim(), "0" | "1") {
         return None;
     }
     let table_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
     let root_items = table_fields
         .iter()
-        .find_map(|field| parse_predefined_rowset_roots(field))?;
+        .find_map(|field| parse_predefined_rowset_roots(field, type_index))?;
     if let [root_item] = root_items.as_slice()
-        && root_item.name == "Элементы"
+        && matches!(root_item.name.as_str(), "Элементы" | "Характеристики")
     {
         Some(root_item.children.clone())
     } else {
@@ -2004,17 +2020,23 @@ fn parse_predefined_data_blob(bytes: &[u8]) -> Option<Vec<PredefinedItem>> {
     }
 }
 
-fn parse_predefined_rowset_roots(value: &str) -> Option<Vec<PredefinedItem>> {
+fn parse_predefined_rowset_roots(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<PredefinedItem>> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != "2" {
         return None;
     }
     fields
         .iter()
-        .find_map(|field| parse_predefined_children(field))
+        .find_map(|field| parse_predefined_children(field, type_index))
 }
 
-fn parse_predefined_item(value: &str) -> Option<PredefinedItem> {
+fn parse_predefined_item(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<PredefinedItem> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != "2" {
         return None;
@@ -2031,16 +2053,30 @@ fn parse_predefined_item(value: &str) -> Option<PredefinedItem> {
         .get(value_start + 1)
         .and_then(|field| parse_predefined_bool_value(field))
         .unwrap_or(false);
+    let has_parent_ref = fields
+        .get(value_start + 2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .and_then(|field| field.first().map(|value| value.trim() == r##""#""##))
+        .unwrap_or(false);
+    let name_offset = if has_parent_ref {
+        value_start + 3
+    } else {
+        value_start + 2
+    };
     let name = fields
-        .get(value_start + 3)
+        .get(name_offset)
         .and_then(|field| parse_predefined_string_value(field))?;
     let code = fields
-        .get(value_start + 4)
+        .get(name_offset + 1)
         .and_then(|field| parse_predefined_string_value(field))
         .unwrap_or_default();
     let description = fields
-        .get(value_start + 5)
+        .get(name_offset + 2)
         .and_then(|field| parse_predefined_string_value(field))
+        .unwrap_or_default();
+    let value_types = fields
+        .get(name_offset + 3)
+        .and_then(|field| parse_predefined_type_value(field, type_index))
         .unwrap_or_default();
     let children = if fields
         .get(after_values)
@@ -2048,7 +2084,7 @@ fn parse_predefined_item(value: &str) -> Option<PredefinedItem> {
     {
         fields
             .get(after_values + 1)
-            .and_then(|field| parse_predefined_children(field))
+            .and_then(|field| parse_predefined_children(field, type_index))
             .unwrap_or_default()
     } else {
         Vec::new()
@@ -2059,12 +2095,16 @@ fn parse_predefined_item(value: &str) -> Option<PredefinedItem> {
         name,
         code,
         description,
+        value_types,
         is_folder,
         children,
     })
 }
 
-fn parse_predefined_children(value: &str) -> Option<Vec<PredefinedItem>> {
+fn parse_predefined_children(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<PredefinedItem>> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != "1" {
         return None;
@@ -2074,13 +2114,24 @@ fn parse_predefined_children(value: &str) -> Option<Vec<PredefinedItem>> {
         .iter()
         .skip(2)
         .take(count)
-        .filter_map(|field| parse_predefined_item(field))
+        .filter_map(|field| parse_predefined_item(field, type_index))
         .collect::<Vec<_>>();
     if children.len() == count {
         Some(children)
     } else {
         None
     }
+}
+
+fn parse_predefined_type_value(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r##""#""## {
+        return None;
+    }
+    parse_metadata_type_pattern(fields.get(2)?, type_index)
 }
 
 fn parse_predefined_uuid_value(value: &str) -> Option<String> {
@@ -2244,11 +2295,13 @@ fn push_predefined_item_xml(xml: &mut String, item: &PredefinedItem, indent: usi
 {tab}\t<Name>{}</Name>\r\n\
 {tab}\t<Code>{}</Code>\r\n\
 {tab}\t<Description>{}</Description>\r\n\
+{}\
 {tab}\t<IsFolder>{}</IsFolder>\r\n",
         escape_xml_text(&item.id),
         escape_xml_text(&item.name),
         escape_xml_text(&item.code),
         escape_xml_text(&item.description),
+        format_predefined_type_xml(&item.value_types, indent + 1),
         xml_bool(item.is_folder),
     ));
     if !item.children.is_empty() {
@@ -2259,6 +2312,58 @@ fn push_predefined_item_xml(xml: &mut String, item: &PredefinedItem, indent: usi
         xml.push_str(&format!("{tab}\t</ChildItems>\r\n"));
     }
     xml.push_str(&format!("{tab}</Item>\r\n"));
+}
+
+fn format_predefined_type_xml(value_types: &[ConstantValueType], indent: usize) -> String {
+    if value_types.is_empty() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<Type>\r\n");
+    for value_type in value_types {
+        match value_type {
+            ConstantValueType::Reference { reference } if reference.starts_with("cfg:") => {
+                xml.push_str(&format!(
+                    "{tab}\t<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">d4p1:{}</v8:Type>\r\n",
+                    escape_xml_text(reference.trim_start_matches("cfg:"))
+                ));
+            }
+            _ => {
+                xml.push_str(&format!(
+                    "{tab}\t<v8:Type>{}</v8:Type>\r\n",
+                    metadata_type_xml_name(value_type)
+                ));
+            }
+        }
+    }
+    if let Some((length, allowed_length_flag)) = value_types.iter().find_map(|value_type| {
+        if let ConstantValueType::String {
+            length: Some(length),
+            allowed_length_flag,
+        } = value_type
+        {
+            Some((*length, *allowed_length_flag))
+        } else {
+            None
+        }
+    }) {
+        xml.push_str(&format!("{tab}\t<v8:StringQualifiers>\r\n"));
+        xml.push_str(&format!("{tab}\t\t<v8:Length>{length}</v8:Length>\r\n"));
+        xml.push_str(&format!(
+            "{tab}\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            predefined_string_allowed_length_xml(allowed_length_flag)
+        ));
+        xml.push_str(&format!("{tab}\t</v8:StringQualifiers>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</Type>\r\n"));
+    xml
+}
+
+fn predefined_string_allowed_length_xml(value: u8) -> &'static str {
+    match value {
+        0 => "Fixed",
+        _ => "Variable",
+    }
 }
 
 fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
@@ -2928,6 +3033,7 @@ struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
 }
 
+#[derive(Clone)]
 enum ConstantValueType {
     Boolean,
     String {
@@ -5828,7 +5934,7 @@ mod tests {
             )
             .as_bytes(),
         );
-        assert!(parse_predefined_data_blob(&predefined).is_some());
+        assert!(parse_predefined_data_blob(&predefined, &BTreeMap::new()).is_some());
         let rows = vec![
             ConfigRow {
                 file_name: catalog_uuid.to_string(),
@@ -5866,6 +5972,85 @@ mod tests {
         assert_eq!(
             predefined_row.source_asset_path.as_deref(),
             Some("Catalogs/Products/Ext/Predefined.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_chart_of_characteristic_types_predefined_data_with_types() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let chart_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_uuid = "11111111-1111-4111-8111-111111111111";
+        let ref_type_uuid = "22222222-2222-4222-8222-222222222222";
+        let selection_type_uuid = "33333333-3333-4333-8333-333333333333";
+        let value_type_uuid = "f5c65050-3bbb-11d5-b988-0050bae0a95d";
+        let predefined_type_uuid = "ae135932-4f94-44df-92c1-c91f15a92848";
+        let string_item_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let ref_item_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,{{34,{object_type_uuid},00000000-0000-0000-0000-000000000000,{ref_type_uuid},00000000-0000-0000-0000-000000000000,{selection_type_uuid},{{3,{{1,0,{chart_uuid}}},\"Kinds\",{{1,\"en\",\"Kinds\"}},\"\"}}}}}}"
+            )
+            .as_bytes(),
+        );
+        let predefined = deflate_for_test(
+            format!(
+                "{{1,{{1,{{7}},{{2,{{1,1,{{2,0,6,{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"S\",\"Характеристики\"}},{{\"S\",\"\"}},{{\"S\",\"\"}},{{\"#\",{value_type_uuid},{{\"Pattern\"}}}},1,{{1,2,{{2,1,7,{{\"#\",{predefined_type_uuid},{{1,{string_item_uuid}}}}},{{\"B\",0}},{{\"S\",\"StringKind\"}},{{\"S\",\"\"}},{{\"S\",\"String kind\"}},{{\"#\",{value_type_uuid},{{\"Pattern\",{{\"S\",10,1}}}}}},{{\"N\",0}},0}},{{2,2,7,{{\"#\",{predefined_type_uuid},{{1,{ref_item_uuid}}}}},{{\"B\",0}},{{\"S\",\"RefKind\"}},{{\"S\",\"\"}},{{\"S\",\"Ref kind\"}},{{\"#\",{value_type_uuid},{{\"Pattern\",{{\"#\",{ref_type_uuid}}}}}}},{{\"N\",0}},0}}}}}}}}}},-1,1}}}}"
+            )
+            .as_bytes(),
+        );
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            ref_type_uuid.to_string(),
+            "cfg:ChartOfCharacteristicTypesRef.Kinds".to_string(),
+        );
+        let parsed = parse_predefined_data_blob(&predefined, &type_index).unwrap();
+        assert_eq!(parsed.len(), 2);
+        let rows = vec![
+            ConfigRow {
+                file_name: chart_uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{chart_uuid}.7"),
+                part_no: 0,
+                data_size: predefined.len() as i64,
+                binary_hex: encode_hex_for_test(&predefined),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml =
+            fs::read_to_string(root.join("ChartsOfCharacteristicTypes/Kinds/Ext/Predefined.xml"))
+                .unwrap();
+        assert!(xml.contains(r#"xsi:type="PlanOfCharacteristicKindPredefinedItems""#));
+        assert!(xml.contains(&format!(r#"<Item id="{string_item_uuid}">"#)));
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
+        assert!(xml.contains("<v8:StringQualifiers>"));
+        assert!(xml.contains("<v8:Length>10</v8:Length>"));
+        assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
+        assert!(xml.contains(&format!(r#"<Item id="{ref_item_uuid}">"#)));
+        assert!(
+            xml.contains(r#"<v8:Type xmlns:d4p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d4p1:ChartOfCharacteristicTypesRef.Kinds</v8:Type>"#)
+        );
+        let predefined_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{chart_uuid}.7"))
+            .unwrap();
+        assert_eq!(
+            predefined_row.source_asset_path.as_deref(),
+            Some("ChartsOfCharacteristicTypes/Kinds/Ext/Predefined.xml")
         );
 
         let _ = fs::remove_dir_all(root);
