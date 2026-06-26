@@ -169,6 +169,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_common_command_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageCommonFormObject(args) => {
+            let report = ibcmd_rs::mssql::stage_common_form_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())

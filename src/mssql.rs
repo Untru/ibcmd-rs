@@ -14,6 +14,7 @@ use crate::cli::{
     MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
     MssqlStageCatalogObjectArgs, MssqlStageDataProcessorObjectArgs,
     MssqlStageCommonCommandObjectArgs,
+    MssqlStageCommonFormObjectArgs,
     MssqlStageDocumentJournalObjectArgs, MssqlStageExchangePlanObjectArgs,
     MssqlStageInformationRegisterObjectArgs, MssqlStageMetadataObjectsArgs,
     MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs, MssqlStageScheduledJobObjectArgs,
@@ -1025,6 +1026,22 @@ pub fn stage_role_object(args: &MssqlStageRoleObjectArgs) -> Result<StageMetadat
 
 pub fn stage_common_command_object(
     args: &MssqlStageCommonCommandObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_common_form_object(
+    args: &MssqlStageCommonFormObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
