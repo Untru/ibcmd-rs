@@ -125,6 +125,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_metadata_objects(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageExchangePlanObject(args) => {
+            let report = ibcmd_rs::mssql::stage_exchange_plan_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())

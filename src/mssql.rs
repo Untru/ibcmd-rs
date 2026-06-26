@@ -11,8 +11,8 @@ use crate::cli::{
     MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs, MssqlDeltaImportArgs,
     MssqlStageCommonModuleArgs, MssqlStageCommonModuleMetadataArgs,
     MssqlStageCommonModuleObjectArgs, MssqlStageCommonModuleObjectsArgs,
-    MssqlStageCommonModulesArgs, MssqlStageMetadataObjectsArgs, MssqlStorageExportArgs,
-    MssqlStorageImportArgs,
+    MssqlStageCommonModulesArgs, MssqlStageExchangePlanObjectArgs,
+    MssqlStageMetadataObjectsArgs, MssqlStorageExportArgs, MssqlStorageImportArgs,
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
@@ -862,6 +862,22 @@ pub fn stage_metadata_objects(
         },
         version_replacements: patched_versions.replacements,
     })
+}
+
+pub fn stage_exchange_plan_object(
+    args: &MssqlStageExchangePlanObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
 }
 
 fn prepare_metadata_object_stage(
