@@ -5200,6 +5200,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         std::fs::create_dir_all(root.join("DataProcessors")).unwrap();
         std::fs::create_dir_all(root.join("Documents")).unwrap();
         std::fs::create_dir_all(root.join("ExchangePlans")).unwrap();
+        std::fs::create_dir_all(root.join("Enums")).unwrap();
+        std::fs::create_dir_all(root.join("InformationRegisters")).unwrap();
         std::fs::create_dir_all(root.join("Reports")).unwrap();
 
         std::fs::write(
@@ -5212,6 +5214,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
       <GeneratedTypes>
         <GeneratedType name="CatalogTabularSection.РолиИсполнителей.Товары">
           <TypeId>21212121-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </Catalog>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Catalogs/РолиИсполнителей.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Catalog uuid="20202020-2020-4202-8202-202020202020">
+    <Properties>
+      <Name>РолиИсполнителей</Name>
+      <GeneratedTypes>
+        <GeneratedType name="CatalogRef.РолиИсполнителей">
+          <TypeId>22222222-2222-4222-8222-222222222222</TypeId>
+        </GeneratedType>
+        <GeneratedType name="CatalogSelection.РолиИсполнителей">
+          <TypeId>23232323-2323-4232-8232-232323232323</TypeId>
+        </GeneratedType>
+        <GeneratedType name="CatalogList.РолиИсполнителей">
+          <TypeId>24242424-2424-4242-8242-242424242424</TypeId>
+        </GeneratedType>
+        <GeneratedType name="CatalogManager.РолиИсполнителей">
+          <TypeId>25252525-2525-4252-8252-252525252525</TypeId>
         </GeneratedType>
       </GeneratedTypes>
     </Properties>
@@ -5396,6 +5425,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     <Properties>
       <Name>АктОбУничтоженииПерсональныхДанных</Name>
       <GeneratedTypes>
+        <GeneratedType name="DocumentRef.АктОбУничтоженииПерсональныхДанных">
+          <TypeId>26262626-2626-4262-8262-262626262626</TypeId>
+        </GeneratedType>
+        <GeneratedType name="DocumentSelection.АктОбУничтоженииПерсональныхДанных">
+          <TypeId>27272727-2727-4272-8272-272727272727</TypeId>
+        </GeneratedType>
+        <GeneratedType name="DocumentList.АктОбУничтоженииПерсональныхДанных">
+          <TypeId>28282828-2828-4282-8282-282828282828</TypeId>
+        </GeneratedType>
+        <GeneratedType name="DocumentManager.АктОбУничтоженииПерсональныхДанных">
+          <TypeId>29292929-2929-4292-8292-292929292929</TypeId>
+        </GeneratedType>
         <GeneratedType name="DocumentTabularSection.АктОбУничтоженииПерсональныхДанных.Товары">
           <TypeId>1e1e1e1e-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
         </GeneratedType>
@@ -5426,6 +5467,57 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
       </GeneratedTypes>
     </Properties>
   </Document>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Enums/ВариантыВажностиЗадачи.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Enum uuid="19191919-1919-4191-8191-191919191919">
+    <Properties>
+      <Name>ВариантыВажностиЗадачи</Name>
+      <GeneratedTypes>
+        <GeneratedType name="EnumRef.ВариантыВажностиЗадачи">
+          <TypeId>30303030-3030-4303-8303-303030303030</TypeId>
+        </GeneratedType>
+        <GeneratedType name="EnumList.ВариантыВажностиЗадачи">
+          <TypeId>31313131-3131-4313-8313-313131313131</TypeId>
+        </GeneratedType>
+        <GeneratedType name="EnumManager.ВариантыВажностиЗадачи">
+          <TypeId>32323232-3232-4323-8323-323232323232</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </Enum>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("InformationRegisters/АдминистративнаяИерархия.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <InformationRegister uuid="33333333-3333-4333-8333-333333333334">
+    <Properties>
+      <Name>АдминистративнаяИерархия</Name>
+      <GeneratedTypes>
+        <GeneratedType name="InformationRegisterRecord.АдминистративнаяИерархия">
+          <TypeId>33333333-3333-4333-8333-333333333331</TypeId>
+        </GeneratedType>
+        <GeneratedType name="InformationRegisterRecordSet.АдминистративнаяИерархия">
+          <TypeId>33333333-3333-4333-8333-333333333332</TypeId>
+        </GeneratedType>
+        <GeneratedType name="InformationRegisterRecordKey.АдминистративнаяИерархия">
+          <TypeId>33333333-3333-4333-8333-333333333333</TypeId>
+        </GeneratedType>
+        <GeneratedType name="InformationRegisterRecordManager.АдминистративнаяИерархия">
+          <TypeId>33333333-3333-4333-8333-333333333335</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </InformationRegister>
 </MetaDataObject>
 "#,
         )
@@ -5502,6 +5594,22 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "21212121-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
             (
+                "CatalogRef.РолиИсполнителей",
+                "22222222-2222-4222-8222-222222222222",
+            ),
+            (
+                "CatalogSelection.РолиИсполнителей",
+                "23232323-2323-4232-8232-232323232323",
+            ),
+            (
+                "CatalogList.РолиИсполнителей",
+                "24242424-2424-4242-8242-242424242424",
+            ),
+            (
+                "CatalogManager.РолиИсполнителей",
+                "25252525-2525-4252-8252-252525252525",
+            ),
+            (
                 "ChartOfCharacteristicTypesTabularSection.ОбъектыАдресацииЗадач.Товары",
                 "1c1c1c1c-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
@@ -5526,8 +5634,52 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "1e1e1e1e-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
             (
+                "DocumentRef.АктОбУничтоженииПерсональныхДанных",
+                "26262626-2626-4262-8262-262626262626",
+            ),
+            (
+                "DocumentSelection.АктОбУничтоженииПерсональныхДанных",
+                "27272727-2727-4272-8272-272727272727",
+            ),
+            (
+                "DocumentList.АктОбУничтоженииПерсональныхДанных",
+                "28282828-2828-4282-8282-282828282828",
+            ),
+            (
+                "DocumentManager.АктОбУничтоженииПерсональныхДанных",
+                "29292929-2929-4292-8292-292929292929",
+            ),
+            (
                 "ExchangePlanObject.ОбновлениеИнформационнойБазы",
                 "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "EnumRef.ВариантыВажностиЗадачи",
+                "30303030-3030-4303-8303-303030303030",
+            ),
+            (
+                "EnumList.ВариантыВажностиЗадачи",
+                "31313131-3131-4313-8313-313131313131",
+            ),
+            (
+                "EnumManager.ВариантыВажностиЗадачи",
+                "32323232-3232-4323-8323-323232323232",
+            ),
+            (
+                "InformationRegisterRecord.АдминистративнаяИерархия",
+                "33333333-3333-4333-8333-333333333331",
+            ),
+            (
+                "InformationRegisterRecordSet.АдминистративнаяИерархия",
+                "33333333-3333-4333-8333-333333333332",
+            ),
+            (
+                "InformationRegisterRecordKey.АдминистративнаяИерархия",
+                "33333333-3333-4333-8333-333333333333",
+            ),
+            (
+                "InformationRegisterRecordManager.АдминистративнаяИерархия",
+                "33333333-3333-4333-8333-333333333335",
             ),
             (
                 "ReportObject.БизнесПроцессы",
