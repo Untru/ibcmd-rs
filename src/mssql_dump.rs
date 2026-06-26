@@ -316,6 +316,7 @@ enum SourceAssetKind {
     Binary,
     ExtPicture,
     Help,
+    InflatedBinary,
     Schedule,
 }
 
@@ -431,6 +432,10 @@ fn source_assets_from_metadata_blob_inner(
                 primary_path: object_path.join("Ext").join("Schedule.xml"),
                 kind: SourceAssetKind::Schedule,
             }),
+            "XDTOPackage" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("Package.bin"),
+                kind: SourceAssetKind::InflatedBinary,
+            }),
             _ => None,
         };
         if let Some(asset) = asset {
@@ -525,6 +530,21 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             }
             fs::write(&xml_path, format_help_xml(&pages))
                 .with_context(|| format!("failed to write {}", xml_path.display()))?;
+        }
+        SourceAssetKind::InflatedBinary => {
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, inflated)
+                .with_context(|| format!("failed to write {}", path.display()))?;
         }
     }
 
@@ -3618,6 +3638,58 @@ mod tests {
         assert_eq!(
             help_row.source_asset_path.as_deref(),
             Some("Catalogs/Products/Ext/Help.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_xdto_package_body_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{uuid}}},\"Exchange\",{{1,\"en\",\"Exchange\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"http://example.com/exchange\"}},0}}"
+            )
+            .as_bytes(),
+        );
+        let package = b"\xef\xbb\xbf<package xmlns=\"http://v8.1c.ru/8.1/xdto\"/>";
+        let body = deflate_for_test(package);
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("XDTOPackages/Exchange/Ext/Package.bin")).unwrap(),
+            package
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("XDTOPackages/Exchange/Ext/Package.bin")
         );
 
         let _ = fs::remove_dir_all(root);
