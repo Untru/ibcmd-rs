@@ -1103,6 +1103,57 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_common_command_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-common-command-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("CommonCommands/АвтономнаяРабота.xml"),
+            root.join("CommonCommands/АвтономнаяРабота.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl"),
+            root.join("CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "CommonCommands/АвтономнаяРабота.xml",
+            SourceKind::MetadataXml,
+            Some("CommonCommands/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("CommonCommands/АвтономнаяРабота")
+        )));
+    }
+
+    #[test]
     fn scans_real_role_and_scheduled_job_ext_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
