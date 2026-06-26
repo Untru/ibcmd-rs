@@ -2752,6 +2752,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "Subsystem" => Some(("Subsystem", "Subsystems")),
         "WebService" => Some(("WebService", "WebServices")),
         "XDTOPackage" => Some(("XDTOPackage", "XDTOPackages")),
+        "Enum" => Some(("Enum", "Enums")),
         _ => None,
     }
 }
@@ -4571,6 +4572,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "SettingsStorage.ХранилищеВариантовОтчетов",
                 "14512818-58b0-44cc-b00d-d37913c57aad",
+            ),
+            (
+                "Enum.ВариантыВажностиЗадачи",
+                "c39750ca-e33f-40c2-b830-119423d9a2ae",
             ),
             (
                 "SessionParameter.АвторизованныйПользователь",
