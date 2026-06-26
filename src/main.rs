@@ -133,6 +133,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_business_process_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageDocumentJournalObject(args) => {
+            let report = ibcmd_rs::mssql::stage_document_journal_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())
