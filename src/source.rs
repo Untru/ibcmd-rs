@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufReader, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -101,13 +101,16 @@ fn scan_file(path: &Path, relative: &Path) -> Result<SourceFile> {
         fs::metadata(path).with_context(|| format!("failed to stat {}", path.display()))?;
     let relative_text = normalize_path(relative);
     let needs_xml_root = is_xml(path) && should_parse_xml_root(&relative_text);
-    let (sha256_result, xml_root_result) = if needs_xml_root {
-        rayon::join(|| sha256_file(path), || first_xml_element(path))
+    let (sha256, xml_root) = if needs_xml_root {
+        let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let (sha256_result, xml_root_result) = rayon::join(
+            || sha256_bytes(&bytes),
+            || first_xml_element_from_bytes(&bytes, path),
+        );
+        (sha256_result?, xml_root_result?)
     } else {
-        (sha256_file(path), Ok(None))
+        (sha256_file(path)?, None)
     };
-    let sha256 = sha256_result?;
-    let xml_root = xml_root_result?;
     let kind = classify(path, &relative_text, xml_root.as_deref());
     let object_hint = infer_object_hint(&relative_text, &kind, xml_root.as_deref());
 
@@ -140,10 +143,14 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn first_xml_element(path: &Path) -> Result<Option<String>> {
-    let file =
-        File::open(path).with_context(|| format!("failed to open xml {}", path.display()))?;
-    let mut reader = Reader::from_reader(BufReader::new(file));
+fn sha256_bytes(bytes: &[u8]) -> Result<String> {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn first_xml_element_from_bytes(bytes: &[u8], path: &Path) -> Result<Option<String>> {
+    let mut reader = Reader::from_reader(bytes);
     reader.config_mut().trim_text(true);
 
     let mut buffer = Vec::new();
