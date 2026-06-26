@@ -104,7 +104,11 @@ fn scan_file(path: &Path, relative: &Path) -> Result<SourceFile> {
     let sha256 = sha256_file(path)?;
     let relative_text = normalize_path(relative);
     let xml_root = if is_xml(path) {
-        first_xml_element(path).unwrap_or(None)
+        if should_parse_xml_root(&relative_text) {
+            first_xml_element(path).unwrap_or(None)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -286,6 +290,23 @@ fn is_ignored(path: &Path) -> bool {
 
 fn is_metadata_subfile(relative_lower: &str) -> bool {
     relative_lower.starts_with("ext/") || relative_lower.contains("/ext/")
+}
+
+fn should_parse_xml_root(relative: &str) -> bool {
+    let lower = relative.to_ascii_lowercase();
+    if lower == "configuration.xml" {
+        return true;
+    }
+    if lower.contains("/forms/") || lower.ends_with("/form.xml") {
+        return false;
+    }
+    if lower.contains("/templates/") || lower.ends_with("/template.xml") {
+        return false;
+    }
+    if has_metadata_collection_folder(&lower) || is_metadata_subfile(&lower) {
+        return false;
+    }
+    true
 }
 
 fn has_metadata_collection_folder(relative_lower: &str) -> bool {
@@ -602,6 +623,31 @@ mod tests {
             ),
             Some("CommandGroups/Органайзер".to_string())
         );
+    }
+
+    #[test]
+    fn scans_metadata_collection_xml_without_parsing_root_element() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-scan-lazy-xml-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs")).unwrap();
+        std::fs::write(
+            root.join("Catalogs/Invalid.xml"),
+            b"<Catalog uuid=\"11111111-1111-4111-8111-111111111111\">",
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let file = manifest
+            .files
+            .iter()
+            .find(|file| file.path == "Catalogs/Invalid.xml")
+            .expect("expected invalid catalog xml to be included");
+        assert_eq!(file.kind, SourceKind::MetadataXml);
+        assert_eq!(file.object_hint.as_deref(), Some("Catalogs/Invalid"));
     }
 
     #[test]
