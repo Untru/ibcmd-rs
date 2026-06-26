@@ -345,6 +345,7 @@ fn parse_module_body_source_paths_from_metadata_blob(
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
     let module_file = match (kind, suffix) {
         ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
+        ("CommonCommand", "2") => Some("CommandModule.bsl"),
         ("Catalog", "0") => Some("ObjectModule.bsl"),
         ("Catalog", "3") => Some("ManagerModule.bsl"),
         ("Report", "0") => Some("ObjectModule.bsl"),
@@ -699,6 +700,9 @@ fn metadata_source_for_text(
         1 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
             Some(("XDTOPackage", "XDTOPackages"))
         }
+        2 if contains_wrapped_metadata_object_code(text, 9, uuid) => {
+            Some(("CommonCommand", "CommonCommands"))
+        }
         2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
             Some(("HTTPService", "HTTPServices"))
         }
@@ -722,6 +726,7 @@ fn metadata_source_for_text(
         }
         5 => Some(("CommonAttribute", "CommonAttributes")),
         6 => Some(("Role", "Roles")),
+        9 => Some(("CommonCommand", "CommonCommands")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
         17 => Some(("DataProcessor", "DataProcessors")),
         19 => Some(("Report", "Reports")),
@@ -749,6 +754,12 @@ fn metadata_source_for_text(
 
 fn is_typed_metadata_source(kind: &str) -> bool {
     matches!(kind, "SessionParameter" | "CommonAttribute")
+}
+
+fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> bool {
+    let marker = format!("{{1,0,{uuid}}}");
+    let code_marker = format!("{{{code},");
+    text.contains(&marker) && text.contains(&code_marker)
 }
 
 fn is_defined_type_metadata_text(text: &str, uuid: &str) -> bool {
@@ -2022,6 +2033,13 @@ mod tests {
                 "16",
                 PathBuf::from("ChartsOfCharacteristicTypes/Kinds/Ext/ManagerModule.bsl"),
             ),
+            (
+                "CommonCommand",
+                "CommonCommands",
+                "OpenSettings",
+                "2",
+                PathBuf::from("CommonCommands/OpenSettings/Ext/CommandModule.bsl"),
+            ),
         ];
 
         for (kind, folder, name, suffix, expected) in cases {
@@ -2193,6 +2211,55 @@ mod tests {
     }
 
     #[test]
+    fn writes_common_command_module_text_to_source_layout_when_metadata_is_present() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{1,\r\n{{2,{uuid},078a6af8-d22c-4248-9c33-7e90075a3d2c}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Open settings\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{uuid}}},\"OpenSettings\",{{1,\"en\",\"Open settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let text = b"Procedure Run(CommandParameter)\r\nEndProcedure\r\n";
+        let body = pack_module_blob_bytes(text, None, None).unwrap().blob;
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.2"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 1);
+        let expected = root.join("CommonCommands/OpenSettings/Ext/CommandModule.bsl");
+        assert_eq!(fs::read(expected).unwrap(), text);
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.2"))
+            .unwrap();
+        assert_eq!(
+            body_row.module_text_path.as_deref(),
+            Some("CommonCommands/OpenSettings/Ext/CommandModule.bsl")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn writes_object_family_module_text_to_source_layout_when_metadata_is_present() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -2324,6 +2391,28 @@ mod tests {
         assert_eq!(properties.kind, "ChartOfCharacteristicTypes");
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "ExpenseItems");
+    }
+
+    #[test]
+    fn extracts_common_command_xml_from_metadata_blob() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{1,\r\n{{2,{uuid},078a6af8-d22c-4248-9c33-7e90075a3d2c}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Open settings\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{uuid}}},\"OpenSettings\",{{1,\"en\",\"Open settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("CommonCommands").join("OpenSettings.xml")
+        );
+        assert_eq!(properties.kind, "CommonCommand");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "OpenSettings");
     }
 
     #[test]
