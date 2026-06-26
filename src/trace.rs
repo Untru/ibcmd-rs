@@ -91,7 +91,7 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
 
     let mut groups = merged
         .groups
-        .into_iter()
+        .into_par_iter()
         .map(|(normalized_sql, group)| {
             let average_duration_us = if group.count == 0 {
                 0
