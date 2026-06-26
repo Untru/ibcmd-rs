@@ -1911,9 +1911,11 @@ fn quote_string_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ColumnShape, TableShape, compare_shapes, infer_common_module_text_path, quote_ident,
-        quote_string, require_non_lab_confirmation,
+        ColumnShape, PreparedMetadataObjectStage, TableShape, compare_shapes,
+        infer_common_module_text_path, quote_ident, quote_string, require_non_lab_confirmation,
     };
+    use crate::module_blob::SimpleMetadataXmlProperties;
+    use std::path::PathBuf;
 
     #[test]
     fn quotes_sql_identifier_and_string() {
@@ -1948,6 +1950,34 @@ mod tests {
             infer_common_module_text_path(r"CommonModules\РаботаСБанкамиВызовСервера.xml".as_ref()),
             std::path::PathBuf::from(r"CommonModules\РаботаСБанкамиВызовСервера\Ext\Module.bsl")
         );
+    }
+
+    #[test]
+    fn builds_metadata_object_stage_sql_with_expected_row_counts() {
+        let prepared = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "CommonPicture".to_string(),
+            xml: PathBuf::from("CommonPictures/TestPicture.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "CommonPicture".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "TestPicture".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+        }];
+
+        let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xAA, 0xBB]);
+
+        assert!(sql.contains("USE [TestDb];"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 2 THROW 54000"));
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
+        assert!(sql.contains("0x012345"));
+        assert!(sql.contains("0xAABB"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 4"));
     }
 
     #[test]
