@@ -4325,6 +4325,22 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "DataProcessorObject.АвтоматическоеИзвлечениеТекстов",
+                "5db20d4f-615f-4911-9cd4-45ff4f623dd2",
+            ),
+            (
+                "DataProcessorManager.АвтоматическоеИзвлечениеТекстов",
+                "76b2ec7a-4ddb-4d50-aec2-4a1b6bb1b3b9",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
