@@ -2182,6 +2182,10 @@ fn extract_ext_picture(bytes: &[u8]) -> Result<Vec<u8>> {
 fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "Picture.png"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "Picture.gif"
+    } else if bytes.starts_with(b"\x00\x00\x01\x00") {
+        "Picture.ico"
     } else if bytes.starts_with(b"PK\x03\x04") {
         "Picture.zip"
     } else if let Ok(text) = std::str::from_utf8(bytes) {
@@ -7993,6 +7997,21 @@ mod tests {
             index.get(chart_ref_type_id).map(String::as_str),
             Some("cfg:ChartOfCharacteristicTypesRef.ExpenseItems")
         );
+    }
+
+    #[test]
+    fn detects_ext_picture_binary_file_names() {
+        assert_eq!(
+            ext_picture_file_name(b"\x89PNG\r\n\x1a\npayload"),
+            "Picture.png"
+        );
+        assert_eq!(ext_picture_file_name(b"GIF87apayload"), "Picture.gif");
+        assert_eq!(ext_picture_file_name(b"GIF89apayload"), "Picture.gif");
+        assert_eq!(
+            ext_picture_file_name(b"\x00\x00\x01\x00payload"),
+            "Picture.ico"
+        );
+        assert_eq!(ext_picture_file_name(b"PK\x03\x04payload"), "Picture.zip");
     }
 
     #[test]
