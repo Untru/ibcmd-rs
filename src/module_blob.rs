@@ -5897,6 +5897,110 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn resolves_simple_metadata_references_from_synthetic_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-simple-refs-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+
+        let cases = [
+            ("CommonAttributes", "ОтредактированныеПредопределенныеРеквизиты", "CommonAttribute", "41414141-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("CommonForms", "ФормаОтчета", "CommonForm", "42424242-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("CommonTemplates", "СтруктураПодчиненности", "CommonTemplate", "43434343-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("EventSubscriptions", "ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных", "EventSubscription", "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("FunctionalOptions", "ВыполнятьЗамерыПроизводительности", "FunctionalOption", "45454545-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("FunctionalOptionsParameters", "ОбщиеНастройкиУзлов", "FunctionalOptionsParameter", "46464646-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("HTTPServices", "exchange_dsl_1_0_0_1", "HTTPService", "47474747-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Languages", "Русский", "Language", "48484848-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Roles", "АдминистраторСистемы", "Role", "49494949-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("ScheduledJobs", "ЗагрузкаКурсовВалют", "ScheduledJob", "4a4a4a4a-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("SettingsStorages", "ХранилищеВариантовОтчетов", "SettingsStorage", "4b4b4b4b-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("StyleItems", "ВажнаяНадписьШрифт", "StyleItem", "4c4c4c4c-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Subsystems", "СтандартныеПодсистемы", "Subsystem", "4d4d4d4d-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Tasks", "ЗадачаИсполнителя", "Task", "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("WebServices", "RemoteControl", "WebService", "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("XDTOPackages", "АдминистрированиеОбменаДанными_2_4_5_1", "XDTOPackage", "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+        ];
+
+        for (folder, name, kind, uuid) in cases {
+            std::fs::create_dir_all(root.join(folder)).unwrap();
+            std::fs::write(
+                root.join(folder).join(format!("{name}.xml")),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <{kind} uuid="{uuid}">
+    <Properties>
+      <Name>{name}</Name>
+    </Properties>
+  </{kind}>
+</MetaDataObject>
+"#
+                ),
+            )
+            .unwrap();
+        }
+
+        let source = MetadataSourceContext::new(root);
+        for (reference, expected_uuid) in [
+            (
+                "CommonAttribute.ОтредактированныеПредопределенныеРеквизиты",
+                "41414141-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "CommonForm.ФормаОтчета",
+                "42424242-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "CommonTemplate.СтруктураПодчиненности",
+                "43434343-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "EventSubscription.ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных",
+                "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "FunctionalOption.ВыполнятьЗамерыПроизводительности",
+                "45454545-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "FunctionalOptionsParameter.ОбщиеНастройкиУзлов",
+                "46464646-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "HTTPService.exchange_dsl_1_0_0_1",
+                "47474747-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            ("Language.Русский", "48484848-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "Role.АдминистраторСистемы",
+                "49494949-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ScheduledJob.ЗагрузкаКурсовВалют",
+                "4a4a4a4a-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "SettingsStorage.ХранилищеВариантовОтчетов",
+                "4b4b4b4b-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            ("StyleItem.ВажнаяНадписьШрифт", "4c4c4c4c-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Subsystem.СтандартныеПодсистемы", "4d4d4d4d-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Task.ЗадачаИсполнителя", "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("WebService.RemoteControl", "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1",
+                "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_reference_uuid(reference).unwrap(),
+                expected_uuid
+            );
+        }
+    }
+
+    #[test]
     fn patches_versions_uuids_without_changing_text_length() {
         let mut text = "\u{feff}{1,2,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"root\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\"file.0\",cccccccc-cccc-4ccc-cccc-cccccccccccc}".to_string();
         let original_len = text.len();
