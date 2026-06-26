@@ -164,7 +164,7 @@ fn dump_table_rows(
             .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
     }
     let module_text_paths = if extract_module_text {
-        common_module_body_paths(&rows)
+        module_body_paths(&rows)
     } else {
         BTreeMap::new()
     };
@@ -282,7 +282,7 @@ fn dump_table_rows(
     })
 }
 
-fn common_module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
+fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
     let file_names = rows
         .iter()
         .map(|row| row.file_name.as_str())
@@ -300,13 +300,29 @@ fn common_module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
         let Ok(bytes) = decode_hex(&row.binary_hex) else {
             continue;
         };
-        let Some(name) = parse_common_module_name_from_metadata_blob(&bytes, &row.file_name) else {
+        let Some(path) = parse_module_body_source_path_from_metadata_blob(&bytes, &row.file_name)
+        else {
             continue;
         };
-        paths.insert(body_id, common_module_source_path(&name));
+        paths.insert(body_id, path);
     }
 
     paths
+}
+
+fn parse_module_body_source_path_from_metadata_blob(blob: &[u8], uuid: &str) -> Option<PathBuf> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let object_code = parse_metadata_object_code(text)?;
+    let header = parse_metadata_header_from_text(text, uuid)?;
+
+    if object_code == 12 {
+        return Some(common_module_source_path(&header.name));
+    }
+
+    let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
+    module_owner_source_path(kind, folder, &header.name)
 }
 
 fn common_module_source_path(name: &str) -> PathBuf {
@@ -314,6 +330,18 @@ fn common_module_source_path(name: &str) -> PathBuf {
         .join(sanitize_source_path_segment(name))
         .join("Ext")
         .join("Module.bsl")
+}
+
+fn module_owner_source_path(kind: &str, folder: &str, name: &str) -> Option<PathBuf> {
+    match kind {
+        "HTTPService" | "WebService" => Some(
+            PathBuf::from(folder)
+                .join(sanitize_source_path_segment(name))
+                .join("Ext")
+                .join("Module.bsl"),
+        ),
+        _ => None,
+    }
 }
 
 struct ExtractedMetadataSourceXml {
@@ -638,6 +666,9 @@ fn metadata_source_for_text(
         }
         2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
             Some(("HTTPService", "HTTPServices"))
+        }
+        4 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
+            Some(("WebService", "WebServices"))
         }
         2 if header_index == Some(1)
             && fields.get(2).copied().and_then(parse_uuid_field).is_some()
@@ -1302,46 +1333,6 @@ fn escape_xml_text(value: &str) -> String {
     output
 }
 
-fn parse_common_module_name_from_metadata_blob(blob: &[u8], uuid: &str) -> Option<String> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}');
-    let after_root = text.trim_start().strip_prefix("{1,")?.trim_start();
-    if !after_root.starts_with("{12,") {
-        return None;
-    }
-
-    let uuid_pos = text.find(uuid)?;
-    let after_uuid = &text[uuid_pos + uuid.len()..];
-    let name_start = after_uuid.find("},\"")? + 2;
-    parse_1c_quoted_string(&after_uuid[name_start..])
-}
-
-fn parse_1c_quoted_string(input: &str) -> Option<String> {
-    let mut chars = input.chars();
-    if chars.next()? != '"' {
-        return None;
-    }
-    let mut output = String::new();
-    let mut previous_quote = false;
-    for ch in chars {
-        if ch == '"' {
-            if previous_quote {
-                output.push('"');
-                previous_quote = false;
-            } else {
-                previous_quote = true;
-            }
-            continue;
-        }
-        if previous_quote {
-            return Some(output);
-        }
-        output.push(ch);
-    }
-    None
-}
-
 fn sanitize_source_path_segment(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -1680,6 +1671,83 @@ mod tests {
             Some("CommonModules/TestModule/Ext/Module.bsl")
         );
         assert_eq!(fs::read(root.join(expected)).unwrap(), text);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_service_module_text_to_source_layout_when_metadata_is_present() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let http_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let http_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\"api\",\r\n{{3,\r\n{{1,0,{http_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20}},0}}"
+            )
+            .as_bytes(),
+        );
+        let web_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let web_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\"http://example.com\",\r\n{{3,\r\n{{1,0,{web_uuid}}},\"Exchange\",{{1,\"en\",\"Exchange\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{0,0}},\"exchange.1cws\",\r\n{{0}},0,20}},0}}"
+            )
+            .as_bytes(),
+        );
+        let text = b"Procedure Run()\r\nEndProcedure\r\n";
+        let body = pack_module_blob_bytes(text, None, None).unwrap().blob;
+        let rows = vec![
+            ConfigRow {
+                file_name: http_uuid.to_string(),
+                part_no: 0,
+                data_size: http_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&http_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{http_uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+            ConfigRow {
+                file_name: web_uuid.to_string(),
+                part_no: 0,
+                data_size: web_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&web_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{web_uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 2);
+        assert!(root.join("HTTPServices/Api/Ext/Module.bsl").exists());
+        assert!(root.join("WebServices/Exchange/Ext/Module.bsl").exists());
+        let http_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{http_uuid}.0"))
+            .unwrap();
+        let web_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{web_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            http_row.module_text_path.as_deref(),
+            Some("HTTPServices/Api/Ext/Module.bsl")
+        );
+        assert_eq!(
+            web_row.module_text_path.as_deref(),
+            Some("WebServices/Exchange/Ext/Module.bsl")
+        );
 
         let _ = fs::remove_dir_all(root);
     }
