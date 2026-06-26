@@ -1897,6 +1897,8 @@ mod tests {
             uuid::Uuid::new_v4().hyphenated()
         ));
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface"))
+            .unwrap();
 
         std::fs::copy(
             lab_root.join("CommonCommands/АвтономнаяРабота.xml"),
@@ -1906,6 +1908,18 @@ mod tests {
         std::fs::copy(
             lab_root.join("CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl"),
             root.join("CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface/ru.html"),
+            "<html>help</html>",
         )
         .unwrap();
 
@@ -1932,6 +1946,16 @@ mod tests {
         assert!(files.contains(&(
             "CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl",
             SourceKind::Module,
+            Some("CommonCommands/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml",
+            SourceKind::MetadataXml,
+            Some("CommonCommands/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "CommonCommands/АвтономнаяРабота/Ext/CommandInterface/ru.html",
+            SourceKind::Other,
             Some("CommonCommands/АвтономнаяРабота")
         )));
     }
