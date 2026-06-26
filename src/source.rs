@@ -77,7 +77,7 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
             .map(|(path, relative)| scan_file(&path, &relative))
             .collect::<Result<Vec<_>>>()
     })??;
-    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files.par_sort_by(|left, right| left.path.cmp(&right.path));
 
     Ok(SourceManifest {
         root: canonical_root,

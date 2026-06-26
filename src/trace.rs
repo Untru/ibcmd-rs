@@ -129,7 +129,7 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
         })
         .collect::<Vec<_>>();
 
-    groups.sort_by(|left, right| {
+    groups.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
