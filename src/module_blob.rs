@@ -4599,12 +4599,21 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             ),
             ("Catalog.РолиИсполнителей", "45c0003f-0ed7-4582-b84e-217fdc4ddeaf"),
             (
+                "BusinessProcess.Задание",
+                "dad11c2e-08fc-4a6b-8829-8be6c64c15fc",
+            ),
+            (
                 "Document.ЭлектронноеПисьмоИсходящее",
                 "8f2b8a8e-4cd3-45e3-89ae-1cc4bd0ff30a",
             ),
             (
                 "InformationRegister.ДополнительныеСведения",
                 "3ad5d8a7-3071-46aa-aebf-306bdb67983b",
+            ),
+            ("Report.БизнесПроцессы", "c5f91669-13d8-4f0a-a054-2701078da38a"),
+            (
+                "Task.ЗадачаИсполнителя",
+                "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
             ),
             (
                 "StyleItem.ВажнаяНадписьШрифт",
