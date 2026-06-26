@@ -369,7 +369,9 @@ fn extract_table_names(sql: &str) -> BTreeSet<String> {
             .get(index + 1)
             .map(|value| value.to_ascii_lowercase());
         let candidate = match token.as_str() {
-            "from" | "join" | "into" | "update" => tokens.get(index + 1),
+            "from" | "join" | "into" | "using" => tokens.get(index + 1),
+            "update" if next.as_deref() != Some("set") => tokens.get(index + 1),
+            "merge" if next.as_deref() == Some("into") => tokens.get(index + 2),
             "delete" if next.as_deref() == Some("from") => tokens.get(index + 2),
             _ => None,
         };
@@ -815,6 +817,15 @@ mod tests {
     <action name="attach_activity_id"><value>aa-4</value></action>
   </event>
   <event name="sql_statement_completed">
+    <data name="duration"><value>29</value></data>
+    <data name="row_count"><value>1</value></data>
+    <data name="statement"><value>MERGE INTO ConfigSave AS target USING Config AS source ON target.FileName = source.FileName WHEN MATCHED THEN UPDATE SET target.BinaryData = source.BinaryData WHEN NOT MATCHED THEN INSERT (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo) VALUES (source.FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), source.Attributes, source.DataSize, source.BinaryData, source.PartNo);</value></data>
+    <action name="session_id"><value>41</value></action>
+    <action name="transaction_id"><value>111</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+    <action name="attach_activity_id"><value>aa-5</value></action>
+  </event>
+  <event name="sql_statement_completed">
     <data name="duration"><value>3</value></data>
     <data name="statement"><value>BEGIN TRANSACTION</value></data>
   </event>
@@ -831,8 +842,8 @@ mod tests {
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir(dir);
 
-        assert_eq!(analysis.events_seen, 6);
-        assert_eq!(analysis.groups.len(), 6);
+        assert_eq!(analysis.events_seen, 7);
+        assert_eq!(analysis.groups.len(), 7);
 
         let noop = analysis
             .groups
@@ -883,6 +894,18 @@ mod tests {
         assert_eq!(insert.count, 1);
         assert_eq!(insert.table_names, vec!["ConfigSave".to_string()]);
         assert_eq!(insert.object_names, vec!["sp_executesql".to_string()]);
+
+        let merge = analysis
+            .groups
+            .iter()
+            .find(|group| group.normalized_sql.starts_with("merge into configsave"))
+            .unwrap();
+        assert_eq!(merge.count, 1);
+        assert_eq!(
+            merge.table_names,
+            vec!["Config".to_string(), "ConfigSave".to_string()]
+        );
+        assert_eq!(merge.object_names, vec!["sp_executesql".to_string()]);
 
         let begin = analysis
             .groups
