@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::trace::TraceAnalysis;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageMutationKind {
     ConfigSaveCount,
@@ -24,7 +24,15 @@ pub struct StorageMappingReport {
     pub groups_seen: usize,
     pub mapped_groups: usize,
     pub unmapped_groups: usize,
+    pub summaries: Vec<StorageMutationSummary>,
     pub entries: Vec<StorageMappingEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StorageMutationSummary {
+    pub kind: StorageMutationKind,
+    pub groups: usize,
+    pub total_duration_us: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,6 +61,8 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
         })
         .collect::<Vec<_>>();
 
+    let mut summaries = summarize_entries(&entries);
+
     entries.sort_by(|left, right| {
         right
             .total_duration_us
@@ -71,8 +81,36 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
         groups_seen: analysis.groups.len(),
         mapped_groups,
         unmapped_groups: entries.len().saturating_sub(mapped_groups),
+        summaries: {
+            summaries.sort_by(|left, right| {
+                right
+                    .total_duration_us
+                    .cmp(&left.total_duration_us)
+                    .then_with(|| left.kind.cmp(&right.kind))
+            });
+            summaries
+        },
         entries,
     }
+}
+
+fn summarize_entries(entries: &[StorageMappingEntry]) -> Vec<StorageMutationSummary> {
+    let mut totals = std::collections::BTreeMap::<StorageMutationKind, (usize, u64)>::new();
+    for entry in entries {
+        let value = totals.entry(entry.kind).or_insert((0, 0));
+        value.0 += 1;
+        value.1 += entry.total_duration_us;
+    }
+    totals
+        .into_iter()
+        .map(
+            |(kind, (groups, total_duration_us))| StorageMutationSummary {
+                kind,
+                groups,
+                total_duration_us,
+            },
+        )
+        .collect()
 }
 
 fn classify_group(group: &crate::trace::QueryGroup) -> StorageMutationKind {
@@ -219,12 +257,19 @@ mod tests {
         assert_eq!(report.groups_seen, 5);
         assert_eq!(report.mapped_groups, 5);
         assert_eq!(report.unmapped_groups, 0);
+        assert_eq!(report.summaries.len(), 5);
         assert_eq!(report.entries[0].kind, StorageMutationKind::ConfigSaveMerge);
         assert!(
             report
                 .entries
                 .iter()
                 .any(|entry| entry.kind == StorageMutationKind::ConfigSaveCount)
+        );
+        assert!(
+            report
+                .summaries
+                .iter()
+                .any(|summary| summary.kind == StorageMutationKind::ConfigSaveMerge)
         );
     }
 
