@@ -410,6 +410,16 @@ fn parse_generated_type_entries_from_blob(
             entries.push((type_id, format!("cfg:DocumentRef.{}", header.name)));
         }
     }
+    if object_code == 57 {
+        if let Some(type_id) = fields.get(3).copied().and_then(parse_uuid_field) {
+            entries.push((type_id, format!("cfg:CatalogRef.{}", header.name)));
+        }
+    }
+    if object_code == 20 {
+        if let Some(type_id) = fields.get(1).copied().and_then(parse_uuid_field) {
+            entries.push((type_id, format!("cfg:EnumRef.{}", header.name)));
+        }
+    }
 
     Some(entries)
 }
@@ -1591,6 +1601,51 @@ mod tests {
         assert!(xml.contains("<v8:Type>cfg:DocumentRef.Invoice</v8:Type>"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn builds_catalog_and_enum_reference_type_index_entries() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_ref_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,{catalog_ref_type_id},33333333-3333-4333-8333-333333333333,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let enum_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let enum_ref_type_id = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let enum_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,{enum_ref_type_id},eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee,ffffffff-ffff-4fff-ffff-ffffffffffff,11111111-2222-4333-8444-555555555555,\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Statuses\",{{1,\"en\",\"Statuses\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_blob),
+            },
+            ConfigRow {
+                file_name: enum_uuid.to_string(),
+                part_no: 0,
+                data_size: enum_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&enum_blob),
+            },
+        ];
+
+        let index = build_metadata_type_index(&rows);
+
+        assert_eq!(
+            index.get(catalog_ref_type_id).map(String::as_str),
+            Some("cfg:CatalogRef.Customers")
+        );
+        assert_eq!(
+            index.get(enum_ref_type_id).map(String::as_str),
+            Some("cfg:EnumRef.Statuses")
+        );
     }
 
     #[test]
