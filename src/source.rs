@@ -53,28 +53,26 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
 
     let canonical_root = fs::canonicalize(root)
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
-    let mut entries = Vec::new();
-
-    for entry in WalkDir::new(&canonical_root)
-        .into_iter()
-        .filter_entry(|entry| !is_ignored(entry.path()))
-    {
-        let entry = entry?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let path = entry.path();
-        let relative = path
-            .strip_prefix(&canonical_root)
-            .with_context(|| format!("failed to make relative path for {}", path.display()))?;
-        entries.push((path.to_path_buf(), relative.to_path_buf()));
-    }
-
     let mut files = parallel::install(|| {
-        entries
-            .into_par_iter()
-            .map(|(path, relative)| scan_file(&path, &relative))
+        WalkDir::new(&canonical_root)
+            .into_iter()
+            .filter_entry(|entry| !is_ignored(entry.path()))
+            .par_bridge()
+            .filter_map(|entry| match entry {
+                Ok(entry) if entry.file_type().is_file() => {
+                    Some(Ok::<walkdir::DirEntry, anyhow::Error>(entry))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error.into())),
+            })
+            .map(|entry| {
+                let entry = entry?;
+                let path = entry.path();
+                let relative = path.strip_prefix(&canonical_root).with_context(|| {
+                    format!("failed to make relative path for {}", path.display())
+                })?;
+                scan_file(path, relative)
+            })
             .collect::<Result<Vec<_>>>()
     })??;
     files.par_sort_by(|left, right| left.path.cmp(&right.path));
