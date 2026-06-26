@@ -9,6 +9,7 @@ pub struct CompatibilityReport {
     pub supported_operations: Vec<OperationSupport>,
     pub supported_source_families: Vec<&'static str>,
     pub supported_metadata_families: Vec<&'static str>,
+    pub supported_write_patterns: Vec<&'static str>,
     pub notes: Vec<&'static str>,
 }
 
@@ -175,6 +176,13 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "XDTOPackage",
             "Task",
         ],
+        supported_write_patterns: vec![
+            "no-op load",
+            "module-body-only change",
+            "metadata-attribute change",
+            "new object insert",
+            "merge-based ConfigSave staging",
+        ],
         notes: vec![
             "Platform build, DBMS version and compatibility mode are captured per run by probe and trace artifacts.",
             "The current matrix is source-of-truth for implemented coverage; ibcmd parity is still being measured experimentally.",
@@ -248,5 +256,10 @@ mod tests {
             1
         );
         assert!(report.supported_metadata_families.contains(&"Task"));
+        assert!(
+            report
+                .supported_write_patterns
+                .contains(&"merge-based ConfigSave staging")
+        );
     }
 }
