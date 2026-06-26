@@ -3261,6 +3261,58 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_xdto_package_variant_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-xdto-variant-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1/Ext"))
+            .unwrap();
+
+        std::fs::copy(
+            lab_root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1.xml"),
+            root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1/Ext/Package.bin"),
+            root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1/Ext/Package.bin"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "XDTOPackages/ApplicationExtensionsManagement_1_0_1_1.xml",
+            SourceKind::MetadataXml,
+            Some("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1")
+        )));
+        assert!(files.contains(&(
+            "XDTOPackages/ApplicationExtensionsManagement_1_0_1_1/Ext/Package.bin",
+            SourceKind::Binary,
+            Some("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1")
+        )));
+    }
+
+    #[test]
     fn scans_real_role_and_scheduled_job_ext_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
