@@ -2757,6 +2757,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "HTTPService" => Some(("HTTPService", "HTTPServices")),
         "Language" => Some(("Language", "Languages")),
         "InformationRegister" => Some(("InformationRegister", "InformationRegisters")),
+        "ExchangePlan" => Some(("ExchangePlan", "ExchangePlans")),
         "Role" => Some(("Role", "Roles")),
         "ScheduledJob" => Some(("ScheduledJob", "ScheduledJobs")),
         "SettingsStorage" => Some(("SettingsStorage", "SettingsStorages")),
@@ -5920,6 +5921,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             ("Tasks", "ЗадачаИсполнителя", "Task", "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
             ("WebServices", "RemoteControl", "WebService", "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
             ("XDTOPackages", "АдминистрированиеОбменаДанными_2_4_5_1", "XDTOPackage", "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("BusinessProcesses", "Задание", "BusinessProcess", "51515151-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("DataProcessors", "АвтоматическоеИзвлечениеТекстов", "DataProcessor", "52525252-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("ExchangePlans", "ОбновлениеИнформационнойБазы", "ExchangePlan", "53535353-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ("Reports", "БизнесПроцессы", "Report", "54545454-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
         ];
 
         for (folder, name, kind, uuid) in cases {
@@ -5992,6 +5997,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1",
                 "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
+            ("BusinessProcess.Задание", "51515151-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "DataProcessor.АвтоматическоеИзвлечениеТекстов",
+                "52525252-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ExchangePlan.ОбновлениеИнформационнойБазы",
+                "53535353-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            ("Report.БизнесПроцессы", "54545454-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
         ] {
             assert_eq!(
                 source.resolve_metadata_reference_uuid(reference).unwrap(),
