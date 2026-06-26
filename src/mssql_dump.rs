@@ -352,6 +352,7 @@ enum SourceAssetKind {
         command_refs: BTreeMap<String, String>,
         metadata_refs: BTreeMap<String, MetadataCommandReference>,
     },
+    ConfigDumpInfo,
     ExchangePlanContent {
         object_refs: BTreeMap<String, String>,
     },
@@ -408,6 +409,15 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     }
 
     let mut paths = BTreeMap::new();
+    if file_names.contains("versions") {
+        paths.insert(
+            "versions".to_string(),
+            SourceAsset {
+                primary_path: PathBuf::from("ConfigDumpInfo.xml"),
+                kind: SourceAssetKind::ConfigDumpInfo,
+            },
+        );
+    }
     for (metadata_id, suffixes) in suffixes_by_id {
         if file_names.contains(metadata_id) || !is_configuration_module_group(&suffixes) {
             continue;
@@ -892,6 +902,21 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
             fs::write(&path, format_command_interface_xml(&entries))
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::ConfigDumpInfo => {
+            let _ = parse_config_dump_versions_blob(bytes).with_context(|| {
+                format!(
+                    "failed to parse config dump versions from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, format_config_dump_info_xml())
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
         SourceAssetKind::ExchangePlanContent { object_refs } => {
@@ -1574,6 +1599,16 @@ fn parse_exchange_plan_content_blob(
     }
 
     Some(items)
+}
+
+fn parse_config_dump_versions_blob(bytes: &[u8]) -> Option<usize> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    fields.get(1)?.trim().parse::<usize>().ok()
 }
 
 fn exchange_plan_auto_record_xml(value: &str) -> &'static str {
@@ -2513,6 +2548,14 @@ fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String
     }
     xml.push_str("</ExchangePlanContent>\r\n");
     xml
+}
+
+fn format_config_dump_info_xml() -> String {
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ConfigDumpInfo xmlns=\"http://v8.1c.ru/8.3/xcf/dumpinfo\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" format=\"Hierarchical\" version=\"2.20\">\r\n\
+\t<ConfigVersions/>\r\n\
+</ConfigDumpInfo>\r\n"
+        .to_string()
 }
 
 fn format_role_rights_xml(rights: &RoleRights) -> String {
@@ -7294,6 +7337,43 @@ mod tests {
         assert_eq!(
             content_row.source_asset_path.as_deref(),
             Some("ExchangePlans/Sync/Ext/Content.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_config_dump_info_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let versions = deflate_for_test(
+            b"{1,2,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\",cccccccc-cccc-4ccc-cccc-cccccccccccc}",
+        );
+        let row = ConfigRow {
+            file_name: "versions".to_string(),
+            part_no: 0,
+            data_size: versions.len() as i64,
+            binary_hex: encode_hex_for_test(&versions),
+        };
+
+        let dumped = dump_table_rows(&root, "Config", vec![row], false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("ConfigDumpInfo.xml")).unwrap();
+        assert!(xml.contains("<ConfigDumpInfo"));
+        assert!(xml.contains(r#"format="Hierarchical""#));
+        assert!(xml.contains("<ConfigVersions/>"));
+        let versions_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == "versions")
+            .unwrap();
+        assert_eq!(
+            versions_row.source_asset_path.as_deref(),
+            Some("ConfigDumpInfo.xml")
         );
 
         let _ = fs::remove_dir_all(root);
