@@ -4357,6 +4357,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "DocumentObject.АктОбУничтоженииПерсональныхДанных",
+                "12576083-65c9-4698-a669-bd9dec07cc88",
+            ),
+            (
+                "DocumentRef.АктОбУничтоженииПерсональныхДанных",
+                "6851400e-2dbc-4f37-868b-a4683b097408",
+            ),
+            (
+                "DocumentSelection.АктОбУничтоженииПерсональныхДанных",
+                "54a7694c-e379-4c71-8e87-e8cd69ac617a",
+            ),
+            (
+                "DocumentList.АктОбУничтоженииПерсональныхДанных",
+                "300148b3-5f55-43a5-a9a6-0840f74a0c3e",
+            ),
+            (
+                "DocumentManager.АктОбУничтоженииПерсональныхДанных",
+                "d67de8ab-dd38-424a-aaea-753b75c3b7e8",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
