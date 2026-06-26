@@ -4265,6 +4265,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "BusinessProcessObject.Задание",
+                "4a670c5f-960b-4b36-b587-59bcea4d8449",
+            ),
+            (
+                "BusinessProcessRef.Задание",
+                "07d25a98-bdd8-4f7b-b87b-172294158755",
+            ),
+            (
+                "BusinessProcessSelection.Задание",
+                "d0447d5c-7808-4532-8a98-0cb3974a90bf",
+            ),
+            (
+                "BusinessProcessList.Задание",
+                "9c74798b-2430-4cda-97f2-44472b8d59ac",
+            ),
+            (
+                "BusinessProcessManager.Задание",
+                "9f615ee8-8711-4ca9-98d0-f0a258dcdfd2",
+            ),
+            (
+                "BusinessProcessRoutePointRef.Задание",
+                "35f39a4f-8a59-4b48-aa38-ef5f2640d375",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
