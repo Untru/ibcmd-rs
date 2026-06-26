@@ -673,6 +673,7 @@ struct CommandInterfaceEntry {
 
 struct RoleRights {
     objects: Vec<RoleObjectRights>,
+    restriction_templates: Vec<RoleRestrictionTemplate>,
 }
 
 struct RoleObjectRights {
@@ -683,6 +684,12 @@ struct RoleObjectRights {
 struct RoleRight {
     name: String,
     value: bool,
+    restriction_by_condition: Option<String>,
+}
+
+struct RoleRestrictionTemplate {
+    name: String,
+    condition: String,
 }
 
 #[derive(Clone)]
@@ -931,27 +938,7 @@ fn parse_role_rights_blob(
         }
         let object_name = object_refs.get(object_uuid)?.clone();
 
-        let right_ref = split_1c_braced_fields(entry[1], 0)?;
-        if right_ref.first()?.trim() != "0" || (right_ref.len() - 1) % 2 != 0 {
-            return None;
-        }
-        let mut rights = Vec::new();
-        for pair in right_ref[1..].chunks(2) {
-            let right_uuid = pair.first()?.trim();
-            if !is_uuid_text(right_uuid) {
-                return None;
-            }
-            let value = match pair.get(1)?.trim() {
-                "0" => false,
-                "1" => true,
-                _ => return None,
-            };
-            let right_name = role_right_name(right_uuid)?.to_string();
-            rights.push(RoleRight {
-                name: right_name,
-                value,
-            });
-        }
+        let rights = parse_role_object_rights(entry[1])?;
         objects.push(RoleObjectRights {
             name: object_name,
             rights,
@@ -959,7 +946,154 @@ fn parse_role_rights_blob(
     }
 
     objects.reverse();
-    Some(RoleRights { objects })
+    let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
+    Some(RoleRights {
+        objects,
+        restriction_templates,
+    })
+}
+
+fn parse_role_object_rights(value: &str) -> Option<Vec<RoleRight>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    match fields.first()?.trim() {
+        "0" if (fields.len() - 1) % 2 == 0 => {
+            parse_role_right_pairs(&fields, 1, (fields.len() - 1) / 2, &BTreeMap::new())
+        }
+        "0" => None,
+        "1" => {
+            let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+            let pairs_start = 2usize;
+            let restrictions_count_index = pairs_start.checked_add(count.checked_mul(2)?)?;
+            if fields.len() <= restrictions_count_index {
+                return None;
+            }
+            let restrictions = parse_role_right_restrictions(
+                fields.get(restrictions_count_index)?.trim(),
+                &fields[restrictions_count_index + 1..],
+            )?;
+            parse_role_right_pairs(&fields, pairs_start, count, &restrictions)
+        }
+        _ => None,
+    }
+}
+
+fn parse_role_right_pairs(
+    fields: &[&str],
+    start: usize,
+    count: usize,
+    restrictions: &BTreeMap<String, String>,
+) -> Option<Vec<RoleRight>> {
+    let mut rights = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = start.checked_add(index.checked_mul(2)?)?;
+        let right_uuid = fields.get(offset)?.trim();
+        if !is_uuid_text(right_uuid) {
+            return None;
+        }
+        let value = match fields.get(offset + 1)?.trim() {
+            "0" => false,
+            "1" => true,
+            _ => return None,
+        };
+        rights.push(RoleRight {
+            name: role_right_name(right_uuid)?.to_string(),
+            value,
+            restriction_by_condition: restrictions.get(right_uuid).cloned(),
+        });
+    }
+    Some(rights)
+}
+
+fn parse_role_right_restrictions(
+    count_text: &str,
+    values: &[&str],
+) -> Option<BTreeMap<String, String>> {
+    let count = count_text.parse::<usize>().ok()?;
+    let mut restrictions = BTreeMap::new();
+    if count == 0 {
+        if !values.is_empty() {
+            return None;
+        }
+        return Some(restrictions);
+    }
+    if values.len() == count {
+        for entry in values {
+            let pair = split_1c_braced_fields(entry, 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            let right_uuid = pair.first()?.trim();
+            if !is_uuid_text(right_uuid) {
+                return None;
+            }
+            let condition = parse_role_restriction_condition(pair.get(1)?)?;
+            restrictions.insert(right_uuid.to_string(), condition);
+        }
+        return Some(restrictions);
+    }
+    if values.len() != 1 {
+        return None;
+    }
+    let entries = split_1c_braced_fields(values[0], 0)?;
+    if entries.len() == count * 2
+        && entries
+            .first()
+            .is_some_and(|entry| is_uuid_text(entry.trim()))
+    {
+        for entry in entries.chunks(2) {
+            let right_uuid = entry.first()?.trim();
+            let condition = parse_role_restriction_condition(entry.get(1)?)?;
+            restrictions.insert(right_uuid.to_string(), condition);
+        }
+        return Some(restrictions);
+    }
+    if entries.len() != count {
+        return None;
+    }
+    for entry in entries {
+        let pair = split_1c_braced_fields(entry, 0)?;
+        if pair.len() != 2 {
+            return None;
+        }
+        let right_uuid = pair.first()?.trim();
+        if !is_uuid_text(right_uuid) {
+            return None;
+        }
+        let condition = parse_role_restriction_condition(pair.get(1)?)?;
+        restrictions.insert(right_uuid.to_string(), condition);
+    }
+    Some(restrictions)
+}
+
+fn parse_role_restriction_condition(value: &str) -> Option<String> {
+    let wrapper = split_1c_braced_fields(value, 0)?;
+    if wrapper.first()?.trim() != "1" {
+        return None;
+    }
+    let condition_fields = split_1c_braced_fields(wrapper.get(1)?, 0)?;
+    if condition_fields.first()?.trim() != "1" {
+        return None;
+    }
+    parse_1c_quoted_string_with_len(condition_fields.get(1)?.trim()).map(|(value, _)| value)
+}
+
+fn parse_role_restriction_templates(value: &str) -> Option<Vec<RoleRestrictionTemplate>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if fields.len() != count + 1 {
+        return None;
+    }
+    let mut templates = Vec::with_capacity(count);
+    for field in fields.iter().skip(1) {
+        let template = split_1c_braced_fields(field, 0)?;
+        if template.len() != 2 {
+            return None;
+        }
+        let name = parse_1c_quoted_string_with_len(template.first()?.trim())?.0;
+        let condition = parse_1c_quoted_string_with_len(template.get(1)?.trim())?.0;
+        templates.push(RoleRestrictionTemplate { name, condition });
+    }
+    Some(templates)
 }
 
 fn role_right_name(uuid: &str) -> Option<&'static str> {
@@ -1283,16 +1417,29 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
     );
     for object in &rights.objects {
         xml.push_str("\t<object>\r\n\t\t<name>");
-        xml.push_str(&escape_xml_text(&object.name));
+        xml.push_str(&escape_xml_element_text(&object.name));
         xml.push_str("</name>\r\n");
         for right in &object.rights {
             xml.push_str("\t\t<right>\r\n\t\t\t<name>");
-            xml.push_str(&escape_xml_text(&right.name));
+            xml.push_str(&escape_xml_element_text(&right.name));
             xml.push_str("</name>\r\n\t\t\t<value>");
             xml.push_str(xml_bool(right.value));
-            xml.push_str("</value>\r\n\t\t</right>\r\n");
+            xml.push_str("</value>\r\n");
+            if let Some(condition) = &right.restriction_by_condition {
+                xml.push_str("\t\t\t<restrictionByCondition>\r\n\t\t\t\t<condition>");
+                xml.push_str(&escape_xml_element_text(condition));
+                xml.push_str("</condition>\r\n\t\t\t</restrictionByCondition>\r\n");
+            }
+            xml.push_str("\t\t</right>\r\n");
         }
         xml.push_str("\t</object>\r\n");
+    }
+    for template in &rights.restriction_templates {
+        xml.push_str("\t<restrictionTemplate>\r\n\t\t<name>");
+        xml.push_str(&escape_xml_element_text(&template.name));
+        xml.push_str("</name>\r\n\t\t<condition>");
+        xml.push_str(&escape_xml_element_text(&template.condition));
+        xml.push_str("</condition>\r\n\t</restrictionTemplate>\r\n");
     }
     xml.push_str("</Rights>\r\n");
     xml
@@ -2697,6 +2844,19 @@ fn escape_xml_text(value: &str) -> String {
             '<' => output.push_str("&lt;"),
             '>' => output.push_str("&gt;"),
             '"' => output.push_str("&quot;"),
+            _ => output.push(ch),
+        }
+    }
+    output
+}
+
+fn escape_xml_element_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
             _ => output.push(ch),
         }
     }
@@ -4334,7 +4494,7 @@ mod tests {
         );
         let rights = deflate_for_test(
             format!(
-                "{{10,{{3,{{{{1,{catalog_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},{{{{1,{configuration_uuid},0,0}},{{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1}}}},{{{{1,{register_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1}}}}}},{{0}},4294967295,1,0,4294967295}}"
+                "{{10,{{3,{{{{1,{catalog_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},{{{{1,{configuration_uuid},0,0}},{{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1}}}},{{{{1,{register_uuid},0,0}},{{1,3,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,2,{{{{1c87578f-9e09-4ec0-a991-5629c87b1588,{{1,{{1,\"#Если &Allowed #Тогда \"\"OK\"\"\",0}}}}}},{{287b74b8-3a66-4a76-ba27-4f1f6a93770e,{{1,{{1,\"ГДЕ Owner = &User\",0}}}}}}}}}}}}}},{{1,{{\"OnlyAllowed\",\"// Template & \"\"quoted\"\"\"}}}},4294967295,1,0,4294967295}}"
             )
             .as_bytes(),
         );
@@ -4383,10 +4543,16 @@ mod tests {
         assert!(xml.contains("<name>Configuration.DemoApp</name>"));
         assert!(xml.contains("<name>MainWindowModeNormal</name>"));
         assert!(xml.contains("<name>Read</name>"));
+        assert!(xml.contains("<restrictionByCondition>"));
+        assert!(xml.contains("#Если &amp;Allowed #Тогда \"OK\""));
         assert!(xml.contains("<name>Update</name>"));
+        assert!(xml.contains("ГДЕ Owner = &amp;User"));
         assert!(xml.contains("<name>TotalsControl</name>"));
         assert!(xml.contains("<name>Insert</name>"));
         assert!(xml.contains("<name>View</name>"));
+        assert!(xml.contains("<restrictionTemplate>"));
+        assert!(xml.contains("<name>OnlyAllowed</name>"));
+        assert!(xml.contains("// Template &amp; \"quoted\""));
         let body_row = dumped
             .rows
             .iter()
