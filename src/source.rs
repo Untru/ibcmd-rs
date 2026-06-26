@@ -1274,6 +1274,12 @@ mod tests {
         ))
         .unwrap();
         std::fs::create_dir_all(
+            root.join("CommonTemplates/КомпонентаСканированияДокументов_3_0_1_1033/Ext"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("CommonTemplates/ШтампЭлектроннойПодписиOfficeOpen/Ext"))
+            .unwrap();
+        std::fs::create_dir_all(
             root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext"),
         )
         .unwrap();
@@ -1306,6 +1312,20 @@ mod tests {
         std::fs::copy(
             lab_root.join("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template/ru.html"),
             root.join("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template/ru.html"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "CommonTemplates/КомпонентаСканированияДокументов_3_0_1_1033/Ext/Template.bin",
+            ),
+            root.join(
+                "CommonTemplates/КомпонентаСканированияДокументов_3_0_1_1033/Ext/Template.bin",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonTemplates/ШтампЭлектроннойПодписиOfficeOpen/Ext/Template.txt"),
+            root.join("CommonTemplates/ШтампЭлектроннойПодписиOfficeOpen/Ext/Template.txt"),
         )
         .unwrap();
         std::fs::copy(
@@ -1363,6 +1383,16 @@ mod tests {
             "CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template/ru.html",
             SourceKind::Other,
             Some("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru")
+        )));
+        assert!(files.contains(&(
+            "CommonTemplates/КомпонентаСканированияДокументов_3_0_1_1033/Ext/Template.bin",
+            SourceKind::Binary,
+            Some("CommonTemplates/КомпонентаСканированияДокументов_3_0_1_1033")
+        )));
+        assert!(files.contains(&(
+            "CommonTemplates/ШтампЭлектроннойПодписиOfficeOpen/Ext/Template.txt",
+            SourceKind::Other,
+            Some("CommonTemplates/ШтампЭлектроннойПодписиOfficeOpen")
         )));
         assert!(files.contains(&(
             "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1.xml",
