@@ -2709,6 +2709,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
     let prefix = reference.split_once('.')?.0;
     match prefix {
         "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
+        "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
         "FilterCriterion" => Some(("FilterCriterion", "FilterCriteria")),
         "FunctionalOption" => Some(("FunctionalOption", "FunctionalOptions")),
@@ -4257,6 +4258,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1",
                 "ac7ea771-4b10-4d43-9c0a-9cd36e4c49a4",
+            ),
+            (
+                "DocumentJournal.Взаимодействия",
+                "7da57c89-af2c-445a-96f7-39250f70306f",
             ),
         ] {
             assert_eq!(

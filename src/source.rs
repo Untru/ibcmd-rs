@@ -1221,6 +1221,164 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_document_journal_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-docjournal-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(
+            root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия/Ext"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join(
+                "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт/Ext",
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("DocumentJournals/Взаимодействия/Commands/ПозвонитьПоКонтакту/Ext"),
+        )
+        .unwrap();
+
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия.xml"),
+            root.join("DocumentJournals/Взаимодействия.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка.xml"),
+            root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form.xml"),
+            root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Help.xml"),
+            root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+            root.join("DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия.xml"),
+            root.join("DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт.xml",
+            ),
+            root.join(
+                "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт.xml",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия/Ext/Template.xml",
+            ),
+            root.join("DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия/Ext/Template.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт/Ext/Template.xml",
+            ),
+            root.join(
+                "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт/Ext/Template.xml",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("DocumentJournals/Взаимодействия/Commands/ПозвонитьПоКонтакту/Ext/CommandModule.bsl"),
+            root.join("DocumentJournals/Взаимодействия/Commands/ПозвонитьПоКонтакту/Ext/CommandModule.bsl"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия.xml",
+            SourceKind::MetadataXml,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Forms/ФормаСписка.xml",
+            SourceKind::Form,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form.xml",
+            SourceKind::Form,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Help.xml",
+            SourceKind::Form,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Forms/ФормаСписка/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия.xml",
+            SourceKind::Template,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт.xml",
+            SourceKind::Template,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействия/Ext/Template.xml",
+            SourceKind::Template,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Templates/СхемаОтборВзаимодействияКонтакт/Ext/Template.xml",
+            SourceKind::Template,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "DocumentJournals/Взаимодействия/Commands/ПозвонитьПоКонтакту/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("DocumentJournals/Взаимодействия")
+        )));
+    }
+
+    #[test]
     fn scans_real_task_form_and_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
