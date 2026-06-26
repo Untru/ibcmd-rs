@@ -26,6 +26,9 @@ use crate::cli::{
     MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs,
     MssqlStageScheduledJobObjectArgs, MssqlStageSessionParameterObjectArgs,
     MssqlStageSettingsStorageObjectArgs, MssqlStageStyleItemObjectArgs,
+    MssqlStageStyleObjectArgs, MssqlStageBotObjectArgs,
+    MssqlStageDocumentNumeratorObjectArgs, MssqlStageIntegrationServiceObjectArgs,
+    MssqlStageSequenceObjectArgs, MssqlStageWSReferenceObjectArgs,
     MssqlStageSubsystemObjectArgs, MssqlStageTaskObjectArgs, MssqlStageWebServiceObjectArgs,
     MssqlStageFilterCriteriaObjectArgs, MssqlStageAccountingRegisterObjectArgs,
     MssqlStageAccumulationRegisterObjectArgs,
@@ -1231,6 +1234,37 @@ pub fn stage_style_item_object(
     };
     stage_metadata_objects(&metadata_args)
 }
+
+macro_rules! passthrough_metadata_stage {
+    ($fn_name:ident, $args_ty:ty) => {
+        pub fn $fn_name(args: &$args_ty) -> Result<StageMetadataObjectsReport> {
+            let metadata_args = MssqlStageMetadataObjectsArgs {
+                server: args.server.clone(),
+                database: args.database.clone(),
+                xmls: vec![args.xml.clone()],
+                source_root: args.source_root.clone(),
+                sqlcmd: args.sqlcmd.clone(),
+                replace_config_save: args.replace_config_save,
+                allow_non_lab: args.allow_non_lab,
+                script_output: args.script_output.clone(),
+            };
+            stage_metadata_objects(&metadata_args)
+        }
+    };
+}
+
+passthrough_metadata_stage!(stage_style_object, MssqlStageStyleObjectArgs);
+passthrough_metadata_stage!(stage_bot_object, MssqlStageBotObjectArgs);
+passthrough_metadata_stage!(
+    stage_document_numerator_object,
+    MssqlStageDocumentNumeratorObjectArgs
+);
+passthrough_metadata_stage!(
+    stage_integration_service_object,
+    MssqlStageIntegrationServiceObjectArgs
+);
+passthrough_metadata_stage!(stage_sequence_object, MssqlStageSequenceObjectArgs);
+passthrough_metadata_stage!(stage_ws_reference_object, MssqlStageWSReferenceObjectArgs);
 
 pub fn stage_task_object(args: &MssqlStageTaskObjectArgs) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {

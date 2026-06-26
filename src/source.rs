@@ -267,14 +267,20 @@ fn is_metadata_collection(value: &str) -> bool {
             | "sessionparameters"
             | "settingsstorages"
             | "styleitems"
+            | "styles"
             | "subsystems"
             | "roles"
             | "commoncommands"
             | "businessprocesses"
+            | "bots"
             | "definedtypes"
             | "tasks"
             | "constants"
+            | "documentnumerators"
+            | "integrationservices"
+            | "sequences"
             | "webservices"
+            | "wsreferences"
             | "xdtopackages"
     )
 }
@@ -358,6 +364,30 @@ mod tests {
                 Some("Form")
             ),
             SourceKind::Form
+        );
+        assert_eq!(
+            classify(
+                "Bot.xml".as_ref(),
+                "Bots/ОповещенияПользователейОСобытиях.xml",
+                Some("MetaDataObject")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "DocumentNumerator.xml".as_ref(),
+                "DocumentNumerators/ДенежныеДокументы.xml",
+                Some("MetaDataObject")
+            ),
+            SourceKind::MetadataXml
+        );
+        assert_eq!(
+            classify(
+                "Style.xml".as_ref(),
+                "Styles/Основной.xml",
+                Some("MetaDataObject")
+            ),
+            SourceKind::MetadataXml
         );
     }
 
@@ -529,6 +559,54 @@ mod tests {
                 Some("MetaDataObject")
             ),
             Some("StyleItems/ВажнаяНадписьШрифт".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Styles/Основной.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("Styles/Основной".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Bots/ОповещенияПользователейОСобытиях.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("Bots/ОповещенияПользователейОСобытиях".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "DocumentNumerators/ДенежныеДокументы.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("DocumentNumerators/ДенежныеДокументы".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "IntegrationServices/ОбменСообщениями.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("IntegrationServices/ОбменСообщениями".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "Sequences/ДокументыОрганизаций.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("Sequences/ДокументыОрганизаций".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "WSReferences/WSСборОтчетностиРосстата.xml",
+                &SourceKind::MetadataXml,
+                Some("MetaDataObject")
+            ),
+            Some("WSReferences/WSСборОтчетностиРосстата".to_string())
         );
         assert_eq!(
             infer_object_hint(

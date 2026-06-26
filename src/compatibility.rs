@@ -139,14 +139,20 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "SessionParameters",
             "SettingsStorages",
             "StyleItems",
+            "Styles",
             "Subsystems",
             "Roles",
             "CommonCommands",
             "BusinessProcesses",
+            "Bots",
             "DefinedTypes",
             "Tasks",
             "Constants",
+            "DocumentNumerators",
+            "IntegrationServices",
+            "Sequences",
             "WebServices",
+            "WSReferences",
             "XDTOPackages",
         ],
         supported_metadata_families: vec![
@@ -173,6 +179,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "Report",
             "DataProcessor",
             "Enum",
+            "Bot",
             "BusinessProcess",
             "ExchangePlan",
             "EventSubscription",
@@ -182,9 +189,14 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "HTTPService",
             "ScheduledJob",
             "StyleItem",
+            "Style",
             "Subsystem",
             "Role",
+            "DocumentNumerator",
             "WebService",
+            "WSReference",
+            "IntegrationService",
+            "Sequence",
             "XDTOPackage",
             "Task",
         ],
@@ -263,7 +275,13 @@ mod tests {
                 .supported_source_families
                 .contains(&"BusinessProcesses")
         );
+        assert!(report.supported_source_families.contains(&"Styles"));
+        assert!(report.supported_source_families.contains(&"Bots"));
         assert!(report.supported_source_families.contains(&"DefinedTypes"));
+        assert!(report.supported_source_families.contains(&"DocumentNumerators"));
+        assert!(report.supported_source_families.contains(&"IntegrationServices"));
+        assert!(report.supported_source_families.contains(&"Sequences"));
+        assert!(report.supported_source_families.contains(&"WSReferences"));
         assert!(
             report
                 .supported_metadata_families
@@ -298,7 +316,13 @@ mod tests {
                 .supported_metadata_families
                 .contains(&"BusinessProcess")
         );
+        assert!(report.supported_metadata_families.contains(&"Bot"));
         assert!(report.supported_metadata_families.contains(&"SettingsStorage"));
+        assert!(report.supported_metadata_families.contains(&"DocumentNumerator"));
+        assert!(report.supported_metadata_families.contains(&"IntegrationService"));
+        assert!(report.supported_metadata_families.contains(&"Sequence"));
+        assert!(report.supported_metadata_families.contains(&"Style"));
+        assert!(report.supported_metadata_families.contains(&"WSReference"));
         assert_eq!(
             report
                 .supported_metadata_families

@@ -213,6 +213,30 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_style_item_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageStyleObject(args) => {
+            let report = ibcmd_rs::mssql::stage_style_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageBotObject(args) => {
+            let report = ibcmd_rs::mssql::stage_bot_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageDocumentNumeratorObject(args) => {
+            let report = ibcmd_rs::mssql::stage_document_numerator_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageIntegrationServiceObject(args) => {
+            let report = ibcmd_rs::mssql::stage_integration_service_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageSequenceObject(args) => {
+            let report = ibcmd_rs::mssql::stage_sequence_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageWSReferenceObject(args) => {
+            let report = ibcmd_rs::mssql::stage_ws_reference_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlStageTaskObject(args) => {
             let report = ibcmd_rs::mssql::stage_task_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);

@@ -103,6 +103,18 @@ pub enum Commands {
     MssqlStageLanguageObject(MssqlStageLanguageObjectArgs),
     /// Stage one style item object from XML.
     MssqlStageStyleItemObject(MssqlStageStyleItemObjectArgs),
+    /// Stage one style object from XML.
+    MssqlStageStyleObject(MssqlStageStyleObjectArgs),
+    /// Stage one bot object from XML.
+    MssqlStageBotObject(MssqlStageBotObjectArgs),
+    /// Stage one document numerator object from XML.
+    MssqlStageDocumentNumeratorObject(MssqlStageDocumentNumeratorObjectArgs),
+    /// Stage one integration service object from XML.
+    MssqlStageIntegrationServiceObject(MssqlStageIntegrationServiceObjectArgs),
+    /// Stage one sequence object from XML.
+    MssqlStageSequenceObject(MssqlStageSequenceObjectArgs),
+    /// Stage one WS reference object from XML.
+    MssqlStageWSReferenceObject(MssqlStageWSReferenceObjectArgs),
     /// Stage one task object from XML.
     MssqlStageTaskObject(MssqlStageTaskObjectArgs),
     /// Stage one subsystem object from XML.
@@ -1139,6 +1151,174 @@ pub struct MssqlStageStyleItemObjectArgs {
     #[arg(long)]
     pub database: String,
     /// Style item XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageStyleObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Style XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageBotObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Bot XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageDocumentNumeratorObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Document numerator XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageIntegrationServiceObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Integration service XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageSequenceObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Sequence XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageWSReferenceObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// WS reference XML file.
     #[arg(long)]
     pub xml: PathBuf,
     /// Root folder with full XML sources, used to resolve metadata references.
@@ -2207,6 +2387,48 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_new_metadata_stage_commands() {
+        macro_rules! assert_stage_command {
+            ($name:literal, $variant:ident) => {{
+                let cli = Cli::parse_from([
+                    "ibcmd-rs",
+                    $name,
+                    "--database",
+                    "TestDb",
+                    "--xml",
+                    r"Dummy\Object.xml",
+                    "--replace-config-save",
+                    "--allow-non-lab",
+                ]);
+
+                match cli.command {
+                    Commands::$variant(args) => {
+                        assert_eq!(args.database, "TestDb");
+                        assert_eq!(args.xml, PathBuf::from(r"Dummy\Object.xml"));
+                    }
+                    other => panic!("unexpected command: {other:?}"),
+                }
+            }};
+        }
+
+        assert_stage_command!("mssql-stage-style-object", MssqlStageStyleObject);
+        assert_stage_command!("mssql-stage-bot-object", MssqlStageBotObject);
+        assert_stage_command!(
+            "mssql-stage-document-numerator-object",
+            MssqlStageDocumentNumeratorObject
+        );
+        assert_stage_command!(
+            "mssql-stage-integration-service-object",
+            MssqlStageIntegrationServiceObject
+        );
+        assert_stage_command!("mssql-stage-sequence-object", MssqlStageSequenceObject);
+        assert_stage_command!(
+            "mssql-stage-ws-reference-object",
+            MssqlStageWSReferenceObject
+        );
     }
 
     #[test]
