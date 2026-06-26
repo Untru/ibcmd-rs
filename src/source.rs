@@ -741,6 +741,7 @@ mod tests {
         std::fs::create_dir_all(root.join("DefinedTypes")).unwrap();
         std::fs::create_dir_all(root.join("CommonAttributes")).unwrap();
         std::fs::create_dir_all(root.join("FunctionalOptions")).unwrap();
+        std::fs::create_dir_all(root.join("FunctionalOptionsParameters")).unwrap();
         std::fs::create_dir_all(root.join("EventSubscriptions")).unwrap();
         std::fs::create_dir_all(root.join("HTTPServices")).unwrap();
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
@@ -828,6 +829,19 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
+            root.join("FunctionalOptionsParameters/ОбщиеНастройкиУзлов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <FunctionalOptionsParameter uuid="f9479915-cdee-40d5-ba53-101132aac672">
+    <Properties>
+      <Name>ОбщиеНастройкиУзлов</Name>
+    </Properties>
+  </FunctionalOptionsParameter>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
             root.join("EventSubscriptions/СобытиеПередЗаписью.xml"),
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
@@ -910,6 +924,11 @@ mod tests {
             "FunctionalOptions/ВыполнятьЗамерыПроизводительности.xml",
             SourceKind::MetadataXml,
             Some("FunctionalOptions/ВыполнятьЗамерыПроизводительности")
+        )));
+        assert!(files.contains(&(
+            "FunctionalOptionsParameters/ОбщиеНастройкиУзлов.xml",
+            SourceKind::MetadataXml,
+            Some("FunctionalOptionsParameters/ОбщиеНастройкиУзлов")
         )));
         assert!(files.contains(&(
             "EventSubscriptions/СобытиеПередЗаписью.xml",
