@@ -5702,9 +5702,13 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         std::fs::create_dir_all(root.join("AccumulationRegisters")).unwrap();
         std::fs::create_dir_all(root.join("AccountingRegisters")).unwrap();
         std::fs::create_dir_all(root.join("CalculationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("Catalogs")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfAccounts")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationTypes")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("Documents")).unwrap();
+        std::fs::create_dir_all(root.join("Enums")).unwrap();
+        std::fs::create_dir_all(root.join("InformationRegisters")).unwrap();
 
         std::fs::write(
             root.join("AccumulationRegisters/Продажи.xml"),
@@ -5728,6 +5732,19 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
       <Name>Хозрасчеты</Name>
     </Properties>
   </AccountingRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Catalogs/РолиИсполнителей.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Catalog uuid="20202020-2020-4202-8202-202020202020">
+    <Properties>
+      <Name>РолиИсполнителей</Name>
+    </Properties>
+  </Catalog>
 </MetaDataObject>
 "#,
         )
@@ -5789,6 +5806,45 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 "#,
         )
         .unwrap();
+        std::fs::write(
+            root.join("Documents/АктОбУничтоженииПерсональныхДанных.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Document uuid="14141414-1414-4141-8141-141414141414">
+    <Properties>
+      <Name>АктОбУничтоженииПерсональныхДанных</Name>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Enums/ВариантыВажностиЗадачи.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Enum uuid="19191919-1919-4191-8191-191919191919">
+    <Properties>
+      <Name>ВариантыВажностиЗадачи</Name>
+    </Properties>
+  </Enum>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("InformationRegisters/АдминистративнаяИерархия.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <InformationRegister uuid="33333333-3333-4333-8333-333333333334">
+    <Properties>
+      <Name>АдминистративнаяИерархия</Name>
+    </Properties>
+  </InformationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
 
         let source = MetadataSourceContext::new(root);
         for (reference, expected_uuid) in [
@@ -5805,6 +5861,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "33333333-3333-4333-8333-333333333333",
             ),
             (
+                "Catalog.РолиИсполнителей",
+                "20202020-2020-4202-8202-202020202020",
+            ),
+            (
                 "ChartOfAccounts.ПланСчетов",
                 "44444444-4444-4444-8444-444444444444",
             ),
@@ -5815,6 +5875,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "ChartOfCalculationRegisters.Начисления",
                 "66666666-6666-4666-8666-666666666666",
+            ),
+            (
+                "Document.АктОбУничтоженииПерсональныхДанных",
+                "14141414-1414-4141-8141-141414141414",
+            ),
+            (
+                "Enum.ВариантыВажностиЗадачи",
+                "19191919-1919-4191-8191-191919191919",
+            ),
+            (
+                "InformationRegister.АдминистративнаяИерархия",
+                "33333333-3333-4333-8333-333333333334",
             ),
         ] {
             assert_eq!(
