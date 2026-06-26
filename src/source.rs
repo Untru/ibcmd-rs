@@ -1431,6 +1431,22 @@ mod tests {
             root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help"),
         )
         .unwrap();
+        std::fs::create_dir_all(
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/РазблокированиеРеквизитов/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help"),
+        )
+        .unwrap();
 
         std::fs::copy(
             lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач.xml"),
@@ -1497,6 +1513,66 @@ mod tests {
         std::fs::copy(
             lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help/ru.html"),
             root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help/ru.html"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form/Module.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/РазблокированиеРеквизитов/Ext/Form.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/РазблокированиеРеквизитов/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ManagerModule.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help.xml"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html"),
+            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html"),
         )
         .unwrap();
 
@@ -1574,6 +1650,66 @@ mod tests {
             "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help/ru.html",
             SourceKind::Other,
             Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаСписка/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/РазблокированиеРеквизитов/Ext/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ManagerModule.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html",
+            SourceKind::Other,
+            Some("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения")
         )));
     }
 

@@ -2722,6 +2722,10 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "AccumulationRegister" => Some(("AccumulationRegister", "AccumulationRegisters")),
         "AccountingRegister" => Some(("AccountingRegister", "AccountingRegisters")),
         "BusinessProcess" => Some(("BusinessProcess", "BusinessProcesses")),
+        "ChartOfCharacteristicTypes" => Some((
+            "ChartOfCharacteristicTypes",
+            "ChartsOfCharacteristicTypes",
+        )),
         "Catalog" => Some(("Catalog", "Catalogs")),
         "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
         "CommonForm" => Some(("CommonForm", "CommonForms")),
@@ -4548,6 +4552,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "CommonForm.АвтономнаяРабота",
                 "1f3057c2-135f-44b2-9f86-34481fbc5596",
+            ),
+            (
+                "ChartOfCharacteristicTypes.ДополнительныеРеквизитыИСведения",
+                "1055d15b-8cb5-4ff0-a526-7fd20a08a96c",
+            ),
+            (
+                "ChartOfCharacteristicTypes.ОбъектыАдресацииЗадач",
+                "ad083c26-7461-4e94-b524-0174242fbd91",
             ),
             (
                 "CommonTemplate.ВидыДокументовУдостоверяющихЛичность",
