@@ -415,12 +415,14 @@ fn parse_generated_type_entries_from_blob(
             entries.push((type_id, format!("cfg:CatalogRef.{}", header.name)));
         }
     }
-    if object_code == 20 {
+    let header_index = metadata_header_field_index(&fields, uuid);
+
+    if object_code == 20 && header_index == Some(5) {
         if let Some(type_id) = fields.get(1).copied().and_then(parse_uuid_field) {
             entries.push((type_id, format!("cfg:EnumRef.{}", header.name)));
         }
     }
-    if object_code == 33 {
+    if object_code == 33 && fields.get(1).copied().and_then(parse_uuid_field).is_some() {
         push_indexed_generated_type(
             &mut entries,
             &fields,
@@ -577,7 +579,7 @@ fn extract_metadata_source_xml(
         let xml = format_defined_type_source_xml(&header, &defined_type).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    let (kind, folder) = metadata_source_for_object_code(object_code)?;
+    let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
     let header = parse_metadata_header_from_text(text, uuid)?;
     let relative_path = PathBuf::from(folder)
         .join(sanitize_source_path_segment(&header.name))
@@ -601,19 +603,64 @@ fn parse_metadata_object_code(text: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-fn metadata_source_for_object_code(code: u32) -> Option<(&'static str, &'static str)> {
+fn metadata_source_for_text(
+    code: u32,
+    text: &str,
+    uuid: &str,
+) -> Option<(&'static str, &'static str)> {
+    let fields = metadata_object_fields(text)?;
+    let header_index = metadata_header_field_index(&fields, uuid);
+
     match code {
-        1 => Some(("EventSubscription", "EventSubscriptions")),
+        1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
+            Some(("EventSubscription", "EventSubscriptions"))
+        }
         6 => Some(("Role", "Roles")),
+        14 => Some(("FilterCriterion", "FilterCriteria")),
         17 => Some(("DataProcessor", "DataProcessors")),
-        22 => Some(("Subsystem", "Subsystems")),
+        20 if header_index == Some(5) => Some(("Enum", "Enums")),
+        20 if header_index == Some(3) => Some(("Report", "Reports")),
+        21 => Some(("CalculationRegister", "CalculationRegisters")),
+        22 if header_index == Some(1) => Some(("Subsystem", "Subsystems")),
+        22 if field_is_unsigned_integer(fields.get(1)) => {
+            Some(("AccountingRegister", "AccountingRegisters"))
+        }
+        26 => Some(("DocumentJournal", "DocumentJournals")),
         28 => Some(("AccumulationRegister", "AccumulationRegisters")),
+        30 => Some(("BusinessProcess", "BusinessProcesses")),
+        32 => Some(("ChartOfAccounts", "ChartsOfAccounts")),
+        33 if header_index == Some(1) => Some(("Task", "Tasks")),
         33 => Some(("InformationRegister", "InformationRegisters")),
         34 => Some(("ChartOfCharacteristicTypes", "ChartsOfCharacteristicTypes")),
+        35 => Some(("ChartOfCalculationTypes", "ChartsOfCalculationTypes")),
+        37 => Some(("ExchangePlan", "ExchangePlans")),
         40 => Some(("Document", "Documents")),
         57 => Some(("Catalog", "Catalogs")),
         _ => None,
     }
+}
+
+fn metadata_object_fields(text: &str) -> Option<Vec<&str>> {
+    let root_fields = split_1c_braced_fields(text, 0)?;
+    let object_text = *root_fields.get(1)?;
+    split_1c_braced_fields(object_text, 0)
+}
+
+fn metadata_header_field_index(fields: &[&str], uuid: &str) -> Option<usize> {
+    let marker = format!("{{1,0,{uuid}}}");
+    fields.iter().position(|field| field.contains(&marker))
+}
+
+fn field_starts_with(field: Option<&&str>, prefix: &str) -> bool {
+    field
+        .map(|value| value.trim_start().starts_with(prefix))
+        .unwrap_or(false)
+}
+
+fn field_is_unsigned_integer(field: Option<&&str>) -> bool {
+    field
+        .map(|value| value.trim().chars().all(|ch| ch.is_ascii_digit()))
+        .unwrap_or(false)
 }
 
 fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonModuleFlags> {
@@ -1581,6 +1628,115 @@ mod tests {
         assert_eq!(properties.kind, "ChartOfCharacteristicTypes");
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "ExpenseItems");
+    }
+
+    #[test]
+    fn disambiguates_colliding_metadata_object_codes() {
+        let enum_uuid = "11111111-1111-4111-8111-111111111111";
+        let enum_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-cccc-cccccccccccc,dddddddd-dddd-4ddd-dddd-dddddddddddd,\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let report_uuid = "22222222-2222-4222-8222-222222222222";
+        let report_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let subsystem_uuid = "33333333-3333-4333-8333-333333333333";
+        let subsystem_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let accounting_uuid = "44444444-4444-4444-8444-444444444444";
+        let accounting_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,22,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-cccc-cccccccccccc,dddddddd-dddd-4ddd-dddd-dddddddddddd,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee,ffffffff-ffff-4fff-ffff-ffffffffffff,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,77777777-7777-4777-8777-777777777777,\r\n{{0,\r\n{{3,\r\n{{1,0,{accounting_uuid}}},\"Ledger\",{{1,\"en\",\"Ledger\"}},\"\"}}\r\n}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let task_uuid = "55555555-5555-4555-8555-555555555555";
+        let task_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"Task\",{{1,\"en\",\"Task\"}},\"\"}},0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            extract_metadata_source_xml(&enum_blob, enum_uuid, &BTreeMap::new())
+                .unwrap()
+                .relative_path,
+            PathBuf::from("Enums").join("Status.xml")
+        );
+        assert_eq!(
+            extract_metadata_source_xml(&report_blob, report_uuid, &BTreeMap::new())
+                .unwrap()
+                .relative_path,
+            PathBuf::from("Reports").join("SalesReport.xml")
+        );
+        assert_eq!(
+            extract_metadata_source_xml(&subsystem_blob, subsystem_uuid, &BTreeMap::new())
+                .unwrap()
+                .relative_path,
+            PathBuf::from("Subsystems").join("Sales.xml")
+        );
+        assert_eq!(
+            extract_metadata_source_xml(&accounting_blob, accounting_uuid, &BTreeMap::new())
+                .unwrap()
+                .relative_path,
+            PathBuf::from("AccountingRegisters").join("Ledger.xml")
+        );
+        assert_eq!(
+            extract_metadata_source_xml(&task_blob, task_uuid, &BTreeMap::new())
+                .unwrap()
+                .relative_path,
+            PathBuf::from("Tasks").join("Task.xml")
+        );
+    }
+
+    #[test]
+    fn ignores_report_and_task_rows_in_generated_type_index() {
+        let report_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let report_object_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let report_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,{report_object_type_id},cccccccc-cccc-4ccc-cccc-cccccccccccc,\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let task_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let task_generated_type_id = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let task_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"Task\",{{1,\"en\",\"Task\"}},\"\"}},0,{task_generated_type_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: report_uuid.to_string(),
+                part_no: 0,
+                data_size: report_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&report_blob),
+            },
+            ConfigRow {
+                file_name: task_uuid.to_string(),
+                part_no: 0,
+                data_size: task_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&task_blob),
+            },
+        ];
+
+        let index = build_metadata_type_index(&rows);
+
+        assert!(!index.contains_key(report_object_type_id));
+        assert!(!index.contains_key(task_generated_type_id));
     }
 
     #[test]
