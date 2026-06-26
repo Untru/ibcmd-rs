@@ -279,6 +279,9 @@ pub struct MssqlDumpConfigArgs {
     /// Extract module `text` elements into <table>_module_text/*.bsl when a row is a module blob.
     #[arg(long)]
     pub extract_module_text: bool,
+    /// Try to reconstruct minimal source XML for recognized metadata blobs.
+    #[arg(long)]
+    pub extract_metadata_xml: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2727,6 +2730,7 @@ mod tests {
             "--include-config-save",
             "--inflate",
             "--extract-module-text",
+            "--extract-metadata-xml",
             "--overwrite",
         ]);
 
@@ -2741,6 +2745,7 @@ mod tests {
                 assert!(args.include_config_save);
                 assert!(args.inflate);
                 assert!(args.extract_module_text);
+                assert!(args.extract_metadata_xml);
                 assert!(args.overwrite);
             }
             other => panic!("unexpected command: {other:?}"),

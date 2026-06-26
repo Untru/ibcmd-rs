@@ -20,6 +20,7 @@ pub struct MssqlDumpConfigReport {
     pub total_binary_bytes: usize,
     pub total_inflated_rows: usize,
     pub total_module_text_rows: usize,
+    pub total_metadata_xml_rows: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +30,7 @@ pub struct MssqlDumpedTableReport {
     pub binary_bytes: usize,
     pub inflated_rows: usize,
     pub module_text_rows: usize,
+    pub metadata_xml_rows: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,6 +54,7 @@ struct MssqlDumpRowManifest {
     binary_path: String,
     inflated_path: Option<String>,
     module_text_path: Option<String>,
+    metadata_xml_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +94,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             rows,
             args.inflate,
             args.extract_module_text,
+            args.extract_metadata_xml,
         )?;
         reports.push(MssqlDumpedTableReport {
             table: table.to_string(),
@@ -98,6 +102,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             binary_bytes: dumped.binary_bytes,
             inflated_rows: dumped.inflated_rows,
             module_text_rows: dumped.module_text_rows,
+            metadata_xml_rows: dumped.metadata_xml_rows,
         });
         manifest_tables.push(MssqlDumpTableManifest {
             table: table.to_string(),
@@ -124,6 +129,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         total_binary_bytes: reports.iter().map(|table| table.binary_bytes).sum(),
         total_inflated_rows: reports.iter().map(|table| table.inflated_rows).sum(),
         total_module_text_rows: reports.iter().map(|table| table.module_text_rows).sum(),
+        total_metadata_xml_rows: reports.iter().map(|table| table.metadata_xml_rows).sum(),
         tables: reports,
     })
 }
@@ -133,6 +139,7 @@ struct DumpedTable {
     binary_bytes: usize,
     inflated_rows: usize,
     module_text_rows: usize,
+    metadata_xml_rows: usize,
 }
 
 fn dump_table_rows(
@@ -141,6 +148,7 @@ fn dump_table_rows(
     rows: Vec<ConfigRow>,
     inflate: bool,
     extract_module_text: bool,
+    extract_metadata_xml: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
     fs::create_dir_all(&table_dir)
@@ -165,6 +173,7 @@ fn dump_table_rows(
     let mut binary_bytes = 0;
     let mut inflated_rows = 0;
     let mut module_text_rows = 0;
+    let mut metadata_xml_rows = 0;
     for row in rows {
         let bytes = decode_hex(&row.binary_hex)
             .with_context(|| format!("failed to decode {} row {}", table, row.file_name))?;
@@ -228,6 +237,25 @@ fn dump_table_rows(
             None
         };
 
+        let metadata_xml_relative = if extract_metadata_xml {
+            match extract_metadata_source_xml(&bytes, &row.file_name) {
+                Some(extracted) => {
+                    let path = output_dir.join(&extracted.relative_path);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("failed to create {}", parent.display()))?;
+                    }
+                    fs::write(&path, extracted.xml)
+                        .with_context(|| format!("failed to write {}", path.display()))?;
+                    metadata_xml_rows += 1;
+                    Some(extracted.relative_path.to_string_lossy().replace('\\', "/"))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
         manifests.push(MssqlDumpRowManifest {
             file_name: row.file_name,
             part_no: row.part_no,
@@ -236,6 +264,7 @@ fn dump_table_rows(
             binary_path: binary_relative.to_string_lossy().replace('\\', "/"),
             inflated_path: inflated_relative,
             module_text_path: module_text_relative,
+            metadata_xml_path: metadata_xml_relative,
         });
     }
 
@@ -244,6 +273,7 @@ fn dump_table_rows(
         binary_bytes,
         inflated_rows,
         module_text_rows,
+        metadata_xml_rows,
     })
 }
 
@@ -279,6 +309,234 @@ fn common_module_source_path(name: &str) -> PathBuf {
         .join(sanitize_source_path_segment(name))
         .join("Ext")
         .join("Module.bsl")
+}
+
+struct ExtractedMetadataSourceXml {
+    relative_path: PathBuf,
+    xml: Vec<u8>,
+}
+
+struct MetadataHeader {
+    uuid: String,
+    name: String,
+    synonyms: Vec<(String, String)>,
+    comment: String,
+}
+
+fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
+    if uuid.contains('.') {
+        return None;
+    }
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let object_code = parse_metadata_object_code(text)?;
+    let (kind, folder) = metadata_source_for_object_code(object_code)?;
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let relative_path = PathBuf::from(folder)
+        .join(sanitize_source_path_segment(&header.name))
+        .with_extension("xml");
+    let xml = format_metadata_source_xml(kind, &header).into_bytes();
+
+    Some(ExtractedMetadataSourceXml { relative_path, xml })
+}
+
+fn parse_metadata_object_code(text: &str) -> Option<u32> {
+    let after_root = text.trim_start().strip_prefix("{1,")?;
+    let after_root = after_root.trim_start();
+    let after_open = after_root.strip_prefix('{')?;
+    let digits = after_open
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+fn metadata_source_for_object_code(code: u32) -> Option<(&'static str, &'static str)> {
+    match code {
+        1 => Some(("EventSubscription", "EventSubscriptions")),
+        6 => Some(("Role", "Roles")),
+        17 => Some(("DataProcessor", "DataProcessors")),
+        22 => Some(("Subsystem", "Subsystems")),
+        28 => Some(("AccumulationRegister", "AccumulationRegisters")),
+        33 => Some(("InformationRegister", "InformationRegisters")),
+        40 => Some(("Document", "Documents")),
+        57 => Some(("Catalog", "Catalogs")),
+        _ => None,
+    }
+}
+
+fn parse_metadata_header_from_text(text: &str, uuid: &str) -> Option<MetadataHeader> {
+    let marker = format!("{{1,0,{uuid}}},");
+    let mut offset = text.find(&marker)? + marker.len();
+    offset = skip_ascii_ws_at(text, offset);
+    let (name, consumed) = parse_1c_quoted_string_with_len(&text[offset..])?;
+    offset += consumed;
+    offset = expect_comma_at(text, offset)?;
+    offset = skip_ascii_ws_at(text, offset);
+    let synonym_end = scan_1c_braced_value(text, offset)?;
+    let synonyms = parse_1c_synonyms(&text[offset..synonym_end]);
+    offset = expect_comma_at(text, synonym_end)?;
+    offset = skip_ascii_ws_at(text, offset);
+    let (comment, _) = parse_1c_quoted_string_with_len(&text[offset..])?;
+
+    Some(MetadataHeader {
+        uuid: uuid.to_string(),
+        name,
+        synonyms,
+        comment,
+    })
+}
+
+fn parse_1c_quoted_string_with_len(input: &str) -> Option<(String, usize)> {
+    let mut chars = input.char_indices();
+    if chars.next()?.1 != '"' {
+        return None;
+    }
+    let mut output = String::new();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '"' {
+            if let Some((_, next)) = chars.clone().next()
+                && next == '"'
+            {
+                output.push('"');
+                let _ = chars.next();
+                continue;
+            }
+            return Some((output, index + ch.len_utf8()));
+        }
+        output.push(ch);
+    }
+    None
+}
+
+fn parse_1c_synonyms(input: &str) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    let mut offset = 0;
+    while let Some(relative) = input[offset..].find('"') {
+        offset += relative;
+        let Some((value, consumed)) = parse_1c_quoted_string_with_len(&input[offset..]) else {
+            break;
+        };
+        values.push(value);
+        offset += consumed;
+    }
+
+    values
+        .chunks(2)
+        .filter_map(|chunk| match chunk {
+            [lang, content] => Some((lang.clone(), content.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn scan_1c_braced_value(text: &str, start: usize) -> Option<usize> {
+    if text[start..].chars().next()? != '{' {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut chars = text[start..].char_indices().peekable();
+    while let Some((relative, ch)) = chars.next() {
+        if in_string {
+            if ch == '"' {
+                if let Some((_, next)) = chars.peek()
+                    && *next == '"'
+                {
+                    let _ = chars.next();
+                    continue;
+                }
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start + relative + ch.len_utf8());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn skip_ascii_ws_at(text: &str, mut offset: usize) -> usize {
+    while let Some(byte) = text.as_bytes().get(offset)
+        && byte.is_ascii_whitespace()
+    {
+        offset += 1;
+    }
+    offset
+}
+
+fn expect_comma_at(text: &str, offset: usize) -> Option<usize> {
+    let offset = skip_ascii_ws_at(text, offset);
+    if text.as_bytes().get(offset) == Some(&b',') {
+        Some(offset + 1)
+    } else {
+        None
+    }
+}
+
+fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
+    let mut synonyms = String::new();
+    if header.synonyms.is_empty() {
+        synonyms.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        synonyms.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            synonyms.push_str("\t\t\t\t<v8:item>\r\n");
+            synonyms.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            synonyms.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            synonyms.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        synonyms.push_str("\t\t\t</Synonym>\r\n");
+    }
+
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"2.21\">\r\n\
+\t<{kind} uuid=\"{uuid}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>{name}</Name>\r\n\
+{synonyms}\
+\t\t\t<Comment>{comment}</Comment>\r\n\
+\t\t</Properties>\r\n\
+\t</{kind}>\r\n\
+</MetaDataObject>\r\n",
+        uuid = escape_xml_text(&header.uuid),
+        name = escape_xml_text(&header.name),
+        comment = escape_xml_text(&header.comment),
+    )
+}
+
+fn escape_xml_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            _ => output.push(ch),
+        }
+    }
+    output
 }
 
 fn parse_common_module_name_from_metadata_blob(blob: &[u8], uuid: &str) -> Option<String> {
@@ -524,7 +782,7 @@ mod tests {
     use flate2::write::DeflateEncoder;
     use std::io::Write;
 
-    use crate::module_blob::pack_module_blob_bytes;
+    use crate::module_blob::{pack_module_blob_bytes, parse_simple_metadata_xml_properties};
 
     #[test]
     fn decodes_plain_hex_and_sql_hex() {
@@ -598,7 +856,7 @@ mod tests {
             binary_hex: encode_hex_for_test(&packed.blob),
         };
 
-        let dumped = dump_table_rows(&root, "Config", vec![row], false, true).unwrap();
+        let dumped = dump_table_rows(&root, "Config", vec![row], false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 1);
         let module_text_path = dumped.rows[0].module_text_path.as_ref().unwrap();
@@ -639,7 +897,7 @@ mod tests {
             },
         ];
 
-        let dumped = dump_table_rows(&root, "Config", rows, false, true).unwrap();
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 1);
         let expected = PathBuf::from("CommonModules")
@@ -656,6 +914,66 @@ mod tests {
             Some("CommonModules/TestModule/Ext/Module.bsl")
         );
         assert_eq!(fs::read(root.join(expected)).unwrap(), text);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_simple_metadata_xml_from_recognized_blob() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let blob = deflate_for_test(
+            format!(
+                "\u{feff}{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"SalesCatalog\",{{2,\"ru\",\"Продажи\",\"en\",\"Sales\"}},\"Comment\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Catalogs").join("SalesCatalog.xml")
+        );
+        assert_eq!(properties.kind, "Catalog");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "SalesCatalog");
+        assert_eq!(properties.comment, "Comment");
+        assert_eq!(properties.synonyms.len(), 2);
+    }
+
+    #[test]
+    fn writes_extracted_metadata_xml_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let row = ConfigRow {
+            file_name: uuid.to_string(),
+            part_no: 0,
+            data_size: blob.len() as i64,
+            binary_hex: encode_hex_for_test(&blob),
+        };
+
+        let dumped = dump_table_rows(&root, "Config", vec![row], false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(
+            dumped.rows[0].metadata_xml_path.as_deref(),
+            Some("Documents/Invoice.xml")
+        );
+        let written = fs::read(root.join("Documents").join("Invoice.xml")).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&written).unwrap();
+        assert_eq!(properties.kind, "Document");
+        assert_eq!(properties.uuid, uuid);
 
         let _ = fs::remove_dir_all(root);
     }
