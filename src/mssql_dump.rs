@@ -1434,6 +1434,31 @@ fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> {
     parse_metadata_header_from_text(text, uuid).map(|header| header.name)
 }
 
+fn extract_configuration_source_xml(text: &str, uuid: &str) -> Option<String> {
+    if !text.trim_start().starts_with("{2,") {
+        return None;
+    }
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let uuid_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    if uuid_fields.first()?.trim() != uuid {
+        return None;
+    }
+    let marker = "{1,0,";
+    let marker_start = text.find(marker)?;
+    let header_uuid_start = marker_start + marker.len();
+    let header_uuid_end = header_uuid_start + 36;
+    let header_uuid = text.get(header_uuid_start..header_uuid_end)?;
+    if !is_uuid_text(header_uuid) || !is_metadata_header_marker(text, header_uuid_end) {
+        return None;
+    }
+    let mut header = parse_metadata_header_from_text(text, header_uuid)?;
+    header.uuid = uuid.to_string();
+    Some(format_metadata_source_xml("Configuration", &header))
+}
+
 fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
     let mut index = BTreeMap::new();
     for row in rows {
@@ -3398,6 +3423,12 @@ fn extract_metadata_source_xml_with_refs(
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
+    if let Some(xml) = extract_configuration_source_xml(text, uuid) {
+        return Some(ExtractedMetadataSourceXml {
+            relative_path: PathBuf::from("Configuration.xml"),
+            xml: xml.into_bytes(),
+        });
+    }
     let object_code = parse_metadata_object_code(text)?;
     if object_code == 12 {
         let header = parse_metadata_header_from_text(text, uuid)?;
@@ -7540,6 +7571,34 @@ mod tests {
             properties.return_values_reuse,
             ReturnValuesReuse::DuringSession
         );
+    }
+
+    #[test]
+    fn extracts_configuration_xml_from_root_metadata_blob() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let blob = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+
+        assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+        assert_eq!(properties.kind, "Configuration");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "DemoApp");
+        assert_eq!(properties.comment, "Configuration comment");
     }
 
     #[test]
