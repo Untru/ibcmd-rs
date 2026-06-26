@@ -165,6 +165,106 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_role_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageConstantObject(args) => {
+            let report = ibcmd_rs::mssql::stage_constant_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageDefinedTypeObject(args) => {
+            let report = ibcmd_rs::mssql::stage_defined_type_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageSessionParameterObject(args) => {
+            let report = ibcmd_rs::mssql::stage_session_parameter_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageSettingsStorageObject(args) => {
+            let report = ibcmd_rs::mssql::stage_settings_storage_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageFunctionalOptionObject(args) => {
+            let report = ibcmd_rs::mssql::stage_functional_option_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageFunctionalOptionsParameterObject(args) => {
+            let report = ibcmd_rs::mssql::stage_functional_options_parameter_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageEventSubscriptionObject(args) => {
+            let report = ibcmd_rs::mssql::stage_event_subscription_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageHTTPServiceObject(args) => {
+            let report = ibcmd_rs::mssql::stage_http_service_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageWebServiceObject(args) => {
+            let report = ibcmd_rs::mssql::stage_web_service_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageCommonAttributeObject(args) => {
+            let report = ibcmd_rs::mssql::stage_common_attribute_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageLanguageObject(args) => {
+            let report = ibcmd_rs::mssql::stage_language_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageStyleItemObject(args) => {
+            let report = ibcmd_rs::mssql::stage_style_item_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageTaskObject(args) => {
+            let report = ibcmd_rs::mssql::stage_task_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageSubsystemObject(args) => {
+            let report = ibcmd_rs::mssql::stage_subsystem_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageCommandGroupObject(args) => {
+            let report = ibcmd_rs::mssql::stage_command_group_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageEnumObject(args) => {
+            let report = ibcmd_rs::mssql::stage_enum_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageDocumentObject(args) => {
+            let report = ibcmd_rs::mssql::stage_document_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageFilterCriteriaObject(args) => {
+            let report = ibcmd_rs::mssql::stage_filter_criteria_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageAccountingRegisterObject(args) => {
+            let report = ibcmd_rs::mssql::stage_accounting_register_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageAccumulationRegisterObject(args) => {
+            let report = ibcmd_rs::mssql::stage_accumulation_register_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageCalculationRegisterObject(args) => {
+            let report = ibcmd_rs::mssql::stage_calculation_register_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageChartOfCharacteristicTypesObject(args) => {
+            let report = ibcmd_rs::mssql::stage_chart_of_characteristic_types_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageChartOfAccountsObject(args) => {
+            let report = ibcmd_rs::mssql::stage_chart_of_accounts_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageChartOfCalculationTypesObject(args) => {
+            let report = ibcmd_rs::mssql::stage_chart_of_calculation_types_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlStageChartOfCalculationRegistersObject(args) => {
+            let report = ibcmd_rs::mssql::stage_chart_of_calculation_registers_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlStageCommonCommandObject(args) => {
             let report = ibcmd_rs::mssql::stage_common_command_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);

@@ -13,14 +13,28 @@ use crate::cli::{
     MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
     MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
     MssqlStageCatalogObjectArgs, MssqlStageDataProcessorObjectArgs,
-    MssqlStageCommonCommandObjectArgs,
+    MssqlStageCommonAttributeObjectArgs, MssqlStageCommonCommandObjectArgs,
     MssqlStageCommonFormObjectArgs,
     MssqlStageCommonPictureObjectArgs,
-    MssqlStageCommonTemplateObjectArgs,
+    MssqlStageCommonTemplateObjectArgs, MssqlStageConstantObjectArgs,
+    MssqlStageDefinedTypeObjectArgs, MssqlStageEventSubscriptionObjectArgs,
+    MssqlStageCommandGroupObjectArgs, MssqlStageEnumObjectArgs, MssqlStageDocumentObjectArgs,
+    MssqlStageFunctionalOptionObjectArgs,
+    MssqlStageFunctionalOptionsParameterObjectArgs, MssqlStageHTTPServiceObjectArgs,
     MssqlStageDocumentJournalObjectArgs, MssqlStageExchangePlanObjectArgs,
-    MssqlStageInformationRegisterObjectArgs, MssqlStageMetadataObjectsArgs,
-    MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs, MssqlStageScheduledJobObjectArgs,
-    MssqlStageXdtopackageObjectArgs, MssqlStorageExportArgs, MssqlStorageImportArgs,
+    MssqlStageInformationRegisterObjectArgs, MssqlStageLanguageObjectArgs,
+    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs,
+    MssqlStageScheduledJobObjectArgs, MssqlStageSessionParameterObjectArgs,
+    MssqlStageSettingsStorageObjectArgs, MssqlStageStyleItemObjectArgs,
+    MssqlStageSubsystemObjectArgs, MssqlStageTaskObjectArgs, MssqlStageWebServiceObjectArgs,
+    MssqlStageFilterCriteriaObjectArgs, MssqlStageAccountingRegisterObjectArgs,
+    MssqlStageAccumulationRegisterObjectArgs,
+    MssqlStageCalculationRegisterObjectArgs,
+    MssqlStageChartOfAccountsObjectArgs,
+    MssqlStageChartOfCalculationRegistersObjectArgs,
+    MssqlStageChartOfCalculationTypesObjectArgs,
+    MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageXdtopackageObjectArgs,
+    MssqlStorageExportArgs, MssqlStorageImportArgs,
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
@@ -1013,6 +1027,402 @@ pub fn stage_xdtopackage_object(
 }
 
 pub fn stage_role_object(args: &MssqlStageRoleObjectArgs) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_constant_object(
+    args: &MssqlStageConstantObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_defined_type_object(
+    args: &MssqlStageDefinedTypeObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_session_parameter_object(
+    args: &MssqlStageSessionParameterObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_settings_storage_object(
+    args: &MssqlStageSettingsStorageObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_functional_option_object(
+    args: &MssqlStageFunctionalOptionObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_functional_options_parameter_object(
+    args: &MssqlStageFunctionalOptionsParameterObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_event_subscription_object(
+    args: &MssqlStageEventSubscriptionObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_http_service_object(
+    args: &MssqlStageHTTPServiceObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_web_service_object(
+    args: &MssqlStageWebServiceObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_common_attribute_object(
+    args: &MssqlStageCommonAttributeObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_language_object(
+    args: &MssqlStageLanguageObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_style_item_object(
+    args: &MssqlStageStyleItemObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_task_object(args: &MssqlStageTaskObjectArgs) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_subsystem_object(
+    args: &MssqlStageSubsystemObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_command_group_object(
+    args: &MssqlStageCommandGroupObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_enum_object(args: &MssqlStageEnumObjectArgs) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_document_object(
+    args: &MssqlStageDocumentObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_filter_criteria_object(
+    args: &MssqlStageFilterCriteriaObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_accounting_register_object(
+    args: &MssqlStageAccountingRegisterObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_accumulation_register_object(
+    args: &MssqlStageAccumulationRegisterObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_calculation_register_object(
+    args: &MssqlStageCalculationRegisterObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_chart_of_characteristic_types_object(
+    args: &MssqlStageChartOfCharacteristicTypesObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_chart_of_accounts_object(
+    args: &MssqlStageChartOfAccountsObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_chart_of_calculation_types_object(
+    args: &MssqlStageChartOfCalculationTypesObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_chart_of_calculation_registers_object(
+    args: &MssqlStageChartOfCalculationRegistersObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
         database: args.database.clone(),
