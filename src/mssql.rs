@@ -1973,6 +1973,24 @@ mod tests {
     }
 
     #[test]
+    fn qualifies_table_names_with_database() {
+        assert_eq!(
+            super::qualified_table("Test Db]", "ConfigSave"),
+            "[Test Db]]].dbo.[ConfigSave]"
+        );
+    }
+
+    #[test]
+    fn quotes_paths_for_sql_string_literals() {
+        let path = PathBuf::from(r"C:\temp\O'Brien\backup.bak");
+
+        assert_eq!(
+            super::quote_string_path(&path),
+            r"C:\temp\O''Brien\backup.bak"
+        );
+    }
+
+    #[test]
     fn builds_metadata_object_stage_sql_with_expected_row_counts() {
         let prepared = vec![PreparedMetadataObjectStage {
             object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
