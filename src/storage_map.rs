@@ -237,6 +237,9 @@ fn classify_role(group: &crate::trace::QueryGroup) -> StorageStageRole {
         return StorageStageRole::ConfigObject;
     }
     if sql.starts_with("insert into configsave") {
+        if sample_lower.contains("n'versions'") {
+            return StorageStageRole::ConfigVersion;
+        }
         if sample_lower.contains("n'root'") || sample_lower.contains("n'version'") {
             return StorageStageRole::ConfigHeader;
         }
@@ -253,12 +256,18 @@ fn classify_role(group: &crate::trace::QueryGroup) -> StorageStageRole {
         return StorageStageRole::ConfigSaveGeneric;
     }
     if sql.starts_with("update configsave set binarydata") {
+        if sample_lower.contains("file_name = n'versions'") {
+            return StorageStageRole::ConfigVersion;
+        }
         if sample_lower.contains("file_name = n'module'") {
             return StorageStageRole::ConfigModuleBody;
         }
         return StorageStageRole::ConfigSaveGeneric;
     }
     if sql.starts_with("update configsave set attributes") {
+        if sample_lower.contains("file_name = n'versions'") {
+            return StorageStageRole::ConfigVersion;
+        }
         if sample_lower.contains("file_name = n'metadata'") {
             return StorageStageRole::ConfigMetadata;
         }
@@ -325,7 +334,7 @@ mod tests {
     fn classifies_configsave_patterns() {
         let analysis = TraceAnalysis {
             files: vec!["trace.xml".into()],
-            events_seen: 11,
+            events_seen: 12,
             groups: vec![
                 group(
                     "select count_big(*) from configsave where file_name = ? and part_no = ?",
@@ -382,6 +391,12 @@ mod tests {
                     16,
                 ),
                 group(
+                    "insert into configsave (file_name, creation, modified, attributes, data_size, binarydata, part_no) select n'versions', sysutcdatetime(), sysutcdatetime(), attributes, data_size, binarydata, part_no from config where file_name = n'versions' and part_no = 0",
+                    vec!["ConfigSave"],
+                    1,
+                    16,
+                ),
+                group(
                     "insert into params (file_name, creation, modified, attributes, data_size, binarydata, part_no) values (?, sysutcdatetime(), sysutcdatetime(), ?, ?, ?, ?)",
                     vec!["Params"],
                     1,
@@ -392,8 +407,8 @@ mod tests {
         };
 
         let report = build_storage_mapping(&analysis);
-        assert_eq!(report.groups_seen, 11);
-        assert_eq!(report.mapped_groups, 11);
+        assert_eq!(report.groups_seen, 12);
+        assert_eq!(report.mapped_groups, 12);
         assert_eq!(report.unmapped_groups, 0);
         assert!(
             report
@@ -429,6 +444,12 @@ mod tests {
             report
                 .entries
                 .iter()
+                .any(|entry| entry.role == StorageStageRole::ConfigVersion)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
                 .any(|entry| entry.role == StorageStageRole::Params)
         );
         assert!(
@@ -454,6 +475,12 @@ mod tests {
                 .roles
                 .iter()
                 .any(|summary| summary.role == StorageStageRole::ConfigObject)
+        );
+        assert!(
+            report
+                .roles
+                .iter()
+                .any(|summary| summary.role == StorageStageRole::ConfigVersion)
         );
         assert!(
             report
