@@ -248,6 +248,7 @@ pub struct StageSourceObjectsReport {
     pub database: String,
     pub metadata_objects: Vec<StagedMetadataObjectReport>,
     pub common_modules: Vec<StagedCommonModuleObjectReport>,
+    pub scripts: Vec<PathBuf>,
     pub script: PathBuf,
     pub before: StorageTableManifest,
     pub after: StorageTableManifest,
@@ -984,6 +985,7 @@ pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageS
             })
             .collect::<Result<Vec<_>>>()
     })??;
+    let metadata_object_count = metadata_objects.len();
     let common_modules = parallel::install(|| {
         common_module_xmls
             .par_iter()
@@ -998,6 +1000,7 @@ pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageS
             })
             .collect::<Result<Vec<_>>>()
     })??;
+    let common_module_count = common_modules.len();
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
 
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
@@ -1005,39 +1008,67 @@ pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageS
         .iter()
         .map(|object| object.object_id.clone())
         .chain(common_modules.iter().flat_map(|module| {
-            [
-                module.module_id.clone(),
-                module.module_body_id.clone(),
-            ]
+            [module.module_id.clone(), module.module_body_id.clone()]
         }))
         .collect::<Vec<_>>();
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
-    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
-    let script = args.script_output.clone().unwrap_or_else(|| {
-        default_stage_script_path(
-            &args.database,
-            &format!(
-                "source_objects_{}_{}",
-                metadata_objects.len(),
-                common_modules.len()
-            ),
-        )
-    });
-    if let Some(parent) = script.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let sql = build_stage_source_objects_sql(
-        &args.database,
-        &metadata_objects,
-        &common_modules,
-        &patched_versions.blob,
+    let batch_size = args.batch_size.unwrap_or(500).max(1);
+    let batches = build_source_stage_batches(
+        metadata_objects.clone(),
+        common_modules.clone(),
+        batch_size,
     );
-    fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-    run_sql_file(&args.sqlcmd, &args.server, &script)?;
+    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let mut scripts = Vec::with_capacity(batches.len());
+    let mut running_rows = 0usize;
+    let mut after = before.clone();
 
-    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    for (index, batch) in batches.iter().enumerate() {
+        let script = batch_stage_script_path(
+            args.script_output.as_ref(),
+            &args.database,
+            "source_objects",
+            index,
+        );
+        if let Some(parent) = script.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let include_stable_rows = index == 0;
+        let include_versions_row = index + 1 == batches.len();
+        running_rows += batch.row_count;
+        let expected_total_rows = running_rows
+            + if include_stable_rows { 2 } else { 0 }
+            + if include_versions_row { 1 } else { 0 };
+        let sql = build_stage_source_objects_sql(
+            &args.database,
+            &batch.metadata_objects,
+            &batch.common_modules,
+            &patched_versions.blob,
+            include_stable_rows,
+            include_versions_row,
+            expected_total_rows,
+        );
+        fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
+        run_sql_file(&args.sqlcmd, &args.server, &script)?;
+        after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+        scripts.push(script);
+    }
+
+    let script = scripts
+        .last()
+        .cloned()
+        .unwrap_or_else(|| args.script_output.clone().unwrap_or_else(|| {
+            default_stage_script_path(
+                &args.database,
+                &format!(
+                    "source_objects_{}_{}",
+                    metadata_object_count,
+                    common_module_count
+                ),
+            )
+        }));
     let metadata_objects = metadata_objects
         .into_iter()
         .map(|object| StagedMetadataObjectReport {
@@ -1077,6 +1108,7 @@ pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageS
         database: args.database.clone(),
         metadata_objects,
         common_modules,
+        scripts,
         script,
         before,
         after,
@@ -2842,9 +2874,11 @@ fn build_stage_source_objects_sql(
     metadata_objects: &[PreparedMetadataObjectStage],
     common_modules: &[PreparedCommonModuleObjectStage],
     versions_blob: &[u8],
+    include_stable_rows: bool,
+    include_versions_row: bool,
+    expected_total_rows: usize,
 ) -> String {
     let versions_blob_hex = encode_hex(versions_blob);
-    let expected_total_rows = metadata_objects.len() + common_modules.len() * 2 + 3;
     let mut sql = format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -2858,6 +2892,16 @@ fn build_stage_source_objects_sql(
          IF @@ROWCOUNT <> 2 THROW 55000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n",
         db = quote_ident(database),
     );
+    if !include_stable_rows {
+        sql.clear();
+        sql.push_str(&format!(
+            "SET NOCOUNT ON;\n\
+             SET XACT_ABORT ON;\n\
+             USE {db};\n\
+             BEGIN TRAN;\n",
+            db = quote_ident(database),
+        ));
+    }
 
     for (index, object) in metadata_objects.iter().enumerate() {
         let metadata_blob_hex = encode_hex(&object.metadata_blob);
@@ -2902,20 +2946,96 @@ fn build_stage_source_objects_sql(
         ));
     }
 
+    if include_versions_row {
+        sql.push_str(&format!(
+            "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'versions' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW 56998, 'Expected to insert versions row into ConfigSave', 1;\n",
+            versions_blob_len = versions_blob.len(),
+            versions_blob_hex = versions_blob_hex,
+        ));
+    }
     sql.push_str(&format!(
-        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-         SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
-         FROM Config\n\
-         WHERE FileName = N'versions' AND PartNo = 0;\n\
-         IF @@ROWCOUNT <> 1 THROW 56998, 'Expected to insert versions row into ConfigSave', 1;\n\
-         IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> {expected_total_rows} THROW 56999, 'Unexpected ConfigSave row count after source tree staging', 1;\n\
+        "IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> {expected_total_rows} THROW 56999, 'Unexpected ConfigSave row count after source tree staging', 1;\n\
          COMMIT;\n",
-        versions_blob_len = versions_blob.len(),
-        versions_blob_hex = versions_blob_hex,
         expected_total_rows = expected_total_rows,
     ));
 
     sql
+}
+
+#[derive(Debug, Clone)]
+struct SourceStageBatch {
+    metadata_objects: Vec<PreparedMetadataObjectStage>,
+    common_modules: Vec<PreparedCommonModuleObjectStage>,
+    row_count: usize,
+}
+
+fn build_source_stage_batches(
+    metadata_objects: Vec<PreparedMetadataObjectStage>,
+    common_modules: Vec<PreparedCommonModuleObjectStage>,
+    batch_size: usize,
+) -> Vec<SourceStageBatch> {
+    let mut items = metadata_objects
+        .into_iter()
+        .map(SourceStageItem::Metadata)
+        .chain(common_modules.into_iter().map(SourceStageItem::CommonModule))
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| left.path().cmp(right.path()));
+
+    let mut batches = Vec::new();
+    let mut current = SourceStageBatch {
+        metadata_objects: Vec::new(),
+        common_modules: Vec::new(),
+        row_count: 0,
+    };
+    let mut current_items = 0usize;
+
+    for item in items {
+        if current_items == batch_size {
+            batches.push(current);
+            current = SourceStageBatch {
+                metadata_objects: Vec::new(),
+                common_modules: Vec::new(),
+                row_count: 0,
+            };
+            current_items = 0;
+        }
+        match item {
+            SourceStageItem::Metadata(object) => {
+                current.row_count += 1;
+                current.metadata_objects.push(object);
+            }
+            SourceStageItem::CommonModule(module) => {
+                current.row_count += 2;
+                current.common_modules.push(module);
+            }
+        }
+        current_items += 1;
+    }
+
+    if current_items > 0 {
+        batches.push(current);
+    }
+
+    batches
+}
+
+#[derive(Debug, Clone)]
+enum SourceStageItem {
+    Metadata(PreparedMetadataObjectStage),
+    CommonModule(PreparedCommonModuleObjectStage),
+}
+
+impl SourceStageItem {
+    fn path(&self) -> &Path {
+        match self {
+            SourceStageItem::Metadata(object) => &object.xml,
+            SourceStageItem::CommonModule(module) => &module.xml,
+        }
+    }
 }
 
 fn default_stage_script_path(database: &str, name: &str) -> PathBuf {
@@ -2924,6 +3044,27 @@ fn default_stage_script_path(database: &str, name: &str) -> PathBuf {
         sanitize_file_part(database),
         sanitize_file_part(name)
     ))
+}
+
+fn batch_stage_script_path(
+    base: Option<&PathBuf>,
+    database: &str,
+    name: &str,
+    batch_index: usize,
+) -> PathBuf {
+    if let Some(base) = base {
+        let parent = base.parent().unwrap_or_else(|| Path::new(""));
+        let stem = base
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(name);
+        let extension = base
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("sql");
+        return parent.join(format!("{stem}_batch{batch}.{}", extension, batch = batch_index + 1));
+    }
+    default_stage_script_path(database, &format!("{name}_batch{}", batch_index + 1))
 }
 
 fn sanitize_file_part(value: &str) -> String {

@@ -630,6 +630,9 @@ pub struct MssqlStageSourceObjectsArgs {
     /// Required confirmation for non-lab destructive runs.
     #[arg(long)]
     pub allow_non_lab: bool,
+    /// Optional maximum number of staged XML objects per SQL batch.
+    #[arg(long)]
+    pub batch_size: Option<usize>,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
