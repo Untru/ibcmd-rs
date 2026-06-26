@@ -25,6 +25,7 @@ const ELEM_ADDR_SIZE: usize = 12;
 const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
+const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -479,8 +480,9 @@ enum MetadataTypePatternElement {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommonCommandRepresentation {
+    Text,
     Auto,
     Picture,
     PictureAndText,
@@ -530,6 +532,8 @@ enum CommandGroupPicture {
 
 #[derive(Debug, Clone, Copy)]
 enum CommandGroupCategory {
+    NavigationPanel,
+    FormNavigationPanel,
     ActionsPanel,
     FormCommandBar,
 }
@@ -1816,6 +1820,14 @@ fn parse_command_group_picture(
     if reference == "StdPicture.Print" {
         return Ok(CommandGroupPicture::StdPicturePrint);
     }
+    if reference == "StdPicture.InformationRegister" {
+        let load_transparent =
+            parse_required_metadata_bool("CommandGroup", "Picture/LoadTransparent", load_transparent)?;
+        return Ok(CommandGroupPicture::CommonPicture {
+            uuid: STD_PICTURE_INFORMATION_REGISTER_UUID.to_string(),
+            load_transparent,
+        });
+    }
     if !reference.starts_with("CommonPicture.") {
         return Err(anyhow!(
             "unsupported CommandGroup Picture reference: {reference}"
@@ -1893,6 +1905,7 @@ fn parse_common_command_representation(
     let value =
         value.ok_or_else(|| anyhow!("CommonCommand Properties/Representation not found in XML"))?;
     match value.trim() {
+        "Text" => Ok(CommonCommandRepresentation::Text),
         "Auto" => Ok(CommonCommandRepresentation::Auto),
         "Picture" => Ok(CommonCommandRepresentation::Picture),
         "PictureAndText" => Ok(CommonCommandRepresentation::PictureAndText),
@@ -1932,6 +1945,8 @@ fn parse_command_group_category(value: Option<String>) -> Result<CommandGroupCat
     let value =
         value.ok_or_else(|| anyhow!("CommandGroup Properties/Category not found in XML"))?;
     match value.trim() {
+        "NavigationPanel" => Ok(CommandGroupCategory::NavigationPanel),
+        "FormNavigationPanel" => Ok(CommandGroupCategory::FormNavigationPanel),
         "ActionsPanel" => Ok(CommandGroupCategory::ActionsPanel),
         "FormCommandBar" => Ok(CommandGroupCategory::FormCommandBar),
         other => Err(anyhow!("unsupported CommandGroup Category: {other}")),
@@ -1940,6 +1955,7 @@ fn parse_command_group_category(value: Option<String>) -> Result<CommandGroupCat
 
 fn common_command_representation_code(value: CommonCommandRepresentation) -> u8 {
     match value {
+        CommonCommandRepresentation::Text => 0,
         CommonCommandRepresentation::Picture => 1,
         CommonCommandRepresentation::PictureAndText => 2,
         CommonCommandRepresentation::Auto => 3,
@@ -1963,6 +1979,8 @@ fn common_command_on_main_server_unavailable_behavior_code(
 
 fn command_group_category_code(value: CommandGroupCategory) -> u8 {
     match value {
+        CommandGroupCategory::NavigationPanel => 1,
+        CommandGroupCategory::FormNavigationPanel => 2,
         CommandGroupCategory::ActionsPanel => 4,
         CommandGroupCategory::FormCommandBar => 8,
     }
@@ -3151,8 +3169,9 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_INFO, MetadataSourceContext, build_module_inner, deflate_raw, inflate_raw,
-        parse_v8_container,
+        DEFAULT_INFO, CommonCommandRepresentation, MetadataSourceContext, build_module_inner,
+        common_command_representation_code, deflate_raw, inflate_raw,
+        parse_common_command_representation, parse_v8_container,
     };
     use crate::module_blob::ModuleElement;
 
@@ -4115,6 +4134,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn parses_common_command_representation_text() {
+        assert_eq!(
+            parse_common_command_representation(Some("Text".to_string())).unwrap(),
+            CommonCommandRepresentation::Text
+        );
+        assert_eq!(
+            common_command_representation_code(CommonCommandRepresentation::Text),
+            0
+        );
+    }
+
+    #[test]
     fn patches_command_group_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
@@ -4168,6 +4199,65 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("{1,\"ru\",\"Group tip\"}"));
         assert!(inflated.contains("{4,1,{-13},\"\",-1,-1,1,0,\"\"}"));
         assert!(inflated.contains(",4,1,"));
+    }
+
+    #[test]
+    fn patches_command_group_navigation_panel_categories() {
+        let cases = [
+            (
+                "NavigationPanel",
+                r#"{1,
+{3,
+{4,0,{0},"",-1,-1,1,0,""},1,3,
+{0},
+{0},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldGroup",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
+},0}"#,
+                ",1,3,",
+            ),
+            (
+                "FormNavigationPanel",
+                r#"{1,
+{3,
+{4,0,{0},"",-1,-1,1,0,""},2,3,
+{0},
+{0},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldGroup",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
+},0}"#,
+                ",2,3,",
+            ),
+        ];
+
+        for (category, active_inner, expected_code) in cases {
+            let mut active = b"\xEF\xBB\xBF".to_vec();
+            active.extend_from_slice(active_inner.as_bytes());
+            let base_blob = deflate_raw(&active).unwrap();
+            let xml = format!(
+                r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommandGroup uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewGroup</Name>
+      <Synonym/>
+      <Comment/>
+      <Representation>Auto</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Category>{category}</Category>
+    </Properties>
+  </CommandGroup>
+</MetaDataObject>
+"#
+            );
+            let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes())
+                .unwrap();
+            let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+            assert!(inflated.contains(expected_code), "{inflated}");
+        }
     }
 
     #[test]
@@ -4490,6 +4580,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains(super::STD_PICTURE_USER_UUID));
         assert!(inflated.contains("{4,1,{0,6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f},\"\",-1,-1,0,0,\"\"}"));
         assert!(!inflated.contains("StdPicture.User"));
+    }
+
+    #[test]
+    fn packs_command_group_std_picture_information_register_reference() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{3,
+{4,0,{0},"",-1,-1,1,0,""},1,3,
+{0},
+{0},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldGroup",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommandGroup uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewGroup</Name>
+      <Synonym/>
+      <Comment/>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture>
+        <xr:Ref>StdPicture.InformationRegister</xr:Ref>
+        <xr:LoadTransparent>true</xr:LoadTransparent>
+      </Picture>
+      <Category>NavigationPanel</Category>
+    </Properties>
+  </CommandGroup>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes())
+            .unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+        assert!(inflated.contains(super::STD_PICTURE_INFORMATION_REGISTER_UUID));
+        assert!(inflated.contains(
+            "{4,1,{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c},\"\",-1,-1,1,0,\"\"}"
+        ));
+        assert!(!inflated.contains("StdPicture.InformationRegister"));
     }
 
     #[test]
