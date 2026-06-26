@@ -420,8 +420,109 @@ fn parse_generated_type_entries_from_blob(
             entries.push((type_id, format!("cfg:EnumRef.{}", header.name)));
         }
     }
+    if object_code == 33 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            1,
+            "InformationRegisterRecord",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            3,
+            "InformationRegisterManager",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            5,
+            "InformationRegisterSelection",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            7,
+            "InformationRegisterList",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            9,
+            "InformationRegisterRecordSet",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            11,
+            "InformationRegisterRecordKey",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            13,
+            "InformationRegisterRecordManager",
+            &header.name,
+        );
+    }
+    if object_code == 34 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            1,
+            "ChartOfCharacteristicTypesObject",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            3,
+            "ChartOfCharacteristicTypesRef",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            5,
+            "ChartOfCharacteristicTypesSelection",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            7,
+            "ChartOfCharacteristicTypesList",
+            &header.name,
+        );
+        push_indexed_generated_type(&mut entries, &fields, 9, "Characteristic", &header.name);
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            11,
+            "ChartOfCharacteristicTypesManager",
+            &header.name,
+        );
+    }
 
     Some(entries)
+}
+
+fn push_indexed_generated_type(
+    entries: &mut Vec<(String, String)>,
+    fields: &[&str],
+    index: usize,
+    generated_type: &str,
+    name: &str,
+) {
+    if let Some(type_id) = fields.get(index).copied().and_then(parse_uuid_field) {
+        entries.push((type_id, format!("cfg:{generated_type}.{name}")));
+    }
 }
 
 fn parse_uuid_field(value: &str) -> Option<String> {
@@ -508,6 +609,7 @@ fn metadata_source_for_object_code(code: u32) -> Option<(&'static str, &'static 
         22 => Some(("Subsystem", "Subsystems")),
         28 => Some(("AccumulationRegister", "AccumulationRegisters")),
         33 => Some(("InformationRegister", "InformationRegisters")),
+        34 => Some(("ChartOfCharacteristicTypes", "ChartsOfCharacteristicTypes")),
         40 => Some(("Document", "Documents")),
         57 => Some(("Catalog", "Catalogs")),
         _ => None,
@@ -1460,6 +1562,28 @@ mod tests {
     }
 
     #[test]
+    fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
+        let uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let blob = deflate_for_test(
+            format!(
+                "\u{feff}{{1,\r\n{{34,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExpenseItems\",{{1,\"en\",\"Expense items\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("ChartsOfCharacteristicTypes").join("ExpenseItems.xml")
+        );
+        assert_eq!(properties.kind, "ChartOfCharacteristicTypes");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "ExpenseItems");
+    }
+
+    #[test]
     fn extracts_common_module_xml_from_metadata_blob() {
         let uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let blob = deflate_for_test(
@@ -1645,6 +1769,61 @@ mod tests {
         assert_eq!(
             index.get(enum_ref_type_id).map(String::as_str),
             Some("cfg:EnumRef.Statuses")
+        );
+    }
+
+    #[test]
+    fn builds_register_and_chart_reference_type_index_entries() {
+        let info_register_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let record_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let record_set_type_id = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let info_register_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,{record_type_id},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,77777777-7777-4777-8777-777777777777,{record_set_type_id},88888888-8888-4888-8888-888888888888,99999999-9999-4999-8999-999999999999,aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee,ffffffff-ffff-4fff-8fff-ffffffffffff,eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,\r\n{{0,\r\n{{3,\r\n{{1,0,{info_register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let chart_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let chart_object_type_id = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let chart_ref_type_id = "ffffffff-ffff-4fff-ffff-ffffffffffff";
+        let chart_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{34,{chart_object_type_id},11111111-1111-4111-8111-111111111111,{chart_ref_type_id},22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,77777777-7777-4777-8777-777777777777,88888888-8888-4888-8888-888888888888,99999999-9999-4999-8999-999999999999,aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee,\r\n{{0,\r\n{{3,\r\n{{1,0,{chart_uuid}}},\"ExpenseItems\",{{1,\"en\",\"Expense items\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: info_register_uuid.to_string(),
+                part_no: 0,
+                data_size: info_register_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&info_register_blob),
+            },
+            ConfigRow {
+                file_name: chart_uuid.to_string(),
+                part_no: 0,
+                data_size: chart_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&chart_blob),
+            },
+        ];
+
+        let index = build_metadata_type_index(&rows);
+
+        assert_eq!(
+            index.get(record_type_id).map(String::as_str),
+            Some("cfg:InformationRegisterRecord.Prices")
+        );
+        assert_eq!(
+            index.get(record_set_type_id).map(String::as_str),
+            Some("cfg:InformationRegisterRecordSet.Prices")
+        );
+        assert_eq!(
+            index.get(chart_object_type_id).map(String::as_str),
+            Some("cfg:ChartOfCharacteristicTypesObject.ExpenseItems")
+        );
+        assert_eq!(
+            index.get(chart_ref_type_id).map(String::as_str),
+            Some("cfg:ChartOfCharacteristicTypesRef.ExpenseItems")
         );
     }
 
