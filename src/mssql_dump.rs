@@ -443,18 +443,26 @@ fn source_assets_from_metadata_blob_inner(
         }
     }
 
-    let help_id = format!("{uuid}.1");
-    if let Some(help_row) = rows_by_file_name.get(help_id.as_str())
-        && let Ok(help_bytes) = decode_hex(&help_row.binary_hex)
-        && parse_help_blob_pages(&help_bytes).is_some()
-    {
-        assets.push((
-            help_id,
-            SourceAsset {
-                primary_path: object_path.join("Ext").join("Help.xml"),
-                kind: SourceAssetKind::Help,
-            },
-        ));
+    let mapped_ids = assets
+        .iter()
+        .map(|(body_id, _)| body_id.clone())
+        .collect::<BTreeSet<_>>();
+    let object_row_prefix = format!("{uuid}.");
+    for (body_id, body_row) in rows_by_file_name {
+        if !body_id.starts_with(&object_row_prefix) || mapped_ids.contains(*body_id) {
+            continue;
+        }
+        if let Ok(help_bytes) = decode_hex(&body_row.binary_hex)
+            && parse_help_blob_pages(&help_bytes).is_some()
+        {
+            assets.push((
+                (*body_id).to_string(),
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("Help.xml"),
+                    kind: SourceAssetKind::Help,
+                },
+            ));
+        }
     }
 
     Some(assets)
@@ -3610,7 +3618,7 @@ mod tests {
                 binary_hex: encode_hex_for_test(&metadata),
             },
             ConfigRow {
-                file_name: format!("{uuid}.1"),
+                file_name: format!("{uuid}.5"),
                 part_no: 0,
                 data_size: help.len() as i64,
                 binary_hex: encode_hex_for_test(&help),
@@ -3633,7 +3641,7 @@ mod tests {
         let help_row = dumped
             .rows
             .iter()
-            .find(|row| row.file_name == format!("{uuid}.1"))
+            .find(|row| row.file_name == format!("{uuid}.5"))
             .unwrap();
         assert_eq!(
             help_row.source_asset_path.as_deref(),
