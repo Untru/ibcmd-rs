@@ -38,6 +38,7 @@ pub struct MssqlCompareSummary {
     pub missing_in_right: usize,
     pub row_count_differences: usize,
     pub column_differences: usize,
+    pub checksum_differences: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -242,6 +243,8 @@ pub struct GeneratedBlobReport {
 struct TableShape {
     table_name: String,
     row_count: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    row_checksum: Option<i64>,
     #[serde(default)]
     columns: Vec<ColumnShape>,
 }
@@ -1215,8 +1218,19 @@ fn compare_shapes(
                     summary.column_differences += 1;
                     differences.push(MssqlDifference {
                         kind: "columns".to_string(),
-                        table: name,
+                        table: name.clone(),
                         detail: "column definitions differ".to_string(),
+                    });
+                }
+                if left.row_checksum != right.row_checksum {
+                    summary.checksum_differences += 1;
+                    differences.push(MssqlDifference {
+                        kind: "checksum".to_string(),
+                        table: name,
+                        detail: format!(
+                            "row checksum {:?} vs {:?}",
+                            left.row_checksum, right.row_checksum
+                        ),
                     });
                 }
             }
@@ -1238,6 +1252,7 @@ fn load_table_shapes(sqlcmd: &Path, server: &str, database: &str) -> Result<Vec<
         "SET NOCOUNT ON; USE {db};\n\
          SELECT t.name AS table_name,\n\
                 ISNULL(SUM(CASE WHEN ps.index_id IN (0, 1) THEN ps.row_count ELSE 0 END), 0) AS row_count,\n\
+                CHECKSUM_AGG(BINARY_CHECKSUM(*)) AS row_checksum,\n\
                 JSON_QUERY((\n\
                     SELECT c.name,\n\
                            TYPE_NAME(c.user_type_id) AS type_name,\n\
@@ -1931,6 +1946,7 @@ mod tests {
         let table = TableShape {
             table_name: "Config".to_string(),
             row_count: 1,
+            row_checksum: Some(42),
             columns: vec![ColumnShape {
                 name: "FileName".to_string(),
                 type_name: "nvarchar".to_string(),
@@ -1945,6 +1961,32 @@ mod tests {
         assert!(report.same);
         assert_eq!(report.summary.left_tables, 1);
         assert_eq!(report.summary.right_tables, 1);
+    }
+
+    #[test]
+    fn compare_detects_checksum_differences() {
+        let left = TableShape {
+            table_name: "Config".to_string(),
+            row_count: 1,
+            row_checksum: Some(1),
+            columns: vec![],
+        };
+        let right = TableShape {
+            table_name: "Config".to_string(),
+            row_count: 1,
+            row_checksum: Some(2),
+            columns: vec![],
+        };
+
+        let report = compare_shapes("left", "right", &[left], &[right]);
+        assert!(!report.same);
+        assert_eq!(report.summary.checksum_differences, 1);
+        assert!(
+            report
+                .differences
+                .iter()
+                .any(|difference| difference.kind == "checksum")
+        );
     }
 
     #[test]
