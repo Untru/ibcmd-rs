@@ -3555,6 +3555,7 @@ mod tests {
         std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_1_1/Ext")).unwrap();
         std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange_2_0_1_6/Ext"))
             .unwrap();
+        std::fs::create_dir_all(root.join("WebServices/Сервис/Ext")).unwrap();
 
         std::fs::copy(
             lab_root.join("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml"),
@@ -3699,6 +3700,26 @@ mod tests {
         std::fs::copy(
             lab_root.join("WebServices/RemoteAdministrationOfExchange_2_0_1_6/Ext/Module.bsl"),
             root.join("WebServices/RemoteAdministrationOfExchange_2_0_1_6/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("WebServices/Сервис.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <WebService uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Сервис</Name>
+      <Synonym/>
+      <Comment/>
+    </Properties>
+  </WebService>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("WebServices/Сервис/Ext/Module.bsl"),
+            "Procedure Stub()\r\nEndProcedure\r\n",
         )
         .unwrap();
 
@@ -3861,6 +3882,16 @@ mod tests {
             "WebServices/RemoteAdministrationOfExchange_2_0_1_6/Ext/Module.bsl",
             SourceKind::Module,
             Some("WebServices/RemoteAdministrationOfExchange_2_0_1_6")
+        )));
+        assert!(files.contains(&(
+            "WebServices/Сервис.xml",
+            SourceKind::MetadataXml,
+            Some("WebServices/Сервис")
+        )));
+        assert!(files.contains(&(
+            "WebServices/Сервис/Ext/Module.bsl",
+            SourceKind::Module,
+            Some("WebServices/Сервис")
         )));
     }
 
