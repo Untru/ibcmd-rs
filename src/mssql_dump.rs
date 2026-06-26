@@ -235,8 +235,15 @@ fn dump_table_rows(
         };
 
         let module_text_relative = if extract_module_text {
-            match unpack_module_blob_text(&bytes) {
-                Ok(text) => {
+            let module_text = match unpack_module_blob_text(&bytes) {
+                Ok(text) => Some(text),
+                Err(_) if module_text_paths.contains_key(&row.file_name) => {
+                    unpack_form_body_module_text(&bytes)
+                }
+                Err(_) => None,
+            };
+            match module_text {
+                Some(text) => {
                     let relative = module_text_paths
                         .get(&row.file_name)
                         .cloned()
@@ -254,7 +261,7 @@ fn dump_table_rows(
                     module_text_rows += 1;
                     Some(relative.to_string_lossy().replace('\\', "/"))
                 }
-                Err(_) => None,
+                None => None,
             }
         } else {
             None
@@ -849,20 +856,20 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
 
     let mut index = BTreeMap::new();
     for form in forms {
-        let relative_path = owners
+        let owner_matches = owners
             .iter()
-            .find(|(owner_text, _)| owner_text.contains(&form.uuid))
-            .map(|(_, owner_path)| {
-                owner_path
-                    .join("Forms")
-                    .join(sanitize_source_path_segment(&form.name))
-                    .with_extension("xml")
-            })
-            .unwrap_or_else(|| {
-                PathBuf::from("CommonForms")
-                    .join(sanitize_source_path_segment(&form.name))
-                    .with_extension("xml")
-            });
+            .filter(|(owner_text, _)| owner_text.contains(&form.uuid))
+            .collect::<Vec<_>>();
+        let relative_path = if let [(_, owner_path)] = owner_matches.as_slice() {
+            owner_path
+                .join("Forms")
+                .join(sanitize_source_path_segment(&form.name))
+                .with_extension("xml")
+        } else {
+            PathBuf::from("CommonForms")
+                .join(sanitize_source_path_segment(&form.name))
+                .with_extension("xml")
+        };
         let kind = if relative_path.starts_with("CommonForms") {
             "CommonForm"
         } else {
@@ -1816,6 +1823,7 @@ fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
         };
         paths.extend(entries);
     }
+    paths.extend(form_module_body_paths(rows, &file_names));
 
     paths
 }
@@ -1849,6 +1857,43 @@ fn configuration_module_body_paths(file_names: &BTreeSet<&str>) -> BTreeMap<Stri
     }
 
     paths
+}
+
+fn form_module_body_paths(
+    rows: &[ConfigRow],
+    file_names: &BTreeSet<&str>,
+) -> BTreeMap<String, PathBuf> {
+    let mut paths = BTreeMap::new();
+    for (form_uuid, form_ref) in build_form_source_reference_index(rows) {
+        let body_id = format!("{form_uuid}.0");
+        if !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let mut form_dir = form_ref.relative_path;
+        form_dir.set_extension("");
+        paths.insert(
+            body_id,
+            form_dir.join("Ext").join("Form").join("Module.bsl"),
+        );
+    }
+    paths
+}
+
+fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let (module_text, _) = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?;
+    if module_text.trim().is_empty() {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(3 + module_text.len());
+    bytes.extend_from_slice(b"\xEF\xBB\xBF");
+    bytes.extend_from_slice(module_text.as_bytes());
+    Some(bytes)
 }
 
 fn is_configuration_module_group(suffixes: &BTreeSet<&str>) -> bool {
@@ -4491,11 +4536,18 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_catalog_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
         let owned_form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let common_form_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{common_form_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let second_catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{second_catalog_uuid}}},\"Services\",{{1,\"en\",\"Services\"}},\"\"}}\r\n}},0,{common_form_uuid}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -4525,6 +4577,12 @@ mod tests {
                 binary_hex: encode_hex_for_test(&owned_form_metadata),
             },
             ConfigRow {
+                file_name: second_catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: second_catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&second_catalog_metadata),
+            },
+            ConfigRow {
                 file_name: common_form_uuid.to_string(),
                 part_no: 0,
                 data_size: common_form_metadata.len() as i64,
@@ -4534,7 +4592,7 @@ mod tests {
 
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
-        assert_eq!(dumped.metadata_xml_rows, 3);
+        assert_eq!(dumped.metadata_xml_rows, 4);
         let owned_xml =
             fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm.xml")).unwrap();
         let common_xml = fs::read_to_string(root.join("CommonForms/SharedForm.xml")).unwrap();
@@ -4542,6 +4600,8 @@ mod tests {
         assert!(owned_xml.contains("<FormType>Managed</FormType>"));
         assert!(common_xml.contains("<CommonForm uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">"));
         assert!(common_xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(!root.join("Catalogs/Products/Forms/SharedForm.xml").exists());
+        assert!(!root.join("Catalogs/Services/Forms/SharedForm.xml").exists());
 
         let owned_row = dumped
             .rows
@@ -4551,6 +4611,74 @@ mod tests {
         assert_eq!(
             owned_row.metadata_xml_path.as_deref(),
             Some("Catalogs/Products/Forms/ListForm.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_form_module_text_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let form_body = deflate_for_test(
+            b"{4,{0},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{0}}",
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: form_uuid.to_string(),
+                part_no: 0,
+                data_size: form_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&form_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{form_uuid}.0"),
+                part_no: 0,
+                data_size: form_body.len() as i64,
+                binary_hex: encode_hex_for_test(&form_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 1);
+        let module_text =
+            fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl"))
+                .unwrap();
+        assert_eq!(
+            module_text,
+            "\u{feff}Procedure Run()\r\n\tMessage(\"Hi\");\r\nEndProcedure\r\n"
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{form_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.module_text_path.as_deref(),
+            Some("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl")
         );
 
         let _ = fs::remove_dir_all(root);
