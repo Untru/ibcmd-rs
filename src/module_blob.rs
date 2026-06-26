@@ -2731,7 +2731,10 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "CommonForm" => Some(("CommonForm", "CommonForms")),
         "CalculationRegister" => Some(("CalculationRegister", "CalculationRegisters")),
         "ChartOfAccounts" => Some(("ChartOfAccounts", "ChartsOfAccounts")),
-        "ChartOfCalculationTypes" => Some(("ChartOfCalculationTypes", "ChartsOfCalculationTypes")),
+        "ChartOfCalculationTypes" => Some((
+            "ChartOfCalculationTypes",
+            "ChartsOfCalculationTypes",
+        )),
         "ChartOfCalculationRegisters" => Some((
             "ChartOfCalculationRegisters",
             "ChartsOfCalculationRegisters",
@@ -5117,6 +5120,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         <GeneratedType name="ChartOfCalculationTypesSelection.ВидыРасчета">
           <TypeId>eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee</TypeId>
         </GeneratedType>
+        <GeneratedType name="ChartOfCalculationTypesObject.ВидыРасчета">
+          <TypeId>eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeea</TypeId>
+        </GeneratedType>
       </GeneratedTypes>
     </Properties>
   </ChartOfCalculationTypes>
@@ -5164,6 +5170,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "ChartOfCalculationTypesSelection.ВидыРасчета",
                 "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            ),
+            (
+                "ChartOfCalculationTypesObject.ВидыРасчета",
+                "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeea",
             ),
             (
                 "ChartOfCalculationRegistersManager.Начисления",
@@ -5262,6 +5272,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
   <ChartOfCalculationRegisters uuid="66666666-6666-4666-8666-666666666666">
     <Properties>
       <Name>Начисления</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ChartOfCalculationRegistersManager.Начисления">
+          <TypeId>ffffffff-ffff-4fff-8fff-ffffffffffff</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
     </Properties>
   </ChartOfCalculationRegisters>
 </MetaDataObject>
