@@ -314,7 +314,7 @@ fn dump_table_rows(
 #[derive(Clone, Copy)]
 enum SourceAssetKind {
     Binary,
-    ExtPicturePng,
+    ExtPicture,
 }
 
 struct SourceAsset {
@@ -359,19 +359,60 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             }
         }
     }
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some(asset) = source_asset_from_metadata_blob(&bytes, &row.file_name, &file_names)
+        else {
+            continue;
+        };
+        paths.insert(format!("{}.0", row.file_name), asset);
+    }
 
     paths
 }
 
 const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
-    ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicturePng),
+    ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
     ("4", "Ext/ParentConfigurations.bin", SourceAssetKind::Binary),
     (
         "c",
         "Ext/MainSectionPicture.xml",
-        SourceAssetKind::ExtPicturePng,
+        SourceAssetKind::ExtPicture,
     ),
 ];
+
+fn source_asset_from_metadata_blob(
+    blob: &[u8],
+    uuid: &str,
+    file_names: &BTreeSet<&str>,
+) -> Option<SourceAsset> {
+    let body_id = format!("{uuid}.0");
+    if !file_names.contains(body_id.as_str()) {
+        return None;
+    }
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let object_code = parse_metadata_object_code(text)?;
+    let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
+    if kind != "CommonPicture" {
+        return None;
+    }
+    let header = parse_metadata_header_from_text(text, uuid)?;
+
+    Some(SourceAsset {
+        primary_path: PathBuf::from(folder)
+            .join(sanitize_source_path_segment(&header.name))
+            .join("Ext")
+            .join("Picture.xml"),
+        kind: SourceAssetKind::ExtPicture,
+    })
+}
 
 fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
     match asset.kind {
@@ -384,8 +425,8 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, bytes)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::ExtPicturePng => {
-            let picture = extract_ext_picture_png(bytes).with_context(|| {
+        SourceAssetKind::ExtPicture => {
+            let picture = extract_ext_picture(bytes).with_context(|| {
                 format!(
                     "failed to extract picture from source asset {}",
                     asset.primary_path.display()
@@ -396,26 +437,49 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&xml_path, format_ext_picture_xml())
-                .with_context(|| format!("failed to write {}", xml_path.display()))?;
 
             let picture_dir = output_dir.join(asset.primary_path.with_extension(""));
             fs::create_dir_all(&picture_dir)
                 .with_context(|| format!("failed to create {}", picture_dir.display()))?;
-            let picture_path = picture_dir.join("Picture.png");
-            fs::write(&picture_path, picture)
+            let picture_file_name = ext_picture_file_name(&picture);
+            let picture_path = picture_dir.join(picture_file_name);
+            fs::write(&picture_path, &picture)
                 .with_context(|| format!("failed to write {}", picture_path.display()))?;
+            fs::write(&xml_path, format_ext_picture_xml(picture_file_name))
+                .with_context(|| format!("failed to write {}", xml_path.display()))?;
         }
     }
 
     Ok(asset.primary_path.clone())
 }
 
-fn extract_ext_picture_png(bytes: &[u8]) -> Result<Vec<u8>> {
+fn extract_ext_picture(bytes: &[u8]) -> Result<Vec<u8>> {
     let inflated = inflate_raw_deflate(bytes)?;
-    let text = String::from_utf8(inflated).context("picture blob is not UTF-8")?;
-    let payload = extract_base64_payload(&text).context("picture blob does not contain #base64")?;
-    decode_base64_mime(payload).context("failed to decode picture base64")
+    if let Ok(text) = std::str::from_utf8(&inflated)
+        && let Some(payload) = extract_base64_payload(text)
+    {
+        return decode_base64_mime(payload).context("failed to decode picture base64");
+    }
+    Ok(inflated)
+}
+
+fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "Picture.png"
+    } else if bytes.starts_with(b"PK\x03\x04") {
+        "Picture.zip"
+    } else if let Ok(text) = std::str::from_utf8(bytes) {
+        let text = text.trim_start_matches('\u{feff}').trim_start();
+        if text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg") {
+            "Picture.svg"
+        } else if text.starts_with('<') {
+            "Picture.xml"
+        } else {
+            "Picture.txt"
+        }
+    } else {
+        "Picture.bin"
+    }
 }
 
 fn extract_base64_payload(text: &str) -> Option<&str> {
@@ -475,14 +539,16 @@ fn base64_value(byte: u8) -> Option<u8> {
     }
 }
 
-fn format_ext_picture_xml() -> &'static str {
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+fn format_ext_picture_xml(file_name: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <ExtPicture xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.17\">\r\n\
 \t<Picture>\r\n\
-\t\t<xr:Abs>Picture.png</xr:Abs>\r\n\
+\t\t<xr:Abs>{file_name}</xr:Abs>\r\n\
 \t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
 \t</Picture>\r\n\
 </ExtPicture>\r\n"
+    )
 }
 
 fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
@@ -1080,6 +1146,7 @@ fn metadata_source_for_text(
         {
             Some(("ScheduledJob", "ScheduledJobs"))
         }
+        4 if header_index == Some(1) => Some(("CommonPicture", "CommonPictures")),
         5 => Some(("CommonAttribute", "CommonAttributes")),
         6 => Some(("Role", "Roles")),
         9 => Some(("CommonCommand", "CommonCommands")),
@@ -3069,6 +3136,102 @@ mod tests {
         assert_eq!(properties.kind, "CommonCommand");
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "OpenSettings");
+    }
+
+    #[test]
+    fn writes_common_picture_xml_and_asset_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let text_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{uuid}}},\"Address\",{{1,\"en\",\"Address\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let text_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{text_uuid}}},\"DocumentKinds\",{{1,\"en\",\"Document kinds\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},4}},0}}"
+            )
+            .as_bytes(),
+        );
+        let zip = b"PK\x03\x04";
+        let picture = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
+        let text_picture = deflate_for_test(b"1;Passport;Pass\r\n");
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: picture.len() as i64,
+                binary_hex: encode_hex_for_test(&picture),
+            },
+            ConfigRow {
+                file_name: text_uuid.to_string(),
+                part_no: 0,
+                data_size: text_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&text_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{text_uuid}.0"),
+                part_no: 0,
+                data_size: text_picture.len() as i64,
+                binary_hex: encode_hex_for_test(&text_picture),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 2);
+        assert_eq!(dumped.source_asset_rows, 2);
+        assert!(root.join("CommonPictures/Address.xml").exists());
+        assert_eq!(
+            fs::read(root.join("CommonPictures/Address/Ext/Picture/Picture.zip")).unwrap(),
+            zip
+        );
+        assert!(
+            fs::read_to_string(root.join("CommonPictures/Address/Ext/Picture.xml"))
+                .unwrap()
+                .contains("<xr:Abs>Picture.zip</xr:Abs>")
+        );
+        assert_eq!(
+            fs::read(root.join("CommonPictures/DocumentKinds/Ext/Picture/Picture.txt")).unwrap(),
+            b"1;Passport;Pass\r\n"
+        );
+        assert!(
+            fs::read_to_string(root.join("CommonPictures/DocumentKinds/Ext/Picture.xml"))
+                .unwrap()
+                .contains("<xr:Abs>Picture.txt</xr:Abs>")
+        );
+        let metadata_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == uuid)
+            .unwrap();
+        let picture_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            metadata_row.metadata_xml_path.as_deref(),
+            Some("CommonPictures/Address.xml")
+        );
+        assert_eq!(
+            picture_row.source_asset_path.as_deref(),
+            Some("CommonPictures/Address/Ext/Picture.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
