@@ -2648,6 +2648,7 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
             Some("Catalogs")
         }
         "CatalogTabularSection" | "CatalogTabularSectionRow" => Some("Catalogs"),
+        "CommonForm" => Some("CommonForms"),
         "ChartOfCharacteristicTypesObject"
         | "ChartOfCharacteristicTypesRef"
         | "ChartOfCharacteristicTypesSelection"
@@ -2703,6 +2704,7 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "InformationRegisterRecordManager" => Some("InformationRegisters"),
         "FilterCriterionList" | "FilterCriterionManager" => Some("FilterCriteria"),
         "ConstantManager" | "ConstantValueManager" | "ConstantValueKey" => Some("Constants"),
+        "CommonTemplate" => Some("CommonTemplates"),
         "SettingsStorageManager" => Some("SettingsStorages"),
         "ReportObject" | "ReportManager" => Some("Reports"),
         "TaskObject" | "TaskRef" | "TaskSelection" | "TaskList" | "TaskManager" => Some("Tasks"),
@@ -4378,6 +4380,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             Some("Catalogs")
         );
         assert_eq!(
+            super::metadata_type_source_folder("CommonForm.АвтономнаяРабота"),
+            Some("CommonForms")
+        );
+        assert_eq!(
             super::metadata_type_source_folder("Characteristic.Dimension"),
             Some("ChartsOfCharacteristicTypes")
         );
@@ -4400,6 +4406,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(
             super::metadata_type_source_folder("ConstantValueKey.SomeConstant"),
             Some("Constants")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("CommonTemplate.СтруктураПодчиненности"),
+            Some("CommonTemplates")
         );
         assert_eq!(
             super::metadata_type_source_folder("SettingsStorageManager.Settings"),
