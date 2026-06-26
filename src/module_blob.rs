@@ -3427,6 +3427,43 @@ mod tests {
     }
 
     #[test]
+    fn patches_web_service_metadata_blob_from_xml() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{3,
+{1,0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},"OldService",
+{1,"ru","Old service"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <WebService uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+    <Properties>
+      <Name>NewService</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>New service</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>New comment</Comment>
+    </Properties>
+  </WebService>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert_eq!(packed.properties.kind, "WebService");
+        assert!(inflated.as_bytes().starts_with(b"\xEF\xBB\xBF"));
+        assert!(inflated.contains("\"NewService\""));
+        assert!(inflated.contains("{1,\"ru\",\"New service\"}"));
+        assert!(inflated.contains("\"New comment\""));
+    }
+
+    #[test]
     fn patches_constant_type_and_use_standard_commands() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
