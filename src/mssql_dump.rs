@@ -338,8 +338,114 @@ fn parse_module_body_source_paths_from_metadata_blob(
             paths.insert(body_id, path);
         }
     }
+    paths.extend(nested_command_module_source_paths(
+        kind,
+        folder,
+        &header.name,
+        uuid,
+        text,
+        file_names,
+    ));
 
     Some(paths)
+}
+
+fn nested_command_module_source_paths(
+    kind: &str,
+    folder: &str,
+    owner_name: &str,
+    owner_uuid: &str,
+    text: &str,
+    file_names: &BTreeSet<&str>,
+) -> BTreeMap<String, PathBuf> {
+    if !metadata_kind_can_own_commands(kind) {
+        return BTreeMap::new();
+    }
+
+    let mut paths = BTreeMap::new();
+    for command in nested_command_headers_from_text(text, owner_uuid) {
+        let body_id = format!("{}.2", command.uuid);
+        if !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let path = PathBuf::from(folder)
+            .join(sanitize_source_path_segment(owner_name))
+            .join("Commands")
+            .join(sanitize_source_path_segment(&command.name))
+            .join("Ext")
+            .join("CommandModule.bsl");
+        paths.insert(body_id, path);
+    }
+
+    paths
+}
+
+fn metadata_kind_can_own_commands(kind: &str) -> bool {
+    !matches!(
+        kind,
+        "CommonModule"
+            | "CommonCommand"
+            | "CommonForm"
+            | "CommonPicture"
+            | "CommonTemplate"
+            | "CommandGroup"
+            | "Constant"
+            | "DefinedType"
+            | "EventSubscription"
+            | "FunctionalOption"
+            | "FunctionalOptionsParameter"
+            | "Language"
+            | "Role"
+            | "SessionParameter"
+            | "StyleItem"
+            | "XDTOPackage"
+    )
+}
+
+fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
+    let mut headers = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut offset = 0usize;
+    let marker = "{1,0,";
+
+    while let Some(relative) = text[offset..].find(marker) {
+        let marker_start = offset + relative;
+        let uuid_start = marker_start + marker.len();
+        let uuid_end = uuid_start + 36;
+        offset = uuid_start;
+
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if uuid == owner_uuid || !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
+            continue;
+        }
+        if !is_offset_inside_metadata_object_code(text, marker_start, 9) {
+            continue;
+        }
+        if !seen.insert(uuid.to_string()) {
+            continue;
+        }
+        if let Some(header) = parse_metadata_header_from_text(text, uuid) {
+            headers.push(header);
+        }
+    }
+
+    headers
+}
+
+fn is_metadata_header_marker(text: &str, uuid_end: usize) -> bool {
+    matches!(text.get(uuid_end..uuid_end + 2), Some("},"))
+}
+
+fn is_offset_inside_metadata_object_code(text: &str, offset: usize, code: u32) -> bool {
+    let code_marker = format!("{{{code},");
+    let Some(start) = text[..offset].rfind(&code_marker) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
 }
 
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
@@ -2254,6 +2360,57 @@ mod tests {
         assert_eq!(
             body_row.module_text_path.as_deref(),
             Some("CommonCommands/OpenSettings/Ext/CommandModule.bsl")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_nested_command_module_text_to_source_layout_when_owner_metadata_is_present() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let owner_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,835478cc-434a-480c-ad61-99801cd685ed,92b15a50-2234-40c9-af13-3d746d4b870f,\r\n{{0,\r\n{{3,\r\n{{1,0,{owner_uuid}}},\"Scanning\",{{1,\"en\",\"Scanning\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,86df3c66-2c45-49c1-9e7d-5d1892acb646,6ae2f4ed-a57a-49ed-a854-8795bf1e1519,00000000-0000-0000-0000-000000000000,\r\n{{0}},\r\n{{0}}\r\n}},5,\r\n{{45556acb-826a-4f73-898a-6025fc9536e1,1,\r\n{{\r\n{{0,\r\n{{1,\r\n{{2,{command_uuid},078a6af8-d22c-4248-9c33-7e90075a3d2c}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Scan sheet\"}},1,\r\n{{0,0,0}},0,\r\n{{1,bc80566a-86a5-4e87-acd4-872239385a2e}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"ScanSheet\",{{1,\"en\",\"Scan sheet\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0}}\r\n}}\r\n}},0}}\r\n}}\r\n}},\r\n{{d5b0e5ed-256d-401c-9c36-f630cafd8a62,3,0f193c89-b664-448e-bed3-2147430367f7,4c9b2506-75a8-47d3-a5d5-d946088ba14a,36eacaa1-2efd-49c0-82de-2f8972535bf2}},\r\n{{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let text = b"Procedure Run(CommandParameter)\r\nEndProcedure\r\n";
+        let body = pack_module_blob_bytes(text, None, None).unwrap().blob;
+        let rows = vec![
+            ConfigRow {
+                file_name: owner_uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{command_uuid}.2"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 1);
+        let expected =
+            root.join("DataProcessors/Scanning/Commands/ScanSheet/Ext/CommandModule.bsl");
+        assert_eq!(fs::read(expected).unwrap(), text);
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{command_uuid}.2"))
+            .unwrap();
+        assert_eq!(
+            body_row.module_text_path.as_deref(),
+            Some("DataProcessors/Scanning/Commands/ScanSheet/Ext/CommandModule.bsl")
         );
 
         let _ = fs::remove_dir_all(root);
