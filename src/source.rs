@@ -99,17 +99,15 @@ pub fn read_manifest(path: &Path) -> Result<SourceManifest> {
 fn scan_file(path: &Path, relative: &Path) -> Result<SourceFile> {
     let metadata =
         fs::metadata(path).with_context(|| format!("failed to stat {}", path.display()))?;
-    let sha256 = sha256_file(path)?;
     let relative_text = normalize_path(relative);
-    let xml_root = if is_xml(path) {
-        if should_parse_xml_root(&relative_text) {
-            first_xml_element(path).unwrap_or(None)
-        } else {
-            None
-        }
+    let needs_xml_root = is_xml(path) && should_parse_xml_root(&relative_text);
+    let (sha256_result, xml_root_result) = if needs_xml_root {
+        rayon::join(|| sha256_file(path), || first_xml_element(path))
     } else {
-        None
+        (sha256_file(path), Ok(None))
     };
+    let sha256 = sha256_result?;
+    let xml_root = xml_root_result?;
     let kind = classify(path, &relative_text, xml_root.as_deref());
     let object_hint = infer_object_hint(&relative_text, &kind, xml_root.as_deref());
 
