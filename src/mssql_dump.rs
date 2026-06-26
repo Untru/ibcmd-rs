@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -147,6 +148,11 @@ fn dump_table_rows(
         fs::create_dir_all(&module_text_dir)
             .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
     }
+    let module_text_paths = if extract_module_text {
+        common_module_body_paths(&rows)
+    } else {
+        BTreeMap::new()
+    };
 
     let mut manifests = Vec::new();
     let mut binary_bytes = 0;
@@ -192,9 +198,18 @@ fn dump_table_rows(
         let module_text_relative = if extract_module_text {
             match unpack_module_blob_text(&bytes) {
                 Ok(text) => {
-                    let relative = PathBuf::from(format!("{table}_module_text"))
-                        .join(format!("{safe_name}.bsl"));
+                    let relative = module_text_paths
+                        .get(&row.file_name)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            PathBuf::from(format!("{table}_module_text"))
+                                .join(format!("{safe_name}.bsl"))
+                        });
                     let path = output_dir.join(&relative);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("failed to create {}", parent.display()))?;
+                    }
                     fs::write(&path, text)
                         .with_context(|| format!("failed to write {}", path.display()))?;
                     module_text_rows += 1;
@@ -223,6 +238,96 @@ fn dump_table_rows(
         inflated_rows,
         module_text_rows,
     })
+}
+
+fn common_module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
+    let file_names = rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut paths = BTreeMap::new();
+
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let body_id = format!("{}.0", row.file_name);
+        if !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some(name) = parse_common_module_name_from_metadata_blob(&bytes, &row.file_name) else {
+            continue;
+        };
+        paths.insert(body_id, common_module_source_path(&name));
+    }
+
+    paths
+}
+
+fn common_module_source_path(name: &str) -> PathBuf {
+    PathBuf::from("CommonModules")
+        .join(sanitize_source_path_segment(name))
+        .join("Ext")
+        .join("Module.bsl")
+}
+
+fn parse_common_module_name_from_metadata_blob(blob: &[u8], uuid: &str) -> Option<String> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let after_root = text.trim_start().strip_prefix("{1,")?.trim_start();
+    if !after_root.starts_with("{12,") {
+        return None;
+    }
+
+    let uuid_pos = text.find(uuid)?;
+    let after_uuid = &text[uuid_pos + uuid.len()..];
+    let name_start = after_uuid.find("},\"")? + 2;
+    parse_1c_quoted_string(&after_uuid[name_start..])
+}
+
+fn parse_1c_quoted_string(input: &str) -> Option<String> {
+    let mut chars = input.chars();
+    if chars.next()? != '"' {
+        return None;
+    }
+    let mut output = String::new();
+    let mut previous_quote = false;
+    for ch in chars {
+        if ch == '"' {
+            if previous_quote {
+                output.push('"');
+                previous_quote = false;
+            } else {
+                previous_quote = true;
+            }
+            continue;
+        }
+        if previous_quote {
+            return Some(output);
+        }
+        output.push(ch);
+    }
+    None
+}
+
+fn sanitize_source_path_segment(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+            output.push('_');
+        } else {
+            output.push(ch);
+        }
+    }
+    if output.trim().is_empty() {
+        "Unnamed".to_string()
+    } else {
+        output
+    }
 }
 
 fn fetch_rows(sqlcmd: &Path, server: &str, database: &str, table: &str) -> Result<Vec<ConfigRow>> {
@@ -359,6 +464,10 @@ fn safe_storage_file_name(file_name: &str, part_no: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::Compression;
+    use flate2::write::DeflateEncoder;
+    use std::io::Write;
+
     use crate::module_blob::pack_module_blob_bytes;
 
     #[test]
@@ -413,7 +522,65 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn writes_common_module_text_to_source_layout_when_metadata_is_present() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "\u{feff}{{1,\r\n{{12,\r\n{{3,\r\n{{1,0,{uuid}}},\"TestModule\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let text = b"Procedure Run()\r\nEndProcedure\r\n";
+        let body = pack_module_blob_bytes(text, None, None).unwrap().blob;
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 1);
+        let expected = PathBuf::from("CommonModules")
+            .join("TestModule")
+            .join("Ext")
+            .join("Module.bsl");
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.module_text_path.as_deref(),
+            Some("CommonModules/TestModule/Ext/Module.bsl")
+        );
+        assert_eq!(fs::read(root.join(expected)).unwrap(), text);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
     fn encode_hex_for_test(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn deflate_for_test(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
     }
 }
