@@ -324,7 +324,7 @@ fn parse_module_body_source_paths_from_metadata_blob(
         metadata_source_for_text(object_code, text, uuid)?
     };
     let mut paths = BTreeMap::new();
-    for suffix in ["0", "1", "2", "3"] {
+    for suffix in MODULE_BODY_SUFFIXES {
         let body_id = format!("{uuid}.{suffix}");
         if !file_names.contains(body_id.as_str()) {
             continue;
@@ -342,9 +342,17 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
         ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
         ("Catalog", "0") => Some("ObjectModule.bsl"),
         ("Catalog", "3") => Some("ManagerModule.bsl"),
+        ("Report", "0") => Some("ObjectModule.bsl"),
+        ("Report", "2") => Some("ManagerModule.bsl"),
+        ("DataProcessor", "0") => Some("ObjectModule.bsl"),
+        ("Enum", "0") => Some("ManagerModule.bsl"),
         ("ExchangePlan", "2") => Some("ObjectModule.bsl"),
         ("ExchangePlan", "3") => Some("ManagerModule.bsl"),
         ("InformationRegister", "2") => Some("ManagerModule.bsl"),
+        ("BusinessProcess", "6") => Some("ObjectModule.bsl"),
+        ("BusinessProcess", "8") => Some("ManagerModule.bsl"),
+        ("ChartOfCharacteristicTypes", "15") => Some("ObjectModule.bsl"),
+        ("ChartOfCharacteristicTypes", "16") => Some("ManagerModule.bsl"),
         _ => None,
     };
     module_file.map(|module_file| {
@@ -1410,7 +1418,7 @@ fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
             selected.insert(metadata_id.to_string());
             continue;
         }
-        for suffix in ["0", "1", "2", "3"] {
+        for suffix in MODULE_BODY_SUFFIXES {
             selected.insert(format!("{file_name}.{suffix}"));
         }
     }
@@ -1419,11 +1427,13 @@ fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
 
 fn metadata_id_from_module_file_name(file_name: &str) -> Option<&str> {
     let (metadata_id, suffix) = file_name.rsplit_once('.')?;
-    if metadata_id.is_empty() || !matches!(suffix, "0" | "1" | "2" | "3") {
+    if metadata_id.is_empty() || !MODULE_BODY_SUFFIXES.contains(&suffix) {
         return None;
     }
     Some(metadata_id)
 }
+
+const MODULE_BODY_SUFFIXES: &[&str] = &["0", "1", "2", "3", "5", "6", "7", "8", "15", "16"];
 
 fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
     let output = Command::new(sqlcmd)
@@ -1609,9 +1619,80 @@ mod tests {
         assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1"));
         assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.2"));
         assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.3"));
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.15"));
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.16"));
         assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
         assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.2"));
-        assert_eq!(selected.len(), 7);
+        assert_eq!(selected.len(), 13);
+    }
+
+    #[test]
+    fn maps_additional_object_family_module_suffixes_to_source_layout() {
+        let cases = [
+            (
+                "Report",
+                "Reports",
+                "Sales",
+                "0",
+                PathBuf::from("Reports/Sales/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "Report",
+                "Reports",
+                "Sales",
+                "2",
+                PathBuf::from("Reports/Sales/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "DataProcessor",
+                "DataProcessors",
+                "Import",
+                "0",
+                PathBuf::from("DataProcessors/Import/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "Enum",
+                "Enums",
+                "Status",
+                "0",
+                PathBuf::from("Enums/Status/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "BusinessProcess",
+                "BusinessProcesses",
+                "Task",
+                "6",
+                PathBuf::from("BusinessProcesses/Task/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "BusinessProcess",
+                "BusinessProcesses",
+                "Task",
+                "8",
+                PathBuf::from("BusinessProcesses/Task/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "ChartOfCharacteristicTypes",
+                "ChartsOfCharacteristicTypes",
+                "Kinds",
+                "15",
+                PathBuf::from("ChartsOfCharacteristicTypes/Kinds/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "ChartOfCharacteristicTypes",
+                "ChartsOfCharacteristicTypes",
+                "Kinds",
+                "16",
+                PathBuf::from("ChartsOfCharacteristicTypes/Kinds/Ext/ManagerModule.bsl"),
+            ),
+        ];
+
+        for (kind, folder, name, suffix, expected) in cases {
+            assert_eq!(
+                module_owner_source_path(kind, folder, name, suffix),
+                Some(expected)
+            );
+        }
     }
 
     #[test]
