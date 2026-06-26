@@ -624,17 +624,35 @@ fn metadata_source_for_text(
         0 if header_index == Some(1) && field_starts_with(fields.get(2), "{0,") => {
             Some(("FunctionalOptionsParameter", "FunctionalOptionsParameters"))
         }
+        0 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
+            Some(("Language", "Languages"))
+        }
         1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
             Some(("EventSubscription", "EventSubscriptions"))
         }
         1 if header_index == Some(1) && field_starts_with(fields.get(1), "{2,") => {
             Some(("SessionParameter", "SessionParameters"))
         }
+        1 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
+            Some(("XDTOPackage", "XDTOPackages"))
+        }
+        2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
+            Some(("HTTPService", "HTTPServices"))
+        }
         2 if header_index == Some(1)
             && fields.get(2).copied().and_then(parse_uuid_field).is_some()
             && field_starts_with(fields.get(3), "{0,") =>
         {
             Some(("FunctionalOption", "FunctionalOptions"))
+        }
+        2 if header_index == Some(1) && field_starts_with(fields.get(1), "{0,") => {
+            Some(("SettingsStorage", "SettingsStorages"))
+        }
+        2 if header_index == Some(1)
+            && field_is_quoted_string(fields.get(2))
+            && field_is_quoted_string(fields.get(3)) =>
+        {
+            Some(("ScheduledJob", "ScheduledJobs"))
         }
         5 => Some(("CommonAttribute", "CommonAttributes")),
         6 => Some(("Role", "Roles")),
@@ -694,6 +712,15 @@ fn field_starts_with(field: Option<&&str>, prefix: &str) -> bool {
 fn field_is_unsigned_integer(field: Option<&&str>) -> bool {
     field
         .map(|value| value.trim().chars().all(|ch| ch.is_ascii_digit()))
+        .unwrap_or(false)
+}
+
+fn field_is_quoted_string(field: Option<&&str>) -> bool {
+    field
+        .map(|value| {
+            let value = value.trim();
+            value.len() >= 2 && value.starts_with('"') && value.ends_with('"')
+        })
         .unwrap_or(false)
 }
 
@@ -1978,6 +2005,87 @@ mod tests {
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "UseFeatureFor");
         assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_additional_simple_service_metadata_xml_from_blobs() {
+        let language_uuid = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let language_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{language_uuid}}},\"English\",{{1,\"en\",\"English\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"en\"}},0}}"
+            )
+            .as_bytes(),
+        );
+        let xdto_uuid = "22222222-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let xdto_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{xdto_uuid}}},\"Exchange\",{{1,\"en\",\"Exchange\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"http://example.com/exchange\"}},0}}"
+            )
+            .as_bytes(),
+        );
+        let http_uuid = "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let http_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\"api\",\r\n{{3,\r\n{{1,0,{http_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20}},0}}"
+            )
+            .as_bytes(),
+        );
+        let storage_uuid = "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let storage_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{0,\r\n{{3,\r\n{{1,0,{storage_uuid}}},\"UserSettings\",{{1,\"en\",\"User settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000}},2,\r\n{{0}},\r\n{{0}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let job_uuid = "55555555-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let job_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{job_uuid}}},\"LoadRates\",{{1,\"en\",\"Load rates\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"\",\"Load rates\",1,1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,\"LoadRates\",3,10}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        for (blob, uuid, expected_kind, expected_path) in [
+            (
+                &language_blob,
+                language_uuid,
+                "Language",
+                PathBuf::from("Languages").join("English.xml"),
+            ),
+            (
+                &xdto_blob,
+                xdto_uuid,
+                "XDTOPackage",
+                PathBuf::from("XDTOPackages").join("Exchange.xml"),
+            ),
+            (
+                &http_blob,
+                http_uuid,
+                "HTTPService",
+                PathBuf::from("HTTPServices").join("Api.xml"),
+            ),
+            (
+                &storage_blob,
+                storage_uuid,
+                "SettingsStorage",
+                PathBuf::from("SettingsStorages").join("UserSettings.xml"),
+            ),
+            (
+                &job_blob,
+                job_uuid,
+                "ScheduledJob",
+                PathBuf::from("ScheduledJobs").join("LoadRates.xml"),
+            ),
+        ] {
+            let extracted = extract_metadata_source_xml(blob, uuid, &BTreeMap::new()).unwrap();
+            let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+            let repacked = pack_simple_metadata_blob_from_xml(blob, &extracted.xml).unwrap();
+
+            assert_eq!(extracted.relative_path, expected_path);
+            assert_eq!(properties.kind, expected_kind);
+            assert_eq!(properties.uuid, uuid);
+            assert!(!repacked.blob.is_empty());
+        }
     }
 
     #[test]
