@@ -352,6 +352,9 @@ enum SourceAssetKind {
         command_refs: BTreeMap<String, String>,
         metadata_refs: BTreeMap<String, MetadataCommandReference>,
     },
+    ExchangePlanContent {
+        object_refs: BTreeMap<String, String>,
+    },
     ExtPicture,
     Form,
     Help,
@@ -583,6 +586,21 @@ fn source_assets_from_metadata_blob_inner(
         PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
     };
     let mut assets = Vec::new();
+
+    if kind == "ExchangePlan" {
+        let content_id = format!("{uuid}.1");
+        if file_names.contains(content_id.as_str()) {
+            assets.push((
+                content_id,
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("Content.xml"),
+                    kind: SourceAssetKind::ExchangePlanContent {
+                        object_refs: object_refs.clone(),
+                    },
+                },
+            ));
+        }
+    }
 
     let body_id = format!("{uuid}.0");
     if file_names.contains(body_id.as_str()) {
@@ -876,6 +894,22 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_command_interface_xml(&entries))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::ExchangePlanContent { object_refs } => {
+            let items =
+                parse_exchange_plan_content_blob(bytes, object_refs).with_context(|| {
+                    format!(
+                        "failed to extract exchange plan content from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, format_exchange_plan_content_xml(&items))
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
     }
 
     Ok(asset.primary_path.clone())
@@ -900,6 +934,11 @@ struct HelpContent {
 struct CommandInterfaceEntry {
     name: String,
     common: bool,
+}
+
+struct ExchangePlanContentItem {
+    metadata: String,
+    auto_record: &'static str,
 }
 
 #[derive(Clone)]
@@ -1482,6 +1521,41 @@ fn parse_command_interface_common_flag(value: &str) -> Option<bool> {
         Some(false)
     } else {
         None
+    }
+}
+
+fn parse_exchange_plan_content_blob(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<ExchangePlanContentItem>> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut items = Vec::with_capacity(count);
+    let mut index = 2usize;
+    for _ in 0..count {
+        let object_id = parse_uuid_field(fields.get(index)?.trim())?;
+        let auto_record = exchange_plan_auto_record_xml(fields.get(index + 1)?.trim());
+        let metadata = object_refs.get(&object_id)?.clone();
+        items.push(ExchangePlanContentItem {
+            metadata,
+            auto_record,
+        });
+        index += 2;
+    }
+
+    Some(items)
+}
+
+fn exchange_plan_auto_record_xml(value: &str) -> &'static str {
+    match value {
+        "0" => "Deny",
+        "1" => "Auto",
+        _ => "Auto",
     }
 }
 
@@ -2394,6 +2468,25 @@ fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
         ));
     }
     xml.push_str("\t</CommandsVisibility>\r\n</CommandInterface>\r\n");
+    xml
+}
+
+fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ExchangePlanContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+    );
+    for item in items {
+        xml.push_str(&format!(
+            "\t<Item>\r\n\
+\t\t<Metadata>{}</Metadata>\r\n\
+\t\t<AutoRecord>{}</AutoRecord>\r\n\
+\t</Item>\r\n",
+            escape_xml_text(&item.metadata),
+            item.auto_record
+        ));
+    }
+    xml.push_str("</ExchangePlanContent>\r\n");
     xml
 }
 
@@ -7092,6 +7185,84 @@ mod tests {
         assert_eq!(
             body_row.source_asset_path.as_deref(),
             Some("Subsystems/Admin/Ext/CommandInterface.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_exchange_plan_content_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let plan_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let register_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let plan = deflate_for_test(
+            format!(
+                "{{1,\r\n{{37,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{3,\r\n{{1,0,{plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let catalog = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let register = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let content =
+            deflate_for_test(format!("{{2,2,{catalog_uuid},0,{register_uuid},1}}").as_bytes());
+        let rows = vec![
+            ConfigRow {
+                file_name: plan_uuid.to_string(),
+                part_no: 0,
+                data_size: plan.len() as i64,
+                binary_hex: encode_hex_for_test(&plan),
+            },
+            ConfigRow {
+                file_name: format!("{plan_uuid}.1"),
+                part_no: 0,
+                data_size: content.len() as i64,
+                binary_hex: encode_hex_for_test(&content),
+            },
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog),
+            },
+            ConfigRow {
+                file_name: register_uuid.to_string(),
+                part_no: 0,
+                data_size: register.len() as i64,
+                binary_hex: encode_hex_for_test(&register),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("ExchangePlans/Sync/Ext/Content.xml")).unwrap();
+        assert!(xml.contains("<Metadata>Catalog.Customers</Metadata>"));
+        assert!(xml.contains("<AutoRecord>Deny</AutoRecord>"));
+        assert!(xml.contains("<Metadata>InformationRegister.Prices</Metadata>"));
+        assert!(xml.contains("<AutoRecord>Auto</AutoRecord>"));
+        let content_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{plan_uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            content_row.source_asset_path.as_deref(),
+            Some("ExchangePlans/Sync/Ext/Content.xml")
         );
 
         let _ = fs::remove_dir_all(root);
