@@ -350,6 +350,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     let metadata_refs = build_metadata_command_reference_index(rows);
     let object_refs = build_metadata_object_reference_index(rows);
     let field_refs = build_metadata_field_reference_index(rows);
+    let form_refs = build_form_source_reference_index(rows);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -410,6 +411,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             paths.insert(body_id, asset);
         }
     }
+    paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
 
     paths
 }
@@ -885,6 +887,45 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
     }
 
     index
+}
+
+fn form_help_asset_paths(
+    rows: &[ConfigRow],
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> BTreeMap<String, SourceAsset> {
+    let file_names = rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut paths = BTreeMap::new();
+    for (form_uuid, form_ref) in form_refs {
+        let row_prefix = format!("{form_uuid}.");
+        let mut form_dir = form_ref.relative_path.clone();
+        form_dir.set_extension("");
+        for body_id in file_names
+            .iter()
+            .filter(|file_name| file_name.starts_with(&row_prefix))
+        {
+            let module_body_id = format!("{form_uuid}.0");
+            if *body_id == module_body_id.as_str() {
+                continue;
+            }
+            if let Some(row) = rows_by_file_name.get(*body_id)
+                && let Ok(bytes) = decode_hex(&row.binary_hex)
+                && parse_help_blob_pages(&bytes).is_some()
+            {
+                paths.insert(
+                    (*body_id).to_string(),
+                    SourceAsset {
+                        primary_path: form_dir.join("Ext").join("Help.xml"),
+                        kind: SourceAssetKind::Help,
+                    },
+                );
+            }
+        }
+    }
+    paths
 }
 
 fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> {
@@ -4932,6 +4973,75 @@ mod tests {
         assert_eq!(
             help_row.source_asset_path.as_deref(),
             Some("Catalogs/Products/Ext/Help.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_form_help_xml_and_html_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ItemForm\",{{1,\"en\",\"Item form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let help = deflate_for_test(b"{5,1,\"ru\",{#base64:PGgxPkZvcm08L2gxPg==},0}");
+        let rows = vec![
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: form_uuid.to_string(),
+                part_no: 0,
+                data_size: form_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&form_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{form_uuid}.1"),
+                part_no: 0,
+                data_size: help.len() as i64,
+                binary_hex: encode_hex_for_test(&help),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 2);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert!(
+            fs::read_to_string(root.join("Catalogs/Products/Forms/ItemForm/Ext/Help.xml"))
+                .unwrap()
+                .contains("<Page>ru</Page>")
+        );
+        assert_eq!(
+            fs::read(root.join("Catalogs/Products/Forms/ItemForm/Ext/Help/ru.html")).unwrap(),
+            b"<h1>Form</h1>"
+        );
+        let help_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{form_uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            help_row.source_asset_path.as_deref(),
+            Some("Catalogs/Products/Forms/ItemForm/Ext/Help.xml")
         );
 
         let _ = fs::remove_dir_all(root);
