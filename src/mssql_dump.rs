@@ -3938,9 +3938,20 @@ fn parse_metadata_type_pattern_element(
         r#""D""# => Some(ConstantValueType::DateTime),
         r##""#""## if element.len() >= 2 => {
             let type_id = parse_uuid_field(element.get(1)?.trim())?;
-            let reference = type_index.get(&type_id)?.clone();
+            let reference = type_index
+                .get(&type_id)
+                .cloned()
+                .or_else(|| builtin_type_reference(&type_id).map(ToOwned::to_owned))?;
             Some(ConstantValueType::Reference { reference })
         }
+        _ => None,
+    }
+}
+
+fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
+    match type_id {
+        "e199ca70-93cf-46ce-a54b-6edc88c3a296" => Some("v8:ValueStorage"),
+        "fc01b5df-97fe-449b-83d4-218a090e681e" => Some("v8:UUID"),
         _ => None,
     }
 }
@@ -7347,6 +7358,47 @@ mod tests {
         assert!(String::from_utf8_lossy(&extracted.xml).contains("xs:boolean"));
         assert!(String::from_utf8_lossy(&extracted.xml).contains("<UseStandardCommands>true"));
         assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_constant_xml_with_builtin_uuid_types() {
+        for (uuid, name, type_uuid, expected_type) in [
+            (
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                "StoredValue",
+                "e199ca70-93cf-46ce-a54b-6edc88c3a296",
+                "v8:ValueStorage",
+            ),
+            (
+                "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+                "VersionUuid",
+                "fc01b5df-97fe-449b-83d4-218a090e681e",
+                "v8:UUID",
+            ),
+        ] {
+            let blob = deflate_for_test(
+                format!(
+                    "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{type_uuid}}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                )
+                .as_bytes(),
+            );
+
+            let extracted = extract_metadata_source_xml(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("Constants").join(format!("{name}.xml"))
+            );
+            assert!(xml.contains(&format!("<v8:Type>{expected_type}</v8:Type>")));
+        }
     }
 
     #[test]
