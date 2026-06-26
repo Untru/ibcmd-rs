@@ -78,20 +78,16 @@ struct FileAnalysis {
 }
 
 pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
-    let analyses = inputs
+    let merged = inputs
         .par_iter()
         .map(|input| {
             analyze_one_file(input)
                 .with_context(|| format!("failed to analyze {}", input.display()))
         })
-        .collect::<Result<Vec<_>>>()?;
-
-    let merged = analyses
-        .into_par_iter()
-        .reduce(FileAnalysis::default, |mut left, right| {
+        .try_reduce(FileAnalysis::default, |mut left, right| {
             left.merge_from(right);
-            left
-        });
+            Ok(left)
+        })?;
 
     let mut groups = merged
         .groups
