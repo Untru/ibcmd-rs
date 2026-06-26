@@ -153,6 +153,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_information_register_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageScheduledJobObject(args) => {
+            let report = ibcmd_rs::mssql::stage_scheduled_job_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())

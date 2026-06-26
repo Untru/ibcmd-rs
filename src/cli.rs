@@ -71,6 +71,8 @@ pub enum Commands {
     MssqlStageCatalogObject(MssqlStageCatalogObjectArgs),
     /// Stage one information register object from XML.
     MssqlStageInformationRegisterObject(MssqlStageInformationRegisterObjectArgs),
+    /// Stage one scheduled job object from XML.
+    MssqlStageScheduledJobObject(MssqlStageScheduledJobObjectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -668,6 +670,34 @@ pub struct MssqlStageInformationRegisterObjectArgs {
     pub script_output: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+pub struct MssqlStageScheduledJobObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Scheduled job XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -844,6 +874,33 @@ mod tests {
                 assert_eq!(
                     args.xml,
                     PathBuf::from(r"InformationRegisters\ВерсииОбъектов.xml")
+                );
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_scheduled_job_stage_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-scheduled-job-object",
+            "--database",
+            "TestDb",
+            "--xml",
+            r"ScheduledJobs\ЗагрузкаКурсовВалют.xml",
+            "--replace-config-save",
+            "--allow-non-lab",
+        ]);
+
+        match cli.command {
+            Commands::MssqlStageScheduledJobObject(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(
+                    args.xml,
+                    PathBuf::from(r"ScheduledJobs\ЗагрузкаКурсовВалют.xml")
                 );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
