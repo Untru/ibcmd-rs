@@ -195,6 +195,11 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    let subsystem_refs = if extract_metadata_xml {
+        build_subsystem_source_reference_index(&rows)
+    } else {
+        BTreeMap::new()
+    };
 
     let mut manifests = Vec::new();
     let mut binary_bytes = 0;
@@ -273,12 +278,13 @@ fn dump_table_rows(
         };
 
         let metadata_xml_relative = if extract_metadata_xml {
-            match extract_metadata_source_xml(
+            match extract_metadata_source_xml_with_refs(
                 &bytes,
                 &row.file_name,
                 &type_index,
                 &form_refs,
                 &template_refs,
+                &subsystem_refs,
             ) {
                 Some(extracted) => {
                     let path = output_dir.join(&extracted.relative_path);
@@ -364,6 +370,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     let field_refs = build_metadata_field_reference_index(rows);
     let form_refs = build_form_source_reference_index(rows);
     let template_refs = build_template_source_reference_index(rows);
+    let subsystem_refs = build_subsystem_source_reference_index(rows);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -420,6 +427,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             &metadata_refs,
             &object_refs,
             &field_refs,
+            &subsystem_refs,
         ) {
             paths.insert(body_id, asset);
         }
@@ -491,6 +499,7 @@ fn source_assets_from_metadata_blob(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Vec<(String, SourceAsset)> {
     source_assets_from_metadata_blob_inner(
         blob,
@@ -501,6 +510,7 @@ fn source_assets_from_metadata_blob(
         metadata_refs,
         object_refs,
         field_refs,
+        subsystem_refs,
     )
     .unwrap_or_default()
 }
@@ -514,6 +524,7 @@ fn source_assets_from_metadata_blob_inner(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<Vec<(String, SourceAsset)>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
@@ -521,7 +532,16 @@ fn source_assets_from_metadata_blob_inner(
     let object_code = parse_metadata_object_code(text)?;
     let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let object_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+    let object_path = if kind == "Subsystem" {
+        subsystem_refs
+            .get(uuid)
+            .map(|subsystem_ref| subsystem_ref.relative_path.with_extension(""))
+            .unwrap_or_else(|| {
+                PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
+            })
+    } else {
+        PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
+    };
     let mut assets = Vec::new();
 
     let body_id = format!("{uuid}.0");
@@ -660,7 +680,7 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
         SourceAssetKind::Help => {
-            let pages = parse_help_blob_pages(bytes).with_context(|| {
+            let help = parse_help_blob(bytes).with_context(|| {
                 format!(
                     "failed to extract help from source asset {}",
                     asset.primary_path.display()
@@ -675,12 +695,22 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             let help_dir = output_dir.join(asset.primary_path.with_extension(""));
             fs::create_dir_all(&help_dir)
                 .with_context(|| format!("failed to create {}", help_dir.display()))?;
-            for page in &pages {
+            for page in &help.pages {
                 let page_path = help_dir.join(&page.file_name);
                 fs::write(&page_path, &page.content)
                     .with_context(|| format!("failed to write {}", page_path.display()))?;
             }
-            fs::write(&xml_path, format_help_xml(&pages))
+            if !help.files.is_empty() {
+                let files_dir = help_dir.join("_files");
+                fs::create_dir_all(&files_dir)
+                    .with_context(|| format!("failed to create {}", files_dir.display()))?;
+                for file in &help.files {
+                    let file_path = files_dir.join(&file.file_name);
+                    fs::write(&file_path, &file.content)
+                        .with_context(|| format!("failed to write {}", file_path.display()))?;
+                }
+            }
+            fs::write(&xml_path, format_help_xml(&help.pages))
                 .with_context(|| format!("failed to write {}", xml_path.display()))?;
         }
         SourceAssetKind::InflatedBinary => {
@@ -767,6 +797,16 @@ struct HelpPage {
     page: String,
     file_name: String,
     content: Vec<u8>,
+}
+
+struct HelpFile {
+    file_name: String,
+    content: Vec<u8>,
+}
+
+struct HelpContent {
+    pages: Vec<HelpPage>,
+    files: Vec<HelpFile>,
 }
 
 struct CommandInterfaceEntry {
@@ -1055,6 +1095,111 @@ fn build_template_source_reference_index(
     }
 
     index
+}
+
+fn build_subsystem_source_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, SubsystemSourceReference> {
+    let mut subsystems = BTreeMap::<String, (MetadataHeader, String)>::new();
+
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        let text = text.trim_start_matches('\u{feff}');
+        let Some(object_code) = parse_metadata_object_code(text) else {
+            continue;
+        };
+        let Some((kind, _folder)) = metadata_source_for_text(object_code, text, &row.file_name)
+        else {
+            continue;
+        };
+        if kind != "Subsystem" {
+            continue;
+        }
+        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
+            continue;
+        };
+        subsystems.insert(header.uuid.clone(), (header, text.to_string()));
+    }
+
+    let mut parent_by_child = BTreeMap::<String, String>::new();
+    for child_uuid in subsystems.keys() {
+        let owners = subsystems
+            .iter()
+            .filter(|(owner_uuid, (_, owner_text))| {
+                owner_uuid.as_str() != child_uuid.as_str() && owner_text.contains(child_uuid)
+            })
+            .map(|(owner_uuid, _)| owner_uuid.clone())
+            .collect::<Vec<_>>();
+        if let [owner_uuid] = owners.as_slice() {
+            parent_by_child.insert(child_uuid.clone(), owner_uuid.clone());
+        }
+    }
+
+    let mut memo = BTreeMap::<String, PathBuf>::new();
+    for uuid in subsystems.keys() {
+        let mut visiting = BTreeSet::<String>::new();
+        let _ = resolve_subsystem_source_path(
+            uuid,
+            &subsystems,
+            &parent_by_child,
+            &mut memo,
+            &mut visiting,
+        );
+    }
+
+    memo.into_iter()
+        .map(|(uuid, relative_path)| (uuid, SubsystemSourceReference { relative_path }))
+        .collect()
+}
+
+fn resolve_subsystem_source_path(
+    uuid: &str,
+    subsystems: &BTreeMap<String, (MetadataHeader, String)>,
+    parent_by_child: &BTreeMap<String, String>,
+    memo: &mut BTreeMap<String, PathBuf>,
+    visiting: &mut BTreeSet<String>,
+) -> Option<PathBuf> {
+    if let Some(path) = memo.get(uuid) {
+        return Some(path.clone());
+    }
+    if !visiting.insert(uuid.to_string()) {
+        return None;
+    }
+    let (header, _) = subsystems.get(uuid)?;
+    let name = sanitize_source_path_segment(&header.name);
+    let relative_path = if let Some(parent_uuid) = parent_by_child.get(uuid) {
+        resolve_subsystem_source_path(parent_uuid, subsystems, parent_by_child, memo, visiting)
+            .map(|parent_path| {
+                parent_path
+                    .with_extension("")
+                    .join("Subsystems")
+                    .join(&name)
+                    .with_extension("xml")
+            })
+            .unwrap_or_else(|| {
+                PathBuf::from("Subsystems")
+                    .join(&name)
+                    .with_extension("xml")
+            })
+    } else {
+        PathBuf::from("Subsystems")
+            .join(&name)
+            .with_extension("xml")
+    };
+    visiting.remove(uuid);
+    memo.insert(uuid.to_string(), relative_path.clone());
+    Some(relative_path)
 }
 
 fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
@@ -1692,6 +1837,10 @@ const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
 ];
 
 fn parse_help_blob_pages(bytes: &[u8]) -> Option<Vec<HelpPage>> {
+    parse_help_blob(bytes).map(|help| help.pages)
+}
+
+fn parse_help_blob(bytes: &[u8]) -> Option<HelpContent> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
@@ -1715,7 +1864,35 @@ fn parse_help_blob_pages(bytes: &[u8]) -> Option<Vec<HelpPage>> {
         });
     }
 
-    if pages.is_empty() { None } else { Some(pages) }
+    if pages.is_empty() {
+        return None;
+    }
+
+    let mut files = Vec::new();
+    if let Some(count) = fields
+        .get(index)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    {
+        index += 1;
+        for _ in 0..count {
+            let (file_name, _) = parse_1c_quoted_string_with_len(fields.get(index)?.trim())?;
+            index += 1;
+            if fields
+                .get(index)
+                .is_some_and(|field| field.trim().chars().all(|ch| ch.is_ascii_digit()))
+            {
+                index += 1;
+            }
+            let payload = extract_base64_payload(fields.get(index)?.trim())?;
+            index += 1;
+            files.push(HelpFile {
+                file_name: sanitize_source_path_segment(&file_name),
+                content: decode_base64_mime(payload)?,
+            });
+        }
+    }
+
+    Some(HelpContent { pages, files })
 }
 
 fn extract_ext_picture(bytes: &[u8]) -> Result<Vec<u8>> {
@@ -2428,6 +2605,10 @@ struct TemplateSourceReference {
     template_type: &'static str,
 }
 
+struct SubsystemSourceReference {
+    relative_path: PathBuf,
+}
+
 struct MetadataHeader {
     uuid: String,
     name: String,
@@ -2652,12 +2833,31 @@ fn is_uuid_text(value: &str) -> bool {
     value.len() == 36 && value.chars().all(|ch| ch.is_ascii_hexdigit() || ch == '-')
 }
 
+#[cfg(test)]
 fn extract_metadata_source_xml(
     blob: &[u8],
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<ExtractedMetadataSourceXml> {
+    extract_metadata_source_xml_with_refs(
+        blob,
+        uuid,
+        type_index,
+        form_refs,
+        template_refs,
+        &BTreeMap::new(),
+    )
+}
+
+fn extract_metadata_source_xml_with_refs(
+    blob: &[u8],
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
@@ -2730,9 +2930,20 @@ fn extract_metadata_source_xml(
     }
     let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let relative_path = PathBuf::from(folder)
-        .join(sanitize_source_path_segment(&header.name))
-        .with_extension("xml");
+    let relative_path = if kind == "Subsystem" {
+        subsystem_refs
+            .get(uuid)
+            .map(|subsystem_ref| subsystem_ref.relative_path.clone())
+            .unwrap_or_else(|| {
+                PathBuf::from(folder)
+                    .join(sanitize_source_path_segment(&header.name))
+                    .with_extension("xml")
+            })
+    } else {
+        PathBuf::from(folder)
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml")
+    };
     let xml = if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed).into_bytes()
@@ -5257,7 +5468,9 @@ mod tests {
             )
             .as_bytes(),
         );
-        let help = deflate_for_test(b"{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},0}");
+        let help = deflate_for_test(
+            b"{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,{#base64:iVBORw0KGgo=}}",
+        );
         let rows = vec![
             ConfigRow {
                 file_name: uuid.to_string(),
@@ -5285,6 +5498,10 @@ mod tests {
         assert_eq!(
             fs::read(root.join("Catalogs/Products/Ext/Help/ru.html")).unwrap(),
             b"<html></html>"
+        );
+        assert_eq!(
+            fs::read(root.join("Catalogs/Products/Ext/Help/_files/shot.png")).unwrap(),
+            b"\x89PNG\r\n\x1a\n"
         );
         let help_row = dumped
             .rows
@@ -5769,6 +5986,92 @@ mod tests {
         assert_eq!(
             body_row.source_asset_path.as_deref(),
             Some("Subsystems/Admin/Ext/CommandInterface.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let parent_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let child_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let parent_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"StandardSubsystems\",{{1,\"en\",\"Standard subsystems\"}},\"\"}},1,{child_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let child_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{child_uuid}}},\"Users\",{{1,\"en\",\"Users\"}},\"\"}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let help = deflate_for_test(b"{5,1,\"ru\",{#base64:PGgxPlVzZXJzPC9oMT4=},0}");
+        let rows = vec![
+            ConfigRow {
+                file_name: parent_uuid.to_string(),
+                part_no: 0,
+                data_size: parent_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&parent_metadata),
+            },
+            ConfigRow {
+                file_name: child_uuid.to_string(),
+                part_no: 0,
+                data_size: child_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&child_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{child_uuid}.0"),
+                part_no: 0,
+                data_size: help.len() as i64,
+                binary_hex: encode_hex_for_test(&help),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 2);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert!(root.join("Subsystems/StandardSubsystems.xml").exists());
+        assert!(
+            root.join("Subsystems/StandardSubsystems/Subsystems/Users.xml")
+                .exists()
+        );
+        assert!(
+            fs::read_to_string(
+                root.join("Subsystems/StandardSubsystems/Subsystems/Users/Ext/Help.xml")
+            )
+            .unwrap()
+            .contains("<Page>ru</Page>")
+        );
+        assert_eq!(
+            fs::read(root.join("Subsystems/StandardSubsystems/Subsystems/Users/Ext/Help/ru.html"))
+                .unwrap(),
+            b"<h1>Users</h1>"
+        );
+        let child_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == child_uuid)
+            .unwrap();
+        assert_eq!(
+            child_row.metadata_xml_path.as_deref(),
+            Some("Subsystems/StandardSubsystems/Subsystems/Users.xml")
+        );
+        let help_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{child_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            help_row.source_asset_path.as_deref(),
+            Some("Subsystems/StandardSubsystems/Subsystems/Users/Ext/Help.xml")
         );
 
         let _ = fs::remove_dir_all(root);
