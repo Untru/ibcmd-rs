@@ -3952,6 +3952,9 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
     match type_id {
         "e199ca70-93cf-46ce-a54b-6edc88c3a296" => Some("v8:ValueStorage"),
         "fc01b5df-97fe-449b-83d4-218a090e681e" => Some("v8:UUID"),
+        "3ee983d7-ace7-40f9-bb7e-2e916fcddd56" => Some("v8:FixedStructure"),
+        "4500381b-db30-4a10-9db4-990038032acf" => Some("v8:FixedArray"),
+        "220455ea-6c85-4513-996f-bbe79ed07774" => Some("v8:FixedMap"),
         _ => None,
     }
 }
@@ -7374,6 +7377,24 @@ mod tests {
                 "VersionUuid",
                 "fc01b5df-97fe-449b-83d4-218a090e681e",
                 "v8:UUID",
+            ),
+            (
+                "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+                "FixedStructureValue",
+                "3ee983d7-ace7-40f9-bb7e-2e916fcddd56",
+                "v8:FixedStructure",
+            ),
+            (
+                "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+                "FixedArrayValue",
+                "4500381b-db30-4a10-9db4-990038032acf",
+                "v8:FixedArray",
+            ),
+            (
+                "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+                "FixedMapValue",
+                "220455ea-6c85-4513-996f-bbe79ed07774",
+                "v8:FixedMap",
             ),
         ] {
             let blob = deflate_for_test(
