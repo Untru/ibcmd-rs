@@ -356,6 +356,7 @@ enum SourceAssetKind {
     ExchangePlanContent {
         object_refs: BTreeMap<String, String>,
     },
+    BusinessProcessFlowchart,
     ExtPicture,
     Form,
     Help,
@@ -607,6 +608,19 @@ fn source_assets_from_metadata_blob_inner(
                     kind: SourceAssetKind::ExchangePlanContent {
                         object_refs: object_refs.clone(),
                     },
+                },
+            ));
+        }
+    }
+
+    if kind == "BusinessProcess" {
+        let flowchart_id = format!("{uuid}.7");
+        if file_names.contains(flowchart_id.as_str()) {
+            assets.push((
+                flowchart_id,
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("Flowchart.xml"),
+                    kind: SourceAssetKind::BusinessProcessFlowchart,
                 },
             ));
         }
@@ -935,6 +949,21 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_exchange_plan_content_xml(&items))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::BusinessProcessFlowchart => {
+            let flowchart = parse_business_process_flowchart_blob(bytes).with_context(|| {
+                format!(
+                    "failed to extract business process flowchart from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, format_business_process_flowchart_xml(&flowchart))
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
     }
 
     Ok(asset.primary_path.clone())
@@ -964,6 +993,68 @@ struct CommandInterfaceEntry {
 struct ExchangePlanContentItem {
     metadata: String,
     auto_record: &'static str,
+}
+
+struct BusinessProcessFlowchart {
+    items: Vec<FlowchartItem>,
+}
+
+struct FlowchartItem {
+    tag: &'static str,
+    id: String,
+    uuid: Option<String>,
+    name: String,
+    title: Vec<(String, String)>,
+    tab_order: String,
+    properties: FlowchartItemProperties,
+    events: Vec<FlowchartEvent>,
+}
+
+struct FlowchartItemProperties {
+    location: Option<FlowchartLocation>,
+    pivot_points: Vec<FlowchartPoint>,
+    from: Option<FlowchartConnectionEnd>,
+    to: Option<FlowchartConnectionEnd>,
+    decorative_line: bool,
+    line_style: &'static str,
+    begin_arrow: &'static str,
+    end_arrow: &'static str,
+    transparent: bool,
+    horizontal_align: &'static str,
+    explanation: Option<String>,
+    task_description: Option<String>,
+    true_port_index: Option<String>,
+    false_port_index: Option<String>,
+}
+
+struct FlowchartLocation {
+    left: String,
+    top: String,
+    right: String,
+    bottom: String,
+}
+
+struct FlowchartPoint {
+    x: String,
+    y: String,
+}
+
+struct FlowchartConnectionEnd {
+    item: String,
+    port_index: String,
+}
+
+struct FlowchartEvent {
+    name: &'static str,
+    handler: Option<String>,
+}
+
+struct FlowchartBase {
+    id: String,
+    uuid: Option<String>,
+    name: String,
+    title: Vec<(String, String)>,
+    tab_order: String,
 }
 
 #[derive(Clone)]
@@ -1609,6 +1700,331 @@ fn parse_config_dump_versions_blob(bytes: &[u8]) -> Option<usize> {
         return None;
     }
     fields.get(1)?.trim().parse::<usize>().ok()
+}
+
+fn parse_business_process_flowchart_blob(bytes: &[u8]) -> Option<BusinessProcessFlowchart> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    parse_business_process_flowchart_text(text.trim_start_matches('\u{feff}'))
+}
+
+fn parse_business_process_flowchart_text(text: &str) -> Option<BusinessProcessFlowchart> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "5" {
+        return None;
+    }
+    let item_count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    let mut raw_items = Vec::<(String, String)>::with_capacity(item_count);
+    let mut names = BTreeMap::<String, String>::new();
+    let mut index = 3usize;
+    for _ in 0..item_count {
+        let code = fields.get(index)?.trim().to_string();
+        let body = fields.get(index + 1)?.to_string();
+        let base = parse_flowchart_base(&code, &body)?;
+        names.insert(base.id, base.name);
+        raw_items.push((code, body));
+        index += 2;
+    }
+
+    let mut items = Vec::with_capacity(item_count);
+    for (code, body) in raw_items {
+        items.push(parse_flowchart_item(&code, &body, &names)?);
+    }
+
+    Some(BusinessProcessFlowchart { items })
+}
+
+fn parse_flowchart_item(
+    code: &str,
+    body: &str,
+    names: &BTreeMap<String, String>,
+) -> Option<FlowchartItem> {
+    let fields = split_1c_braced_fields(body, 0)?;
+    let base = parse_flowchart_base(code, body)?;
+    let mut properties = FlowchartItemProperties {
+        location: None,
+        pivot_points: Vec::new(),
+        from: None,
+        to: None,
+        decorative_line: false,
+        line_style: "Solid",
+        begin_arrow: "None",
+        end_arrow: "None",
+        transparent: false,
+        horizontal_align: "Center",
+        explanation: None,
+        task_description: None,
+        true_port_index: None,
+        false_port_index: None,
+    };
+    let mut events = Vec::new();
+    let tag = match code {
+        "0" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            properties.transparent = parse_flowchart_transparent(fields.get(2)?).unwrap_or(false);
+            properties.horizontal_align = if properties.transparent {
+                "Left"
+            } else {
+                "Center"
+            };
+            "Decoration"
+        }
+        "1" => {
+            parse_flowchart_line_graphics(fields.get(6)?, &mut properties, names)?;
+            let from_id = fields.get(2)?.trim();
+            let to_id = fields.get(4)?.trim();
+            if from_id != "-1"
+                && let Some(from) = &mut properties.from
+            {
+                from.item = names.get(from_id).cloned().unwrap_or_default();
+            }
+            if to_id != "-1"
+                && let Some(to) = &mut properties.to
+            {
+                to.item = names.get(to_id).cloned().unwrap_or_default();
+            }
+            properties.decorative_line = fields.get(5).map(|value| value.trim() == "1")?;
+            properties.line_style = if properties.decorative_line {
+                "Dashed"
+            } else {
+                "Solid"
+            };
+            properties.end_arrow = if properties.decorative_line
+                && properties
+                    .to
+                    .as_ref()
+                    .map(|end| end.item.is_empty())
+                    .unwrap_or(true)
+            {
+                "None"
+            } else {
+                "Filled"
+            };
+            "ConnectionLine"
+        }
+        "2" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            events = parse_flowchart_named_events(fields.get(3)?, &["BeforeStart"])?;
+            "Start"
+        }
+        "3" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            events = parse_flowchart_named_events(fields.get(3)?, &["OnComplete"])?;
+            "Completion"
+        }
+        "4" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            properties.true_port_index = Some("3".to_string());
+            properties.false_port_index = Some("1".to_string());
+            events = parse_flowchart_named_events(fields.get(3)?, &["ConditionCheck"])?;
+            "Condition"
+        }
+        "5" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            properties.explanation = fields.get(3).and_then(|value| parse_1c_string(value));
+            properties.task_description = fields.get(7).and_then(|value| parse_1c_string(value));
+            events = parse_flowchart_activity_events(fields.get(5)?)?;
+            "Activity"
+        }
+        _ => return None,
+    };
+
+    Some(FlowchartItem {
+        tag,
+        id: base.id,
+        uuid: base.uuid,
+        name: base.name,
+        title: base.title,
+        tab_order: base.tab_order,
+        properties,
+        events,
+    })
+}
+
+fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
+    let fields = split_1c_braced_fields(body, 0)?;
+    let head = split_1c_braced_fields(fields.first()?, 0)?;
+    let uuid = if matches!(code, "2" | "3" | "4" | "5") {
+        head.get(2).map(|value| value.trim().to_string())
+    } else {
+        None
+    }
+    .filter(|value| is_uuid_text(value));
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+        split_1c_braced_fields(head.first()?, 0)?
+    } else {
+        head
+    };
+    let id = base_fields.get(1)?.trim().to_string();
+    let title = parse_flowchart_title(base_fields.get(2)?);
+    let name = parse_1c_string(base_fields.get(3)?)?;
+    let tab_order = base_fields.get(4)?.trim().to_string();
+
+    Some(FlowchartBase {
+        id,
+        uuid,
+        name,
+        title,
+        tab_order,
+    })
+}
+
+fn parse_flowchart_shape_graphics(
+    text: &str,
+    properties: &mut FlowchartItemProperties,
+) -> Option<()> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    let wrapper = split_1c_braced_fields(outer.first()?, 0)?;
+    let geometry = split_1c_braced_fields(wrapper.first()?, 0)?;
+    properties.location = Some(FlowchartLocation {
+        left: geometry.get(2)?.trim().to_string(),
+        top: geometry.get(3)?.trim().to_string(),
+        right: geometry.get(4)?.trim().to_string(),
+        bottom: geometry.get(5)?.trim().to_string(),
+    });
+    Some(())
+}
+
+fn parse_flowchart_line_graphics(
+    text: &str,
+    properties: &mut FlowchartItemProperties,
+    names: &BTreeMap<String, String>,
+) -> Option<()> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    let geometry = split_1c_braced_fields(outer.first()?, 0)?;
+    let point_count = geometry.get(2)?.trim().parse::<usize>().ok()?;
+    let mut points = Vec::with_capacity(point_count);
+    let mut index = 3usize;
+    for _ in 0..point_count {
+        points.push(FlowchartPoint {
+            x: geometry.get(index)?.trim().to_string(),
+            y: geometry.get(index + 1)?.trim().to_string(),
+        });
+        index += 2;
+    }
+    properties.pivot_points = points;
+    properties.line_style = parse_flowchart_line_style(geometry.get(index)?).unwrap_or("Solid");
+    index += 2;
+    let from_port = geometry.get(index)?.trim().to_string();
+    let to_port = geometry.get(index + 1)?.trim().to_string();
+    properties.from = Some(FlowchartConnectionEnd {
+        item: String::new(),
+        port_index: from_port,
+    });
+    properties.to = Some(FlowchartConnectionEnd {
+        item: String::new(),
+        port_index: to_port,
+    });
+    if geometry.get(index + 2).map(|value| value.trim() == "1") == Some(true) {
+        properties.end_arrow = "Filled";
+    }
+    let _ = names;
+    Some(())
+}
+
+fn parse_flowchart_line_style(text: &str) -> Option<&'static str> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    match fields.get(3)?.trim() {
+        "2" => Some("Dashed"),
+        _ => Some("Solid"),
+    }
+}
+
+fn parse_flowchart_transparent(text: &str) -> Option<bool> {
+    let outer = split_1c_braced_fields(text, 0)?;
+    let wrapper = split_1c_braced_fields(outer.first()?, 0)?;
+    let style = split_1c_braced_fields(wrapper.first()?, 0)?;
+    let flags = split_1c_braced_fields(style.first()?, 0)?;
+    Some(flags.get(11)?.trim() == "1")
+}
+
+fn parse_flowchart_activity_events(text: &str) -> Option<Vec<FlowchartEvent>> {
+    let handlers = parse_flowchart_event_handlers(text)?;
+    Some(vec![
+        FlowchartEvent {
+            name: "InteractiveActivationProcessing",
+            handler: None,
+        },
+        FlowchartEvent {
+            name: "BeforeCreateTasks",
+            handler: handlers.get(&1).cloned(),
+        },
+        FlowchartEvent {
+            name: "OnCreateTask",
+            handler: handlers.get(&2).cloned(),
+        },
+        FlowchartEvent {
+            name: "OnExecute",
+            handler: handlers.get(&3).cloned(),
+        },
+        FlowchartEvent {
+            name: "CheckExecutionProcessing",
+            handler: None,
+        },
+        FlowchartEvent {
+            name: "BeforeExecute",
+            handler: None,
+        },
+        FlowchartEvent {
+            name: "BeforeExecuteInteractively",
+            handler: None,
+        },
+    ])
+}
+
+fn parse_flowchart_named_events(text: &str, names: &[&'static str]) -> Option<Vec<FlowchartEvent>> {
+    let handlers = parse_flowchart_event_handlers(text)?;
+    Some(
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| FlowchartEvent {
+                name,
+                handler: handlers.get(&(index as i32)).cloned(),
+            })
+            .collect(),
+    )
+}
+
+fn parse_flowchart_event_handlers(text: &str) -> Option<BTreeMap<i32, String>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    let mut handlers = BTreeMap::new();
+    for field in fields.iter().skip(1).take(count) {
+        let event = split_1c_braced_fields(field, 0)?;
+        let index = event.first()?.trim().parse::<i32>().ok()?;
+        let handler = parse_1c_string(event.get(1)?)?;
+        handlers.insert(index, handler);
+    }
+    Some(handlers)
+}
+
+fn parse_flowchart_title(text: &str) -> Vec<(String, String)> {
+    let Some(fields) = split_1c_braced_fields(text, 0) else {
+        return Vec::new();
+    };
+    let count = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| {
+            let pair = split_1c_braced_fields(field, 0)?;
+            Some((
+                parse_1c_string(pair.first()?)?,
+                parse_1c_string(pair.get(1)?)?,
+            ))
+        })
+        .collect()
+}
+
+fn parse_1c_string(text: &str) -> Option<String> {
+    let text = text.trim();
+    let inner = text.strip_prefix('"')?.strip_suffix('"')?;
+    Some(inner.replace("\"\"", "\""))
 }
 
 fn exchange_plan_auto_record_xml(value: &str) -> &'static str {
@@ -2548,6 +2964,221 @@ fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String
     }
     xml.push_str("</ExchangePlanContent>\r\n");
     xml
+}
+
+fn format_business_process_flowchart_xml(flowchart: &BusinessProcessFlowchart) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<GraphicalSchema xmlns=\"http://v8.1c.ru/8.3/xcf/scheme\" xmlns:sch=\"http://v8.1c.ru/8.2/data/graphscheme\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<BackColor>style:FieldBackColor</BackColor>\r\n\
+\t<GridEnabled>true</GridEnabled>\r\n\
+\t<DrawGridMode>Lines</DrawGridMode>\r\n\
+\t<GridHorizontalStep>20</GridHorizontalStep>\r\n\
+\t<GridVerticalStep>20</GridVerticalStep>\r\n\
+\t<PrintParameters>\r\n\
+\t\t<TopMargin>10</TopMargin>\r\n\
+\t\t<LeftMargin>10</LeftMargin>\r\n\
+\t\t<BottomMargin>10</BottomMargin>\r\n\
+\t\t<RightMargin>10</RightMargin>\r\n\
+\t\t<BlackAndWhite>false</BlackAndWhite>\r\n\
+\t\t<FitPageMode>Auto</FitPageMode>\r\n\
+\t</PrintParameters>\r\n\
+\t<Items>\r\n",
+    );
+    for item in &flowchart.items {
+        push_flowchart_item_xml(&mut xml, item);
+    }
+    xml.push_str("\t</Items>\r\n</GraphicalSchema>\r\n");
+    xml
+}
+
+fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
+    if let Some(uuid) = &item.uuid {
+        xml.push_str(&format!(
+            "\t\t<{} id=\"{}\" uuid=\"{}\">\r\n",
+            item.tag,
+            escape_xml_text(&item.id),
+            escape_xml_text(uuid)
+        ));
+    } else {
+        xml.push_str(&format!(
+            "\t\t<{} id=\"{}\">\r\n",
+            item.tag,
+            escape_xml_text(&item.id)
+        ));
+    }
+    xml.push_str("\t\t\t<Properties>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&item.name)
+    ));
+    push_flowchart_title_xml(xml, &item.title);
+    xml.push_str("\t\t\t\t<ToolTip/>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<TabOrder>{}</TabOrder>\r\n",
+        escape_xml_text(&item.tab_order)
+    ));
+    xml.push_str("\t\t\t\t<BackColor>auto</BackColor>\r\n");
+    xml.push_str("\t\t\t\t<TextColor>style:FormTextColor</TextColor>\r\n");
+    xml.push_str("\t\t\t\t<LineColor>style:BorderColor</LineColor>\r\n");
+    xml.push_str("\t\t\t\t<GroupNumber>0</GroupNumber>\r\n");
+    xml.push_str("\t\t\t\t<ZOrder>0</ZOrder>\r\n");
+    xml.push_str("\t\t\t\t<Hyperlink>false</Hyperlink>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<Transparent>{}</Transparent>\r\n",
+        xml_bool(item.properties.transparent)
+    ));
+    xml.push_str("\t\t\t\t<Font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:DefaultGUIFont\" kind=\"WindowsFont\"/>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+        item.properties.horizontal_align
+    ));
+    xml.push_str("\t\t\t\t<VerticalAlign>Center</VerticalAlign>\r\n");
+    xml.push_str("\t\t\t\t<PictureLocation>Left</PictureLocation>\r\n");
+    if item.tag == "ConnectionLine" {
+        push_flowchart_line_properties_xml(xml, &item.properties);
+    } else {
+        push_flowchart_shape_properties_xml(xml, item);
+    }
+    xml.push_str("\t\t\t</Properties>\r\n");
+    if !item.events.is_empty() {
+        xml.push_str("\t\t\t<Events>\r\n");
+        for event in &item.events {
+            if let Some(handler) = &event.handler {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Event name=\"{}\">{}</Event>\r\n",
+                    event.name,
+                    escape_xml_text(handler)
+                ));
+            } else {
+                xml.push_str(&format!("\t\t\t\t<Event name=\"{}\"/>\r\n", event.name));
+            }
+        }
+        xml.push_str("\t\t\t</Events>\r\n");
+    }
+    xml.push_str(&format!("\t\t</{}>\r\n", item.tag));
+}
+
+fn push_flowchart_title_xml(xml: &mut String, title: &[(String, String)]) {
+    if title.is_empty() {
+        xml.push_str("\t\t\t\t<Title/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t\t<Title>\r\n");
+    for (lang, content) in title {
+        xml.push_str("\t\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_text(lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_text(content)
+        ));
+        xml.push_str("\t\t\t\t\t</v8:item>\r\n");
+    }
+    xml.push_str("\t\t\t\t</Title>\r\n");
+}
+
+fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
+    if let Some(location) = &item.properties.location {
+        xml.push_str(&format!(
+            "\t\t\t\t<Location top=\"{}\" left=\"{}\" bottom=\"{}\" right=\"{}\"/>\r\n",
+            escape_xml_text(&location.top),
+            escape_xml_text(&location.left),
+            escape_xml_text(&location.bottom),
+            escape_xml_text(&location.right)
+        ));
+    }
+    if matches!(item.tag, "Start" | "Activity" | "Condition" | "Completion") {
+        xml.push_str("\t\t\t\t<Border width=\"1\" gap=\"false\">\r\n");
+        xml.push_str(
+            "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">Solid</v8ui:style>\r\n",
+        );
+        xml.push_str("\t\t\t\t</Border>\r\n");
+    }
+    xml.push_str("\t\t\t\t<Picture/>\r\n");
+    xml.push_str("\t\t\t\t<PictureSize>AutoSize</PictureSize>\r\n");
+    if item.tag == "Activity" {
+        xml.push_str(&format!(
+            "\t\t\t\t<TaskDescription>{}</TaskDescription>\r\n",
+            escape_xml_text(item.properties.task_description.as_deref().unwrap_or(""))
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t<Explanation>{}</Explanation>\r\n",
+            escape_xml_text(item.properties.explanation.as_deref().unwrap_or(""))
+        ));
+        xml.push_str("\t\t\t\t<Group>false</Group>\r\n");
+    }
+    if item.tag == "Condition" {
+        xml.push_str(&format!(
+            "\t\t\t\t<TruePortIndex>{}</TruePortIndex>\r\n",
+            item.properties.true_port_index.as_deref().unwrap_or("3")
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t<FalsePortIndex>{}</FalsePortIndex>\r\n",
+            item.properties.false_port_index.as_deref().unwrap_or("1")
+        ));
+    }
+    if item.tag == "Decoration" {
+        xml.push_str("\t\t\t\t<Shape>Document</Shape>\r\n");
+        xml.push_str("\t\t\t\t<FlipMode>0</FlipMode>\r\n");
+        xml.push_str("\t\t\t\t<Angle xsi:type=\"xs:decimal\">0</Angle>\r\n");
+    }
+}
+
+fn push_flowchart_line_properties_xml(xml: &mut String, properties: &FlowchartItemProperties) {
+    xml.push_str("\t\t\t\t<PivotPoints>\r\n");
+    for point in &properties.pivot_points {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Point x=\"{}\" y=\"{}\"/>\r\n",
+            escape_xml_text(&point.x),
+            escape_xml_text(&point.y)
+        ));
+    }
+    xml.push_str("\t\t\t\t</PivotPoints>\r\n");
+    xml.push_str("\t\t\t\t<Connect>\r\n");
+    push_flowchart_connection_end_xml(xml, "From", properties.from.as_ref());
+    push_flowchart_connection_end_xml(xml, "To", properties.to.as_ref());
+    xml.push_str("\t\t\t\t</Connect>\r\n");
+    xml.push_str("\t\t\t\t<Line width=\"1\" gap=\"false\">\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">{}</v8ui:style>\r\n",
+        properties.line_style
+    ));
+    xml.push_str("\t\t\t\t</Line>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<DecorativeLine>{}</DecorativeLine>\r\n",
+        xml_bool(properties.decorative_line)
+    ));
+    xml.push_str("\t\t\t\t<TextLocation>FirstSegment</TextLocation>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<BeginArrow>{}</BeginArrow>\r\n",
+        properties.begin_arrow
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t<EndArrow>{}</EndArrow>\r\n",
+        properties.end_arrow
+    ));
+}
+
+fn push_flowchart_connection_end_xml(
+    xml: &mut String,
+    tag: &str,
+    end: Option<&FlowchartConnectionEnd>,
+) {
+    let item = end.map(|end| end.item.as_str()).unwrap_or("");
+    let port_index = end.map(|end| end.port_index.as_str()).unwrap_or("0");
+    xml.push_str(&format!("\t\t\t\t\t<{tag}>\r\n"));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<Item>{}</Item>\r\n",
+        escape_xml_text(item)
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<PortIndex>{}</PortIndex>\r\n",
+        escape_xml_text(port_index)
+    ));
+    xml.push_str(&format!("\t\t\t\t\t</{tag}>\r\n"));
 }
 
 fn format_config_dump_info_xml() -> String {
@@ -7374,6 +8005,84 @@ mod tests {
         assert_eq!(
             versions_row.source_asset_path.as_deref(),
             Some("ConfigDumpInfo.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_business_process_flowchart_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let process_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let start_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let completion_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{30,\r\n{{3,\r\n{{1,0,{process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let style = "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+        let line_style =
+            "{7,{3,0,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,1,0,0,0,0}";
+        let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+        let start_head = format!("{{{{4,1,{{1,0}},\"Start\",1}},4,{start_uuid},0}}");
+        let completion_head = format!("{{{{4,3,{{1,0}},\"Done\",3}},4,{completion_uuid},0}}");
+        let line_head = "{4,2,{1,0},\"Line\",2}";
+        let start_geometry = format!("{{{style},5,10,20,50,60}}");
+        let completion_geometry = format!("{{{style},5,70,80,110,120}}");
+        let start_shape = format!("{{{{{start_geometry},1}}}}");
+        let completion_shape = format!("{{{{{completion_geometry},1}}}}");
+        let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
+        let line_shape = format!("{{{line_geometry}}}");
+        let start_item = format!("{{{start_head},2,{start_shape},{{0}}}}");
+        let line_item = format!("{{{line_head},3,1,0,3,0,{line_shape}}}");
+        let completion_item =
+            format!("{{{completion_head},2,{completion_shape},{{1,{{0,\"OnDone\"}}}}}}");
+        let flowchart = deflate_for_test(
+            format!(
+                "{{5,{{{{1,{style},1,20,20}}}},3,2,{start_item},1,{line_item},3,{completion_item},4}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: process_uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{process_uuid}.7"),
+                part_no: 0,
+                data_size: flowchart.len() as i64,
+                binary_hex: encode_hex_for_test(&flowchart),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml =
+            fs::read_to_string(root.join("BusinessProcesses/Approval/Ext/Flowchart.xml")).unwrap();
+        assert!(xml.contains(r#"<Start id="1" uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#));
+        assert!(xml.contains(r#"<ConnectionLine id="2">"#));
+        assert!(xml.contains("<Item>Start</Item>"));
+        assert!(xml.contains("<Item>Done</Item>"));
+        assert!(xml.contains(r#"<Completion id="3" uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">"#));
+        assert!(xml.contains(r#"<Event name="OnComplete">OnDone</Event>"#));
+        let flowchart_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{process_uuid}.7"))
+            .unwrap();
+        assert_eq!(
+            flowchart_row.source_asset_path.as_deref(),
+            Some("BusinessProcesses/Approval/Ext/Flowchart.xml")
         );
 
         let _ = fs::remove_dir_all(root);
