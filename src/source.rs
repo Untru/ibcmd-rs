@@ -1260,6 +1260,76 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_chart_of_accounts_layouts() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-chart-of-accounts-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("ChartsOfAccounts/ПланСчетов/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfAccounts/ПланСчетов/Forms/ФормаСписка"))
+            .unwrap();
+
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfAccounts uuid="44444444-4444-4444-8444-444444444444">
+    <Properties>
+      <Name>ПланСчетов</Name>
+    </Properties>
+  </ChartOfAccounts>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов/Ext/Help.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов/Forms/ФормаСписка/Form.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfAccounts/ПланСчетов")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfAccounts/ПланСчетов")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов/Forms/ФормаСписка/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfAccounts/ПланСчетов")
+        )));
+    }
+
+    #[test]
     fn scans_real_chart_of_calculation_family_layouts() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-charts-of-calculation-{}",
