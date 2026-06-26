@@ -350,10 +350,21 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
         ("Report", "0") => Some("ObjectModule.bsl"),
         ("Report", "2") => Some("ManagerModule.bsl"),
         ("DataProcessor", "0") => Some("ObjectModule.bsl"),
+        ("DataProcessor", "2") => Some("ManagerModule.bsl"),
+        ("Document", "0") => Some("ObjectModule.bsl"),
+        ("Document", "2") => Some("ManagerModule.bsl"),
         ("Enum", "0") => Some("ManagerModule.bsl"),
         ("ExchangePlan", "2") => Some("ObjectModule.bsl"),
         ("ExchangePlan", "3") => Some("ManagerModule.bsl"),
-        ("InformationRegister", "2") => Some("ManagerModule.bsl"),
+        ("AccumulationRegister", "1")
+        | ("AccountingRegister", "1")
+        | ("CalculationRegister", "1")
+        | ("InformationRegister", "1") => Some("RecordSetModule.bsl"),
+        ("AccumulationRegister", "2")
+        | ("AccountingRegister", "2")
+        | ("CalculationRegister", "2")
+        | ("InformationRegister", "2") => Some("ManagerModule.bsl"),
+        ("DocumentJournal", "1") => Some("ManagerModule.bsl"),
         ("BusinessProcess", "6") => Some("ObjectModule.bsl"),
         ("BusinessProcess", "8") => Some("ManagerModule.bsl"),
         ("ChartOfCharacteristicTypes", "15") => Some("ObjectModule.bsl"),
@@ -1925,6 +1936,55 @@ mod tests {
                 "Import",
                 "0",
                 PathBuf::from("DataProcessors/Import/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "DataProcessor",
+                "DataProcessors",
+                "Import",
+                "2",
+                PathBuf::from("DataProcessors/Import/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "Document",
+                "Documents",
+                "Invoice",
+                "0",
+                PathBuf::from("Documents/Invoice/Ext/ObjectModule.bsl"),
+            ),
+            (
+                "Document",
+                "Documents",
+                "Invoice",
+                "2",
+                PathBuf::from("Documents/Invoice/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "InformationRegister",
+                "InformationRegisters",
+                "Prices",
+                "1",
+                PathBuf::from("InformationRegisters/Prices/Ext/RecordSetModule.bsl"),
+            ),
+            (
+                "AccumulationRegister",
+                "AccumulationRegisters",
+                "Sales",
+                "1",
+                PathBuf::from("AccumulationRegisters/Sales/Ext/RecordSetModule.bsl"),
+            ),
+            (
+                "AccumulationRegister",
+                "AccumulationRegisters",
+                "Sales",
+                "2",
+                PathBuf::from("AccumulationRegisters/Sales/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "DocumentJournal",
+                "DocumentJournals",
+                "Interactions",
+                "1",
+                PathBuf::from("DocumentJournals/Interactions/Ext/ManagerModule.bsl"),
             ),
             (
                 "Enum",
