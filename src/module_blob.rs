@@ -4447,12 +4447,28 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "141c7b66-d689-4c8e-ace8-b8e1d8c7fbaa",
             ),
             (
+                "CommonForm.ФормаОтчета",
+                "9d6d77a9-1f55-4162-93a5-14bb3f3febaf",
+            ),
+            (
+                "CommonForm.ФормаНастроекОтчета",
+                "6106e958-354c-4211-992c-3c3819e8828e",
+            ),
+            (
+                "CommonForm.ФормаВариантаОтчета",
+                "1f55f330-7c0a-4a29-905f-51d664515bc5",
+            ),
+            (
                 "CommonForm.АвтономнаяРабота",
                 "1f3057c2-135f-44b2-9f86-34481fbc5596",
             ),
             (
                 "CommonTemplate.ВидыДокументовУдостоверяющихЛичность",
                 "1682d528-87bf-48c5-acf9-57ab654a615a",
+            ),
+            (
+                "CommonTemplate.СтруктураПодчиненности",
+                "7a62d031-c340-4b1e-90af-fff697a2e979",
             ),
             (
                 "ScheduledJob.ЗагрузкаКурсовВалют",
