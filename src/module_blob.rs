@@ -4153,6 +4153,118 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn rejects_common_command_std_picture_references() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewCommand</Name>
+      <Synonym/>
+      <Comment/>
+      <Group>FormCommandBarImportant</Group>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture>
+        <xr:Ref>StdPicture.Print</xr:Ref>
+        <xr:LoadTransparent>false</xr:LoadTransparent>
+      </Picture>
+      <Shortcut/>
+      <IncludeHelpInContents>false</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let error = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("StdPicture UUID mapping is platform-owned"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_common_command_multiple_parameter_types() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewCommand</Name>
+      <Synonym/>
+      <Comment/>
+      <Group>FormCommandBarImportant</Group>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>false</IncludeHelpInContents>
+      <CommandParameterType>
+        <v8:TypeSet>cfg:DefinedType.TestOwner</v8:TypeSet>
+        <v8:TypeSet>cfg:DefinedType.TestOwner</v8:TypeSet>
+      </CommandParameterType>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let error = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("only single CommonCommand CommandParameterType TypeSet is supported"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn patches_common_module_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
