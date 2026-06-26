@@ -724,6 +724,7 @@ fn metadata_source_for_text(
         6 => Some(("Role", "Roles")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
         17 => Some(("DataProcessor", "DataProcessors")),
+        19 => Some(("Report", "Reports")),
         20 if header_index == Some(5) => Some(("Enum", "Enums")),
         20 if header_index == Some(3) => Some(("Report", "Reports")),
         21 => Some(("CalculationRegister", "CalculationRegisters")),
@@ -2219,6 +2220,13 @@ mod tests {
             )
             .as_bytes(),
         );
+        let report_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let report_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{19,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"LateTasks\",{{1,\"en\",\"Late tasks\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
         let text = b"Procedure Run()\r\nEndProcedure\r\n";
         let body = pack_module_blob_bytes(text, None, None).unwrap().blob;
         let mut rows = Vec::new();
@@ -2231,6 +2239,9 @@ mod tests {
             (format!("{exchange_uuid}.3"), body.clone()),
             (register_uuid.to_string(), register_metadata.clone()),
             (format!("{register_uuid}.2"), body.clone()),
+            (report_uuid.to_string(), report_metadata.clone()),
+            (format!("{report_uuid}.0"), body.clone()),
+            (format!("{report_uuid}.2"), body.clone()),
         ] {
             rows.push(ConfigRow {
                 file_name,
@@ -2242,7 +2253,7 @@ mod tests {
 
         let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
 
-        assert_eq!(dumped.module_text_rows, 5);
+        assert_eq!(dumped.module_text_rows, 7);
         assert!(root.join("Catalogs/Products/Ext/ObjectModule.bsl").exists());
         assert!(
             root.join("Catalogs/Products/Ext/ManagerModule.bsl")
@@ -2258,6 +2269,11 @@ mod tests {
         );
         assert!(
             root.join("InformationRegisters/Settings/Ext/ManagerModule.bsl")
+                .exists()
+        );
+        assert!(root.join("Reports/LateTasks/Ext/ObjectModule.bsl").exists());
+        assert!(
+            root.join("Reports/LateTasks/Ext/ManagerModule.bsl")
                 .exists()
         );
 
