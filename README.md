@@ -115,8 +115,10 @@ cargo run -- mssql-stage-source-objects --database target_db --source-root C:\fu
    `ModifiesData`, `Picture` for empty or `CommonPicture.<name>` refs,
    `CommandParameterType` for empty or a single `cfg:DefinedType.<name>`, and
    the currently observed `OnMainServerUnavalableBehavior` value `Auto`.
-   Reference resolution requires `--source-root`; `StdPicture` and arbitrary
-   multi-type command parameter sets are intentionally rejected until mapped.
+   Reference resolution requires `--source-root`; `StdPicture.User` is mapped
+   to the platform-owned user picture UUID, while other `StdPicture.*` values
+   and arbitrary multi-type command parameter sets are still rejected until
+   mapped.
 12. SQL verifier: compare table shape, row counts and later row checksums.
 13. Trace analyzer: expand `.xel` export support and add more robust SQL
    normalization.

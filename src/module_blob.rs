@@ -24,6 +24,7 @@ const BLOCK_HEADER_SIZE: usize = 31;
 const ELEM_ADDR_SIZE: usize = 12;
 const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
+const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -1766,6 +1767,14 @@ fn parse_common_command_picture(
     };
     if reference.is_empty() {
         return Ok(CommonCommandPicture::Empty);
+    }
+    if reference == "StdPicture.User" {
+        let load_transparent =
+            parse_required_metadata_bool("CommonCommand", "Picture/LoadTransparent", load_transparent)?;
+        return Ok(CommonCommandPicture::CommonPicture {
+            uuid: STD_PICTURE_USER_UUID.to_string(),
+            load_transparent,
+        });
     }
     if reference.starts_with("StdPicture.") {
         return Err(anyhow!(
@@ -4430,7 +4439,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn rejects_common_command_std_picture_references() {
+    fn packs_common_command_std_picture_user_reference() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
             br#"{1,
@@ -4461,7 +4470,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
       <Representation>Picture</Representation>
       <ToolTip/>
       <Picture>
-        <xr:Ref>StdPicture.Print</xr:Ref>
+        <xr:Ref>StdPicture.User</xr:Ref>
         <xr:LoadTransparent>false</xr:LoadTransparent>
       </Picture>
       <Shortcut/>
@@ -4476,13 +4485,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 "#
         .as_bytes();
 
-        let error = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("StdPicture UUID mapping is platform-owned"),
-            "{error}"
-        );
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+        assert!(inflated.contains(super::STD_PICTURE_USER_UUID));
+        assert!(inflated.contains("{4,1,{0,6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f},\"\",-1,-1,0,0,\"\"}"));
+        assert!(!inflated.contains("StdPicture.User"));
     }
 
     #[test]
