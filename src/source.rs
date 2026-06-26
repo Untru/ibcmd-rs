@@ -941,6 +941,11 @@ mod tests {
         ));
         std::fs::create_dir_all(root.join("CommonForms")).unwrap();
         std::fs::create_dir_all(root.join("CommonTemplates")).unwrap();
+        std::fs::create_dir_all(root.join("CommonForms/АвтономнаяРабота/Ext/Form")).unwrap();
+        std::fs::create_dir_all(root.join(
+            "CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template",
+        ))
+        .unwrap();
         std::fs::create_dir_all(
             root.join("XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1/Ext"),
         )
@@ -952,8 +957,28 @@ mod tests {
         )
         .unwrap();
         std::fs::copy(
+            lab_root.join("CommonForms/АвтономнаяРабота/Ext/Form.xml"),
+            root.join("CommonForms/АвтономнаяРабота/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonForms/АвтономнаяРабота/Ext/Form/Module.bsl"),
+            root.join("CommonForms/АвтономнаяРабота/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
             lab_root.join("CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml"),
             root.join("CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template.xml"),
+            root.join("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template/ru.html"),
+            root.join("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template/ru.html"),
         )
         .unwrap();
         std::fs::copy(
@@ -988,9 +1013,29 @@ mod tests {
             Some("CommonForms/АвтономнаяРабота")
         )));
         assert!(files.contains(&(
+            "CommonForms/АвтономнаяРабота/Ext/Form.xml",
+            SourceKind::Form,
+            Some("CommonForms/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "CommonForms/АвтономнаяРабота/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("CommonForms/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
             "CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml",
             SourceKind::MetadataXml,
             Some("CommonTemplates/ВидыДокументовУдостоверяющихЛичность")
+        )));
+        assert!(files.contains(&(
+            "CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template.xml",
+            SourceKind::Template,
+            Some("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru")
+        )));
+        assert!(files.contains(&(
+            "CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru/Ext/Template/ru.html",
+            SourceKind::Other,
+            Some("CommonTemplates/ИнструкцияДляУстановкиКодаДляПредопределенногоУзла_ru")
         )));
         assert!(files.contains(&(
             "XDTOPackages/АдминистрированиеОбменаДанными_2_4_5_1.xml",
