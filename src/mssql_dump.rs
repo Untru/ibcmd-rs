@@ -346,6 +346,10 @@ struct ConstantProperties {
     use_standard_commands: bool,
 }
 
+struct DefinedTypeProperties {
+    value_types: Vec<ConstantValueType>,
+}
+
 enum ConstantValueType {
     Boolean,
     String {
@@ -384,6 +388,15 @@ fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetad
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
         let xml = format_constant_source_xml(&header, &constant).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
+    if object_code == 0 {
+        let header = parse_metadata_header_from_text(text, uuid)?;
+        let defined_type = parse_defined_type_properties_from_text(text, uuid)?;
+        let relative_path = PathBuf::from("DefinedTypes")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_defined_type_source_xml(&header, &defined_type).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     let (kind, folder) = metadata_source_for_object_code(object_code)?;
@@ -477,7 +490,11 @@ fn parse_constant_properties_from_text(text: &str, uuid: &str) -> Option<Constan
     let typed_object_start = text[..marker_start].rfind("{2,")?;
     let typed_fields = split_1c_braced_fields(text, typed_object_start)?;
     let type_pattern = typed_fields.get(2)?;
-    let value_type = parse_constant_type_pattern(type_pattern)?;
+    let mut value_types = parse_metadata_type_pattern(type_pattern)?;
+    if value_types.len() != 1 {
+        return None;
+    }
+    let value_type = value_types.pop()?;
 
     let constant_object_start = text[..marker_start].rfind("{16,")?;
     let constant_fields = split_1c_braced_fields(text, constant_object_start)?;
@@ -489,12 +506,36 @@ fn parse_constant_properties_from_text(text: &str, uuid: &str) -> Option<Constan
     })
 }
 
-fn parse_constant_type_pattern(value: &str) -> Option<ConstantValueType> {
-    let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != r#""Pattern""# || fields.len() != 2 {
+fn parse_defined_type_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<DefinedTypeProperties> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let defined_type_start = text[..marker_start].rfind("{0,")?;
+    let fields = split_1c_braced_fields(text, defined_type_start)?;
+    let value_types = parse_metadata_type_pattern(fields.get(4)?)?;
+    if value_types.is_empty() {
         return None;
     }
-    let element = split_1c_braced_fields(fields[1], 0)?;
+
+    Some(DefinedTypeProperties { value_types })
+}
+
+fn parse_metadata_type_pattern(value: &str) -> Option<Vec<ConstantValueType>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(1)
+        .map(|field| parse_metadata_type_pattern_element(field))
+        .collect()
+}
+
+fn parse_metadata_type_pattern_element(value: &str) -> Option<ConstantValueType> {
+    let element = split_1c_braced_fields(value, 0)?;
     match element.first()?.trim() {
         r#""B""# => Some(ConstantValueType::Boolean),
         r#""S""# if element.len() == 1 => Some(ConstantValueType::String {
@@ -752,6 +793,81 @@ fn format_constant_source_xml(header: &MetadataHeader, constant: &ConstantProper
         xml.insert_str(index, &insert);
     }
     xml
+}
+
+fn format_defined_type_source_xml(
+    header: &MetadataHeader,
+    defined_type: &DefinedTypeProperties,
+) -> String {
+    let mut xml = format_metadata_source_xml("DefinedType", header).replace(
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+    );
+    let insert = format_metadata_types_xml(&defined_type.value_types);
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
+    let mut xml = "\t\t\t<Type>\r\n".to_string();
+    for value_type in value_types {
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:Type>{}</v8:Type>\r\n",
+            metadata_type_xml_name(value_type)
+        ));
+    }
+    xml.push_str("\t\t\t</Type>\r\n");
+
+    if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::String {
+            length: Some(length),
+            allowed_length_flag,
+        } => Some((*length, *allowed_length_flag)),
+        _ => None,
+    }) {
+        xml.push_str("\t\t\t<StringQualifiers>\r\n");
+        xml.push_str(&format!("\t\t\t\t<v8:Length>{}</v8:Length>\r\n", string.0));
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            string_allowed_length_xml(string.1)
+        ));
+        xml.push_str("\t\t\t</StringQualifiers>\r\n");
+    }
+
+    if let Some(number) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::Number {
+            digits,
+            fraction_digits,
+            allowed_sign_flag,
+        } => Some((*digits, *fraction_digits, *allowed_sign_flag)),
+        _ => None,
+    }) {
+        xml.push_str("\t\t\t<NumberQualifiers>\r\n");
+        xml.push_str(&format!("\t\t\t\t<v8:Digits>{}</v8:Digits>\r\n", number.0));
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
+            number.1
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            number_allowed_sign_xml(number.2)
+        ));
+        xml.push_str("\t\t\t</NumberQualifiers>\r\n");
+    }
+
+    xml
+}
+
+fn metadata_type_xml_name(value_type: &ConstantValueType) -> &'static str {
+    match value_type {
+        ConstantValueType::Boolean => "xs:boolean",
+        ConstantValueType::String { .. } => "xs:string",
+        ConstantValueType::Number { .. } => "xs:decimal",
+        ConstantValueType::DateTime => "xs:dateTime",
+    }
 }
 
 fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
@@ -1303,6 +1419,35 @@ mod tests {
         assert_eq!(properties.comment, "Feature flag");
         assert!(String::from_utf8_lossy(&extracted.xml).contains("xs:boolean"));
         assert!(String::from_utf8_lossy(&extracted.xml).contains("<UseStandardCommands>true"));
+        assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_defined_type_xml_from_metadata_blob() {
+        let uuid = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{{3,\r\n{{1,0,{uuid}}},\"OwnerType\",{{1,\"en\",\"Owner type\"}},\"Defined comment\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"B\"}},{{\"S\",80,1}}}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("DefinedTypes").join("OwnerType.xml")
+        );
+        assert_eq!(properties.kind, "DefinedType");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "OwnerType");
+        assert!(xml.contains("<v8:Type>xs:boolean</v8:Type>"));
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
+        assert!(xml.contains("<v8:Length>80</v8:Length>"));
+        assert!(xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"));
         assert!(!repacked.blob.is_empty());
     }
 
