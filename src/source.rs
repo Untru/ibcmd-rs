@@ -1256,6 +1256,88 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_chart_of_calculation_family_layouts() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-charts-of-calculation-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("ChartsOfCalculationTypes/ВидыРасчета/Forms/ФормаСписка"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters/Начисления/Ext")).unwrap();
+
+        std::fs::write(
+            root.join("ChartsOfCalculationTypes/ВидыРасчета.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCalculationTypes uuid="55555555-5555-4555-8555-555555555555">
+    <Properties>
+      <Name>ВидыРасчета</Name>
+    </Properties>
+  </ChartOfCalculationTypes>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationTypes/ВидыРасчета/Forms/ФормаСписка/Form.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationRegisters/Начисления.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCalculationRegisters uuid="66666666-6666-4666-8666-666666666666">
+    <Properties>
+      <Name>Начисления</Name>
+    </Properties>
+  </ChartOfCalculationRegisters>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationRegisters/Начисления/Ext/Help.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.kind.clone(), file.object_hint.as_deref()))
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "ChartsOfCalculationTypes/ВидыРасчета.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCalculationTypes/ВидыРасчета")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCalculationTypes/ВидыРасчета/Forms/ФормаСписка/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfCalculationTypes/ВидыРасчета")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCalculationRegisters/Начисления.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCalculationRegisters/Начисления")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCalculationRegisters/Начисления/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCalculationRegisters/Начисления")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_form_template_and_package_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
