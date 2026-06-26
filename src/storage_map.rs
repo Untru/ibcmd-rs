@@ -32,6 +32,19 @@ pub enum StorageStageRole {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageOperationFamily {
+    ConfigBundle,
+    CommonModuleBody,
+    CommonModuleMetadata,
+    CommonModuleObject,
+    MetadataObject,
+    Params,
+    TransactionBoundary,
+    Other,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StorageMappingReport {
     pub files: Vec<PathBuf>,
@@ -40,6 +53,7 @@ pub struct StorageMappingReport {
     pub unmapped_groups: usize,
     pub summaries: Vec<StorageMutationSummary>,
     pub roles: Vec<StorageStageRoleSummary>,
+    pub families: Vec<StorageOperationFamilySummary>,
     pub entries: Vec<StorageMappingEntry>,
 }
 
@@ -58,6 +72,13 @@ pub struct StorageStageRoleSummary {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct StorageOperationFamilySummary {
+    pub family: StorageOperationFamily,
+    pub groups: usize,
+    pub total_duration_us: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StorageMappingEntry {
     pub normalized_sql: String,
     pub sample_sql: String,
@@ -66,6 +87,7 @@ pub struct StorageMappingEntry {
     pub table_names: Vec<String>,
     pub kind: StorageMutationKind,
     pub role: StorageStageRole,
+    pub family: StorageOperationFamily,
     pub detail: String,
 }
 
@@ -81,12 +103,14 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             table_names: group.table_names.clone(),
             kind: classify_group(group),
             role: classify_role(group),
+            family: classify_family(group),
             detail: classify_detail(group),
         })
         .collect::<Vec<_>>();
 
     let mut summaries = summarize_entries(&entries);
     let mut roles = summarize_roles(&entries);
+    let mut families = summarize_families(&entries);
 
     entries.sort_by(|left, right| {
         right
@@ -124,6 +148,15 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             });
             roles
         },
+        families: {
+            families.sort_by(|left, right| {
+                right
+                    .total_duration_us
+                    .cmp(&left.total_duration_us)
+                    .then_with(|| left.family.cmp(&right.family))
+            });
+            families
+        },
         entries,
     }
 }
@@ -159,6 +192,25 @@ fn summarize_roles(entries: &[StorageMappingEntry]) -> Vec<StorageStageRoleSumma
         .map(
             |(role, (groups, total_duration_us))| StorageStageRoleSummary {
                 role,
+                groups,
+                total_duration_us,
+            },
+        )
+        .collect()
+}
+
+fn summarize_families(entries: &[StorageMappingEntry]) -> Vec<StorageOperationFamilySummary> {
+    let mut totals = std::collections::BTreeMap::<StorageOperationFamily, (usize, u64)>::new();
+    for entry in entries {
+        let value = totals.entry(entry.family).or_insert((0, 0));
+        value.0 += 1;
+        value.1 += entry.total_duration_us;
+    }
+    totals
+        .into_iter()
+        .map(
+            |(family, (groups, total_duration_us))| StorageOperationFamilySummary {
+                family,
                 groups,
                 total_duration_us,
             },
@@ -285,6 +337,62 @@ fn classify_role(group: &crate::trace::QueryGroup) -> StorageStageRole {
     StorageStageRole::Other
 }
 
+fn classify_family(group: &crate::trace::QueryGroup) -> StorageOperationFamily {
+    let sql = group.normalized_sql.as_str();
+    let sample_lower = group.sample_sql.to_ascii_lowercase();
+
+    if sql == "begin transaction" || sql == "commit transaction" || sql == "rollback transaction" {
+        return StorageOperationFamily::TransactionBoundary;
+    }
+    if sql.starts_with("select count_big(*) from configsave")
+        || (sql.starts_with("insert into configsave")
+            && sample_lower.contains("n'root'")
+            && sample_lower.contains("n'version'"))
+    {
+        return StorageOperationFamily::ConfigBundle;
+    }
+    if sql.starts_with("insert into configsave")
+        || sql.starts_with("update configsave set binarydata")
+    {
+        if sample_lower.contains("n'module'") || sample_lower.contains("file_name = n'module'") {
+            return StorageOperationFamily::CommonModuleBody;
+        }
+        if sample_lower.contains("n'metadata'") || sample_lower.contains("file_name = n'metadata'")
+        {
+            return StorageOperationFamily::CommonModuleMetadata;
+        }
+        if sample_lower.contains("n'newobject'") || sample_lower.contains("values (n'") {
+            return StorageOperationFamily::CommonModuleObject;
+        }
+        if sample_lower.contains("n'versions'") {
+            return StorageOperationFamily::ConfigBundle;
+        }
+        return StorageOperationFamily::ConfigBundle;
+    }
+    if sql.starts_with("update configsave set attributes") {
+        if sample_lower.contains("file_name = n'versions'") {
+            return StorageOperationFamily::ConfigBundle;
+        }
+        if sample_lower.contains("file_name = n'module'") {
+            return StorageOperationFamily::CommonModuleBody;
+        }
+        if sample_lower.contains("file_name = n'metadata'") {
+            return StorageOperationFamily::CommonModuleMetadata;
+        }
+        return StorageOperationFamily::MetadataObject;
+    }
+    if sql.starts_with("merge into configsave") || sql.starts_with("delete from configsave") {
+        return StorageOperationFamily::ConfigBundle;
+    }
+    if sql.starts_with("insert into params")
+        || sql.starts_with("update params")
+        || sql.starts_with("delete from params")
+    {
+        return StorageOperationFamily::Params;
+    }
+    StorageOperationFamily::Other
+}
+
 fn primary_table_detail(group: &crate::trace::QueryGroup, fallback: &str) -> String {
     if let Some(table) = group.table_names.first() {
         format!("{} {}", fallback, table)
@@ -295,7 +403,9 @@ fn primary_table_detail(group: &crate::trace::QueryGroup, fallback: &str) -> Str
 
 #[cfg(test)]
 mod tests {
-    use super::{StorageMutationKind, StorageStageRole, build_storage_mapping};
+    use super::{
+        StorageMutationKind, StorageOperationFamily, StorageStageRole, build_storage_mapping,
+    };
     use crate::trace::{QueryGroup, TraceAnalysis};
 
     fn group(
@@ -460,6 +570,24 @@ mod tests {
         );
         assert!(
             report
+                .entries
+                .iter()
+                .any(|entry| entry.family == StorageOperationFamily::CommonModuleBody)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.family == StorageOperationFamily::CommonModuleMetadata)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.family == StorageOperationFamily::ConfigBundle)
+        );
+        assert!(
+            report
                 .summaries
                 .iter()
                 .any(|summary| summary.kind == StorageMutationKind::ConfigSaveMerge)
@@ -488,6 +616,24 @@ mod tests {
                 .iter()
                 .any(|summary| summary.role == StorageStageRole::TransactionBoundary)
         );
+        assert!(
+            report
+                .families
+                .iter()
+                .any(|summary| summary.family == StorageOperationFamily::CommonModuleBody)
+        );
+        assert!(
+            report
+                .families
+                .iter()
+                .any(|summary| summary.family == StorageOperationFamily::Params)
+        );
+        assert!(
+            report
+                .families
+                .iter()
+                .any(|summary| summary.family == StorageOperationFamily::ConfigBundle)
+        );
     }
 
     #[test]
@@ -503,5 +649,6 @@ mod tests {
         assert_eq!(report.unmapped_groups, 1);
         assert_eq!(report.entries[0].kind, StorageMutationKind::Other);
         assert_eq!(report.entries[0].role, StorageStageRole::Other);
+        assert_eq!(report.entries[0].family, StorageOperationFamily::Other);
     }
 }
