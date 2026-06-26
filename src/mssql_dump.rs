@@ -341,6 +341,25 @@ enum ReturnValuesReuseValue {
     DuringSession,
 }
 
+struct ConstantProperties {
+    value_type: ConstantValueType,
+    use_standard_commands: bool,
+}
+
+enum ConstantValueType {
+    Boolean,
+    String {
+        length: Option<u32>,
+        allowed_length_flag: u8,
+    },
+    Number {
+        digits: u32,
+        fraction_digits: u32,
+        allowed_sign_flag: u8,
+    },
+    DateTime,
+}
+
 fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
@@ -356,6 +375,15 @@ fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetad
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
         let xml = format_common_module_source_xml(&header, &flags).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
+    if object_code == 16 {
+        let header = parse_metadata_header_from_text(text, uuid)?;
+        let constant = parse_constant_properties_from_text(text, uuid)?;
+        let relative_path = PathBuf::from("Constants")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_constant_source_xml(&header, &constant).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     let (kind, folder) = metadata_source_for_object_code(object_code)?;
@@ -441,6 +469,88 @@ fn parse_return_values_reuse_flag(value: &str) -> Option<ReturnValuesReuseValue>
         "2" => Some(ReturnValuesReuseValue::DuringSession),
         _ => None,
     }
+}
+
+fn parse_constant_properties_from_text(text: &str, uuid: &str) -> Option<ConstantProperties> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let typed_object_start = text[..marker_start].rfind("{2,")?;
+    let typed_fields = split_1c_braced_fields(text, typed_object_start)?;
+    let type_pattern = typed_fields.get(2)?;
+    let value_type = parse_constant_type_pattern(type_pattern)?;
+
+    let constant_object_start = text[..marker_start].rfind("{16,")?;
+    let constant_fields = split_1c_braced_fields(text, constant_object_start)?;
+    let use_standard_commands = parse_1c_bool_flag(constant_fields.get(7)?.trim())?;
+
+    Some(ConstantProperties {
+        value_type,
+        use_standard_commands,
+    })
+}
+
+fn parse_constant_type_pattern(value: &str) -> Option<ConstantValueType> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""Pattern""# || fields.len() != 2 {
+        return None;
+    }
+    let element = split_1c_braced_fields(fields[1], 0)?;
+    match element.first()?.trim() {
+        r#""B""# => Some(ConstantValueType::Boolean),
+        r#""S""# if element.len() == 1 => Some(ConstantValueType::String {
+            length: None,
+            allowed_length_flag: 0,
+        }),
+        r#""S""# if element.len() == 3 => Some(ConstantValueType::String {
+            length: Some(element.get(1)?.trim().parse().ok()?),
+            allowed_length_flag: element.get(2)?.trim().parse().ok()?,
+        }),
+        r#""N""# if element.len() == 4 => Some(ConstantValueType::Number {
+            digits: element.get(1)?.trim().parse().ok()?,
+            fraction_digits: element.get(2)?.trim().parse().ok()?,
+            allowed_sign_flag: element.get(3)?.trim().parse().ok()?,
+        }),
+        r#""D""# => Some(ConstantValueType::DateTime),
+        _ => None,
+    }
+}
+
+fn split_1c_braced_fields(text: &str, start: usize) -> Option<Vec<&str>> {
+    let end = scan_1c_braced_value(text, start)?;
+    let inner_start = start + text[start..].chars().next()?.len_utf8();
+    let inner_end = end.checked_sub(1)?;
+    let inner = &text[inner_start..inner_end];
+    let mut fields = Vec::new();
+    let mut field_start = 0usize;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut chars = inner.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if in_string {
+            if ch == '"' {
+                if let Some((_, next)) = chars.peek()
+                    && *next == '"'
+                {
+                    let _ = chars.next();
+                    continue;
+                }
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => {
+                fields.push(inner[field_start..index].trim());
+                field_start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    fields.push(inner[field_start..].trim());
+    Some(fields)
 }
 
 fn parse_metadata_header_from_text(text: &str, uuid: &str) -> Option<MetadataHeader> {
@@ -624,6 +734,83 @@ fn format_common_module_source_xml(header: &MetadataHeader, flags: &CommonModule
         xml.insert_str(index, &insert);
     }
     xml
+}
+
+fn format_constant_source_xml(header: &MetadataHeader, constant: &ConstantProperties) -> String {
+    let mut xml = format_metadata_source_xml("Constant", header).replace(
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+    );
+    let insert = format!(
+        "{}\
+\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+        format_constant_type_xml(&constant.value_type),
+        xml_bool(constant.use_standard_commands),
+    );
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
+    match value_type {
+        ConstantValueType::Boolean => {
+            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:boolean</v8:Type>\r\n\t\t\t</Type>\r\n".to_string()
+        }
+        ConstantValueType::String {
+            length,
+            allowed_length_flag,
+        } => {
+            let mut xml =
+                "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n\t\t\t</Type>\r\n"
+                    .to_string();
+            if let Some(length) = length {
+                xml.push_str("\t\t\t<StringQualifiers>\r\n");
+                xml.push_str(&format!("\t\t\t\t<v8:Length>{length}</v8:Length>\r\n"));
+                xml.push_str(&format!(
+                    "\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+                    string_allowed_length_xml(*allowed_length_flag)
+                ));
+                xml.push_str("\t\t\t</StringQualifiers>\r\n");
+            }
+            xml
+        }
+        ConstantValueType::Number {
+            digits,
+            fraction_digits,
+            allowed_sign_flag,
+        } => format!(
+            "\t\t\t<Type>\r\n\
+\t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
+\t\t\t</Type>\r\n\
+\t\t\t<NumberQualifiers>\r\n\
+\t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
+\t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
+\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
+\t\t\t</NumberQualifiers>\r\n",
+            number_allowed_sign_xml(*allowed_sign_flag)
+        ),
+        ConstantValueType::DateTime => {
+            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\t\t\t</Type>\r\n"
+                .to_string()
+        }
+    }
+}
+
+fn string_allowed_length_xml(value: u8) -> &'static str {
+    match value {
+        1 => "Fixed",
+        _ => "Variable",
+    }
+}
+
+fn number_allowed_sign_xml(value: u8) -> &'static str {
+    match value {
+        1 => "Nonnegative",
+        _ => "Any",
+    }
 }
 
 fn xml_bool(value: bool) -> &'static str {
@@ -896,8 +1083,8 @@ mod tests {
     use std::io::Write;
 
     use crate::module_blob::{
-        ReturnValuesReuse, pack_module_blob_bytes, parse_common_module_xml_properties,
-        parse_simple_metadata_xml_properties,
+        ReturnValuesReuse, pack_module_blob_bytes, pack_simple_metadata_blob_from_xml,
+        parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
     };
 
     #[test]
@@ -1090,6 +1277,33 @@ mod tests {
             properties.return_values_reuse,
             ReturnValuesReuse::DuringSession
         );
+    }
+
+    #[test]
+    fn extracts_constant_xml_from_metadata_blob() {
+        let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Constants").join("UseFeature.xml")
+        );
+        assert_eq!(properties.kind, "Constant");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "UseFeature");
+        assert_eq!(properties.comment, "Feature flag");
+        assert!(String::from_utf8_lossy(&extracted.xml).contains("xs:boolean"));
+        assert!(String::from_utf8_lossy(&extracted.xml).contains("<UseStandardCommands>true"));
+        assert!(!repacked.blob.is_empty());
     }
 
     #[test]
