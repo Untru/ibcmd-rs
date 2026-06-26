@@ -311,9 +311,13 @@ fn dump_table_rows(
     })
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum SourceAssetKind {
     Binary,
+    CommandInterface {
+        command_refs: BTreeMap<String, String>,
+        metadata_refs: BTreeMap<String, MetadataCommandReference>,
+    },
     ExtPicture,
     Help,
     InflatedBinary,
@@ -326,6 +330,8 @@ struct SourceAsset {
 }
 
 fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
+    let command_refs = build_command_interface_reference_index(rows);
+    let metadata_refs = build_metadata_command_reference_index(rows);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -360,7 +366,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
                     body_id,
                     SourceAsset {
                         primary_path: PathBuf::from(path),
-                        kind: *kind,
+                        kind: kind.clone(),
                     },
                 );
             }
@@ -378,6 +384,8 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             &row.file_name,
             &file_names,
             &rows_by_file_name,
+            &command_refs,
+            &metadata_refs,
         ) {
             paths.insert(body_id, asset);
         }
@@ -401,9 +409,18 @@ fn source_assets_from_metadata_blob(
     uuid: &str,
     file_names: &BTreeSet<&str>,
     rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Vec<(String, SourceAsset)> {
-    source_assets_from_metadata_blob_inner(blob, uuid, file_names, rows_by_file_name)
-        .unwrap_or_default()
+    source_assets_from_metadata_blob_inner(
+        blob,
+        uuid,
+        file_names,
+        rows_by_file_name,
+        command_refs,
+        metadata_refs,
+    )
+    .unwrap_or_default()
 }
 
 fn source_assets_from_metadata_blob_inner(
@@ -411,6 +428,8 @@ fn source_assets_from_metadata_blob_inner(
     uuid: &str,
     file_names: &BTreeSet<&str>,
     rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<Vec<(String, SourceAsset)>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
@@ -443,6 +462,32 @@ fn source_assets_from_metadata_blob_inner(
         }
     }
 
+    let command_mapped_ids = assets
+        .iter()
+        .map(|(body_id, _)| body_id.clone())
+        .collect::<BTreeSet<_>>();
+    for suffix in ["0", "1"] {
+        let body_id = format!("{uuid}.{suffix}");
+        if command_mapped_ids.contains(&body_id) {
+            continue;
+        }
+        if let Some(row) = rows_by_file_name.get(body_id.as_str())
+            && let Ok(bytes) = decode_hex(&row.binary_hex)
+            && parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
+        {
+            assets.push((
+                body_id,
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("CommandInterface.xml"),
+                    kind: SourceAssetKind::CommandInterface {
+                        command_refs: command_refs.clone(),
+                        metadata_refs: metadata_refs.clone(),
+                    },
+                },
+            ));
+        }
+    }
+
     let mapped_ids = assets
         .iter()
         .map(|(body_id, _)| body_id.clone())
@@ -468,7 +513,7 @@ fn source_assets_from_metadata_blob_inner(
     Some(assets)
 }
 fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
-    match asset.kind {
+    match &asset.kind {
         SourceAssetKind::Binary => {
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
@@ -554,6 +599,25 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, inflated)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::CommandInterface {
+            command_refs,
+            metadata_refs,
+        } => {
+            let entries = parse_command_interface_blob(bytes, command_refs, metadata_refs)
+                .with_context(|| {
+                    format!(
+                        "failed to extract command interface from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, format_command_interface_xml(&entries))
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
     }
 
     Ok(asset.primary_path.clone())
@@ -563,6 +627,180 @@ struct HelpPage {
     page: String,
     file_name: String,
     content: Vec<u8>,
+}
+
+struct CommandInterfaceEntry {
+    name: String,
+    common: bool,
+}
+
+#[derive(Clone)]
+struct MetadataCommandReference {
+    kind: String,
+    name: String,
+}
+
+fn build_metadata_command_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, MetadataCommandReference> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some((kind, header, _text)) =
+            parse_metadata_command_reference_blob(&bytes, &row.file_name)
+        else {
+            continue;
+        };
+        index.insert(
+            row.file_name.clone(),
+            MetadataCommandReference {
+                kind,
+                name: header.name,
+            },
+        );
+    }
+    index
+}
+
+fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some((kind, header, text)) =
+            parse_metadata_command_reference_blob(&bytes, &row.file_name)
+        else {
+            continue;
+        };
+        if kind == "CommonCommand" {
+            index.insert(
+                row.file_name.clone(),
+                format!("CommonCommand.{}", header.name),
+            );
+        }
+        for command in nested_command_headers_from_text(&text, &row.file_name) {
+            index.insert(
+                command.uuid,
+                format!("{}.{}.Command.{}", kind, header.name, command.name),
+            );
+        }
+    }
+    index
+}
+
+fn parse_metadata_command_reference_blob(
+    blob: &[u8],
+    uuid: &str,
+) -> Option<(String, MetadataHeader, String)> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}').to_string();
+    let object_code = parse_metadata_object_code(&text)?;
+    let (kind, _) = metadata_source_for_text(object_code, &text, uuid)?;
+    let header = parse_metadata_header_from_text(&text, uuid)?;
+    Some((kind.to_string(), header, text))
+}
+
+fn parse_command_interface_blob(
+    bytes: &[u8],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<CommandInterfaceEntry>> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "7" {
+        return None;
+    }
+    let count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    let mut entries = Vec::with_capacity(count);
+    let mut index = 3usize;
+    for _ in 0..count {
+        let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
+        index += 1;
+        let code = command_ref.first()?.trim();
+        if !code.chars().all(|ch| ch.is_ascii_digit()) {
+            return None;
+        }
+        let common = parse_command_interface_common_flag(fields.get(index)?)?;
+        index += 1;
+        let name = if let Some(uuid) = command_ref.get(1).map(|value| value.trim()) {
+            if !is_uuid_text(uuid) {
+                return None;
+            }
+            command_interface_command_name(code, uuid, command_refs, metadata_refs)
+        } else {
+            code.to_string()
+        };
+        entries.push(CommandInterfaceEntry { name, common });
+    }
+
+    Some(entries)
+}
+
+fn parse_command_interface_common_flag(value: &str) -> Option<bool> {
+    if value.contains(r#"{"B",1}"#) {
+        Some(true)
+    } else if value.contains(r#"{"B",0}"#) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn command_interface_command_name(
+    code: &str,
+    uuid: &str,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> String {
+    if let Some(name) = command_refs.get(uuid) {
+        return name.clone();
+    }
+    if let Some(metadata) = metadata_refs.get(uuid) {
+        if code == "0"
+            && let Some(standard) = command_interface_standard_command(&metadata.kind)
+        {
+            return format!(
+                "{}.{}.StandardCommand.{standard}",
+                metadata.kind, metadata.name
+            );
+        }
+        if code == "1" {
+            return format!("{}.{}.StandardCommand.Create", metadata.kind, metadata.name);
+        }
+    }
+
+    format!("{code}:{uuid}")
+}
+
+fn command_interface_standard_command(kind: &str) -> Option<&'static str> {
+    match kind {
+        "DataProcessor" | "Report" | "CommonForm" => Some("Open"),
+        "AccountingRegister"
+        | "AccumulationRegister"
+        | "BusinessProcess"
+        | "Catalog"
+        | "ChartOfAccounts"
+        | "ChartOfCalculationTypes"
+        | "ChartOfCharacteristicTypes"
+        | "Document"
+        | "DocumentJournal"
+        | "Enum"
+        | "ExchangePlan"
+        | "InformationRegister"
+        | "Task" => Some("OpenList"),
+        _ => None,
+    }
 }
 
 fn parse_help_blob_pages(bytes: &[u8]) -> Option<Vec<HelpPage>> {
@@ -701,6 +939,27 @@ fn format_help_xml(pages: &[HelpPage]) -> String {
         xml.push_str("</Page>\r\n");
     }
     xml.push_str("</Help>\r\n");
+    xml
+}
+
+fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<CommandInterface xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<CommandsVisibility>\r\n",
+    );
+    for entry in entries {
+        xml.push_str(&format!(
+            "\t\t<Command name=\"{}\">\r\n\
+\t\t\t<Visibility>\r\n\
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n\
+\t\t\t</Visibility>\r\n\
+\t\t</Command>\r\n",
+            escape_xml_text(&entry.name),
+            xml_bool(entry.common)
+        ));
+    }
+    xml.push_str("\t</CommandsVisibility>\r\n</CommandInterface>\r\n");
     xml
 }
 
@@ -3698,6 +3957,109 @@ mod tests {
         assert_eq!(
             body_row.source_asset_path.as_deref(),
             Some("XDTOPackages/Exchange/Ext/Package.bin")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_subsystem_command_interface_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let subsystem_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let process_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let processor_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let command_uuid = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let unknown_uuid = "ffffffff-ffff-4fff-ffff-ffffffffffff";
+        let subsystem_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let process_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{30,\r\n{{3,\r\n{{1,0,{process_uuid}}},\"TaskFlow\",{{1,\"en\",\"Task flow\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let processor_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,835478cc-434a-480c-ad61-99801cd685ed,92b15a50-2234-40c9-af13-3d746d4b870f,\r\n{{0,\r\n{{3,\r\n{{1,0,{processor_uuid}}},\"Scanning\",{{1,\"en\",\"Scanning\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,86df3c66-2c45-49c1-9e7d-5d1892acb646,6ae2f4ed-a57a-49ed-a854-8795bf1e1519,00000000-0000-0000-0000-000000000000,\r\n{{0}},\r\n{{0}}\r\n}},5,\r\n{{45556acb-826a-4f73-898a-6025fc9536e1,1,\r\n{{\r\n{{0,\r\n{{1,\r\n{{2,{command_uuid},078a6af8-d22c-4248-9c33-7e90075a3d2c}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Scan sheet\"}},1,\r\n{{0,0,0}},0,\r\n{{1,bc80566a-86a5-4e87-acd4-872239385a2e}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"ScanSheet\",{{1,\"en\",\"Scan sheet\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0}}\r\n}}\r\n}},0}}\r\n}}\r\n}},\r\n{{d5b0e5ed-256d-401c-9c36-f630cafd8a62,3,0f193c89-b664-448e-bed3-2147430367f7,4c9b2506-75a8-47d3-a5d5-d946088ba14a,36eacaa1-2efd-49c0-82de-2f8972535bf2}},\r\n{{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let command_interface = deflate_for_test(
+            format!(
+                "{{7,1,5,{{0,{catalog_uuid}}},{{0,{{0,{{\"B\",0}},0}}}},{{1,{process_uuid}}},{{0,{{0,{{\"B\",1}},0}}}},{{0,{command_uuid}}},{{0,{{0,{{\"B\",1}},0}}}},{{100,{unknown_uuid}}},{{0,{{0,{{\"B\",0}},0}}}},{{0}},{{0,{{0,{{\"B\",0}},0}}}},0,0,0,0,0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: subsystem_uuid.to_string(),
+                part_no: 0,
+                data_size: subsystem_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&subsystem_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{subsystem_uuid}.1"),
+                part_no: 0,
+                data_size: command_interface.len() as i64,
+                binary_hex: encode_hex_for_test(&command_interface),
+            },
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: process_uuid.to_string(),
+                part_no: 0,
+                data_size: process_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&process_metadata),
+            },
+            ConfigRow {
+                file_name: processor_uuid.to_string(),
+                part_no: 0,
+                data_size: processor_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&processor_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml =
+            fs::read_to_string(root.join("Subsystems/Admin/Ext/CommandInterface.xml")).unwrap();
+        assert!(xml.contains(r#"<Command name="Catalog.Products.StandardCommand.OpenList">"#));
+        assert!(
+            xml.contains(r#"<Command name="BusinessProcess.TaskFlow.StandardCommand.Create">"#)
+        );
+        assert!(xml.contains(r#"<Command name="DataProcessor.Scanning.Command.ScanSheet">"#));
+        assert!(xml.contains(&format!(r#"<Command name="100:{unknown_uuid}">"#)));
+        assert!(xml.contains(r#"<Command name="0">"#));
+        assert!(xml.contains("<xr:Common>true</xr:Common>"));
+        assert!(xml.contains("<xr:Common>false</xr:Common>"));
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{subsystem_uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Subsystems/Admin/Ext/CommandInterface.xml")
         );
 
         let _ = fs::remove_dir_all(root);
