@@ -38,6 +38,7 @@ use crate::cli::{
     MssqlStageChartOfCalculationTypesObjectArgs,
     MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageXdtopackageObjectArgs,
     MssqlStageSourceCommonModuleObjectsArgs, MssqlStageSourceMetadataObjectsArgs,
+    MssqlStageSourceObjectsArgs,
     MssqlStorageExportArgs, MssqlStorageImportArgs,
 };
 use crate::module_blob::{
@@ -240,6 +241,18 @@ pub struct StagedCommonModuleReport {
     pub text: PathBuf,
     pub text_bytes: usize,
     pub module_blob: GeneratedBlobReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StageSourceObjectsReport {
+    pub database: String,
+    pub metadata_objects: Vec<StagedMetadataObjectReport>,
+    pub common_modules: Vec<StagedCommonModuleObjectReport>,
+    pub script: PathBuf,
+    pub before: StorageTableManifest,
+    pub after: StorageTableManifest,
+    pub versions_blob: GeneratedBlobReport,
+    pub version_replacements: Vec<VersionReplacement>,
 }
 
 #[derive(Debug, Serialize)]
@@ -936,6 +949,143 @@ pub fn stage_source_common_module_objects(
         script_output: args.script_output.clone(),
     };
     stage_common_module_objects(&stage_args)
+}
+
+pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageSourceObjectsReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "source tree staging")?;
+    if !args.replace_config_save {
+        return Err(anyhow!(
+            "staging deletes existing ConfigSave rows; pass --replace-config-save"
+        ));
+    }
+
+    let manifest = scan_sources(&args.source_root)?;
+    let metadata_xmls = source_metadata_xmls(&manifest, &args.source_root);
+    let common_module_xmls = source_common_module_xmls(&manifest, &args.source_root);
+    if metadata_xmls.is_empty() && common_module_xmls.is_empty() {
+        return Err(anyhow!(
+            "no supported root XML objects or common modules found under {}",
+            args.source_root.display()
+        ));
+    }
+
+    let source = MetadataSourceContext::new(args.source_root.clone());
+    let metadata_objects = parallel::install(|| {
+        metadata_xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_metadata_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    Some(&source),
+                )
+            })
+            .collect::<Result<Vec<_>>>()
+    })??;
+    let common_modules = parallel::install(|| {
+        common_module_xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_common_module_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    None,
+                )
+            })
+            .collect::<Result<Vec<_>>>()
+    })??;
+    ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
+
+    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let changes = metadata_objects
+        .iter()
+        .map(|object| object.object_id.clone())
+        .chain(common_modules.iter().flat_map(|module| {
+            [
+                module.module_id.clone(),
+                module.module_body_id.clone(),
+            ]
+        }))
+        .collect::<Vec<_>>();
+    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+
+    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let script = args.script_output.clone().unwrap_or_else(|| {
+        default_stage_script_path(
+            &args.database,
+            &format!(
+                "source_objects_{}_{}",
+                metadata_objects.len(),
+                common_modules.len()
+            ),
+        )
+    });
+    if let Some(parent) = script.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let sql = build_stage_source_objects_sql(
+        &args.database,
+        &metadata_objects,
+        &common_modules,
+        &patched_versions.blob,
+    );
+    fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
+    run_sql_file(&args.sqlcmd, &args.server, &script)?;
+
+    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let metadata_objects = metadata_objects
+        .into_iter()
+        .map(|object| StagedMetadataObjectReport {
+            object_id: object.object_id,
+            kind: object.kind,
+            xml: object.xml,
+            properties: object.properties,
+            metadata_plain_bytes: object.metadata_plain_bytes,
+            metadata_blob: GeneratedBlobReport {
+                bytes: object.metadata_blob.len(),
+                sha256: object.metadata_blob_sha256,
+            },
+        })
+        .collect();
+    let common_modules = common_modules
+        .into_iter()
+        .map(|module| StagedCommonModuleObjectReport {
+            module_id: module.module_id,
+            module_body_id: module.module_body_id,
+            xml: module.xml,
+            text: module.text,
+            properties: module.properties,
+            metadata_plain_bytes: module.metadata_plain_bytes,
+            metadata_blob: GeneratedBlobReport {
+                bytes: module.metadata_blob.len(),
+                sha256: module.metadata_blob_sha256,
+            },
+            text_bytes: module.text_bytes,
+            module_blob: GeneratedBlobReport {
+                bytes: module.module_blob.len(),
+                sha256: module.module_blob_sha256,
+            },
+        })
+        .collect();
+
+    Ok(StageSourceObjectsReport {
+        database: args.database.clone(),
+        metadata_objects,
+        common_modules,
+        script,
+        before,
+        after,
+        versions_blob: GeneratedBlobReport {
+            bytes: patched_versions.blob.len(),
+            sha256: patched_versions.output_sha256,
+        },
+        version_replacements: patched_versions.replacements,
+    })
 }
 
 pub fn stage_exchange_plan_object(
@@ -1902,6 +2052,57 @@ fn ensure_unique_metadata_object_ids(objects: &[PreparedMetadataObjectStage]) ->
     Ok(())
 }
 
+fn ensure_unique_source_stage_ids(
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for object in metadata_objects {
+        if !seen.insert(object.object_id.as_str()) {
+            return Err(anyhow!(
+                "duplicate metadata object id in source tree stage: {}",
+                object.object_id
+            ));
+        }
+    }
+    for module in common_modules {
+        if !seen.insert(module.module_id.as_str()) {
+            return Err(anyhow!(
+                "duplicate common module id in source tree stage: {}",
+                module.module_id
+            ));
+        }
+        if !seen.insert(module.module_body_id.as_str()) {
+            return Err(anyhow!(
+                "duplicate common module body id in source tree stage: {}",
+                module.module_body_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn source_metadata_xmls(manifest: &crate::source::SourceManifest, source_root: &Path) -> Vec<PathBuf> {
+    manifest
+        .files
+        .iter()
+        .filter(|file| is_root_metadata_xml(&file.path))
+        .map(|file| source_root.join(&file.path))
+        .collect()
+}
+
+fn source_common_module_xmls(
+    manifest: &crate::source::SourceManifest,
+    source_root: &Path,
+) -> Vec<PathBuf> {
+    manifest
+        .files
+        .iter()
+        .filter(|file| is_root_common_module_xml(&file.path))
+        .map(|file| source_root.join(&file.path))
+        .collect()
+}
+
 fn compare_shapes(
     left_name: &str,
     right_name: &str,
@@ -2636,6 +2837,87 @@ fn build_stage_metadata_objects_sql(
     sql
 }
 
+fn build_stage_source_objects_sql(
+    database: &str,
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+    versions_blob: &[u8],
+) -> String {
+    let versions_blob_hex = encode_hex(versions_blob);
+    let expected_total_rows = metadata_objects.len() + common_modules.len() * 2 + 3;
+    let mut sql = format!(
+        "SET NOCOUNT ON;\n\
+         SET XACT_ABORT ON;\n\
+         USE {db};\n\
+         BEGIN TRAN;\n\
+         DELETE FROM ConfigSave;\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, DataSize, BinaryData, PartNo\n\
+         FROM Config\n\
+         WHERE FileName IN (N'root', N'version') AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 2 THROW 55000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n",
+        db = quote_ident(database),
+    );
+
+    for (index, object) in metadata_objects.iter().enumerate() {
+        let metadata_blob_hex = encode_hex(&object.metadata_blob);
+        let error_number = 55001 + index;
+        sql.push_str(&format!(
+            "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{object_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{object_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {error_number}, 'Expected to insert metadata object row into ConfigSave', 1;\n",
+            object_id = quote_string(&object.object_id),
+            metadata_blob_len = object.metadata_blob.len(),
+            metadata_blob_hex = metadata_blob_hex,
+            error_number = error_number,
+        ));
+    }
+
+    for (index, module) in common_modules.iter().enumerate() {
+        let metadata_blob_hex = encode_hex(&module.metadata_blob);
+        let module_blob_hex = encode_hex(&module.module_blob);
+        let metadata_error = 56001 + index * 2;
+        let body_error = metadata_error + 1;
+        sql.push_str(&format!(
+            "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{module_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{module_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {metadata_error}, 'Expected to insert common module metadata row into ConfigSave', 1;\n\
+             INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
+             FROM Config\n\
+             WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
+             IF @@ROWCOUNT <> 1 THROW {body_error}, 'Expected to insert common module body row into ConfigSave', 1;\n",
+            module_id = quote_string(&module.module_id),
+            module_body_id = quote_string(&module.module_body_id),
+            metadata_blob_len = module.metadata_blob.len(),
+            metadata_blob_hex = metadata_blob_hex,
+            module_blob_len = module.module_blob.len(),
+            module_blob_hex = module_blob_hex,
+            metadata_error = metadata_error,
+            body_error = body_error,
+        ));
+    }
+
+    sql.push_str(&format!(
+        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'versions', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {versions_blob_len}, 0x{versions_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'versions' AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 1 THROW 56998, 'Expected to insert versions row into ConfigSave', 1;\n\
+         IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> {expected_total_rows} THROW 56999, 'Unexpected ConfigSave row count after source tree staging', 1;\n\
+         COMMIT;\n",
+        versions_blob_len = versions_blob.len(),
+        versions_blob_hex = versions_blob_hex,
+        expected_total_rows = expected_total_rows,
+    ));
+
+    sql
+}
+
 fn default_stage_script_path(database: &str, name: &str) -> PathBuf {
     PathBuf::from(format!(
         r"C:\temp\ibcmd-rs\stage_{}_{}.sql",
@@ -2730,7 +3012,8 @@ mod tests {
         StorageBundleManifest, StorageTableManifest, TableShape, compare_shapes,
         compare_storage_table_manifests, infer_common_module_text_path, quote_ident, quote_string,
         require_non_lab_confirmation, validate_delta_manifest, validate_storage_manifest,
-        is_root_common_module_xml, is_root_metadata_xml,
+        is_root_common_module_xml, is_root_metadata_xml, source_common_module_xmls,
+        source_metadata_xmls,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -2808,6 +3091,84 @@ mod tests {
 
         assert_eq!(metadata, vec!["Bots/Notify.xml"]);
         assert_eq!(modules, vec!["CommonModules/Foo.xml"]);
+    }
+
+    #[test]
+    fn selects_source_tree_stage_candidates() {
+        let manifest = SourceManifest {
+            root: PathBuf::from(r"C:\sources"),
+            generated_at_unix: 0,
+            files: vec![
+                SourceFile {
+                    path: "Bots/Notify.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("Bot".to_string()),
+                    object_hint: Some("Bots/Notify".to_string()),
+                },
+                SourceFile {
+                    path: "Bots/Notify/Ext/Module.bsl".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Module,
+                    xml_root: None,
+                    object_hint: Some("Bots/Notify".to_string()),
+                },
+                SourceFile {
+                    path: "CommonModules/Foo.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("CommonModule".to_string()),
+                    object_hint: Some("CommonModules/Foo".to_string()),
+                },
+                SourceFile {
+                    path: "CommonModules/Foo/Ext/Module.bsl".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Module,
+                    xml_root: None,
+                    object_hint: Some("CommonModules/Foo".to_string()),
+                },
+                SourceFile {
+                    path: "CommonModules/Foo/Ext/Module.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("CommonModule".to_string()),
+                    object_hint: Some("CommonModules/Foo".to_string()),
+                },
+                SourceFile {
+                    path: "Styles/Theme.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("Style".to_string()),
+                    object_hint: Some("Styles/Theme".to_string()),
+                },
+            ],
+        };
+
+        let metadata_xmls =
+            source_metadata_xmls(&manifest, std::path::Path::new(r"C:\sources"));
+        let common_module_xmls =
+            source_common_module_xmls(&manifest, std::path::Path::new(r"C:\sources"));
+
+        assert_eq!(
+            metadata_xmls
+                .iter()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .collect::<Vec<_>>(),
+            vec!["C:/sources/Bots/Notify.xml", "C:/sources/Styles/Theme.xml"]
+        );
+        assert_eq!(
+            common_module_xmls
+                .iter()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .collect::<Vec<_>>(),
+            vec!["C:/sources/CommonModules/Foo.xml"]
+        );
     }
 
     #[test]

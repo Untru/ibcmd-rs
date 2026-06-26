@@ -99,7 +99,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             OperationSupport {
                 name: "mssql-stage-*",
                 status: SupportStatus::Partial,
-                detail: "Common-module, generic metadata, explicit family wrappers, and source-root auto-stage helpers are implemented for the supported surface; deeper blob-model work and parity experiments remain under research.",
+                detail: "Common-module, generic metadata, explicit family wrappers, and source-root auto-stage helpers, including combined source-tree staging, are implemented for the supported surface; deeper blob-model work and parity experiments remain under research.",
             },
             OperationSupport {
                 name: "ibcmd comparison matrix",

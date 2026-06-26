@@ -133,6 +133,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_source_common_module_objects(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageSourceObjects(args) => {
+            let report = ibcmd_rs::mssql::stage_source_objects(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlStageExchangePlanObject(args) => {
             let report = ibcmd_rs::mssql::stage_exchange_plan_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);

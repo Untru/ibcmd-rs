@@ -42,6 +42,7 @@ cargo run -- mssql-stage-common-module-objects --database target_db --xml Common
 cargo run -- mssql-stage-metadata-objects --database target_db --source-root C:\full\xml-sources --xml Constants\SomeConstant.xml --xml SessionParameters\SomeParameter.xml --replace-config-save --allow-non-lab
 cargo run -- mssql-stage-source-metadata-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
 cargo run -- mssql-stage-source-common-module-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-source-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
 ```
 
 ## First ERP Experiment
