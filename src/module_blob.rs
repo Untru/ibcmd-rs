@@ -4578,6 +4578,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "c39750ca-e33f-40c2-b830-119423d9a2ae",
             ),
             (
+                "Enum.ВариантыОтображенияМеток",
+                "fd9177e4-1277-4f77-be3e-07e169fad918",
+            ),
+            (
                 "SessionParameter.АвторизованныйПользователь",
                 "5efc4bc4-b711-4620-8d2e-9d947c6cc141",
             ),
