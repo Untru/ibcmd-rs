@@ -5194,6 +5194,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         std::fs::create_dir_all(root.join("ChartsOfAccounts")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationTypes")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("BusinessProcesses")).unwrap();
+        std::fs::create_dir_all(root.join("DataProcessors")).unwrap();
+        std::fs::create_dir_all(root.join("Documents")).unwrap();
+        std::fs::create_dir_all(root.join("ExchangePlans")).unwrap();
+        std::fs::create_dir_all(root.join("Reports")).unwrap();
 
         std::fs::write(
             root.join("AccumulationRegisters/Продажи.xml"),
@@ -5306,6 +5311,96 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 "#,
         )
         .unwrap();
+        std::fs::write(
+            root.join("BusinessProcesses/Задание.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <BusinessProcess uuid="15151515-1515-4151-8151-151515151515">
+    <Properties>
+      <Name>Задание</Name>
+      <GeneratedTypes>
+        <GeneratedType name="BusinessProcessRef.Задание">
+          <TypeId>11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </BusinessProcess>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("DataProcessors/АвтоматическоеИзвлечениеТекстов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <DataProcessor uuid="18181818-1818-4181-8181-181818181818">
+    <Properties>
+      <Name>АвтоматическоеИзвлечениеТекстов</Name>
+      <GeneratedTypes>
+        <GeneratedType name="DataProcessorManager.АвтоматическоеИзвлечениеТекстов">
+          <TypeId>22222222-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </DataProcessor>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Documents/АктОбУничтоженииПерсональныхДанных.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Document uuid="14141414-1414-4141-8141-141414141414">
+    <Properties>
+      <Name>АктОбУничтоженииПерсональныхДанных</Name>
+      <GeneratedTypes>
+        <GeneratedType name="DocumentObject.АктОбУничтоженииПерсональныхДанных">
+          <TypeId>33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ExchangePlans/ОбновлениеИнформационнойБазы.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ExchangePlan uuid="16161616-1616-4161-8161-161616161616">
+    <Properties>
+      <Name>ОбновлениеИнформационнойБазы</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ExchangePlanObject.ОбновлениеИнформационнойБазы">
+          <TypeId>44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </ExchangePlan>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Reports/БизнесПроцессы.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Report uuid="17171717-1717-4171-8171-171717171717">
+    <Properties>
+      <Name>БизнесПроцессы</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ReportObject.БизнесПроцессы">
+          <TypeId>55555555-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </Report>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
 
         let source = MetadataSourceContext::new(root);
         for (reference, expected_type_id) in [
@@ -5336,6 +5431,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "ChartOfCalculationRegistersManager.Начисления",
                 "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            ),
+            (
+                "BusinessProcessRef.Задание",
+                "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "DataProcessorManager.АвтоматическоеИзвлечениеТекстов",
+                "22222222-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "DocumentObject.АктОбУничтоженииПерсональныхДанных",
+                "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ExchangePlanObject.ОбновлениеИнформационнойБазы",
+                "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ReportObject.БизнесПроцессы",
+                "55555555-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
         ] {
             assert_eq!(
