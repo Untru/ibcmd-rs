@@ -173,6 +173,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_common_form_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageCommonPictureObject(args) => {
+            let report = ibcmd_rs::mssql::stage_common_picture_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())
