@@ -4297,6 +4297,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "CatalogObject.РолиИсполнителей",
+                "ef072c81-fde0-4cf3-a449-5572c679b351",
+            ),
+            (
+                "CatalogRef.РолиИсполнителей",
+                "44422b6d-5eb8-49c6-856b-dd9009611933",
+            ),
+            (
+                "CatalogSelection.РолиИсполнителей",
+                "7a78b42f-4b88-4938-a59a-f1227ae3e4da",
+            ),
+            (
+                "CatalogList.РолиИсполнителей",
+                "26cbb04c-a1eb-45fc-8e62-cc3f010f34cd",
+            ),
+            (
+                "CatalogManager.РолиИсполнителей",
+                "28f405d9-0472-418a-a888-838dd917ced7",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
