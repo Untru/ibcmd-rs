@@ -303,19 +303,18 @@ fn dump_table_rows(
             None
         };
 
-        let source_asset_relative =
-            if module_text_relative.is_none() && metadata_xml_relative.is_none() {
-                match source_assets.get(&row.file_name) {
-                    Some(asset) => {
-                        let relative = write_source_asset(output_dir, asset, &bytes)?;
-                        source_asset_rows += 1;
-                        Some(relative.to_string_lossy().replace('\\', "/"))
-                    }
-                    None => None,
+        let source_asset_relative = if metadata_xml_relative.is_none() {
+            match source_assets.get(&row.file_name) {
+                Some(asset) => {
+                    let relative = write_source_asset(output_dir, asset, &bytes)?;
+                    source_asset_rows += 1;
+                    Some(relative.to_string_lossy().replace('\\', "/"))
                 }
-            } else {
-                None
-            };
+                None => None,
+            }
+        } else {
+            None
+        };
 
         manifests.push(MssqlDumpRowManifest {
             file_name: row.file_name,
@@ -348,6 +347,7 @@ enum SourceAssetKind {
         metadata_refs: BTreeMap<String, MetadataCommandReference>,
     },
     ExtPicture,
+    Form,
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
@@ -433,6 +433,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
+    paths.extend(form_body_asset_paths(rows, &file_names));
     paths.extend(template_body_asset_paths(&template_refs, &file_names));
 
     paths
@@ -478,6 +479,30 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
         "SpreadsheetDocument" => None,
         _ => None,
     }
+}
+
+fn form_body_asset_paths(
+    rows: &[ConfigRow],
+    file_names: &BTreeSet<&str>,
+) -> BTreeMap<String, SourceAsset> {
+    let mut paths = BTreeMap::new();
+    for (form_uuid, form_ref) in build_form_source_reference_index(rows) {
+        let body_id = format!("{form_uuid}.0");
+        if !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let mut form_dir = form_ref.relative_path;
+        form_dir.set_extension("");
+        paths.insert(
+            body_id,
+            SourceAsset {
+                primary_path: form_dir.join("Ext").join("Form.xml"),
+                kind: SourceAssetKind::Form,
+            },
+        );
+    }
+
+    paths
 }
 
 const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
@@ -669,6 +694,20 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             let xml = extract_schedule_xml(bytes).with_context(|| {
                 format!(
                     "failed to extract schedule from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::Form => {
+            let xml = extract_form_body_xml(bytes).with_context(|| {
+                format!(
+                    "failed to extract form xml from source asset {}",
                     asset.primary_path.display()
                 )
             })?;
@@ -2223,6 +2262,32 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
         schedule.week_days.join(" "),
         schedule.months.join(" ")
     )
+}
+
+fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let form_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    if !form_fields
+        .first()
+        .is_some_and(|value| value.trim().chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return None;
+    }
+
+    Some(format_form_body_xml())
+}
+
+fn format_form_body_xml() -> String {
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+</Form>\r\n"
+        .to_string()
 }
 
 fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
@@ -5225,6 +5290,7 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
 
         assert_eq!(dumped.module_text_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
         let module_text =
             fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl"))
                 .unwrap();
@@ -5232,6 +5298,10 @@ mod tests {
             module_text,
             "\u{feff}Procedure Run()\r\n\tMessage(\"Hi\");\r\nEndProcedure\r\n"
         );
+        let form_xml =
+            fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml")).unwrap();
+        assert!(form_xml.contains("<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\""));
+        assert!(form_xml.contains("version=\"2.20\""));
         let body_row = dumped
             .rows
             .iter()
@@ -5240,6 +5310,10 @@ mod tests {
         assert_eq!(
             body_row.module_text_path.as_deref(),
             Some("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl")
+        );
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Catalogs/Products/Forms/ListForm/Ext/Form.xml")
         );
 
         let _ = fs::remove_dir_all(root);
