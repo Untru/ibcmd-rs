@@ -21,6 +21,7 @@ pub struct MssqlDumpConfigReport {
     pub total_inflated_rows: usize,
     pub total_module_text_rows: usize,
     pub total_metadata_xml_rows: usize,
+    pub total_source_asset_rows: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +32,7 @@ pub struct MssqlDumpedTableReport {
     pub inflated_rows: usize,
     pub module_text_rows: usize,
     pub metadata_xml_rows: usize,
+    pub source_asset_rows: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +57,7 @@ struct MssqlDumpRowManifest {
     inflated_path: Option<String>,
     module_text_path: Option<String>,
     metadata_xml_path: Option<String>,
+    source_asset_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -108,6 +111,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             inflated_rows: dumped.inflated_rows,
             module_text_rows: dumped.module_text_rows,
             metadata_xml_rows: dumped.metadata_xml_rows,
+            source_asset_rows: dumped.source_asset_rows,
         });
         manifest_tables.push(MssqlDumpTableManifest {
             table: table.to_string(),
@@ -135,6 +139,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         total_inflated_rows: reports.iter().map(|table| table.inflated_rows).sum(),
         total_module_text_rows: reports.iter().map(|table| table.module_text_rows).sum(),
         total_metadata_xml_rows: reports.iter().map(|table| table.metadata_xml_rows).sum(),
+        total_source_asset_rows: reports.iter().map(|table| table.source_asset_rows).sum(),
         tables: reports,
     })
 }
@@ -145,6 +150,7 @@ struct DumpedTable {
     inflated_rows: usize,
     module_text_rows: usize,
     metadata_xml_rows: usize,
+    source_asset_rows: usize,
 }
 
 fn dump_table_rows(
@@ -173,6 +179,7 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    let source_assets = source_asset_paths(&rows);
     let type_index = if extract_metadata_xml {
         build_metadata_type_index(&rows)
     } else {
@@ -184,6 +191,7 @@ fn dump_table_rows(
     let mut inflated_rows = 0;
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
+    let mut source_asset_rows = 0;
     for row in rows {
         let bytes = decode_hex(&row.binary_hex)
             .with_context(|| format!("failed to decode {} row {}", table, row.file_name))?;
@@ -266,6 +274,20 @@ fn dump_table_rows(
             None
         };
 
+        let source_asset_relative =
+            if module_text_relative.is_none() && metadata_xml_relative.is_none() {
+                match source_assets.get(&row.file_name) {
+                    Some(asset) => {
+                        let relative = write_source_asset(output_dir, asset, &bytes)?;
+                        source_asset_rows += 1;
+                        Some(relative.to_string_lossy().replace('\\', "/"))
+                    }
+                    None => None,
+                }
+            } else {
+                None
+            };
+
         manifests.push(MssqlDumpRowManifest {
             file_name: row.file_name,
             part_no: row.part_no,
@@ -275,6 +297,7 @@ fn dump_table_rows(
             inflated_path: inflated_relative,
             module_text_path: module_text_relative,
             metadata_xml_path: metadata_xml_relative,
+            source_asset_path: source_asset_relative,
         });
     }
 
@@ -284,7 +307,182 @@ fn dump_table_rows(
         inflated_rows,
         module_text_rows,
         metadata_xml_rows,
+        source_asset_rows,
     })
+}
+
+#[derive(Clone, Copy)]
+enum SourceAssetKind {
+    Binary,
+    ExtPicturePng,
+}
+
+struct SourceAsset {
+    primary_path: PathBuf,
+    kind: SourceAssetKind,
+}
+
+fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
+    let file_names = rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for file_name in &file_names {
+        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            continue;
+        };
+        if metadata_id.is_empty() {
+            continue;
+        }
+        suffixes_by_id
+            .entry(metadata_id)
+            .or_default()
+            .insert(suffix);
+    }
+
+    let mut paths = BTreeMap::new();
+    for (metadata_id, suffixes) in suffixes_by_id {
+        if file_names.contains(metadata_id) || !is_configuration_module_group(&suffixes) {
+            continue;
+        }
+        for (suffix, path, kind) in CONFIGURATION_SOURCE_ASSET_SUFFIXES {
+            let body_id = format!("{metadata_id}.{suffix}");
+            if file_names.contains(body_id.as_str()) {
+                paths.insert(
+                    body_id,
+                    SourceAsset {
+                        primary_path: PathBuf::from(path),
+                        kind: *kind,
+                    },
+                );
+            }
+        }
+    }
+
+    paths
+}
+
+const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
+    ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicturePng),
+    ("4", "Ext/ParentConfigurations.bin", SourceAssetKind::Binary),
+    (
+        "c",
+        "Ext/MainSectionPicture.xml",
+        SourceAssetKind::ExtPicturePng,
+    ),
+];
+
+fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
+    match asset.kind {
+        SourceAssetKind::Binary => {
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, bytes)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::ExtPicturePng => {
+            let picture = extract_ext_picture_png(bytes).with_context(|| {
+                format!(
+                    "failed to extract picture from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let xml_path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = xml_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&xml_path, format_ext_picture_xml())
+                .with_context(|| format!("failed to write {}", xml_path.display()))?;
+
+            let picture_dir = output_dir.join(asset.primary_path.with_extension(""));
+            fs::create_dir_all(&picture_dir)
+                .with_context(|| format!("failed to create {}", picture_dir.display()))?;
+            let picture_path = picture_dir.join("Picture.png");
+            fs::write(&picture_path, picture)
+                .with_context(|| format!("failed to write {}", picture_path.display()))?;
+        }
+    }
+
+    Ok(asset.primary_path.clone())
+}
+
+fn extract_ext_picture_png(bytes: &[u8]) -> Result<Vec<u8>> {
+    let inflated = inflate_raw_deflate(bytes)?;
+    let text = String::from_utf8(inflated).context("picture blob is not UTF-8")?;
+    let payload = extract_base64_payload(&text).context("picture blob does not contain #base64")?;
+    decode_base64_mime(payload).context("failed to decode picture base64")
+}
+
+fn extract_base64_payload(text: &str) -> Option<&str> {
+    let prefix = "{#base64:";
+    let start = text.find(prefix)? + prefix.len();
+    let end = text[start..].find('}')? + start;
+    Some(&text[start..end])
+}
+
+fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
+    let values = input
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect::<Vec<_>>();
+    if values.len() % 4 != 0 {
+        return None;
+    }
+
+    let mut output = Vec::with_capacity(values.len() / 4 * 3);
+    for chunk in values.chunks(4) {
+        let mut decoded = [0u8; 4];
+        let mut padding = 0usize;
+        for (index, byte) in chunk.iter().copied().enumerate() {
+            if byte == b'=' {
+                padding += 1;
+                decoded[index] = 0;
+                continue;
+            }
+            if padding > 0 {
+                return None;
+            }
+            decoded[index] = base64_value(byte)?;
+        }
+        if padding > 2 {
+            return None;
+        }
+        output.push((decoded[0] << 2) | (decoded[1] >> 4));
+        if padding < 2 {
+            output.push((decoded[1] << 4) | (decoded[2] >> 2));
+        }
+        if padding < 1 {
+            output.push((decoded[2] << 6) | decoded[3]);
+        }
+    }
+
+    Some(output)
+}
+
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+fn format_ext_picture_xml() -> &'static str {
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ExtPicture xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.17\">\r\n\
+\t<Picture>\r\n\
+\t\t<xr:Abs>Picture.png</xr:Abs>\r\n\
+\t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
+\t</Picture>\r\n\
+</ExtPicture>\r\n"
 }
 
 fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
@@ -2351,7 +2549,10 @@ mod tests {
         let session_body = pack_module_blob_bytes(session_text, None, None)
             .unwrap()
             .blob;
-        let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1}}");
+        let png = b"\x89PNG\r\n\x1a\n";
+        let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
+        let parent_blob = b"parent-cf".to_vec();
+        let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let rows = vec![
             ConfigRow {
                 file_name: format!("{uuid}.0"),
@@ -2364,6 +2565,12 @@ mod tests {
                 part_no: 0,
                 data_size: splash_blob.len() as i64,
                 binary_hex: encode_hex_for_test(&splash_blob),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.4"),
+                part_no: 0,
+                data_size: parent_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&parent_blob),
             },
             ConfigRow {
                 file_name: format!("{uuid}.5"),
@@ -2383,11 +2590,18 @@ mod tests {
                 data_size: session_body.len() as i64,
                 binary_hex: encode_hex_for_test(&session_body),
             },
+            ConfigRow {
+                file_name: format!("{uuid}.c"),
+                part_no: 0,
+                data_size: main_picture_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&main_picture_blob),
+            },
         ];
 
         let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 4);
+        assert_eq!(dumped.source_asset_rows, 3);
         assert_eq!(
             fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
             ordinary_text
@@ -2403,6 +2617,48 @@ mod tests {
         assert_eq!(
             fs::read(root.join("Ext/SessionModule.bsl")).unwrap(),
             session_text
+        );
+        assert_eq!(fs::read(root.join("Ext/Splash/Picture.png")).unwrap(), png);
+        assert_eq!(
+            fs::read(root.join("Ext/MainSectionPicture/Picture.png")).unwrap(),
+            png
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/ParentConfigurations.bin")).unwrap(),
+            parent_blob
+        );
+        assert!(
+            fs::read_to_string(root.join("Ext/Splash.xml"))
+                .unwrap()
+                .contains("<xr:Abs>Picture.png</xr:Abs>")
+        );
+
+        let splash_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.2"))
+            .unwrap();
+        let parent_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.4"))
+            .unwrap();
+        let main_picture_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.c"))
+            .unwrap();
+        assert_eq!(
+            splash_row.source_asset_path.as_deref(),
+            Some("Ext/Splash.xml")
+        );
+        assert_eq!(
+            parent_row.source_asset_path.as_deref(),
+            Some("Ext/ParentConfigurations.bin")
+        );
+        assert_eq!(
+            main_picture_row.source_asset_path.as_deref(),
+            Some("Ext/MainSectionPicture.xml")
         );
 
         let _ = fs::remove_dir_all(root);
