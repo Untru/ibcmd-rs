@@ -273,6 +273,9 @@ pub struct MssqlDumpConfigArgs {
     /// Try to inflate raw deflate blobs and write readable *.txt files.
     #[arg(long)]
     pub inflate: bool,
+    /// Extract module `text` elements into <table>_module_text/*.bsl when a row is a module blob.
+    #[arg(long)]
+    pub extract_module_text: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2718,6 +2721,7 @@ mod tests {
             r"C:\dump",
             "--include-config-save",
             "--inflate",
+            "--extract-module-text",
             "--overwrite",
         ]);
 
@@ -2727,6 +2731,7 @@ mod tests {
                 assert_eq!(args.output_dir, PathBuf::from(r"C:\dump"));
                 assert!(args.include_config_save);
                 assert!(args.inflate);
+                assert!(args.extract_module_text);
                 assert!(args.overwrite);
             }
             other => panic!("unexpected command: {other:?}"),

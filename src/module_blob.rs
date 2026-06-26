@@ -360,6 +360,14 @@ pub fn pack_module_blob_bytes(
     })
 }
 
+pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
+    let elements = read_base_elements_from_blob(blob)?;
+    let text = elements
+        .get("text")
+        .ok_or_else(|| anyhow!("module blob does not contain text element"))?;
+    Ok(text.data.clone())
+}
+
 pub fn pack_common_module_metadata_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
@@ -3217,6 +3225,13 @@ mod tests {
         .unwrap();
         let blob = deflate_raw(&inner).unwrap();
         assert_eq!(inflate_raw(&blob).unwrap(), inner);
+    }
+
+    #[test]
+    fn unpacks_module_blob_text_element() {
+        let text = b"Procedure Run()\r\nEndProcedure\r\n";
+        let packed = super::pack_module_blob_bytes(text, None, None).unwrap();
+        assert_eq!(super::unpack_module_blob_text(&packed.blob).unwrap(), text);
     }
 
     #[test]

@@ -8,6 +8,7 @@ use flate2::read::DeflateDecoder;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::MssqlDumpConfigArgs;
+use crate::module_blob::unpack_module_blob_text;
 
 #[derive(Debug, Serialize)]
 pub struct MssqlDumpConfigReport {
@@ -17,6 +18,7 @@ pub struct MssqlDumpConfigReport {
     pub total_rows: usize,
     pub total_binary_bytes: usize,
     pub total_inflated_rows: usize,
+    pub total_module_text_rows: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,6 +27,7 @@ pub struct MssqlDumpedTableReport {
     pub rows: usize,
     pub binary_bytes: usize,
     pub inflated_rows: usize,
+    pub module_text_rows: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +50,7 @@ struct MssqlDumpRowManifest {
     binary_bytes: usize,
     binary_path: String,
     inflated_path: Option<String>,
+    module_text_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,12 +77,19 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     let mut manifest_tables = Vec::new();
     for table in table_names {
         let rows = fetch_rows(&args.sqlcmd, &args.server, &args.database, table)?;
-        let dumped = dump_table_rows(&args.output_dir, table, rows, args.inflate)?;
+        let dumped = dump_table_rows(
+            &args.output_dir,
+            table,
+            rows,
+            args.inflate,
+            args.extract_module_text,
+        )?;
         reports.push(MssqlDumpedTableReport {
             table: table.to_string(),
             rows: dumped.rows.len(),
             binary_bytes: dumped.binary_bytes,
             inflated_rows: dumped.inflated_rows,
+            module_text_rows: dumped.module_text_rows,
         });
         manifest_tables.push(MssqlDumpTableManifest {
             table: table.to_string(),
@@ -104,6 +115,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         total_rows: reports.iter().map(|table| table.rows).sum(),
         total_binary_bytes: reports.iter().map(|table| table.binary_bytes).sum(),
         total_inflated_rows: reports.iter().map(|table| table.inflated_rows).sum(),
+        total_module_text_rows: reports.iter().map(|table| table.module_text_rows).sum(),
         tables: reports,
     })
 }
@@ -112,6 +124,7 @@ struct DumpedTable {
     rows: Vec<MssqlDumpRowManifest>,
     binary_bytes: usize,
     inflated_rows: usize,
+    module_text_rows: usize,
 }
 
 fn dump_table_rows(
@@ -119,6 +132,7 @@ fn dump_table_rows(
     table: &str,
     rows: Vec<ConfigRow>,
     inflate: bool,
+    extract_module_text: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
     fs::create_dir_all(&table_dir)
@@ -128,10 +142,16 @@ fn dump_table_rows(
         fs::create_dir_all(&inflated_dir)
             .with_context(|| format!("failed to create {}", inflated_dir.display()))?;
     }
+    let module_text_dir = output_dir.join(format!("{table}_module_text"));
+    if extract_module_text {
+        fs::create_dir_all(&module_text_dir)
+            .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
+    }
 
     let mut manifests = Vec::new();
     let mut binary_bytes = 0;
     let mut inflated_rows = 0;
+    let mut module_text_rows = 0;
     for row in rows {
         let bytes = decode_hex(&row.binary_hex)
             .with_context(|| format!("failed to decode {} row {}", table, row.file_name))?;
@@ -169,6 +189,23 @@ fn dump_table_rows(
             None
         };
 
+        let module_text_relative = if extract_module_text {
+            match unpack_module_blob_text(&bytes) {
+                Ok(text) => {
+                    let relative = PathBuf::from(format!("{table}_module_text"))
+                        .join(format!("{safe_name}.bsl"));
+                    let path = output_dir.join(&relative);
+                    fs::write(&path, text)
+                        .with_context(|| format!("failed to write {}", path.display()))?;
+                    module_text_rows += 1;
+                    Some(relative.to_string_lossy().replace('\\', "/"))
+                }
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         manifests.push(MssqlDumpRowManifest {
             file_name: row.file_name,
             part_no: row.part_no,
@@ -176,6 +213,7 @@ fn dump_table_rows(
             binary_bytes: bytes.len(),
             binary_path: binary_relative.to_string_lossy().replace('\\', "/"),
             inflated_path: inflated_relative,
+            module_text_path: module_text_relative,
         });
     }
 
@@ -183,6 +221,7 @@ fn dump_table_rows(
         rows: manifests,
         binary_bytes,
         inflated_rows,
+        module_text_rows,
     })
 }
 
@@ -320,6 +359,7 @@ fn safe_storage_file_name(file_name: &str, part_no: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::module_blob::pack_module_blob_bytes;
 
     #[test]
     fn decodes_plain_hex_and_sql_hex() {
@@ -345,5 +385,35 @@ mod tests {
             "abc_def_ghi__part0"
         );
         assert_eq!(safe_storage_file_name("", 2), "row__part2");
+    }
+
+    #[test]
+    fn extracts_module_text_from_dumped_rows() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let text = b"Procedure Run()\r\nEndProcedure\r\n";
+        let packed = pack_module_blob_bytes(text, None, None).unwrap();
+        let row = ConfigRow {
+            file_name: "module-id.0".to_string(),
+            part_no: 0,
+            data_size: packed.blob.len() as i64,
+            binary_hex: encode_hex_for_test(&packed.blob),
+        };
+
+        let dumped = dump_table_rows(&root, "Config", vec![row], false, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 1);
+        let module_text_path = dumped.rows[0].module_text_path.as_ref().unwrap();
+        let written = fs::read(root.join(module_text_path)).unwrap();
+        assert_eq!(written, text);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn encode_hex_for_test(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 }
