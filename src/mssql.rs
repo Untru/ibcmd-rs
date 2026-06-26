@@ -1984,6 +1984,52 @@ mod tests {
     }
 
     #[test]
+    fn builds_metadata_object_stage_sql_with_multiple_objects() {
+        let prepared = vec![
+            PreparedMetadataObjectStage {
+                object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                kind: "CommonPicture".to_string(),
+                xml: PathBuf::from("CommonPictures/TestPicture.xml"),
+                properties: SimpleMetadataXmlProperties {
+                    kind: "CommonPicture".to_string(),
+                    uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                    name: "TestPicture".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                },
+                metadata_plain_bytes: 12,
+                metadata_blob: vec![0x01, 0x23, 0x45],
+                metadata_blob_sha256: "deadbeef".to_string(),
+            },
+            PreparedMetadataObjectStage {
+                object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                kind: "Language".to_string(),
+                xml: PathBuf::from("Languages/Русский.xml"),
+                properties: SimpleMetadataXmlProperties {
+                    kind: "Language".to_string(),
+                    uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                    name: "Русский".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                },
+                metadata_plain_bytes: 10,
+                metadata_blob: vec![0xAB, 0xCD],
+                metadata_blob_sha256: "cafed00d".to_string(),
+            },
+        ];
+
+        let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xAA, 0xBB]);
+
+        assert!(sql.contains("IF @@ROWCOUNT <> 2 THROW 54000"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54001"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54002"));
+        assert!(sql.contains("0x012345"));
+        assert!(sql.contains("0xABCD"));
+        assert!(sql.contains("0xAABB"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+    }
+
+    #[test]
     fn builds_common_module_metadata_stage_sql_with_expected_row_counts() {
         let sql = super::build_stage_common_module_metadata_sql(
             "TestDb",
