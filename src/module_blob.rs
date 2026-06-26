@@ -2717,6 +2717,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "AccumulationRegister" => Some(("AccumulationRegister", "AccumulationRegisters")),
         "AccountingRegister" => Some(("AccountingRegister", "AccountingRegisters")),
         "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
+        "CommonForm" => Some(("CommonForm", "CommonForms")),
         "CalculationRegister" => Some(("CalculationRegister", "CalculationRegisters")),
         "ChartOfAccounts" => Some(("ChartOfAccounts", "ChartsOfAccounts")),
         "ChartOfCalculationTypes" => Some(("ChartOfCalculationTypes", "ChartsOfCalculationTypes")),
@@ -2726,6 +2727,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         )),
         "CommonCommand" => Some(("CommonCommand", "CommonCommands")),
         "CommonPicture" => Some(("CommonPicture", "CommonPictures")),
+        "CommonTemplate" => Some(("CommonTemplate", "CommonTemplates")),
         "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
         "CommandGroup" => Some(("CommandGroup", "CommandGroups")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
@@ -4443,6 +4445,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "CommonAttribute.ОтредактированныеПредопределенныеРеквизиты",
                 "141c7b66-d689-4c8e-ace8-b8e1d8c7fbaa",
+            ),
+            (
+                "CommonForm.АвтономнаяРабота",
+                "1f3057c2-135f-44b2-9f86-34481fbc5596",
+            ),
+            (
+                "CommonTemplate.ВидыДокументовУдостоверяющихЛичность",
+                "1682d528-87bf-48c5-acf9-57ab654a615a",
             ),
             (
                 "ScheduledJob.ЗагрузкаКурсовВалют",
