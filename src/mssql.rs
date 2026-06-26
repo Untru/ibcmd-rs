@@ -2295,18 +2295,33 @@ mod tests {
             },
             PreparedMetadataObjectStage {
                 object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
-                kind: "Language".to_string(),
-                xml: PathBuf::from("Languages/Русский.xml"),
+                kind: "CommonForm".to_string(),
+                xml: PathBuf::from("CommonForms/ФормаОтчета.xml"),
                 properties: SimpleMetadataXmlProperties {
-                    kind: "Language".to_string(),
+                    kind: "CommonForm".to_string(),
                     uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
-                    name: "Русский".to_string(),
+                    name: "ФормаОтчета".to_string(),
                     synonyms: Vec::new(),
                     comment: String::new(),
                 },
                 metadata_plain_bytes: 10,
                 metadata_blob: vec![0xAB, 0xCD],
                 metadata_blob_sha256: "cafed00d".to_string(),
+            },
+            PreparedMetadataObjectStage {
+                object_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                kind: "CommonTemplate".to_string(),
+                xml: PathBuf::from("CommonTemplates/СтруктураПодчиненности.xml"),
+                properties: SimpleMetadataXmlProperties {
+                    kind: "CommonTemplate".to_string(),
+                    uuid: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                    name: "СтруктураПодчиненности".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                },
+                metadata_plain_bytes: 8,
+                metadata_blob: vec![0x11, 0x22, 0x33],
+                metadata_blob_sha256: "f00dbabe".to_string(),
             },
         ];
 
@@ -2315,10 +2330,12 @@ mod tests {
         assert!(sql.contains("IF @@ROWCOUNT <> 2 THROW 54000"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54001"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54002"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54003"));
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xABCD"));
+        assert!(sql.contains("0x112233"));
         assert!(sql.contains("0xAABB"));
-        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 6"));
     }
 
     #[test]
