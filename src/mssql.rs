@@ -2132,6 +2132,76 @@ mod tests {
     }
 
     #[test]
+    fn builds_common_module_object_stage_sql_with_multiple_modules() {
+        let prepared = vec![
+            PreparedCommonModuleObjectStage {
+                module_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                module_body_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string(),
+                xml: PathBuf::from("CommonModules/TestModule.xml"),
+                text: PathBuf::from("CommonModules/TestModule/Ext/Module.bsl"),
+                properties: CommonModuleXmlProperties {
+                    uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                    name: "TestModule".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                    global: true,
+                    client_managed_application: false,
+                    server: true,
+                    external_connection: false,
+                    client_ordinary_application: false,
+                    server_call: false,
+                    privileged: false,
+                    return_values_reuse: ReturnValuesReuse::DontUse,
+                },
+                metadata_plain_bytes: 14,
+                metadata_blob: vec![0x10, 0x20],
+                metadata_blob_sha256: "cafebabe".to_string(),
+                text_bytes: 7,
+                module_blob: vec![0xAA, 0xBB, 0xCC],
+                module_blob_sha256: "feedface".to_string(),
+            },
+            PreparedCommonModuleObjectStage {
+                module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+                xml: PathBuf::from("CommonModules/Batch.xml"),
+                text: PathBuf::from("CommonModules/Batch/Ext/Module.bsl"),
+                properties: CommonModuleXmlProperties {
+                    uuid: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                    name: "Batch".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                    global: false,
+                    client_managed_application: false,
+                    server: true,
+                    external_connection: false,
+                    client_ordinary_application: false,
+                    server_call: false,
+                    privileged: false,
+                    return_values_reuse: ReturnValuesReuse::DuringRequest,
+                },
+                metadata_plain_bytes: 16,
+                metadata_blob: vec![0x21, 0x43],
+                metadata_blob_sha256: "b16b00b5".to_string(),
+                text_bytes: 9,
+                module_blob: vec![0xDD, 0xEE],
+                module_blob_sha256: "decafbad".to_string(),
+            },
+        ];
+
+        let sql = super::build_stage_common_module_objects_sql("TestDb", &prepared, &[0xCC, 0xDD]);
+
+        assert!(sql.contains("IF @@ROWCOUNT <> 2 THROW 53000"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 53001"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 53002"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 53003"));
+        assert!(sql.contains("0x1020"));
+        assert!(sql.contains("0x2143"));
+        assert!(sql.contains("0xAABBCC"));
+        assert!(sql.contains("0xDDEE"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 7"));
+    }
+
+    #[test]
     fn builds_common_module_batch_stage_sql_with_expected_row_counts() {
         let prepared = vec![PreparedCommonModuleStage {
             spec: CommonModuleStageSpec {
