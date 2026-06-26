@@ -72,6 +72,11 @@ cargo run -- mssql-stage-metadata-objects --database target_db --source-root C:\
    ```powershell
    cargo run -- trace-analyze C:\temp\events.xml -o trace-analysis.json
    ```
+9. Map the grouped SQL into storage-mutation families:
+
+   ```powershell
+   cargo run -- storage-map C:\temp\events.xml -o storage-map.json
+   ```
 
 ## Roadmap
 

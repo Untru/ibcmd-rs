@@ -64,7 +64,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             OperationSupport {
                 name: "storage-map",
                 status: SupportStatus::Implemented,
-                detail: "Classifies trace groups into storage mutation patterns for ConfigSave and Params.",
+                detail: "Classifies trace groups into storage mutation patterns, stage roles and operation families for ConfigSave and Params.",
             },
             OperationSupport {
                 name: "mssql-compare",
@@ -192,7 +192,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "Platform build, DBMS version and compatibility mode are captured per run by probe and trace artifacts.",
             "Storage and delta bundle manifests include row checksums where available so imports can verify content integrity.",
             "The current matrix is source-of-truth for implemented coverage; ibcmd parity is still being measured experimentally.",
-            "Trace storage mapping is derived from normalized SQL groups and is currently focused on ConfigSave and Params mutation families.",
+            "Trace storage mapping is derived from normalized SQL groups and now exposes mutation kinds, stage roles and operation families for ConfigSave and Params.",
             "Non-lab destructive writes remain gated behind explicit confirmation flags.",
         ],
     }
@@ -228,6 +228,12 @@ mod tests {
                 .supported_operations
                 .iter()
                 .any(|item| item.name == "storage-map")
+        );
+        assert!(
+            report
+                .supported_operations
+                .iter()
+                .any(|item| item.detail.contains("stage roles"))
         );
         assert!(
             report
