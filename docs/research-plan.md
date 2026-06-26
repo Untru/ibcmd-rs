@@ -80,23 +80,41 @@ client session, transaction boundaries and object/table names.
 - Trace analysis enrichment for duration, rows, session metadata, object names,
   table names, and transaction boundaries.
 
+### Target Surface
+
+The replacement tool should eventually cover the full set of observed 1C
+metadata and object families below, both in source scanning and in SQL staging
+or blob packing where applicable:
+
+- common object families: `CommonModules`, `CommonForms`, `CommonPictures`,
+  `CommonTemplates`, `CommonAttributes`, `CommonCommands`, `CommandGroups`;
+- simple metadata families: `Constants`, `SessionParameters`,
+  `SettingsStorages`, `DefinedTypes`, `Languages`, `StyleItems`,
+  `FunctionalOptions`, `FunctionalOptionsParameters`, `EventSubscriptions`,
+  `HTTPServices`, `WebServices`, `ScheduledJobs`, `Subsystems`, `Roles`,
+  `Tasks`, `XDTOPackages`;
+- business object families: `Catalogs`, `Documents`, `InformationRegisters`,
+  `AccumulationRegisters`, `AccountingRegisters`, `CalculationRegisters`,
+  `ChartsOfCharacteristicTypes`, `ChartsOfAccounts`,
+  `ChartsOfCalculationTypes`, `ChartsOfCalculationRegisters`,
+  `DocumentJournals`, `Reports`, `DataProcessors`, `Enums`, `ExchangePlans`,
+  `FilterCriteria`, `BusinessProcesses`.
+
+For each family, the implementation should cover:
+
+- source-folder classification;
+- object identity and UUID resolution;
+- owned subtrees such as `Ext`, `Forms`, `Commands`, `Templates`, `Rights`,
+  `Schedule`, `CommandInterface`, and package/blob assets;
+- blob packing or header patching where the platform stores generated binary
+  payloads instead of plain XML.
+
 ### Remaining Work
 
 1. Finish the metadata registry in `module_blob.rs` so every supported family
    has an explicit source-folder mapping, type-prefix mapping, and UUID/source
    resolution path.
-   - Keep the current families covered: `Catalogs`, `Documents`,
-     `InformationRegisters`, `AccumulationRegisters`, `AccountingRegisters`,
-     `CalculationRegisters`, `ChartsOfCharacteristicTypes`, `ChartsOfAccounts`,
-     `ChartsOfCalculationTypes`, `ChartsOfCalculationRegisters`,
-     `CommonModules`, `CommonForms`, `CommonPictures`, `CommonTemplates`,
-     `CommonAttributes`, `CommandGroups`, `DocumentJournals`, `Reports`,
-     `DataProcessors`, `Enums`, `ExchangePlans`, `EventSubscriptions`,
-     `FilterCriteria`, `FunctionalOptions`, `FunctionalOptionsParameters`,
-     `HTTPServices`, `Languages`, `ScheduledJobs`, `SessionParameters`,
-     `SettingsStorages`, `StyleItems`, `Subsystems`, `Roles`,
-     `CommonCommands`, `Tasks`, `Constants`, `WebServices`, and
-     `XDTOPackages`.
+   - Keep the families already covered by the current code and tests.
    - Extend cross-object resolution for `CommonPicture`, `DefinedType`,
      `CommandGroup`, `CommonCommand`, `SettingsStorage`, `FunctionalOption`,
      `FunctionalOptionsParameter`, `EventSubscription`, `FilterCriterion`,
@@ -106,7 +124,7 @@ client session, transaction boundaries and object/table names.
      `Forms`, `Commands`, `Templates`, `Ext`, `Rights`, `Schedule`,
      `CommandInterface`, `Package.bin`, `Picture.svg`, `Picture.zip`, and
      object-specific XML assets.
-2. Add family-specific blob packers for the layouts that are not just header
+2. Add family-specific blob packers for layouts that are not just header
    patches.
    - Keep the simple patchers for `Constant`, `SessionParameter`,
      `SettingsStorage`, `DefinedType`, `CommonCommand`, and `CommandGroup`.
@@ -126,7 +144,7 @@ client session, transaction boundaries and object/table names.
    - Add regressions for roots that can exist both as standalone objects and as
      subtrees under another object.
 5. Lock the write path with trace-analysis regressions for the SQL patterns that
-   matter to the load experiments:
+   matter to the load experiments.
    - no-op load
    - module-body-only change
    - metadata-attribute change
@@ -138,7 +156,7 @@ client session, transaction boundaries and object/table names.
 8. Turn the experimental results into an implementation matrix so future
    platform upgrades only require filling specific gaps, not rediscovering the
    whole model.
-9. Add performance work after correctness is stable:
+9. Add performance work after correctness is stable.
    - multithreaded scan/pack stages where the data model is independent per
      object;
    - bounded worker pools for expensive source parsing;
