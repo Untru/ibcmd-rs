@@ -401,34 +401,37 @@ fn decode_xml_text(text: &str) -> String {
 }
 
 fn extract_table_names(sql: &str) -> BTreeSet<String> {
-    let tokens = sql
-        .split_whitespace()
-        .map(normalize_sql_token)
+    let raw_tokens = sql.split_whitespace().collect::<Vec<_>>();
+    let tokens = raw_tokens
+        .iter()
+        .map(|token| normalize_sql_token(token))
         .collect::<Vec<_>>();
     let mut tables = BTreeSet::new();
 
     let mut index = 0;
     while index < tokens.len() {
         let token = tokens[index].to_ascii_lowercase();
+        let raw_next = raw_tokens.get(index + 1);
         let next = tokens
             .get(index + 1)
             .map(|value| value.to_ascii_lowercase());
         let candidate = match token.as_str() {
             "from" | "join" | "into" | "using" => tokens.get(index + 1),
             "update" if next.as_deref() != Some("set") => tokens.get(index + 1),
+            "insert"
+                if next.as_deref() != Some("into")
+                    && raw_next.is_some_and(|value| !value.starts_with('('))
+                    && next.as_ref().is_some_and(|value| looks_like_table_token(value)) =>
+            {
+                tokens.get(index + 1)
+            }
             "merge" if next.as_deref() == Some("into") => tokens.get(index + 2),
             "delete" if next.as_deref() == Some("from") => tokens.get(index + 2),
             _ => None,
         };
 
         if let Some(table) = candidate {
-            if let Some(table) = table
-                .split_whitespace()
-                .next()
-                .map(strip_sql_table_token)
-                .map(normalize_sql_table_name)
-                .filter(|value| !value.is_empty())
-            {
+            for table in candidate_table_names(table) {
                 tables.insert(table);
             }
         }
@@ -437,6 +440,39 @@ fn extract_table_names(sql: &str) -> BTreeSet<String> {
     }
 
     tables
+}
+
+fn candidate_table_names(token: &str) -> Vec<String> {
+    let token = strip_sql_table_token(token);
+    let token = normalize_sql_table_name(token);
+    if token.is_empty() {
+        return Vec::new();
+    }
+    if token.contains("..") {
+        return vec![token];
+    }
+    let mut tables = vec![token.clone()];
+    if let Some((schema, table)) = token.split_once('.') {
+        if !schema.is_empty() && !table.is_empty() {
+            tables.push(table.to_string());
+        }
+    }
+    tables.sort();
+    tables.dedup();
+    tables
+}
+
+fn looks_like_table_token(token: &str) -> bool {
+    let token = token.trim();
+    !token.is_empty()
+        && !matches!(
+            token.to_ascii_lowercase().as_str(),
+            "(" | "values" | "select" | "output"
+        )
+        && token
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '[' | '\"'))
 }
 
 fn normalize_sql_token(token: &str) -> String {
@@ -518,7 +554,7 @@ mod tests {
     #[test]
     fn extracts_table_names_from_common_statements() {
         let tables = extract_table_names(
-            "SELECT * FROM dbo.Table1 JOIN [dbo].[Table2] ON 1=1; INSERT INTO ConfigSave (...) VALUES (1); DELETE FROM master..sysdatabases WHERE name = N'x'; UPDATE [dbo].[ConfigSave] SET A = 1",
+            "SELECT * FROM dbo.Table1 JOIN [dbo].[Table2] ON 1=1; INSERT INTO ConfigSave (...) VALUES (1); INSERT dbo.Table3 (A) VALUES (1); DELETE FROM master..sysdatabases WHERE name = N'x'; UPDATE [dbo].[ConfigSave] SET A = 1",
         );
         assert_eq!(
             tables,
@@ -526,6 +562,7 @@ mod tests {
                 "ConfigSave".to_string(),
                 "Table1".to_string(),
                 "Table2".to_string(),
+                "Table3".to_string(),
                 "master..sysdatabases".to_string(),
             ]
             .into_iter()
