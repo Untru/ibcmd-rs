@@ -1887,10 +1887,16 @@ mod tests {
             "ibcmd-rs-source-settings-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
+        std::fs::create_dir_all(root.join("CommonAttributes")).unwrap();
         std::fs::create_dir_all(root.join("Languages")).unwrap();
         std::fs::create_dir_all(root.join("SettingsStorages")).unwrap();
         std::fs::create_dir_all(root.join("StyleItems")).unwrap();
 
+        std::fs::copy(
+            lab_root.join("CommonAttributes/ОтредактированныеПредопределенныеРеквизиты.xml"),
+            root.join("CommonAttributes/ОтредактированныеПредопределенныеРеквизиты.xml"),
+        )
+        .unwrap();
         std::fs::copy(
             lab_root.join("Languages/Русский.xml"),
             root.join("Languages/Русский.xml"),
@@ -1922,6 +1928,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
+        assert!(files.contains(&(
+            "CommonAttributes/ОтредактированныеПредопределенныеРеквизиты.xml",
+            SourceKind::MetadataXml,
+            Some("CommonAttributes/ОтредактированныеПредопределенныеРеквизиты")
+        )));
         assert!(files.contains(&(
             "Languages/Русский.xml",
             SourceKind::MetadataXml,

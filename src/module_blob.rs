@@ -4221,6 +4221,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             ),
             ("Language.Русский", "db4a9ccb-9ef5-4b3c-8577-b6fe5db1b62e"),
             (
+                "CommonAttribute.ОтредактированныеПредопределенныеРеквизиты",
+                "141c7b66-d689-4c8e-ace8-b8e1d8c7fbaa",
+            ),
+            (
                 "ScheduledJob.ЗагрузкаКурсовВалют",
                 "c7ffd8ab-15e9-4cf1-a7fd-d05534dff000",
             ),
