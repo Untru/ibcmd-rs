@@ -4471,6 +4471,42 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "InformationRegisterRecord.АдминистративнаяИерархия",
+                "b849da51-b14a-4348-87e7-9ba778ef267d",
+            ),
+            (
+                "InformationRegisterManager.АдминистративнаяИерархия",
+                "f91e151b-de23-41be-a03d-15c69393c1c3",
+            ),
+            (
+                "InformationRegisterSelection.АдминистративнаяИерархия",
+                "2f2b5932-32e0-411b-accc-79d663c5308c",
+            ),
+            (
+                "InformationRegisterList.АдминистративнаяИерархия",
+                "b957dd6a-b02c-4096-8a02-4ca35d78a3b3",
+            ),
+            (
+                "InformationRegisterRecordSet.АдминистративнаяИерархия",
+                "ef23c5b7-2a2b-4573-a996-b7e9b0c719c9",
+            ),
+            (
+                "InformationRegisterRecordKey.АдминистративнаяИерархия",
+                "139107d1-4583-43ef-8b20-283a3074458a",
+            ),
+            (
+                "InformationRegisterRecordManager.АдминистративнаяИерархия",
+                "f9f726d6-bd9a-4cf8-bb57-ee742ca0fad4",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
