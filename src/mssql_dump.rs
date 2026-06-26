@@ -315,6 +315,7 @@ fn dump_table_rows(
 enum SourceAssetKind {
     Binary,
     ExtPicture,
+    Schedule,
 }
 
 struct SourceAsset {
@@ -400,18 +401,24 @@ fn source_asset_from_metadata_blob(
     let text = text.trim_start_matches('\u{feff}');
     let object_code = parse_metadata_object_code(text)?;
     let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
-    if kind != "CommonPicture" {
-        return None;
-    }
     let header = parse_metadata_header_from_text(text, uuid)?;
-
-    Some(SourceAsset {
-        primary_path: PathBuf::from(folder)
-            .join(sanitize_source_path_segment(&header.name))
-            .join("Ext")
-            .join("Picture.xml"),
-        kind: SourceAssetKind::ExtPicture,
-    })
+    match kind {
+        "CommonPicture" => Some(SourceAsset {
+            primary_path: PathBuf::from(folder)
+                .join(sanitize_source_path_segment(&header.name))
+                .join("Ext")
+                .join("Picture.xml"),
+            kind: SourceAssetKind::ExtPicture,
+        }),
+        "ScheduledJob" => Some(SourceAsset {
+            primary_path: PathBuf::from(folder)
+                .join(sanitize_source_path_segment(&header.name))
+                .join("Ext")
+                .join("Schedule.xml"),
+            kind: SourceAssetKind::Schedule,
+        }),
+        _ => None,
+    }
 }
 
 fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
@@ -447,6 +454,20 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                 .with_context(|| format!("failed to write {}", picture_path.display()))?;
             fs::write(&xml_path, format_ext_picture_xml(picture_file_name))
                 .with_context(|| format!("failed to write {}", xml_path.display()))?;
+        }
+        SourceAssetKind::Schedule => {
+            let xml = extract_schedule_xml(bytes).with_context(|| {
+                format!(
+                    "failed to extract schedule from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
     }
 
@@ -548,6 +569,158 @@ fn format_ext_picture_xml(file_name: &str) -> String {
 \t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
 \t</Picture>\r\n\
 </ExtPicture>\r\n"
+    )
+}
+
+struct JobSchedule {
+    begin_date: String,
+    end_date: String,
+    begin_time: String,
+    end_time: String,
+    completion_time: String,
+    completion_interval: String,
+    repeat_period_in_day: String,
+    repeat_pause: String,
+    week_day_in_month: String,
+    day_in_month: String,
+    week_days: Vec<String>,
+    months: Vec<String>,
+    weeks_period: String,
+    days_repeat_period: String,
+}
+
+fn extract_schedule_xml(bytes: &[u8]) -> Result<String> {
+    let inflated = inflate_raw_deflate(bytes)?;
+    let text = String::from_utf8(inflated).context("schedule blob is not UTF-8")?;
+    let schedule = parse_job_schedule_text(text.trim_start_matches('\u{feff}'))
+        .context("failed to parse compact schedule")?;
+    Ok(format_job_schedule_xml(&schedule))
+}
+
+fn parse_job_schedule_text(text: &str) -> Option<JobSchedule> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let mut index = 0usize;
+    let begin_date = format_1c_date(fields.get(index)?.trim())?;
+    index += 1;
+    let end_date = format_1c_date(fields.get(index)?.trim())?;
+    index += 1;
+    let begin_time = format_1c_time(fields.get(index)?.trim())?;
+    index += 1;
+    let end_time = format_1c_time(fields.get(index)?.trim())?;
+    index += 1;
+    let completion_time = format_1c_time(fields.get(index)?.trim())?;
+    index += 1;
+    let completion_interval = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+    let repeat_period_in_day = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+    let repeat_pause = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+
+    let week_days_count = fields.get(index)?.trim().parse::<usize>().ok()?;
+    index += 1;
+    let week_days = parse_schedule_number_list(&fields, &mut index, week_days_count)?;
+
+    let week_day_in_month = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+    let day_in_month = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+
+    let months_count = fields.get(index)?.trim().parse::<usize>().ok()?;
+    index += 1;
+    let months = parse_schedule_number_list(&fields, &mut index, months_count)?;
+
+    let weeks_period = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+    let days_repeat_period = parse_schedule_number(fields.get(index)?)?;
+
+    Some(JobSchedule {
+        begin_date,
+        end_date,
+        begin_time,
+        end_time,
+        completion_time,
+        completion_interval,
+        repeat_period_in_day,
+        repeat_pause,
+        week_day_in_month,
+        day_in_month,
+        week_days,
+        months,
+        weeks_period,
+        days_repeat_period,
+    })
+}
+
+fn parse_schedule_number_list(
+    fields: &[&str],
+    index: &mut usize,
+    count: usize,
+) -> Option<Vec<String>> {
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push(parse_schedule_number(fields.get(*index)?)?);
+        *index += 1;
+    }
+    Some(values)
+}
+
+fn parse_schedule_number(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn format_1c_date(value: &str) -> Option<String> {
+    if value.len() != 14 || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}",
+        &value[0..4],
+        &value[4..6],
+        &value[6..8]
+    ))
+}
+
+fn format_1c_time(value: &str) -> Option<String> {
+    if value.len() != 14 || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}:{}:{}",
+        &value[8..10],
+        &value[10..12],
+        &value[12..14]
+    ))
+}
+
+fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<JobSchedule xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.17\">\r\n\
+\t<Schedule BeginDate=\"{}\" EndDate=\"{}\" BeginTime=\"{}\" EndTime=\"{}\" CompletionTime=\"{}\" CompletionInterval=\"{}\" RepeatPeriodInDay=\"{}\" RepeatPause=\"{}\" WeekDayInMonth=\"{}\" DayInMonth=\"{}\" WeeksPeriod=\"{}\" DaysRepeatPeriod=\"{}\">\r\n\
+\t\t<ent:WeekDays>{}</ent:WeekDays>\r\n\
+\t\t<ent:Months>{}</ent:Months>\r\n\
+\t</Schedule>\r\n\
+</JobSchedule>\r\n",
+        schedule.begin_date,
+        schedule.end_date,
+        schedule.begin_time,
+        schedule.end_time,
+        schedule.completion_time,
+        schedule.completion_interval,
+        schedule.repeat_period_in_day,
+        schedule.repeat_pause,
+        schedule.week_day_in_month,
+        schedule.day_in_month,
+        schedule.weeks_period,
+        schedule.days_repeat_period,
+        schedule.week_days.join(" "),
+        schedule.months.join(" ")
     )
 }
 
@@ -3229,6 +3402,62 @@ mod tests {
         assert_eq!(
             picture_row.source_asset_path.as_deref(),
             Some("CommonPictures/Address/Ext/Picture.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_scheduled_job_schedule_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"LoadRates\",{{1,\"en\",\"Load rates\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"\",\"Load rates\",1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\"LoadRates\",3,10}},0}}"
+            )
+            .as_bytes(),
+        );
+        let schedule = deflate_for_test(
+            b"{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0}",
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: schedule.len() as i64,
+                binary_hex: encode_hex_for_test(&schedule),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml =
+            fs::read_to_string(root.join("ScheduledJobs/LoadRates/Ext/Schedule.xml")).unwrap();
+        assert!(xml.contains("BeginTime=\"08:00:00\""));
+        assert!(xml.contains("EndTime=\"17:00:00\""));
+        assert!(xml.contains("RepeatPeriodInDay=\"60\""));
+        assert!(xml.contains("<ent:WeekDays>6 7</ent:WeekDays>"));
+        assert!(xml.contains("<ent:Months>1 2 3 4 5 6 7 8 9 10 11 12</ent:Months>"));
+        let schedule_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            schedule_row.source_asset_path.as_deref(),
+            Some("ScheduledJobs/LoadRates/Ext/Schedule.xml")
         );
 
         let _ = fs::remove_dir_all(root);
