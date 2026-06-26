@@ -53,27 +53,35 @@ pub struct StorageMappingReport {
     pub groups_seen: usize,
     pub mapped_groups: usize,
     pub unmapped_groups: usize,
+    pub overview: StorageMapOverview,
     pub summaries: Vec<StorageMutationSummary>,
     pub roles: Vec<StorageStageRoleSummary>,
     pub families: Vec<StorageOperationFamilySummary>,
     pub entries: Vec<StorageMappingEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageMapOverview {
+    pub dominant_kind: Option<StorageMutationSummary>,
+    pub dominant_role: Option<StorageStageRoleSummary>,
+    pub dominant_family: Option<StorageOperationFamilySummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageMutationSummary {
     pub kind: StorageMutationKind,
     pub groups: usize,
     pub total_duration_us: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageStageRoleSummary {
     pub role: StorageStageRole,
     pub groups: usize,
     pub total_duration_us: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageOperationFamilySummary {
     pub family: StorageOperationFamily,
     pub groups: usize,
@@ -124,6 +132,25 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             .then_with(|| left.normalized_sql.cmp(&right.normalized_sql))
     });
 
+    summaries.sort_by(|left, right| {
+        right
+            .total_duration_us
+            .cmp(&left.total_duration_us)
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    roles.sort_by(|left, right| {
+        right
+            .total_duration_us
+            .cmp(&left.total_duration_us)
+            .then_with(|| left.role.cmp(&right.role))
+    });
+    families.sort_by(|left, right| {
+        right
+            .total_duration_us
+            .cmp(&left.total_duration_us)
+            .then_with(|| left.family.cmp(&right.family))
+    });
+
     let mapped_groups = entries
         .iter()
         .filter(|entry| entry.kind != StorageMutationKind::Other)
@@ -134,33 +161,14 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
         groups_seen: analysis.groups.len(),
         mapped_groups,
         unmapped_groups: entries.len().saturating_sub(mapped_groups),
-        summaries: {
-            summaries.sort_by(|left, right| {
-                right
-                    .total_duration_us
-                    .cmp(&left.total_duration_us)
-                    .then_with(|| left.kind.cmp(&right.kind))
-            });
-            summaries
+        overview: StorageMapOverview {
+            dominant_kind: summaries.first().cloned(),
+            dominant_role: roles.first().cloned(),
+            dominant_family: families.first().cloned(),
         },
-        roles: {
-            roles.sort_by(|left, right| {
-                right
-                    .total_duration_us
-                    .cmp(&left.total_duration_us)
-                    .then_with(|| left.role.cmp(&right.role))
-            });
-            roles
-        },
-        families: {
-            families.sort_by(|left, right| {
-                right
-                    .total_duration_us
-                    .cmp(&left.total_duration_us)
-                    .then_with(|| left.family.cmp(&right.family))
-            });
-            families
-        },
+        summaries,
+        roles,
+        families,
         entries,
     }
 }
@@ -569,6 +577,9 @@ mod tests {
         assert_eq!(report.groups_seen, 12);
         assert_eq!(report.mapped_groups, 12);
         assert_eq!(report.unmapped_groups, 0);
+        assert!(report.overview.dominant_kind.is_some());
+        assert!(report.overview.dominant_role.is_some());
+        assert!(report.overview.dominant_family.is_some());
         assert!(
             report
                 .entries
@@ -724,6 +735,18 @@ mod tests {
                 .families
                 .iter()
                 .any(|summary| summary.family == StorageOperationFamily::ConfigBundle)
+        );
+        assert_eq!(
+            report.overview.dominant_kind.as_ref().unwrap().kind,
+            report.summaries.first().unwrap().kind
+        );
+        assert_eq!(
+            report.overview.dominant_role.as_ref().unwrap().role,
+            report.roles.first().unwrap().role
+        );
+        assert_eq!(
+            report.overview.dominant_family.as_ref().unwrap().family,
+            report.families.first().unwrap().family
         );
     }
 
