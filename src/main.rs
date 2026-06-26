@@ -157,6 +157,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_scheduled_job_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageXdtopackageObject(args) => {
+            let report = ibcmd_rs::mssql::stage_xdtopackage_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())
