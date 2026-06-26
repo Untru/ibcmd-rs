@@ -2365,6 +2365,58 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_common_attribute_and_session_parameter_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-common-attribute-session-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonAttributes")).unwrap();
+        std::fs::create_dir_all(root.join("SessionParameters")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("CommonAttributes/КомментарийЯзык1.xml"),
+            root.join("CommonAttributes/КомментарийЯзык1.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("SessionParameters/АвторизованныйПользователь.xml"),
+            root.join("SessionParameters/АвторизованныйПользователь.xml"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "CommonAttributes/КомментарийЯзык1.xml",
+            SourceKind::MetadataXml,
+            Some("CommonAttributes/КомментарийЯзык1")
+        )));
+        assert!(files.contains(&(
+            "SessionParameters/АвторизованныйПользователь.xml",
+            SourceKind::MetadataXml,
+            Some("SessionParameters/АвторизованныйПользователь")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
