@@ -1,7 +1,9 @@
 use anyhow::Result;
 use rayon::ThreadPoolBuilder;
+use std::sync::OnceLock;
 
 const MAX_WORKERS: usize = 8;
+static THREAD_POOL: OnceLock<Result<rayon::ThreadPool, String>> = OnceLock::new();
 
 pub fn bounded_worker_count() -> usize {
     bounded_worker_count_from(
@@ -19,10 +21,19 @@ where
     F: FnOnce() -> R + Send,
     R: Send,
 {
-    let pool = ThreadPoolBuilder::new()
-        .num_threads(bounded_worker_count())
-        .build()?;
-    Ok(pool.install(work))
+    Ok(thread_pool()?.install(work))
+}
+
+fn thread_pool() -> Result<&'static rayon::ThreadPool> {
+    THREAD_POOL
+        .get_or_init(|| {
+            ThreadPoolBuilder::new()
+                .num_threads(bounded_worker_count())
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| anyhow::anyhow!(error.clone()))
 }
 
 fn bounded_worker_count_from(override_value: Option<usize>, available: usize) -> usize {
