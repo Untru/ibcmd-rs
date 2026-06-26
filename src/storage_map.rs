@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::trace::TraceAnalysis;
@@ -123,7 +124,7 @@ pub struct StorageMappingEntry {
 pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
     let mut entries = analysis
         .groups
-        .iter()
+        .par_iter()
         .map(|group| StorageMappingEntry {
             normalized_sql: group.normalized_sql.clone(),
             sample_sql: group.sample_sql.clone(),
@@ -144,7 +145,7 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
     let mut signals = summarize_signals(&entries);
     let mut tables = summarize_tables(&entries);
 
-    entries.sort_by(|left, right| {
+    entries.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
@@ -152,31 +153,31 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             .then_with(|| left.normalized_sql.cmp(&right.normalized_sql))
     });
 
-    summaries.sort_by(|left, right| {
+    summaries.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
             .then_with(|| left.kind.cmp(&right.kind))
     });
-    roles.sort_by(|left, right| {
+    roles.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
             .then_with(|| left.role.cmp(&right.role))
     });
-    families.sort_by(|left, right| {
+    families.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
             .then_with(|| left.family.cmp(&right.family))
     });
-    signals.sort_by(|left, right| {
+    signals.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
             .then_with(|| left.signal.cmp(&right.signal))
     });
-    tables.sort_by(|left, right| {
+    tables.par_sort_by(|left, right| {
         right
             .total_duration_us
             .cmp(&left.total_duration_us)
@@ -210,12 +211,28 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
 }
 
 fn summarize_entries(entries: &[StorageMappingEntry]) -> Vec<StorageMutationSummary> {
-    let mut totals = std::collections::BTreeMap::<StorageMutationKind, (usize, u64)>::new();
-    for entry in entries {
-        let value = totals.entry(entry.kind).or_insert((0, 0));
-        value.0 += 1;
-        value.1 += entry.total_duration_us;
-    }
+    let totals = entries
+        .par_iter()
+        .fold(
+            || std::collections::BTreeMap::<StorageMutationKind, (usize, u64)>::new(),
+            |mut totals, entry| {
+                let value = totals.entry(entry.kind).or_insert((0, 0));
+                value.0 += 1;
+                value.1 += entry.total_duration_us;
+                totals
+            },
+        )
+        .reduce(
+            || std::collections::BTreeMap::<StorageMutationKind, (usize, u64)>::new(),
+            |mut left, right| {
+                for (kind, (groups, total_duration_us)) in right {
+                    let value = left.entry(kind).or_insert((0, 0));
+                    value.0 += groups;
+                    value.1 += total_duration_us;
+                }
+                left
+            },
+        );
     totals
         .into_iter()
         .map(
@@ -229,12 +246,28 @@ fn summarize_entries(entries: &[StorageMappingEntry]) -> Vec<StorageMutationSumm
 }
 
 fn summarize_roles(entries: &[StorageMappingEntry]) -> Vec<StorageStageRoleSummary> {
-    let mut totals = std::collections::BTreeMap::<StorageStageRole, (usize, u64)>::new();
-    for entry in entries {
-        let value = totals.entry(entry.role).or_insert((0, 0));
-        value.0 += 1;
-        value.1 += entry.total_duration_us;
-    }
+    let totals = entries
+        .par_iter()
+        .fold(
+            || std::collections::BTreeMap::<StorageStageRole, (usize, u64)>::new(),
+            |mut totals, entry| {
+                let value = totals.entry(entry.role).or_insert((0, 0));
+                value.0 += 1;
+                value.1 += entry.total_duration_us;
+                totals
+            },
+        )
+        .reduce(
+            || std::collections::BTreeMap::<StorageStageRole, (usize, u64)>::new(),
+            |mut left, right| {
+                for (role, (groups, total_duration_us)) in right {
+                    let value = left.entry(role).or_insert((0, 0));
+                    value.0 += groups;
+                    value.1 += total_duration_us;
+                }
+                left
+            },
+        );
     totals
         .into_iter()
         .map(
@@ -248,12 +281,28 @@ fn summarize_roles(entries: &[StorageMappingEntry]) -> Vec<StorageStageRoleSumma
 }
 
 fn summarize_families(entries: &[StorageMappingEntry]) -> Vec<StorageOperationFamilySummary> {
-    let mut totals = std::collections::BTreeMap::<StorageOperationFamily, (usize, u64)>::new();
-    for entry in entries {
-        let value = totals.entry(entry.family).or_insert((0, 0));
-        value.0 += 1;
-        value.1 += entry.total_duration_us;
-    }
+    let totals = entries
+        .par_iter()
+        .fold(
+            || std::collections::BTreeMap::<StorageOperationFamily, (usize, u64)>::new(),
+            |mut totals, entry| {
+                let value = totals.entry(entry.family).or_insert((0, 0));
+                value.0 += 1;
+                value.1 += entry.total_duration_us;
+                totals
+            },
+        )
+        .reduce(
+            || std::collections::BTreeMap::<StorageOperationFamily, (usize, u64)>::new(),
+            |mut left, right| {
+                for (family, (groups, total_duration_us)) in right {
+                    let value = left.entry(family).or_insert((0, 0));
+                    value.0 += groups;
+                    value.1 += total_duration_us;
+                }
+                left
+            },
+        );
     totals
         .into_iter()
         .map(
@@ -267,14 +316,30 @@ fn summarize_families(entries: &[StorageMappingEntry]) -> Vec<StorageOperationFa
 }
 
 fn summarize_signals(entries: &[StorageMappingEntry]) -> Vec<StorageSignalSummary> {
-    let mut totals = std::collections::BTreeMap::<String, (usize, u64)>::new();
-    for entry in entries {
-        for signal in &entry.signals {
-            let value = totals.entry(signal.clone()).or_insert((0, 0));
-            value.0 += 1;
-            value.1 += entry.total_duration_us;
-        }
-    }
+    let totals = entries
+        .par_iter()
+        .fold(
+            || std::collections::BTreeMap::<String, (usize, u64)>::new(),
+            |mut totals, entry| {
+                for signal in &entry.signals {
+                    let value = totals.entry(signal.clone()).or_insert((0, 0));
+                    value.0 += 1;
+                    value.1 += entry.total_duration_us;
+                }
+                totals
+            },
+        )
+        .reduce(
+            || std::collections::BTreeMap::<String, (usize, u64)>::new(),
+            |mut left, right| {
+                for (signal, (groups, total_duration_us)) in right {
+                    let value = left.entry(signal).or_insert((0, 0));
+                    value.0 += groups;
+                    value.1 += total_duration_us;
+                }
+                left
+            },
+        );
     totals
         .into_iter()
         .map(
@@ -288,14 +353,30 @@ fn summarize_signals(entries: &[StorageMappingEntry]) -> Vec<StorageSignalSummar
 }
 
 fn summarize_tables(entries: &[StorageMappingEntry]) -> Vec<StorageTableSummary> {
-    let mut totals = std::collections::BTreeMap::<String, (usize, u64)>::new();
-    for entry in entries {
-        for table in &entry.table_names {
-            let value = totals.entry(table.clone()).or_insert((0, 0));
-            value.0 += 1;
-            value.1 += entry.total_duration_us;
-        }
-    }
+    let totals = entries
+        .par_iter()
+        .fold(
+            || std::collections::BTreeMap::<String, (usize, u64)>::new(),
+            |mut totals, entry| {
+                for table in &entry.table_names {
+                    let value = totals.entry(table.clone()).or_insert((0, 0));
+                    value.0 += 1;
+                    value.1 += entry.total_duration_us;
+                }
+                totals
+            },
+        )
+        .reduce(
+            || std::collections::BTreeMap::<String, (usize, u64)>::new(),
+            |mut left, right| {
+                for (table, (groups, total_duration_us)) in right {
+                    let value = left.entry(table).or_insert((0, 0));
+                    value.0 += groups;
+                    value.1 += total_duration_us;
+                }
+                left
+            },
+        );
     totals
         .into_iter()
         .map(|(table, (groups, total_duration_us))| StorageTableSummary {
