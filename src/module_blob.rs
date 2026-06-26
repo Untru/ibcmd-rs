@@ -4341,6 +4341,22 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "ReportObject.БизнесПроцессы",
+                "1d3afecc-d10d-4795-a819-cadc3d5ecd95",
+            ),
+            (
+                "ReportManager.БизнесПроцессы",
+                "5a14c1b5-a349-4c68-aee7-d7b6b35e78a4",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
