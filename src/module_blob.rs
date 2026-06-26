@@ -3550,6 +3550,53 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_real_new_sfc_simple_metadata_families() -> anyhow::Result<()> {
+        let sfc_root = std::path::PathBuf::from(r"D:\УХА\sfc");
+        if !sfc_root.is_dir() {
+            return Ok(());
+        }
+
+        for (kind, file) in [
+            ("Bot", "Bots/ОповещенияПользователейОСобытиях.xml"),
+            ("DocumentNumerator", "DocumentNumerators/ДенежныеДокументы.xml"),
+            ("IntegrationService", "IntegrationServices/ОбменСообщениями.xml"),
+            ("Sequence", "Sequences/ДокументыОрганизаций.xml"),
+            ("Style", "Styles/Основной.xml"),
+            ("WSReference", "WSReferences/UpdateFilesApiImplService.xml"),
+        ] {
+            let xml = std::fs::read(sfc_root.join(file))?;
+            let parsed = super::parse_simple_metadata_xml_properties(&xml)?;
+            assert_eq!(parsed.kind, kind);
+
+            let mut active = b"\xEF\xBB\xBF".to_vec();
+            active.extend_from_slice(
+                format!(
+                    "{{1,\n{{3,\n{{1,0,{uuid}}},\"OldName\",\n{{1,\"ru\",\"Old synonym\"}},\"Old comment\",0,0,00000000-0000-0000-0000-000000000000,0}},0}}",
+                    uuid = parsed.uuid,
+                )
+                .as_bytes(),
+            );
+            let base_blob = deflate_raw(&active)?;
+
+            let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, &xml)?;
+            let inflated = String::from_utf8(inflate_raw(&packed.blob)?)?;
+
+            assert_eq!(packed.properties.kind, kind);
+            assert_eq!(packed.properties.uuid, parsed.uuid);
+            assert!(inflated.contains(&format!("\"{}\"", parsed.name)), "{inflated}");
+            if !parsed.comment.is_empty() {
+                assert!(
+                    inflated.contains(&format!("\"{}\"", parsed.comment)),
+                    "{inflated}"
+                );
+            }
+            assert!(inflated.contains("00000000-0000-0000-0000-000000000000"));
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn round_trips_common_form_and_template_from_lab_sources() -> anyhow::Result<()> {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")

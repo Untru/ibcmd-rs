@@ -4093,6 +4093,164 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_new_sfc_families() {
+        let sfc_root = std::path::PathBuf::from(r"D:\УХА\sfc");
+        if !sfc_root.is_dir() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-new-sfc-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Bots/ОповещенияПользователейОСобытиях/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("DocumentNumerators")).unwrap();
+        std::fs::create_dir_all(root.join("IntegrationServices/ОбменСообщениями/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("Sequences/ДокументыОрганизаций/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("Styles/Основной/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("WSReferences/UpdateFilesApiImplService/Ext")).unwrap();
+
+        std::fs::copy(
+            sfc_root.join("Bots/ОповещенияПользователейОСобытиях.xml"),
+            root.join("Bots/ОповещенияПользователейОСобытиях.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("Bots/ОповещенияПользователейОСобытиях/Ext/Module.bsl"),
+            root.join("Bots/ОповещенияПользователейОСобытиях/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("DocumentNumerators/ДенежныеДокументы.xml"),
+            root.join("DocumentNumerators/ДенежныеДокументы.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("IntegrationServices/ОбменСообщениями.xml"),
+            root.join("IntegrationServices/ОбменСообщениями.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("IntegrationServices/ОбменСообщениями/Ext/Module.bsl"),
+            root.join("IntegrationServices/ОбменСообщениями/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("Sequences/ДокументыОрганизаций.xml"),
+            root.join("Sequences/ДокументыОрганизаций.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("Sequences/ДокументыОрганизаций/Ext/RecordSetModule.bsl"),
+            root.join("Sequences/ДокументыОрганизаций/Ext/RecordSetModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("Styles/Основной.xml"),
+            root.join("Styles/Основной.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("Styles/Основной/Ext/Style.xml"),
+            root.join("Styles/Основной/Ext/Style.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("WSReferences/UpdateFilesApiImplService.xml"),
+            root.join("WSReferences/UpdateFilesApiImplService.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            sfc_root.join("WSReferences/UpdateFilesApiImplService/Ext/WSDefinition.xml"),
+            root.join("WSReferences/UpdateFilesApiImplService/Ext/WSDefinition.xml"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let lookup = |path: &str| {
+            manifest
+                .files
+                .iter()
+                .find(|file| file.path == path)
+                .map(|file| (file.kind.clone(), file.object_hint.clone()))
+                .unwrap()
+        };
+
+        assert_eq!(
+            lookup("Bots/ОповещенияПользователейОСобытиях.xml"),
+            (
+                SourceKind::MetadataXml,
+                Some("Bots/ОповещенияПользователейОСобытиях".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("Bots/ОповещенияПользователейОСобытиях/Ext/Module.bsl"),
+            (
+                SourceKind::Module,
+                Some("Bots/ОповещенияПользователейОСобытиях".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("DocumentNumerators/ДенежныеДокументы.xml"),
+            (
+                SourceKind::MetadataXml,
+                Some("DocumentNumerators/ДенежныеДокументы".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("IntegrationServices/ОбменСообщениями.xml"),
+            (
+                SourceKind::MetadataXml,
+                Some("IntegrationServices/ОбменСообщениями".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("IntegrationServices/ОбменСообщениями/Ext/Module.bsl"),
+            (
+                SourceKind::Module,
+                Some("IntegrationServices/ОбменСообщениями".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("Sequences/ДокументыОрганизаций.xml"),
+            (
+                SourceKind::MetadataXml,
+                Some("Sequences/ДокументыОрганизаций".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("Sequences/ДокументыОрганизаций/Ext/RecordSetModule.bsl"),
+            (
+                SourceKind::Module,
+                Some("Sequences/ДокументыОрганизаций".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("Styles/Основной.xml"),
+            (SourceKind::MetadataXml, Some("Styles/Основной".to_string()))
+        );
+        assert_eq!(
+            lookup("Styles/Основной/Ext/Style.xml"),
+            (SourceKind::MetadataXml, Some("Styles/Основной".to_string()))
+        );
+        assert_eq!(
+            lookup("WSReferences/UpdateFilesApiImplService.xml"),
+            (
+                SourceKind::MetadataXml,
+                Some("WSReferences/UpdateFilesApiImplService".to_string())
+            )
+        );
+        assert_eq!(
+            lookup("WSReferences/UpdateFilesApiImplService/Ext/WSDefinition.xml"),
+            (
+                SourceKind::MetadataXml,
+                Some("WSReferences/UpdateFilesApiImplService".to_string())
+            )
+        );
+    }
+
+    #[test]
     fn scans_real_event_subscription_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
