@@ -3103,15 +3103,40 @@ fn parse_generated_type_entries_from_blob(
     let fields = split_1c_braced_fields(object_text, 0)?;
     let mut entries = Vec::new();
 
+    if object_code == 0 {
+        push_indexed_generated_type(&mut entries, &fields, 1, "DefinedType", &header.name);
+    }
+    if object_code == 16 {
+        push_indexed_generated_type(&mut entries, &fields, 2, "ConstantManager", &header.name);
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            4,
+            "ConstantValueManager",
+            &header.name,
+        );
+    }
+    if object_code == 30 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            3,
+            "BusinessProcessObject",
+            &header.name,
+        );
+        push_indexed_generated_type(&mut entries, &fields, 5, "BusinessProcessRef", &header.name);
+    }
+    if object_code == 37 {
+        push_indexed_generated_type(&mut entries, &fields, 1, "ExchangePlanObject", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 3, "ExchangePlanRef", &header.name);
+    }
     if object_code == 40 {
-        if let Some(type_id) = fields.get(3).copied().and_then(parse_uuid_field) {
-            entries.push((type_id, format!("cfg:DocumentRef.{}", header.name)));
-        }
+        push_indexed_generated_type(&mut entries, &fields, 1, "DocumentObject", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 3, "DocumentRef", &header.name);
     }
     if object_code == 57 {
-        if let Some(type_id) = fields.get(3).copied().and_then(parse_uuid_field) {
-            entries.push((type_id, format!("cfg:CatalogRef.{}", header.name)));
-        }
+        push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 3, "CatalogRef", &header.name);
     }
     let header_index = metadata_header_field_index(&fields, uuid);
 
@@ -3170,6 +3195,10 @@ fn parse_generated_type_entries_from_blob(
             "InformationRegisterRecordManager",
             &header.name,
         );
+    }
+    if object_code == 33 && header_index == Some(1) {
+        push_indexed_generated_type(&mut entries, &fields, 3, "TaskObject", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 5, "TaskRef", &header.name);
     }
     if object_code == 34 {
         push_indexed_generated_type(
@@ -3955,6 +3984,7 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "3ee983d7-ace7-40f9-bb7e-2e916fcddd56" => Some("v8:FixedStructure"),
         "4500381b-db30-4a10-9db4-990038032acf" => Some("v8:FixedArray"),
         "220455ea-6c85-4513-996f-bbe79ed07774" => Some("v8:FixedMap"),
+        "0a52f9de-73ea-4507-81e8-66217bead73a" => Some("cfg:ExchangePlanRef"),
         _ => None,
     }
 }
@@ -7250,7 +7280,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_report_and_task_rows_in_generated_type_index() {
+    fn ignores_report_and_indexes_task_rows_in_generated_type_index() {
         let report_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let report_object_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let report_blob = deflate_for_test(
@@ -7260,10 +7290,11 @@ mod tests {
             .as_bytes(),
         );
         let task_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
-        let task_generated_type_id = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let task_object_type_id = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let task_ref_type_id = "ffffffff-ffff-4fff-ffff-ffffffffffff";
         let task_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"Task\",{{1,\"en\",\"Task\"}},\"\"}},0,{task_generated_type_id}}}\r\n}}"
+                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"Task\",{{1,\"en\",\"Task\"}},\"\"}},0,{task_object_type_id},11111111-1111-4111-8111-111111111111,{task_ref_type_id}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -7285,7 +7316,14 @@ mod tests {
         let index = build_metadata_type_index(&rows);
 
         assert!(!index.contains_key(report_object_type_id));
-        assert!(!index.contains_key(task_generated_type_id));
+        assert_eq!(
+            index.get(task_object_type_id).map(String::as_str),
+            Some("cfg:TaskObject.Task")
+        );
+        assert_eq!(
+            index.get(task_ref_type_id).map(String::as_str),
+            Some("cfg:TaskRef.Task")
+        );
     }
 
     #[test]
@@ -7395,6 +7433,12 @@ mod tests {
                 "FixedMapValue",
                 "220455ea-6c85-4513-996f-bbe79ed07774",
                 "v8:FixedMap",
+            ),
+            (
+                "ffffffff-ffff-4fff-ffff-ffffffffffff",
+                "ExchangePlanNode",
+                "0a52f9de-73ea-4507-81e8-66217bead73a",
+                "cfg:ExchangePlanRef",
             ),
         ] {
             let blob = deflate_for_test(
@@ -7738,10 +7782,11 @@ mod tests {
     #[test]
     fn builds_catalog_and_enum_reference_type_index_entries() {
         let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_object_type_id = "11111111-1111-4111-8111-111111111111";
         let catalog_ref_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,{catalog_ref_type_id},33333333-3333-4333-8333-333333333333,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+                "{{1,\r\n{{57,{catalog_object_type_id},22222222-2222-4222-8222-222222222222,{catalog_ref_type_id},33333333-3333-4333-8333-333333333333,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -7771,12 +7816,127 @@ mod tests {
         let index = build_metadata_type_index(&rows);
 
         assert_eq!(
+            index.get(catalog_object_type_id).map(String::as_str),
+            Some("cfg:CatalogObject.Customers")
+        );
+        assert_eq!(
             index.get(catalog_ref_type_id).map(String::as_str),
             Some("cfg:CatalogRef.Customers")
         );
         assert_eq!(
             index.get(enum_ref_type_id).map(String::as_str),
             Some("cfg:EnumRef.Statuses")
+        );
+    }
+
+    #[test]
+    fn builds_object_family_generated_type_index_entries() {
+        let defined_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let defined_type_id = "11111111-1111-4111-8111-111111111111";
+        let defined_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,{defined_type_id},22222222-2222-4222-8222-222222222222,\r\n{{3,\r\n{{1,0,{defined_uuid}}},\"OwnerType\",{{1,\"en\",\"Owner type\"}},\"\"}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let constant_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let constant_value_manager_type_id = "33333333-3333-4333-8333-333333333333";
+        let constant_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{constant_uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"\"}},{{\"Pattern\",{{\"B\"}}}}\r\n}}}},44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,{constant_value_manager_type_id},66666666-6666-4666-8666-666666666666}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let business_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let business_object_type_id = "77777777-7777-4777-8777-777777777777";
+        let business_ref_type_id = "88888888-8888-4888-8888-888888888888";
+        let business_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{30,\r\n{{3,\r\n{{1,0,{business_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"\"}},1,{business_object_type_id},99999999-9999-4999-8999-999999999999,{business_ref_type_id},aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let document_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let document_object_type_id = "99999999-9999-4999-8999-999999999991";
+        let document_ref_type_id = "99999999-9999-4999-8999-999999999992";
+        let document_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,{document_object_type_id},99999999-9999-4999-8999-999999999993,{document_ref_type_id},99999999-9999-4999-8999-999999999994,\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let exchange_uuid = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let exchange_ref_type_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let exchange_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{37,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{exchange_ref_type_id},dddddddd-dddd-4ddd-8ddd-dddddddddddd,\r\n{{3,\r\n{{1,0,{exchange_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: defined_uuid.to_string(),
+                part_no: 0,
+                data_size: defined_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&defined_blob),
+            },
+            ConfigRow {
+                file_name: constant_uuid.to_string(),
+                part_no: 0,
+                data_size: constant_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&constant_blob),
+            },
+            ConfigRow {
+                file_name: business_uuid.to_string(),
+                part_no: 0,
+                data_size: business_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&business_blob),
+            },
+            ConfigRow {
+                file_name: document_uuid.to_string(),
+                part_no: 0,
+                data_size: document_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&document_blob),
+            },
+            ConfigRow {
+                file_name: exchange_uuid.to_string(),
+                part_no: 0,
+                data_size: exchange_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&exchange_blob),
+            },
+        ];
+
+        let index = build_metadata_type_index(&rows);
+
+        assert_eq!(
+            index.get(defined_type_id).map(String::as_str),
+            Some("cfg:DefinedType.OwnerType")
+        );
+        assert_eq!(
+            index
+                .get(constant_value_manager_type_id)
+                .map(String::as_str),
+            Some("cfg:ConstantValueManager.UseFeature")
+        );
+        assert_eq!(
+            index.get(business_object_type_id).map(String::as_str),
+            Some("cfg:BusinessProcessObject.Approval")
+        );
+        assert_eq!(
+            index.get(business_ref_type_id).map(String::as_str),
+            Some("cfg:BusinessProcessRef.Approval")
+        );
+        assert_eq!(
+            index.get(document_object_type_id).map(String::as_str),
+            Some("cfg:DocumentObject.Invoice")
+        );
+        assert_eq!(
+            index.get(document_ref_type_id).map(String::as_str),
+            Some("cfg:DocumentRef.Invoice")
+        );
+        assert_eq!(
+            index.get(exchange_ref_type_id).map(String::as_str),
+            Some("cfg:ExchangePlanRef.Sync")
         );
     }
 
