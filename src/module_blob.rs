@@ -3285,6 +3285,88 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_additional_simple_metadata_families() {
+        for (kind, uuid, name, comment) in [
+            (
+                "AccumulationRegister",
+                "11111111-1111-4111-8111-111111111111",
+                "Продажи",
+                "Обороты продаж",
+            ),
+            (
+                "AccountingRegister",
+                "22222222-2222-4222-8222-222222222222",
+                "Хозрасчеты",
+                "Бухгалтерский регистр",
+            ),
+            (
+                "CalculationRegister",
+                "33333333-3333-4333-8333-333333333333",
+                "Премии",
+                "Регистр расчета",
+            ),
+            (
+                "ChartOfAccounts",
+                "44444444-4444-4444-8444-444444444444",
+                "ПланСчетов",
+                "План счетов",
+            ),
+            (
+                "ChartOfCalculationTypes",
+                "55555555-5555-4555-8555-555555555555",
+                "ВидыРасчета",
+                "Виды расчета",
+            ),
+            (
+                "ChartOfCalculationRegisters",
+                "66666666-6666-4666-8666-666666666666",
+                "Начисления",
+                "План начислений",
+            ),
+        ] {
+            let base_blob = {
+                let mut active = b"\xEF\xBB\xBF".to_vec();
+                active.extend_from_slice(
+                    format!(
+                        "{{1,\n{{3,\n{{1,0,{uuid}}},\"OldName\",\n{{1,\"ru\",\"Old synonym\"}},\"Old comment\",0,0,00000000-0000-0000-0000-000000000000,0}},0}}"
+                    )
+                    .as_bytes(),
+                );
+                deflate_raw(&active).unwrap()
+            };
+
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <{kind} uuid="{uuid}">
+    <Properties>
+      <Name>{name}</Name>
+      <Synonym>
+        <item>
+          <lang>ru</lang>
+          <content>{name}</content>
+        </item>
+      </Synonym>
+      <Comment>{comment}</Comment>
+    </Properties>
+  </{kind}>
+</MetaDataObject>
+"#
+            );
+
+            let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes())
+                .unwrap_or_else(|error| panic!("{kind}: {error}"));
+            let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+            assert_eq!(packed.properties.kind, kind);
+            assert_eq!(packed.properties.uuid, uuid);
+            assert!(inflated.contains(&format!("\"{name}\"")), "{inflated}");
+            assert!(inflated.contains(&format!("\"{comment}\"")), "{inflated}");
+            assert!(inflated.contains("00000000-0000-0000-0000-000000000000"));
+        }
+    }
+
+    #[test]
     fn patches_session_parameter_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
