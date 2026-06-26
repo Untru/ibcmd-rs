@@ -162,6 +162,9 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "CommonForm",
             "CommonTemplate",
             "CommonAttribute",
+            "ChartOfCharacteristicTypes",
+            "ChartOfCalculationTypes",
+            "ChartOfCalculationRegisters",
             "DocumentJournal",
             "Report",
             "DataProcessor",
@@ -260,6 +263,21 @@ mod tests {
             report
                 .supported_metadata_families
                 .contains(&"CommonCommand")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"ChartOfCharacteristicTypes")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"ChartOfCalculationTypes")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"ChartOfCalculationRegisters")
         );
         assert!(
             report
