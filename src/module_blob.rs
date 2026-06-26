@@ -4441,6 +4441,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "EnumRef.ВажностьПроблемыУчета",
+                "c8f0f421-adcf-417b-8509-93d4569c4435",
+            ),
+            (
+                "EnumManager.ВажностьПроблемыУчета",
+                "7b08935e-284b-4995-ae95-f93cc6666d02",
+            ),
+            (
+                "EnumList.ВажностьПроблемыУчета",
+                "001333d9-a79f-4306-900e-a56c9e37802f",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
