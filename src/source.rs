@@ -1175,6 +1175,58 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_language_and_settings_storage_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-settings-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Languages")).unwrap();
+        std::fs::create_dir_all(root.join("SettingsStorages")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("Languages/Русский.xml"),
+            root.join("Languages/Русский.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("SettingsStorages/ХранилищеВариантовОтчетов.xml"),
+            root.join("SettingsStorages/ХранилищеВариантовОтчетов.xml"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "Languages/Русский.xml",
+            SourceKind::MetadataXml,
+            Some("Languages/Русский")
+        )));
+        assert!(files.contains(&(
+            "SettingsStorages/ХранилищеВариантовОтчетов.xml",
+            SourceKind::MetadataXml,
+            Some("SettingsStorages/ХранилищеВариантовОтчетов")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_picture_asset_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
