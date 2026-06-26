@@ -2733,6 +2733,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "CommonCommand" => Some(("CommonCommand", "CommonCommands")),
         "CommonPicture" => Some(("CommonPicture", "CommonPictures")),
         "CommonTemplate" => Some(("CommonTemplate", "CommonTemplates")),
+        "Constant" => Some(("Constant", "Constants")),
         "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
         "CommandGroup" => Some(("CommandGroup", "CommandGroups")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
@@ -2746,6 +2747,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "Role" => Some(("Role", "Roles")),
         "ScheduledJob" => Some(("ScheduledJob", "ScheduledJobs")),
         "SettingsStorage" => Some(("SettingsStorage", "SettingsStorages")),
+        "SessionParameter" => Some(("SessionParameter", "SessionParameters")),
         "StyleItem" => Some(("StyleItem", "StyleItems")),
         "Subsystem" => Some(("Subsystem", "Subsystems")),
         "WebService" => Some(("WebService", "WebServices")),
@@ -4519,6 +4521,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "141c7b66-d689-4c8e-ace8-b8e1d8c7fbaa",
             ),
             (
+                "Constant.АвтоматическиНастраиватьРазрешенияВПрофиляхБезопасности",
+                "9893e2d6-f3f8-4d73-bb06-19bf26d216ab",
+            ),
+            (
                 "CommonForm.ФормаОтчета",
                 "9d6d77a9-1f55-4162-93a5-14bb3f3febaf",
             ),
@@ -4565,6 +4571,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "SettingsStorage.ХранилищеВариантовОтчетов",
                 "14512818-58b0-44cc-b00d-d37913c57aad",
+            ),
+            (
+                "SessionParameter.АвторизованныйПользователь",
+                "5efc4bc4-b711-4620-8d2e-9d947c6cc141",
             ),
             (
                 "StyleItem.ВажнаяНадписьШрифт",
