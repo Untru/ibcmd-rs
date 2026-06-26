@@ -3546,6 +3546,7 @@ mod tests {
         std::fs::create_dir_all(root.join("WebServices/EnterpriseDataUpload_1_0_1_1/Ext"))
             .unwrap();
         std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_2_2/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_2_1/Ext")).unwrap();
 
         std::fs::copy(
             lab_root.join("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml"),
@@ -3630,6 +3631,16 @@ mod tests {
         std::fs::copy(
             lab_root.join("WebServices/Exchange_3_0_2_2/Ext/Module.bsl"),
             root.join("WebServices/Exchange_3_0_2_2/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/Exchange_3_0_2_1.xml"),
+            root.join("WebServices/Exchange_3_0_2_1.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/Exchange_3_0_2_1/Ext/Module.bsl"),
+            root.join("WebServices/Exchange_3_0_2_1/Ext/Module.bsl"),
         )
         .unwrap();
 
@@ -3732,6 +3743,16 @@ mod tests {
             "WebServices/Exchange_3_0_2_2/Ext/Module.bsl",
             SourceKind::Module,
             Some("WebServices/Exchange_3_0_2_2")
+        )));
+        assert!(files.contains(&(
+            "WebServices/Exchange_3_0_2_1.xml",
+            SourceKind::MetadataXml,
+            Some("WebServices/Exchange_3_0_2_1")
+        )));
+        assert!(files.contains(&(
+            "WebServices/Exchange_3_0_2_1/Ext/Module.bsl",
+            SourceKind::Module,
+            Some("WebServices/Exchange_3_0_2_1")
         )));
     }
 
