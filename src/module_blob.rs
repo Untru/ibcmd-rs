@@ -4385,6 +4385,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "ExchangePlanObject.ОбновлениеИнформационнойБазы",
+                "0bcfe249-60b0-40fe-bf8e-531749953e91",
+            ),
+            (
+                "ExchangePlanRef.ОбновлениеИнформационнойБазы",
+                "4676cf0b-d6fd-4c39-a5f0-43da2d37c210",
+            ),
+            (
+                "ExchangePlanSelection.ОбновлениеИнформационнойБазы",
+                "0a64a383-8e2c-435e-a2fa-f8fc69fad418",
+            ),
+            (
+                "ExchangePlanList.ОбновлениеИнформационнойБазы",
+                "7559cd4f-0728-442e-9593-02e845cea7fd",
+            ),
+            (
+                "ExchangePlanManager.ОбновлениеИнформационнойБазы",
+                "80a1960a-e4be-445e-8446-cfb59885e83e",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
