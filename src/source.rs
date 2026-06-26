@@ -2140,6 +2140,108 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_report_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-report-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Reports/БизнесПроцессы/Ext/Help")).unwrap();
+        std::fs::create_dir_all(root.join("Reports/БизнесПроцессы/Templates/Макет/Ext")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы.xml"),
+            root.join("Reports/БизнесПроцессы.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы/Ext/Help.xml"),
+            root.join("Reports/БизнесПроцессы/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы/Ext/ManagerModule.bsl"),
+            root.join("Reports/БизнесПроцессы/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы/Ext/ObjectModule.bsl"),
+            root.join("Reports/БизнесПроцессы/Ext/ObjectModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы/Ext/Help/ru.html"),
+            root.join("Reports/БизнесПроцессы/Ext/Help/ru.html"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы/Templates/Макет.xml"),
+            root.join("Reports/БизнесПроцессы/Templates/Макет.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Reports/БизнесПроцессы/Templates/Макет/Ext/Template.xml"),
+            root.join("Reports/БизнесПроцессы/Templates/Макет/Ext/Template.xml"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы.xml",
+            SourceKind::MetadataXml,
+            Some("Reports/БизнесПроцессы")
+        )));
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("Reports/БизнесПроцессы")
+        )));
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы/Ext/ManagerModule.bsl",
+            SourceKind::Module,
+            Some("Reports/БизнесПроцессы")
+        )));
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы/Ext/ObjectModule.bsl",
+            SourceKind::Module,
+            Some("Reports/БизнесПроцессы")
+        )));
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы/Ext/Help/ru.html",
+            SourceKind::Other,
+            Some("Reports/БизнесПроцессы")
+        )));
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы/Templates/Макет.xml",
+            SourceKind::Template,
+            Some("Reports/БизнесПроцессы")
+        )));
+        assert!(files.contains(&(
+            "Reports/БизнесПроцессы/Templates/Макет/Ext/Template.xml",
+            SourceKind::Template,
+            Some("Reports/БизнесПроцессы")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
