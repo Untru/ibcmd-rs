@@ -79,6 +79,8 @@ client session, transaction boundaries and object/table names.
   `CommonCommands`, `Constants`, `WebServices`, and `XDTOPackages`.
 - Trace analysis enrichment for duration, rows, session metadata, object names,
   table names, and transaction boundaries.
+- Storage mapping now groups observed SQL by mutation kind, stage role,
+  operation family, signal, and table name.
 
 ### Target Surface
 
@@ -105,54 +107,60 @@ For each family, the implementation should cover:
 - source-folder classification;
 - object identity and UUID resolution;
 - owned subtrees such as `Ext`, `Forms`, `Commands`, `Templates`, `Rights`,
-  `Schedule`, `CommandInterface`, and package/blob assets;
+  `Schedule`, `CommandInterface`, `Flowchart`, and package/blob assets;
 - blob packing or header patching where the platform stores generated binary
   payloads instead of plain XML.
 
 ### Remaining Work
 
-1. Finish the metadata registry in `module_blob.rs` so every supported family
-   has an explicit source-folder mapping, type-prefix mapping, and UUID/source
-   resolution path.
-   - Keep the families already covered by the current code and tests.
-   - Extend cross-object resolution for `CommonPicture`, `DefinedType`,
-     `CommandGroup`, `CommonCommand`, `SettingsStorage`, `FunctionalOption`,
-     `FunctionalOptionsParameter`, `EventSubscription`, `FilterCriterion`,
-     `HTTPService`, `WebService`, `Language`, `Role`, `ScheduledJob`,
-     `StyleItem`, and `XDTOPackage`.
-   - Cover nested service subtrees and object-owned children, including
-     `Forms`, `Commands`, `Templates`, `Ext`, `Rights`, `Schedule`,
-     `CommandInterface`, `Package.bin`, `Picture.svg`, `Picture.zip`, and
-     object-specific XML assets.
-2. Add family-specific blob packers for layouts that are not just header
-   patches.
-   - Keep the simple patchers for `Constant`, `SessionParameter`,
-     `SettingsStorage`, `DefinedType`, `CommonCommand`, and `CommandGroup`.
-   - Add the remaining object-shaped packers for form/template/rights-style
-     subtrees and any metadata family whose binary payload is versioned or
-     structurally encoded.
-   - Preserve untouched fields exactly so the output stays stable across
-     round-trips.
-3. Add round-trip tests for every supported family.
-   - Use one real XML sample from `lab/` per family.
-   - Use one synthetic base blob per layout to prove header patching is
-     independent of the source content.
-   - Add negative tests for unsupported combinations so regressions fail fast.
-4. Expand source-manifest coverage to every remaining folder layout.
-   - Include nested `Ext/` subfiles, object-owned `Forms`, `Commands`, and
-     `Templates` folders, service subtrees, and binary assets.
-   - Add regressions for roots that can exist both as standalone objects and as
+1. Finish the source and UUID registry in `module_blob.rs`.
+   - Keep the current mappings for `Constant`, `SessionParameter`,
+     `SettingsStorage`, `DefinedType`, `CommonCommand`, `CommandGroup`,
+     `CommonPicture`, `FunctionalOption`, `FunctionalOptionsParameter`,
+     `EventSubscription`, `HTTPService`, `WebService`, `ScheduledJob`,
+     `StyleItem`, `Role`, `Language`, and `XDTOPackage`.
+   - Fill the remaining family-to-folder and family-to-reference mappings for
+     `Catalogs`, `Documents`, `Registers`, `Charts`, `Reports`,
+     `DataProcessors`, `Enums`, `ExchangePlans`, `FilterCriteria`,
+     `BusinessProcesses`, `Tasks`, `Subsystems`, and the remaining owned
+     children under `Forms`, `Commands`, `Templates`, `Ext`, `Rights`,
+     `Schedule`, `CommandInterface`, `Flowchart`, and binary assets.
+2. Add the missing blob packers and header patchers.
+   - Keep the current packers for `CommonModule`, `Constant`,
+     `SessionParameter`, `DefinedType`, `CommonCommand`, and `CommandGroup`.
+   - Add packers for object-shaped metadata whose payload is more than a flat
+     header patch, including form/template/rights-like subtrees and binary
+     payload owners such as `CommonPicture`, `WebService`, `HTTPService`,
+     `ScheduledJob`, `SettingsStorage`, `XDTOPackage`, and service-specific
+     assets.
+   - Preserve untouched fields exactly so round-trips stay stable.
+3. Expand source-manifest coverage to every remaining folder layout.
+   - Cover nested `Ext/` files, object-owned `Forms`, `Commands`,
+     `Templates`, `Rights`, `Schedule`, `CommandInterface`, `Flowchart`,
+     package binaries, and picture assets.
+   - Add regressions for roots that appear both as standalone objects and as
      subtrees under another object.
-5. Lock the write path with trace-analysis regressions for the SQL patterns that
-   matter to the load experiments.
+4. Add stage builders for the remaining object families in `mssql.rs`.
+   - Build explicit staging paths for the business-object families:
+     `Catalogs`, `Documents`, `InformationRegisters`, `AccumulationRegisters`,
+     `AccountingRegisters`, `CalculationRegisters`,
+     `ChartsOfCharacteristicTypes`, `ChartsOfAccounts`,
+     `ChartsOfCalculationTypes`, `ChartsOfCalculationRegisters`,
+     `DocumentJournals`, `Reports`, `DataProcessors`, `Enums`,
+     `ExchangePlans`, `FilterCriteria`, and `BusinessProcesses`.
+   - Add per-family logic for the metadata-only objects that still need
+     staging coverage beyond the current common-module and generic metadata
+     paths.
+5. Lock the write path with trace-analysis regressions for the SQL patterns
+   that matter to the load experiments.
    - no-op load
    - module-body-only change
    - metadata-attribute change
    - new object insert
 6. Run the four experiments against disposable databases and record the SQL
    table-touch set for each platform build we want to support.
-7. Compare the SQL traces and timings against `ibcmd` and mark the remaining
-   divergence by family, operation, and platform version.
+7. Compare the SQL traces and timings against `ibcmd` and mark divergence by
+   family, operation, and platform version.
 8. Turn the experimental results into an implementation matrix so future
    platform upgrades only require filling specific gaps, not rediscovering the
    whole model.
@@ -166,8 +174,8 @@ For each family, the implementation should cover:
 
 ### Delivery Order
 
-1. Finish the type-prefix map and source resolution.
-2. Add the remaining blob packers.
+1. Finish the family-to-folder and family-to-reference maps.
+2. Add the remaining blob packers and staging builders.
 3. Lock the coverage with tests and fixtures.
 4. Re-run the trace experiments and compare against `ibcmd`.
 5. Fill the compatibility matrix and performance notes.
