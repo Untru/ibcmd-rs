@@ -574,7 +574,7 @@ fn extract_metadata_source_xml(
         let xml = format_constant_source_xml(&header, &constant).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    if object_code == 0 {
+    if object_code == 0 && is_defined_type_metadata_text(text, uuid) {
         let header = parse_metadata_header_from_text(text, uuid)?;
         let defined_type = parse_defined_type_properties_from_text(text, uuid, type_index)?;
         let relative_path = PathBuf::from("DefinedTypes")
@@ -621,11 +621,20 @@ fn metadata_source_for_text(
     let header_index = metadata_header_field_index(&fields, uuid);
 
     match code {
+        0 if header_index == Some(1) && field_starts_with(fields.get(2), "{0,") => {
+            Some(("FunctionalOptionsParameter", "FunctionalOptionsParameters"))
+        }
         1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
             Some(("EventSubscription", "EventSubscriptions"))
         }
         1 if header_index == Some(1) && field_starts_with(fields.get(1), "{2,") => {
             Some(("SessionParameter", "SessionParameters"))
+        }
+        2 if header_index == Some(1)
+            && fields.get(2).copied().and_then(parse_uuid_field).is_some()
+            && field_starts_with(fields.get(3), "{0,") =>
+        {
+            Some(("FunctionalOption", "FunctionalOptions"))
         }
         5 => Some(("CommonAttribute", "CommonAttributes")),
         6 => Some(("Role", "Roles")),
@@ -655,6 +664,14 @@ fn metadata_source_for_text(
 
 fn is_typed_metadata_source(kind: &str) -> bool {
     matches!(kind, "SessionParameter" | "CommonAttribute")
+}
+
+fn is_defined_type_metadata_text(text: &str, uuid: &str) -> bool {
+    let Some(fields) = metadata_object_fields(text) else {
+        return false;
+    };
+    metadata_header_field_index(&fields, uuid) == Some(3)
+        && field_starts_with(fields.get(4), r#"{"Pattern""#)
 }
 
 fn metadata_object_fields(text: &str) -> Option<Vec<&str>> {
@@ -1910,6 +1927,56 @@ mod tests {
         assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
         assert!(xml.contains("<v8:Length>50</v8:Length>"));
         assert!(xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"));
+        assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_functional_option_xml_from_metadata_blob() {
+        let uuid = "44444444-4444-4444-8444-444444444444";
+        let location_uuid = "55555555-5555-4555-8555-555555555555";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{location_uuid},\r\n{{0,0}},1}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("FunctionalOptions").join("UseFeature.xml")
+        );
+        assert_eq!(properties.kind, "FunctionalOption");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "UseFeature");
+        assert_eq!(properties.comment, "Feature flag");
+        assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_functional_options_parameter_xml_without_confusing_defined_type() {
+        let uuid = "66666666-6666-4666-8666-666666666666";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeatureFor\",{{1,\"en\",\"Use feature for\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{0,1,\r\n{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,\r\n{{1,77777777-7777-4777-8777-777777777777}}\r\n}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("FunctionalOptionsParameters").join("UseFeatureFor.xml")
+        );
+        assert_eq!(properties.kind, "FunctionalOptionsParameter");
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "UseFeatureFor");
         assert!(!repacked.blob.is_empty());
     }
 
