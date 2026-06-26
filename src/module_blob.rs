@@ -2724,7 +2724,10 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
             "ChartOfCalculationRegisters",
             "ChartsOfCalculationRegisters",
         )),
+        "CommonCommand" => Some(("CommonCommand", "CommonCommands")),
+        "CommonPicture" => Some(("CommonPicture", "CommonPictures")),
         "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
+        "CommandGroup" => Some(("CommandGroup", "CommandGroups")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
         "FilterCriterion" => Some(("FilterCriterion", "FilterCriteria")),
         "FunctionalOption" => Some(("FunctionalOption", "FunctionalOptions")),
@@ -4818,6 +4821,22 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         ] {
             assert_eq!(
                 source.resolve_common_picture_uuid(reference).unwrap(),
+                expected_uuid
+            );
+        }
+
+        for (reference, expected_uuid) in [
+            (
+                "CommonCommand.АвтономнаяРабота",
+                "75ffd0b9-79be-4600-a310-591fddb6d63e",
+            ),
+            (
+                "CommandGroup.Органайзер",
+                "c59e11f3-6bcb-404a-9d76-1416c12be354",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_reference_uuid(reference).unwrap(),
                 expected_uuid
             );
         }
