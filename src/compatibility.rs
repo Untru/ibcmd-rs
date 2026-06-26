@@ -99,7 +99,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             OperationSupport {
                 name: "mssql-stage-*",
                 status: SupportStatus::Partial,
-                detail: "Common-module, metadata-object, and simple metadata staging are implemented; broader family coverage remains under research.",
+                detail: "Common-module, generic metadata, and explicit family wrappers are implemented for the supported surface; deeper blob-model work and parity experiments remain under research.",
             },
             OperationSupport {
                 name: "ibcmd comparison matrix",
@@ -157,14 +157,18 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "CommonCommand",
             "CommandGroup",
             "CommonModule",
+            "AccumulationRegister",
+            "AccountingRegister",
+            "CalculationRegister",
+            "ChartOfAccounts",
+            "ChartOfCalculationTypes",
+            "ChartOfCalculationRegisters",
+            "ChartOfCharacteristicTypes",
             "Language",
             "CommonPicture",
             "CommonForm",
             "CommonTemplate",
             "CommonAttribute",
-            "ChartOfCharacteristicTypes",
-            "ChartOfCalculationTypes",
-            "ChartOfCalculationRegisters",
             "DocumentJournal",
             "Report",
             "DataProcessor",
@@ -285,6 +289,10 @@ mod tests {
                 .supported_metadata_families
                 .contains(&"ChartOfCalculationRegisters")
         );
+        assert!(report.supported_metadata_families.contains(&"AccumulationRegister"));
+        assert!(report.supported_metadata_families.contains(&"AccountingRegister"));
+        assert!(report.supported_metadata_families.contains(&"CalculationRegister"));
+        assert!(report.supported_metadata_families.contains(&"ChartOfAccounts"));
         assert!(
             report
                 .supported_metadata_families
