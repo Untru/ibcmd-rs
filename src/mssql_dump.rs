@@ -355,6 +355,10 @@ struct DefinedTypeProperties {
     value_types: Vec<ConstantValueType>,
 }
 
+struct TypedMetadataProperties {
+    value_types: Vec<ConstantValueType>,
+}
+
 enum ConstantValueType {
     Boolean,
     String {
@@ -584,7 +588,12 @@ fn extract_metadata_source_xml(
     let relative_path = PathBuf::from(folder)
         .join(sanitize_source_path_segment(&header.name))
         .with_extension("xml");
-    let xml = format_metadata_source_xml(kind, &header).into_bytes();
+    let xml = if is_typed_metadata_source(kind) {
+        let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
+        format_typed_metadata_source_xml(kind, &header, &typed).into_bytes()
+    } else {
+        format_metadata_source_xml(kind, &header).into_bytes()
+    };
 
     Some(ExtractedMetadataSourceXml { relative_path, xml })
 }
@@ -615,6 +624,10 @@ fn metadata_source_for_text(
         1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
             Some(("EventSubscription", "EventSubscriptions"))
         }
+        1 if header_index == Some(1) && field_starts_with(fields.get(1), "{2,") => {
+            Some(("SessionParameter", "SessionParameters"))
+        }
+        5 => Some(("CommonAttribute", "CommonAttributes")),
         6 => Some(("Role", "Roles")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
         17 => Some(("DataProcessor", "DataProcessors")),
@@ -638,6 +651,10 @@ fn metadata_source_for_text(
         57 => Some(("Catalog", "Catalogs")),
         _ => None,
     }
+}
+
+fn is_typed_metadata_source(kind: &str) -> bool {
+    matches!(kind, "SessionParameter" | "CommonAttribute")
 }
 
 fn metadata_object_fields(text: &str) -> Option<Vec<&str>> {
@@ -717,10 +734,7 @@ fn parse_constant_properties_from_text(
 ) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
-    let typed_object_start = text[..marker_start].rfind("{2,")?;
-    let typed_fields = split_1c_braced_fields(text, typed_object_start)?;
-    let type_pattern = typed_fields.get(2)?;
-    let mut value_types = parse_metadata_type_pattern(type_pattern, type_index)?;
+    let mut value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
     if value_types.len() != 1 {
         return None;
     }
@@ -734,6 +748,31 @@ fn parse_constant_properties_from_text(
         value_type,
         use_standard_commands,
     })
+}
+
+fn parse_typed_metadata_properties_from_text(
+    text: &str,
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<TypedMetadataProperties> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let value_types = parse_typed_metadata_value_types_before(text, marker_start, type_index)?;
+    if value_types.is_empty() {
+        return None;
+    }
+
+    Some(TypedMetadataProperties { value_types })
+}
+
+fn parse_typed_metadata_value_types_before(
+    text: &str,
+    marker_start: usize,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let typed_object_start = text[..marker_start].rfind("{2,")?;
+    let typed_fields = split_1c_braced_fields(text, typed_object_start)?;
+    parse_metadata_type_pattern(typed_fields.get(2)?, type_index)
 }
 
 fn parse_defined_type_properties_from_text(
@@ -1046,6 +1085,23 @@ fn format_defined_type_source_xml(
         "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
     );
     let insert = format_metadata_types_xml(&defined_type.value_types);
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_typed_metadata_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    typed: &TypedMetadataProperties,
+) -> String {
+    let mut xml = format_metadata_source_xml(kind, header).replace(
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
+    );
+    let insert = format_metadata_types_xml(&typed.value_types);
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
@@ -1797,6 +1853,63 @@ mod tests {
         assert_eq!(properties.comment, "Feature flag");
         assert!(String::from_utf8_lossy(&extracted.xml).contains("xs:boolean"));
         assert!(String::from_utf8_lossy(&extracted.xml).contains("<UseStandardCommands>true"));
+        assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_session_parameter_xml_with_type_from_metadata_blob() {
+        let uuid = "11111111-1111-4111-8111-111111111111";
+        let catalog_ref_type_id = "22222222-2222-4222-8222-222222222222";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"CurrentUser\",{{1,\"en\",\"Current user\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"#\",{catalog_ref_type_id}}}}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let type_index = BTreeMap::from([(
+            catalog_ref_type_id.to_string(),
+            "cfg:CatalogRef.Users".to_string(),
+        )]);
+
+        let extracted = extract_metadata_source_xml(&blob, uuid, &type_index).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("SessionParameters").join("CurrentUser.xml")
+        );
+        assert_eq!(properties.kind, "SessionParameter");
+        assert_eq!(properties.uuid, uuid);
+        assert!(xml.contains("<v8:Type>cfg:CatalogRef.Users</v8:Type>"));
+        assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_common_attribute_xml_with_type_from_metadata_blob() {
+        let uuid = "33333333-3333-4333-8333-333333333333";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"S\",50,1}}}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid, &BTreeMap::new()).unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("CommonAttributes").join("ExternalCode.xml")
+        );
+        assert_eq!(properties.kind, "CommonAttribute");
+        assert_eq!(properties.uuid, uuid);
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
+        assert!(xml.contains("<v8:Length>50</v8:Length>"));
+        assert!(xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"));
         assert!(!repacked.blob.is_empty());
     }
 
