@@ -351,6 +351,9 @@ enum SourceAssetKind {
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
+    PredefinedData {
+        xsi_type: &'static str,
+    },
     RoleRights {
         object_refs: BTreeMap<String, String>,
         field_refs: BTreeMap<String, String>,
@@ -651,6 +654,19 @@ fn source_assets_from_metadata_blob_inner(
                     kind: SourceAssetKind::Help,
                 },
             ));
+            continue;
+        }
+        if let Some(xsi_type) = predefined_data_xsi_type(kind)
+            && let Ok(predefined_bytes) = decode_hex(&body_row.binary_hex)
+            && parse_predefined_data_blob(&predefined_bytes).is_some()
+        {
+            assets.push((
+                (*body_id).to_string(),
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("Predefined.xml"),
+                    kind: SourceAssetKind::PredefinedData { xsi_type },
+                },
+            ));
         }
     }
 
@@ -789,6 +805,21 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, content)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::PredefinedData { xsi_type } => {
+            let items = parse_predefined_data_blob(bytes).with_context(|| {
+                format!(
+                    "failed to extract predefined data from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, format_predefined_data_xml(xsi_type, &items))
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
         SourceAssetKind::RoleRights {
             object_refs,
             field_refs,
@@ -851,6 +882,16 @@ struct HelpContent {
 struct CommandInterfaceEntry {
     name: String,
     common: bool,
+}
+
+#[derive(Clone)]
+struct PredefinedItem {
+    id: String,
+    name: String,
+    code: String,
+    description: String,
+    is_folder: bool,
+    children: Vec<PredefinedItem>,
 }
 
 struct RoleRights {
@@ -1934,6 +1975,143 @@ fn parse_help_blob(bytes: &[u8]) -> Option<HelpContent> {
     Some(HelpContent { pages, files })
 }
 
+fn predefined_data_xsi_type(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Catalog" => Some("CatalogPredefinedItems"),
+        "ChartOfCharacteristicTypes" => Some("PlanOfCharacteristicKindPredefinedItems"),
+        _ => None,
+    }
+}
+
+fn parse_predefined_data_blob(bytes: &[u8]) -> Option<Vec<PredefinedItem>> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let table_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let root_items = table_fields
+        .iter()
+        .find_map(|field| parse_predefined_rowset_roots(field))?;
+    if let [root_item] = root_items.as_slice()
+        && root_item.name == "Элементы"
+    {
+        Some(root_item.children.clone())
+    } else {
+        Some(root_items)
+    }
+}
+
+fn parse_predefined_rowset_roots(value: &str) -> Option<Vec<PredefinedItem>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    fields
+        .iter()
+        .find_map(|field| parse_predefined_children(field))
+}
+
+fn parse_predefined_item(value: &str) -> Option<PredefinedItem> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let value_count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    let value_start = 3usize;
+    let after_values = value_start.checked_add(value_count)?;
+    if fields.len() < after_values {
+        return None;
+    }
+
+    let id = parse_predefined_uuid_value(fields.get(value_start)?)?;
+    let is_folder = fields
+        .get(value_start + 1)
+        .and_then(|field| parse_predefined_bool_value(field))
+        .unwrap_or(false);
+    let name = fields
+        .get(value_start + 3)
+        .and_then(|field| parse_predefined_string_value(field))?;
+    let code = fields
+        .get(value_start + 4)
+        .and_then(|field| parse_predefined_string_value(field))
+        .unwrap_or_default();
+    let description = fields
+        .get(value_start + 5)
+        .and_then(|field| parse_predefined_string_value(field))
+        .unwrap_or_default();
+    let children = if fields
+        .get(after_values)
+        .is_some_and(|field| field.trim() == "1")
+    {
+        fields
+            .get(after_values + 1)
+            .and_then(|field| parse_predefined_children(field))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    Some(PredefinedItem {
+        id,
+        name,
+        code,
+        description,
+        is_folder,
+        children,
+    })
+}
+
+fn parse_predefined_children(value: &str) -> Option<Vec<PredefinedItem>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let children = fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_predefined_item(field))
+        .collect::<Vec<_>>();
+    if children.len() == count {
+        Some(children)
+    } else {
+        None
+    }
+}
+
+fn parse_predefined_uuid_value(value: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r##""#""## {
+        return None;
+    }
+    let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+    let uuid = ref_fields.get(1)?.trim();
+    parse_uuid_field(uuid)
+}
+
+fn parse_predefined_bool_value(value: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""B""# {
+        return None;
+    }
+    parse_1c_bool_flag(fields.get(1)?.trim())
+}
+
+fn parse_predefined_string_value(value: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""S""# {
+        return None;
+    }
+    fields
+        .get(1)
+        .and_then(|field| parse_1c_quoted_string_with_len(field.trim()))
+        .map(|(value, _)| value)
+}
+
 fn extract_ext_picture(bytes: &[u8]) -> Result<Vec<u8>> {
     let inflated = inflate_raw_deflate(bytes)?;
     if let Ok(text) = std::str::from_utf8(&inflated)
@@ -2044,6 +2222,43 @@ fn format_help_xml(pages: &[HelpPage]) -> String {
     }
     xml.push_str("</Help>\r\n");
     xml
+}
+
+fn format_predefined_data_xml(xsi_type: &str, items: &[PredefinedItem]) -> String {
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<PredefinedData xmlns=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"{}\" version=\"2.20\">\r\n",
+        escape_xml_text(xsi_type)
+    );
+    for item in items {
+        push_predefined_item_xml(&mut xml, item, 1);
+    }
+    xml.push_str("</PredefinedData>\r\n");
+    xml
+}
+
+fn push_predefined_item_xml(xml: &mut String, item: &PredefinedItem, indent: usize) {
+    let tab = "\t".repeat(indent);
+    xml.push_str(&format!(
+        "{tab}<Item id=\"{}\">\r\n\
+{tab}\t<Name>{}</Name>\r\n\
+{tab}\t<Code>{}</Code>\r\n\
+{tab}\t<Description>{}</Description>\r\n\
+{tab}\t<IsFolder>{}</IsFolder>\r\n",
+        escape_xml_text(&item.id),
+        escape_xml_text(&item.name),
+        escape_xml_text(&item.code),
+        escape_xml_text(&item.description),
+        xml_bool(item.is_folder),
+    ));
+    if !item.children.is_empty() {
+        xml.push_str(&format!("{tab}\t<ChildItems>\r\n"));
+        for child in &item.children {
+            push_predefined_item_xml(xml, child, indent + 2);
+        }
+        xml.push_str(&format!("{tab}\t</ChildItems>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</Item>\r\n"));
 }
 
 fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
@@ -5585,6 +5800,72 @@ mod tests {
         assert_eq!(
             help_row.source_asset_path.as_deref(),
             Some("Catalogs/Products/Ext/Help.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_predefined_data_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "ae135932-4f94-44df-92c1-c91f15a92848";
+        let folder_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let item_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let predefined = deflate_for_test(
+            format!(
+                "{{0,{{1,{{7}},{{2,{{1,1,{{2,0,5,{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Элементы\"}},{{\"S\",\"\"}},1,{{1,1,{{2,1,7,{{\"#\",{type_uuid},{{1,{folder_uuid}}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Folder\"}},{{\"S\",\"F\"}},{{\"S\",\"Folder description\"}},{{\"N\",0}},1,{{1,1,{{2,2,7,{{\"#\",{type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Item\"}},{{\"S\",\"I\"}},{{\"S\",\"Item description\"}},{{\"N\",0}},0}}}}}}}}}}}}}},-1,3}}}}"
+            )
+            .as_bytes(),
+        );
+        assert!(parse_predefined_data_blob(&predefined).is_some());
+        let rows = vec![
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{catalog_uuid}.1c"),
+                part_no: 0,
+                data_size: predefined.len() as i64,
+                binary_hex: encode_hex_for_test(&predefined),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("Catalogs/Products/Ext/Predefined.xml")).unwrap();
+        assert!(xml.contains(r#"xsi:type="CatalogPredefinedItems""#));
+        assert!(xml.contains(&format!(r#"<Item id="{folder_uuid}">"#)));
+        assert!(xml.contains("<Name>Folder</Name>"));
+        assert!(xml.contains("<Code>F</Code>"));
+        assert!(xml.contains("<Description>Folder description</Description>"));
+        assert!(xml.contains("<IsFolder>true</IsFolder>"));
+        assert!(xml.contains(&format!(r#"<Item id="{item_uuid}">"#)));
+        assert!(xml.contains("<Name>Item</Name>"));
+        assert!(xml.contains("<IsFolder>false</IsFolder>"));
+        let predefined_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{catalog_uuid}.1c"))
+            .unwrap();
+        assert_eq!(
+            predefined_row.source_asset_path.as_deref(),
+            Some("Catalogs/Products/Ext/Predefined.xml")
         );
 
         let _ = fs::remove_dir_all(root);
