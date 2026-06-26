@@ -785,6 +785,7 @@ mod tests {
     <action name="session_id"><value>41</value></action>
     <action name="transaction_id"><value>111</value></action>
     <action name="object_name"><value>sp_executesql</value></action>
+    <action name="attach_activity_id"><value>aa-1</value></action>
   </event>
   <event name="sql_statement_completed">
     <data name="duration"><value>17</value></data>
@@ -793,6 +794,7 @@ mod tests {
     <action name="session_id"><value>41</value></action>
     <action name="transaction_id"><value>111</value></action>
     <action name="object_name"><value>sp_executesql</value></action>
+    <action name="attach_activity_id"><value>aa-2</value></action>
   </event>
   <event name="sql_statement_completed">
     <data name="duration"><value>19</value></data>
@@ -801,6 +803,7 @@ mod tests {
     <action name="session_id"><value>41</value></action>
     <action name="transaction_id"><value>111</value></action>
     <action name="object_name"><value>sp_executesql</value></action>
+    <action name="attach_activity_id"><value>aa-3</value></action>
   </event>
   <event name="sql_statement_completed">
     <data name="duration"><value>23</value></data>
@@ -809,6 +812,7 @@ mod tests {
     <action name="session_id"><value>41</value></action>
     <action name="transaction_id"><value>111</value></action>
     <action name="object_name"><value>sp_executesql</value></action>
+    <action name="attach_activity_id"><value>aa-4</value></action>
   </event>
   <event name="sql_statement_completed">
     <data name="duration"><value>3</value></data>
@@ -841,6 +845,7 @@ mod tests {
             .unwrap();
         assert_eq!(noop.count, 1);
         assert_eq!(noop.table_names, vec!["ConfigSave".to_string()]);
+        assert_eq!(noop.object_names, vec!["sp_executesql".to_string()]);
         assert_eq!(noop.begin_transaction_count, 0);
         assert_eq!(noop.commit_transaction_count, 0);
 
@@ -855,6 +860,7 @@ mod tests {
             .unwrap();
         assert_eq!(body_change.count, 1);
         assert_eq!(body_change.table_names, vec!["ConfigSave".to_string()]);
+        assert_eq!(body_change.object_names, vec!["sp_executesql".to_string()]);
 
         let attr_change = analysis
             .groups
@@ -867,6 +873,7 @@ mod tests {
             .unwrap();
         assert_eq!(attr_change.count, 1);
         assert_eq!(attr_change.table_names, vec!["ConfigSave".to_string()]);
+        assert_eq!(attr_change.object_names, vec!["sp_executesql".to_string()]);
 
         let insert = analysis
             .groups
@@ -875,6 +882,7 @@ mod tests {
             .unwrap();
         assert_eq!(insert.count, 1);
         assert_eq!(insert.table_names, vec!["ConfigSave".to_string()]);
+        assert_eq!(insert.object_names, vec!["sp_executesql".to_string()]);
 
         let begin = analysis
             .groups
