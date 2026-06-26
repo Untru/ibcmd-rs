@@ -2066,6 +2066,42 @@ mod tests {
     }
 
     #[test]
+    fn builds_common_module_batch_stage_sql_with_multiple_modules() {
+        let prepared = vec![
+            PreparedCommonModuleStage {
+                spec: CommonModuleStageSpec {
+                    module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                    text: PathBuf::from("CommonModules/Batch/One/Ext/Module.bsl"),
+                },
+                module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+                text_bytes: 11,
+                blob: vec![0x11, 0x22, 0x33],
+                blob_sha256: "facefeed".to_string(),
+            },
+            PreparedCommonModuleStage {
+                spec: CommonModuleStageSpec {
+                    module_id: "dddddddd-dddd-4ddd-dddd-dddddddddddd".to_string(),
+                    text: PathBuf::from("CommonModules/Batch/Two/Ext/Module.bsl"),
+                },
+                module_body_id: "dddddddd-dddd-4ddd-dddd-dddddddddddd.0".to_string(),
+                text_bytes: 13,
+                blob: vec![0x44, 0x55, 0x66],
+                blob_sha256: "beadfeed".to_string(),
+            },
+        ];
+
+        let sql = super::build_stage_common_modules_sql("TestDb", &prepared, &[0xDD, 0xEE]);
+
+        assert!(sql.contains("IF @@ROWCOUNT <> 4 THROW 51000"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 51001"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 51002"));
+        assert!(sql.contains("0x112233"));
+        assert!(sql.contains("0x445566"));
+        assert!(sql.contains("0xDDEE"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 7"));
+    }
+
+    #[test]
     fn rejects_non_lab_destructive_actions_without_confirmation() {
         let error = require_non_lab_confirmation(false, "storage import").unwrap_err();
         assert!(error.to_string().contains("--allow-non-lab"));
