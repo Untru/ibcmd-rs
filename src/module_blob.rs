@@ -2721,6 +2721,8 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
     match prefix {
         "AccumulationRegister" => Some(("AccumulationRegister", "AccumulationRegisters")),
         "AccountingRegister" => Some(("AccountingRegister", "AccountingRegisters")),
+        "BusinessProcess" => Some(("BusinessProcess", "BusinessProcesses")),
+        "Catalog" => Some(("Catalog", "Catalogs")),
         "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
         "CommonForm" => Some(("CommonForm", "CommonForms")),
         "CalculationRegister" => Some(("CalculationRegister", "CalculationRegisters")),
@@ -2735,6 +2737,8 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "CommonTemplate" => Some(("CommonTemplate", "CommonTemplates")),
         "Constant" => Some(("Constant", "Constants")),
         "DefinedType" => Some(("DefinedType", "DefinedTypes")),
+        "DataProcessor" => Some(("DataProcessor", "DataProcessors")),
+        "Document" => Some(("Document", "Documents")),
         "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
         "CommandGroup" => Some(("CommandGroup", "CommandGroups")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
@@ -2745,12 +2749,15 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         }
         "HTTPService" => Some(("HTTPService", "HTTPServices")),
         "Language" => Some(("Language", "Languages")),
+        "InformationRegister" => Some(("InformationRegister", "InformationRegisters")),
         "Role" => Some(("Role", "Roles")),
         "ScheduledJob" => Some(("ScheduledJob", "ScheduledJobs")),
         "SettingsStorage" => Some(("SettingsStorage", "SettingsStorages")),
         "SessionParameter" => Some(("SessionParameter", "SessionParameters")),
+        "Report" => Some(("Report", "Reports")),
         "StyleItem" => Some(("StyleItem", "StyleItems")),
         "Subsystem" => Some(("Subsystem", "Subsystems")),
+        "Task" => Some(("Task", "Tasks")),
         "WebService" => Some(("WebService", "WebServices")),
         "XDTOPackage" => Some(("XDTOPackage", "XDTOPackages")),
         "Enum" => Some(("Enum", "Enums")),
@@ -4589,6 +4596,15 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "DefinedType.Пользователь",
                 "a72517c3-8c91-4e40-81ac-83c762789e87",
+            ),
+            ("Catalog.РолиИсполнителей", "45c0003f-0ed7-4582-b84e-217fdc4ddeaf"),
+            (
+                "Document.ЭлектронноеПисьмоИсходящее",
+                "8f2b8a8e-4cd3-45e3-89ae-1cc4bd0ff30a",
+            ),
+            (
+                "InformationRegister.ДополнительныеСведения",
+                "3ad5d8a7-3071-46aa-aebf-306bdb67983b",
             ),
             (
                 "StyleItem.ВажнаяНадписьШрифт",
