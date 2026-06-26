@@ -18,6 +18,20 @@ pub enum StorageMutationKind {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageStageRole {
+    ConfigHeader,
+    ConfigVersion,
+    ConfigModuleBody,
+    ConfigMetadata,
+    ConfigObject,
+    ConfigSaveGeneric,
+    Params,
+    TransactionBoundary,
+    Other,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StorageMappingReport {
     pub files: Vec<PathBuf>,
@@ -25,12 +39,20 @@ pub struct StorageMappingReport {
     pub mapped_groups: usize,
     pub unmapped_groups: usize,
     pub summaries: Vec<StorageMutationSummary>,
+    pub roles: Vec<StorageStageRoleSummary>,
     pub entries: Vec<StorageMappingEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StorageMutationSummary {
     pub kind: StorageMutationKind,
+    pub groups: usize,
+    pub total_duration_us: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StorageStageRoleSummary {
+    pub role: StorageStageRole,
     pub groups: usize,
     pub total_duration_us: u64,
 }
@@ -43,6 +65,7 @@ pub struct StorageMappingEntry {
     pub total_duration_us: u64,
     pub table_names: Vec<String>,
     pub kind: StorageMutationKind,
+    pub role: StorageStageRole,
     pub detail: String,
 }
 
@@ -57,11 +80,13 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             total_duration_us: group.total_duration_us,
             table_names: group.table_names.clone(),
             kind: classify_group(group),
+            role: classify_role(group),
             detail: classify_detail(group),
         })
         .collect::<Vec<_>>();
 
     let mut summaries = summarize_entries(&entries);
+    let mut roles = summarize_roles(&entries);
 
     entries.sort_by(|left, right| {
         right
@@ -90,6 +115,15 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             });
             summaries
         },
+        roles: {
+            roles.sort_by(|left, right| {
+                right
+                    .total_duration_us
+                    .cmp(&left.total_duration_us)
+                    .then_with(|| left.role.cmp(&right.role))
+            });
+            roles
+        },
         entries,
     }
 }
@@ -106,6 +140,25 @@ fn summarize_entries(entries: &[StorageMappingEntry]) -> Vec<StorageMutationSumm
         .map(
             |(kind, (groups, total_duration_us))| StorageMutationSummary {
                 kind,
+                groups,
+                total_duration_us,
+            },
+        )
+        .collect()
+}
+
+fn summarize_roles(entries: &[StorageMappingEntry]) -> Vec<StorageStageRoleSummary> {
+    let mut totals = std::collections::BTreeMap::<StorageStageRole, (usize, u64)>::new();
+    for entry in entries {
+        let value = totals.entry(entry.role).or_insert((0, 0));
+        value.0 += 1;
+        value.1 += entry.total_duration_us;
+    }
+    totals
+        .into_iter()
+        .map(
+            |(role, (groups, total_duration_us))| StorageStageRoleSummary {
+                role,
                 groups,
                 total_duration_us,
             },
@@ -169,6 +222,60 @@ fn classify_detail(group: &crate::trace::QueryGroup) -> String {
     }
 }
 
+fn classify_role(group: &crate::trace::QueryGroup) -> StorageStageRole {
+    let sql = group.normalized_sql.as_str();
+    let sample = group.sample_sql.as_str();
+    let sample_lower = sample.to_ascii_lowercase();
+
+    if sql == "begin transaction" || sql == "commit transaction" || sql == "rollback transaction" {
+        return StorageStageRole::TransactionBoundary;
+    }
+    if sql.starts_with("select count_big(*) from configsave") {
+        return StorageStageRole::ConfigHeader;
+    }
+    if sql.starts_with("merge into configsave") {
+        return StorageStageRole::ConfigObject;
+    }
+    if sql.starts_with("insert into configsave") {
+        if sample_lower.contains("n'root'") || sample_lower.contains("n'version'") {
+            return StorageStageRole::ConfigHeader;
+        }
+        if sample_lower.contains("n'module'") || sample_lower.contains("file_name = n'module'") {
+            return StorageStageRole::ConfigModuleBody;
+        }
+        if sample_lower.contains("n'metadata'") || sample_lower.contains("file_name = n'metadata'")
+        {
+            return StorageStageRole::ConfigMetadata;
+        }
+        if sample_lower.contains("n'newobject'") || sample_lower.contains("values (n'") {
+            return StorageStageRole::ConfigObject;
+        }
+        return StorageStageRole::ConfigSaveGeneric;
+    }
+    if sql.starts_with("update configsave set binarydata") {
+        if sample_lower.contains("file_name = n'module'") {
+            return StorageStageRole::ConfigModuleBody;
+        }
+        return StorageStageRole::ConfigSaveGeneric;
+    }
+    if sql.starts_with("update configsave set attributes") {
+        if sample_lower.contains("file_name = n'metadata'") {
+            return StorageStageRole::ConfigMetadata;
+        }
+        return StorageStageRole::ConfigSaveGeneric;
+    }
+    if sql.starts_with("delete from configsave") {
+        return StorageStageRole::ConfigSaveGeneric;
+    }
+    if sql.starts_with("insert into params")
+        || sql.starts_with("update params")
+        || sql.starts_with("delete from params")
+    {
+        return StorageStageRole::Params;
+    }
+    StorageStageRole::Other
+}
+
 fn primary_table_detail(group: &crate::trace::QueryGroup, fallback: &str) -> String {
     if let Some(table) = group.table_names.first() {
         format!("{} {}", fallback, table)
@@ -179,7 +286,7 @@ fn primary_table_detail(group: &crate::trace::QueryGroup, fallback: &str) -> Str
 
 #[cfg(test)]
 mod tests {
-    use super::{StorageMutationKind, build_storage_mapping};
+    use super::{StorageMutationKind, StorageStageRole, build_storage_mapping};
     use crate::trace::{QueryGroup, TraceAnalysis};
 
     fn group(
@@ -218,7 +325,7 @@ mod tests {
     fn classifies_configsave_patterns() {
         let analysis = TraceAnalysis {
             files: vec!["trace.xml".into()],
-            events_seen: 5,
+            events_seen: 11,
             groups: vec![
                 group(
                     "select count_big(*) from configsave where file_name = ? and part_no = ?",
@@ -245,20 +352,55 @@ mod tests {
                     13,
                 ),
                 group(
+                    "update configsave set binarydata = 0x01 where file_name = N'Module' and part_no = 0",
+                    vec!["ConfigSave"],
+                    1,
+                    13,
+                ),
+                group(
+                    "update configsave set attributes = 0x02 where file_name = N'Metadata' and part_no = 0",
+                    vec!["ConfigSave"],
+                    1,
+                    13,
+                ),
+                group(
                     "merge into configsave as target using config as source on target.filename = source.filename when matched then update set target.binarydata = source.binarydata when not matched then insert (filename) values (source.filename)",
                     vec!["Config", "ConfigSave"],
                     1,
                     14,
                 ),
+                group(
+                    "insert into configsave (file_name, creation, modified, attributes, data_size, binarydata, part_no) select file_name, sysutcdatetime(), sysutcdatetime(), attributes, data_size, binarydata, part_no from config where file_name in (?, ?) and part_no = ?",
+                    vec!["ConfigSave"],
+                    1,
+                    15,
+                ),
+                group(
+                    "insert into configsave (file_name, creation, modified, attributes, data_size, binarydata, part_no) select file_name, sysutcdatetime(), sysutcdatetime(), attributes, data_size, binarydata, part_no from config where file_name = ? and part_no = ?",
+                    vec!["ConfigSave"],
+                    1,
+                    16,
+                ),
+                group(
+                    "insert into params (file_name, creation, modified, attributes, data_size, binarydata, part_no) values (?, sysutcdatetime(), sysutcdatetime(), ?, ?, ?, ?)",
+                    vec!["Params"],
+                    1,
+                    17,
+                ),
+                group("begin transaction", vec![], 1, 18),
             ],
         };
 
         let report = build_storage_mapping(&analysis);
-        assert_eq!(report.groups_seen, 5);
-        assert_eq!(report.mapped_groups, 5);
+        assert_eq!(report.groups_seen, 11);
+        assert_eq!(report.mapped_groups, 11);
         assert_eq!(report.unmapped_groups, 0);
-        assert_eq!(report.summaries.len(), 5);
-        assert_eq!(report.entries[0].kind, StorageMutationKind::ConfigSaveMerge);
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.kind == StorageMutationKind::ConfigSaveMerge)
+        );
         assert!(
             report
                 .entries
@@ -267,9 +409,57 @@ mod tests {
         );
         assert!(
             report
+                .entries
+                .iter()
+                .any(|entry| entry.role == StorageStageRole::ConfigModuleBody)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.role == StorageStageRole::ConfigMetadata)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.role == StorageStageRole::ConfigObject)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.role == StorageStageRole::Params)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.role == StorageStageRole::TransactionBoundary)
+        );
+        assert!(
+            report
                 .summaries
                 .iter()
                 .any(|summary| summary.kind == StorageMutationKind::ConfigSaveMerge)
+        );
+        assert!(
+            report
+                .summaries
+                .iter()
+                .any(|summary| summary.kind == StorageMutationKind::ParamsWrite)
+        );
+        assert!(
+            report
+                .roles
+                .iter()
+                .any(|summary| summary.role == StorageStageRole::ConfigObject)
+        );
+        assert!(
+            report
+                .roles
+                .iter()
+                .any(|summary| summary.role == StorageStageRole::TransactionBoundary)
         );
     }
 
@@ -285,5 +475,6 @@ mod tests {
         assert_eq!(report.mapped_groups, 0);
         assert_eq!(report.unmapped_groups, 1);
         assert_eq!(report.entries[0].kind, StorageMutationKind::Other);
+        assert_eq!(report.entries[0].role, StorageStageRole::Other);
     }
 }
