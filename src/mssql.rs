@@ -456,7 +456,14 @@ pub fn export_storage_bundle(args: &MssqlStorageExportArgs) -> Result<StorageBun
                 target.display()
             ));
         }
-        run_bcp_out(&args.bcp, &args.server, &args.database, table, &target)?;
+        run_bcp_out(
+            &args.bcp,
+            &args.server,
+            &args.database,
+            table,
+            &target,
+            args.bcp_trust_cert,
+        )?;
         let stats = storage_table_stats(&args.sqlcmd, &args.server, &args.database, table)?;
         tables.push(StorageTableManifest {
             table_name: table.to_string(),
@@ -512,7 +519,14 @@ pub fn import_storage_bundle(args: &MssqlStorageImportArgs) -> Result<StorageBun
         if !file.is_file() {
             return Err(anyhow!("bundle file not found: {}", file.display()));
         }
-        run_bcp_in(&args.bcp, &args.server, &args.database, table, &file)?;
+        run_bcp_in(
+            &args.bcp,
+            &args.server,
+            &args.database,
+            table,
+            &file,
+            args.bcp_trust_cert,
+        )?;
     }
 
     let after = storage_tables()
@@ -547,6 +561,7 @@ pub fn export_delta_bundle(args: &MssqlDeltaExportArgs) -> Result<DeltaBundleExp
         &args.database,
         "ConfigSave",
         &target,
+        args.bcp_trust_cert,
     )?;
     let table = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let rows = configsave_row_digests(&args.sqlcmd, &args.server, &args.database)?;
@@ -594,7 +609,14 @@ pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImp
     if !file.is_file() {
         return Err(anyhow!("bundle file not found: {}", file.display()));
     }
-    run_bcp_in(&args.bcp, &args.server, &args.database, "ConfigSave", &file)?;
+    run_bcp_in(
+        &args.bcp,
+        &args.server,
+        &args.database,
+        "ConfigSave",
+        &file,
+        args.bcp_trust_cert,
+    )?;
 
     let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     compare_storage_table_manifests(&manifest.table, &after)?;
@@ -2389,15 +2411,29 @@ fn run_sql_file(sqlcmd: &Path, server: &str, script: &Path) -> Result<()> {
     ))
 }
 
-fn run_bcp_out(bcp: &Path, server: &str, database: &str, table: &str, output: &Path) -> Result<()> {
+fn run_bcp_out(
+    bcp: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+    output: &Path,
+    trust_cert: bool,
+) -> Result<()> {
     let table_name = qualified_table(database, table);
-    let command = bcp_command(bcp, &table_name, "out", output, server);
+    let command = bcp_command(bcp, &table_name, "out", output, server, trust_cert);
     run_bcp(command)
 }
 
-fn run_bcp_in(bcp: &Path, server: &str, database: &str, table: &str, input: &Path) -> Result<()> {
+fn run_bcp_in(
+    bcp: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+    input: &Path,
+    trust_cert: bool,
+) -> Result<()> {
     let table_name = qualified_table(database, table);
-    let command = bcp_command(bcp, &table_name, "in", input, server);
+    let command = bcp_command(bcp, &table_name, "in", input, server, trust_cert);
     run_bcp(command)
 }
 
@@ -2407,6 +2443,7 @@ fn bcp_command(
     direction: &str,
     file: &Path,
     server: &str,
+    trust_cert: bool,
 ) -> Command {
     let mut command = Command::new(bcp);
     command
@@ -2416,10 +2453,13 @@ fn bcp_command(
         .arg("-S")
         .arg(server)
         .arg("-T")
-        .arg("-n")
-        .arg("-u")
-        .arg("-b")
-        .arg("1000");
+        .arg("-n");
+    // bcp 18+ needs -u (trust server certificate) for encrypted connections to
+    // a self-signed server; bcp 13 and earlier reject -u, so it stays opt-in.
+    if trust_cert {
+        command.arg("-u");
+    }
+    command.arg("-b").arg("1000");
     command
 }
 

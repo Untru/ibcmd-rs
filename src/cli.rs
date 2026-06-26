@@ -286,6 +286,11 @@ pub struct MssqlStorageExportArgs {
     /// bcp executable path.
     #[arg(long, default_value = "bcp")]
     pub bcp: PathBuf,
+    /// Pass bcp -u (trust server certificate). Needed for bcp 18+ over an
+    /// encrypted connection to a server with a self-signed certificate;
+    /// bcp 13 and earlier reject -u, so it must stay off there.
+    #[arg(long)]
+    pub bcp_trust_cert: bool,
     /// Replace existing bundle files.
     #[arg(long)]
     pub overwrite: bool,
@@ -308,6 +313,11 @@ pub struct MssqlStorageImportArgs {
     /// bcp executable path.
     #[arg(long, default_value = "bcp")]
     pub bcp: PathBuf,
+    /// Pass bcp -u (trust server certificate). Needed for bcp 18+ over an
+    /// encrypted connection to a server with a self-signed certificate;
+    /// bcp 13 and earlier reject -u, so it must stay off there.
+    #[arg(long)]
+    pub bcp_trust_cert: bool,
     /// Required confirmation: delete existing Config/ConfigSave/Params rows first.
     #[arg(long)]
     pub replace: bool,
@@ -333,6 +343,11 @@ pub struct MssqlDeltaExportArgs {
     /// bcp executable path.
     #[arg(long, default_value = "bcp")]
     pub bcp: PathBuf,
+    /// Pass bcp -u (trust server certificate). Needed for bcp 18+ over an
+    /// encrypted connection to a server with a self-signed certificate;
+    /// bcp 13 and earlier reject -u, so it must stay off there.
+    #[arg(long)]
+    pub bcp_trust_cert: bool,
     /// Replace existing bundle files.
     #[arg(long)]
     pub overwrite: bool,
@@ -355,6 +370,11 @@ pub struct MssqlDeltaImportArgs {
     /// bcp executable path.
     #[arg(long, default_value = "bcp")]
     pub bcp: PathBuf,
+    /// Pass bcp -u (trust server certificate). Needed for bcp 18+ over an
+    /// encrypted connection to a server with a self-signed certificate;
+    /// bcp 13 and earlier reject -u, so it must stay off there.
+    #[arg(long)]
+    pub bcp_trust_cert: bool,
     /// Delete existing ConfigSave rows before import.
     #[arg(long)]
     pub replace_config_save: bool,
