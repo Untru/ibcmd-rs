@@ -3464,6 +3464,43 @@ mod tests {
     }
 
     #[test]
+    fn patches_common_picture_metadata_blob_from_xml() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{3,
+{1,0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"OldPicture",
+{1,"ru","Old picture"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonPicture uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>NewPicture</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>New picture</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>New comment</Comment>
+    </Properties>
+  </CommonPicture>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert_eq!(packed.properties.kind, "CommonPicture");
+        assert!(inflated.as_bytes().starts_with(b"\xEF\xBB\xBF"));
+        assert!(inflated.contains("\"NewPicture\""));
+        assert!(inflated.contains("{1,\"ru\",\"New picture\"}"));
+        assert!(inflated.contains("\"New comment\""));
+    }
+
+    #[test]
     fn patches_constant_type_and_use_standard_commands() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
