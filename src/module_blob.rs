@@ -5188,10 +5188,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             "ibcmd-rs-module-types-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
+        std::fs::create_dir_all(root.join("Catalogs")).unwrap();
         std::fs::create_dir_all(root.join("AccumulationRegisters")).unwrap();
         std::fs::create_dir_all(root.join("AccountingRegisters")).unwrap();
         std::fs::create_dir_all(root.join("CalculationRegisters")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfAccounts")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfCharacteristicTypes")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationTypes")).unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters")).unwrap();
         std::fs::create_dir_all(root.join("BusinessProcesses")).unwrap();
@@ -5200,6 +5202,24 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         std::fs::create_dir_all(root.join("ExchangePlans")).unwrap();
         std::fs::create_dir_all(root.join("Reports")).unwrap();
 
+        std::fs::write(
+            root.join("Catalogs/РолиИсполнителей.Товары.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Catalog uuid="20202020-2020-4202-8202-202020202020">
+    <Properties>
+      <Name>РолиИсполнителей</Name>
+      <GeneratedTypes>
+        <GeneratedType name="CatalogTabularSection.РолиИсполнителей.Товары">
+          <TypeId>21212121-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </Catalog>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
         std::fs::write(
             root.join("AccumulationRegisters/Продажи.xml"),
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -5268,6 +5288,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
       </GeneratedTypes>
     </Properties>
   </ChartOfAccounts>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач.Товары.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCharacteristicTypes uuid="1b1b1b1b-1b1b-41b1-81b1-1b1b1b1b1b1b">
+    <Properties>
+      <Name>ОбъектыАдресацииЗадач</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ChartOfCharacteristicTypesTabularSection.ОбъектыАдресацииЗадач.Товары">
+          <TypeId>1c1c1c1c-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+        <GeneratedType name="ChartOfCharacteristicTypesTabularSectionRow.ОбъектыАдресацииЗадач.Товары">
+          <TypeId>1d1d1d1d-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </ChartOfCharacteristicTypes>
 </MetaDataObject>
 "#,
         )
@@ -5355,6 +5396,30 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     <Properties>
       <Name>АктОбУничтоженииПерсональныхДанных</Name>
       <GeneratedTypes>
+        <GeneratedType name="DocumentTabularSection.АктОбУничтоженииПерсональныхДанных.Товары">
+          <TypeId>1e1e1e1e-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+        <GeneratedType name="DocumentObject.АктОбУничтоженииПерсональныхДанных">
+          <TypeId>33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Documents/АктОбУничтоженииПерсональныхДанных.Товары.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <Document uuid="14141414-1414-4141-8141-141414141414">
+    <Properties>
+      <Name>АктОбУничтоженииПерсональныхДанных</Name>
+      <GeneratedTypes>
+        <GeneratedType name="DocumentTabularSection.АктОбУничтоженииПерсональныхДанных.Товары">
+          <TypeId>1e1e1e1e-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
         <GeneratedType name="DocumentObject.АктОбУничтоженииПерсональныхДанных">
           <TypeId>33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
         </GeneratedType>
@@ -5433,6 +5498,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "ffffffff-ffff-4fff-8fff-ffffffffffff",
             ),
             (
+                "CatalogTabularSection.РолиИсполнителей.Товары",
+                "21212121-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ChartOfCharacteristicTypesTabularSection.ОбъектыАдресацииЗадач.Товары",
+                "1c1c1c1c-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ChartOfCharacteristicTypesTabularSectionRow.ОбъектыАдресацииЗадач.Товары",
+                "1d1d1d1d-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
                 "BusinessProcessRef.Задание",
                 "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
@@ -5443,6 +5520,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "DocumentObject.АктОбУничтоженииПерсональныхДанных",
                 "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "DocumentTabularSection.АктОбУничтоженииПерсональныхДанных.Товары",
+                "1e1e1e1e-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
             (
                 "ExchangePlanObject.ОбновлениеИнформационнойБазы",
