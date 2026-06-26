@@ -4413,6 +4413,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "TaskObject.ЗадачаИсполнителя",
+                "edccd440-4634-484c-b31d-443ba8674912",
+            ),
+            (
+                "TaskRef.ЗадачаИсполнителя",
+                "526f0ebe-d70d-4909-8ae9-86bbabfa55da",
+            ),
+            (
+                "TaskSelection.ЗадачаИсполнителя",
+                "a29971a7-e94c-4876-b4de-5ba996cfef0d",
+            ),
+            (
+                "TaskList.ЗадачаИсполнителя",
+                "a3849f5f-312a-4950-a52e-ee3f915b5490",
+            ),
+            (
+                "TaskManager.ЗадачаИсполнителя",
+                "cb17d3c0-8e58-4bed-aea8-a6cc40c5bd74",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
