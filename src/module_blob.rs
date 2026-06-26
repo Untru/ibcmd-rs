@@ -2722,6 +2722,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "ScheduledJob" => Some(("ScheduledJob", "ScheduledJobs")),
         "SettingsStorage" => Some(("SettingsStorage", "SettingsStorages")),
         "StyleItem" => Some(("StyleItem", "StyleItems")),
+        "Subsystem" => Some(("Subsystem", "Subsystems")),
         "WebService" => Some(("WebService", "WebServices")),
         "XDTOPackage" => Some(("XDTOPackage", "XDTOPackages")),
         _ => None,
@@ -4262,6 +4263,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "DocumentJournal.Взаимодействия",
                 "7da57c89-af2c-445a-96f7-39250f70306f",
+            ),
+            (
+                "Subsystem.СтандартныеПодсистемы",
+                "0421b67e-ed26-491d-ab98-ec59002ed4ce",
             ),
         ] {
             assert_eq!(

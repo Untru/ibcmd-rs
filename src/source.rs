@@ -1379,6 +1379,88 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_subsystem_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-subsystem-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(
+            root.join("Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help"),
+        )
+        .unwrap();
+
+        std::fs::copy(
+            lab_root.join("Subsystems/СтандартныеПодсистемы.xml"),
+            root.join("Subsystems/СтандартныеПодсистемы.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом.xml"),
+            root.join("Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help.xml",
+            ),
+            root.join(
+                "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help.xml",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help/ru.html",
+            ),
+            root.join(
+                "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help/ru.html",
+            ),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "Subsystems/СтандартныеПодсистемы.xml",
+            SourceKind::MetadataXml,
+            Some("Subsystems/СтандартныеПодсистемы")
+        )));
+        assert!(files.contains(&(
+            "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом.xml",
+            SourceKind::MetadataXml,
+            Some("Subsystems/СтандартныеПодсистемы")
+        )));
+        assert!(files.contains(&(
+            "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("Subsystems/СтандартныеПодсистемы")
+        )));
+        assert!(files.contains(&(
+            "Subsystems/СтандартныеПодсистемы/Subsystems/УправлениеДоступом/Ext/Help/ru.html",
+            SourceKind::Other,
+            Some("Subsystems/СтандартныеПодсистемы")
+        )));
+    }
+
+    #[test]
     fn scans_real_task_form_and_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
