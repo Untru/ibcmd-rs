@@ -4643,6 +4643,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "9ad3b432-5b49-44ee-9d8d-83c36458d927",
             ),
             (
+                "WebService.RemoteControl",
+                "03d08c14-f814-4e12-8f96-020c36cca2bf",
+            ),
+            (
                 "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1",
                 "ac7ea771-4b10-4d43-9c0a-9cd36e4c49a4",
             ),
