@@ -86,16 +86,15 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let mut events_seen = 0;
-    let mut groups = BTreeMap::<String, GroupAccumulator>::new();
-    for analysis in analyses {
-        events_seen += analysis.events_seen;
-        for (normalized_sql, group) in analysis.groups {
-            groups.entry(normalized_sql).or_default().merge_from(group);
-        }
-    }
+    let merged = analyses
+        .into_par_iter()
+        .reduce(FileAnalysis::default, |mut left, right| {
+            left.merge_from(right);
+            left
+        });
 
-    let mut groups = groups
+    let mut groups = merged
+        .groups
         .into_iter()
         .map(|(normalized_sql, group)| {
             let average_duration_us = if group.count == 0 {
@@ -140,7 +139,7 @@ pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
 
     Ok(TraceAnalysis {
         files: inputs.to_vec(),
-        events_seen,
+        events_seen: merged.events_seen,
         groups,
     })
 }
@@ -320,6 +319,15 @@ impl GroupAccumulator {
         self.begin_transaction_count += other.begin_transaction_count;
         self.commit_transaction_count += other.commit_transaction_count;
         self.rollback_transaction_count += other.rollback_transaction_count;
+    }
+}
+
+impl FileAnalysis {
+    fn merge_from(&mut self, other: FileAnalysis) {
+        self.events_seen += other.events_seen;
+        for (normalized_sql, group) in other.groups {
+            self.groups.entry(normalized_sql).or_default().merge_from(group);
+        }
     }
 }
 
