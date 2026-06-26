@@ -4507,6 +4507,42 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             );
         }
 
+        for (reference, expected_type_id) in [
+            (
+                "InformationRegisterRecord.АдресныеОбъекты",
+                "9ea90ec5-ab70-486e-8cc5-1707d8e5998e",
+            ),
+            (
+                "InformationRegisterManager.АдресныеОбъекты",
+                "28648720-16ff-487f-8f79-68a1480055bd",
+            ),
+            (
+                "InformationRegisterSelection.АдресныеОбъекты",
+                "f8538bed-cc51-4c92-a18e-7b5a933a1025",
+            ),
+            (
+                "InformationRegisterList.АдресныеОбъекты",
+                "aba286a3-0324-4840-92f2-7edc3980054e",
+            ),
+            (
+                "InformationRegisterRecordSet.АдресныеОбъекты",
+                "d7d6d986-6bec-45a0-b3ec-e29f286da38c",
+            ),
+            (
+                "InformationRegisterRecordKey.АдресныеОбъекты",
+                "273accea-5bfd-4163-9a96-86f4995ef650",
+            ),
+            (
+                "InformationRegisterRecordManager.АдресныеОбъекты",
+                "f9342f93-5225-4459-b1fe-d2553b85a5af",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
         for (reference, expected_uuid) in [
             (
                 "CommonPicture.Предупреждение",
