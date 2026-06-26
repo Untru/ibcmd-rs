@@ -64,7 +64,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             OperationSupport {
                 name: "mssql-compare",
                 status: SupportStatus::Implemented,
-                detail: "Compares table shape and row counts for SQL Server infobases.",
+                detail: "Compares table shape, row counts and row checksums for SQL Server infobases.",
             },
             OperationSupport {
                 name: "mssql-clone",
@@ -74,12 +74,12 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             OperationSupport {
                 name: "mssql-storage-export/import",
                 status: SupportStatus::Implemented,
-                detail: "Exports and imports ConfigSave/Params storage bundles via BCP.",
+                detail: "Exports and imports ConfigSave/Params storage bundles via BCP with checksum-backed manifests.",
             },
             OperationSupport {
                 name: "mssql-delta-export/import",
                 status: SupportStatus::Implemented,
-                detail: "Exports and imports staged ConfigSave delta bundles.",
+                detail: "Exports and imports staged ConfigSave delta bundles with row digests and manifest validation.",
             },
             OperationSupport {
                 name: "module-blob-pack",
@@ -185,6 +185,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
         ],
         notes: vec![
             "Platform build, DBMS version and compatibility mode are captured per run by probe and trace artifacts.",
+            "Storage and delta bundle manifests include row checksums where available so imports can verify content integrity.",
             "The current matrix is source-of-truth for implemented coverage; ibcmd parity is still being measured experimentally.",
             "Non-lab destructive writes remain gated behind explicit confirmation flags.",
         ],
