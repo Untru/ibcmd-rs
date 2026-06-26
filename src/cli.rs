@@ -65,6 +65,8 @@ pub enum Commands {
     MssqlStageDocumentJournalObject(MssqlStageDocumentJournalObjectArgs),
     /// Stage one report object from XML.
     MssqlStageReportObject(MssqlStageReportObjectArgs),
+    /// Stage one data processor object from XML.
+    MssqlStageDataProcessorObject(MssqlStageDataProcessorObjectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -578,6 +580,34 @@ pub struct MssqlStageReportObjectArgs {
     pub script_output: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+pub struct MssqlStageDataProcessorObjectArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Data processor XML file.
+    #[arg(long)]
+    pub xml: PathBuf,
+    /// Root folder with full XML sources, used to resolve metadata references.
+    #[arg(long)]
+    pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,6 +707,33 @@ mod tests {
             Commands::MssqlStageReportObject(args) => {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(args.xml, PathBuf::from(r"Reports\БизнесПроцессы.xml"));
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_data_processor_stage_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-data-processor-object",
+            "--database",
+            "TestDb",
+            "--xml",
+            r"DataProcessors\ВыгрузкаЗагрузкаEnterpriseData.xml",
+            "--replace-config-save",
+            "--allow-non-lab",
+        ]);
+
+        match cli.command {
+            Commands::MssqlStageDataProcessorObject(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(
+                    args.xml,
+                    PathBuf::from(r"DataProcessors\ВыгрузкаЗагрузкаEnterpriseData.xml")
+                );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }

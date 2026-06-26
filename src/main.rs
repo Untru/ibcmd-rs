@@ -141,6 +141,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::stage_report_object(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlStageDataProcessorObject(args) => {
+            let report = ibcmd_rs::mssql::stage_data_processor_object(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
     }
 
     Ok(())
