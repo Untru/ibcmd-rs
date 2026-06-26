@@ -814,6 +814,80 @@ mod tests {
     }
 
     #[test]
+    fn groups_statement_and_batch_text_with_same_sql() {
+        let dir = std::env::temp_dir().join(format!(
+            "ibcmd-rs-trace-batch-statement-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("events.xml");
+        fs::write(
+            &path,
+            r#"
+<RingBufferTarget>
+  <event name="sql_statement_completed">
+    <data name="duration"><value>8</value></data>
+    <data name="row_count"><value>2</value></data>
+    <data name="statement"><value>SELECT * FROM ConfigSave WHERE FileName = N'Alpha' AND PartNo = 0</value></data>
+    <action name="session_id"><value>77</value></action>
+    <action name="database_name"><value>DemoDb</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+  <event name="sql_batch_completed">
+    <data name="duration"><value>9</value></data>
+    <data name="row_count"><value>5</value></data>
+    <data name="batch_text"><value>SELECT * FROM ConfigSave WHERE FileName = N'Beta' AND PartNo = 1</value></data>
+    <action name="session_id"><value>77</value></action>
+    <action name="database_name"><value>DemoDb</value></action>
+    <action name="object_name"><value>sp_executesql</value></action>
+  </event>
+</RingBufferTarget>
+"#,
+        )
+        .unwrap();
+
+        let analysis = analyze_one_file(&path).unwrap();
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir(dir);
+
+        assert_eq!(analysis.events_seen, 2);
+        assert_eq!(analysis.groups.len(), 1);
+
+        let group = analysis.groups.values().next().unwrap();
+        assert_eq!(group.count, 2);
+        assert_eq!(group.total_duration_us, 17);
+        assert_eq!(group.total_row_count, 7);
+        assert_eq!(group.max_row_count, 5);
+        assert_eq!(
+            group.event_names,
+            [
+                "sql_batch_completed".to_string(),
+                "sql_statement_completed".to_string()
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.table_names,
+            ["ConfigSave".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.session_ids,
+            ["77".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.database_names,
+            ["DemoDb".to_string()].into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            group.object_names,
+            ["sp_executesql".to_string()]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
     fn groups_load_experiment_sql_patterns() {
         let dir = std::env::temp_dir().join(format!(
             "ibcmd-rs-trace-load-pattern-test-{}",
