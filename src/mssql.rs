@@ -1911,9 +1911,9 @@ fn quote_string_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ColumnShape, PreparedCommonModuleObjectStage, PreparedMetadataObjectStage, TableShape,
-        compare_shapes, infer_common_module_text_path, quote_ident, quote_string,
-        require_non_lab_confirmation,
+        ColumnShape, CommonModuleStageSpec, PreparedCommonModuleObjectStage,
+        PreparedCommonModuleStage, PreparedMetadataObjectStage, TableShape, compare_shapes,
+        infer_common_module_text_path, quote_ident, quote_string, require_non_lab_confirmation,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -2021,6 +2021,30 @@ mod tests {
         assert!(sql.contains("0x1020"));
         assert!(sql.contains("0xAABBCC"));
         assert!(sql.contains("0xCCDD"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+    }
+
+    #[test]
+    fn builds_common_module_batch_stage_sql_with_expected_row_counts() {
+        let prepared = vec![PreparedCommonModuleStage {
+            spec: CommonModuleStageSpec {
+                module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                text: PathBuf::from("CommonModules/Batch/Ext/Module.bsl"),
+            },
+            module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+            text_bytes: 11,
+            blob: vec![0x11, 0x22, 0x33],
+            blob_sha256: "facefeed".to_string(),
+        }];
+
+        let sql = super::build_stage_common_modules_sql("TestDb", &prepared, &[0xDD, 0xEE]);
+
+        assert!(sql.contains("USE [TestDb];"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 3 THROW 51000"));
+        assert!(sql.contains("N'cccccccc-cccc-4ccc-cccc-cccccccccccc'"));
+        assert!(sql.contains("N'cccccccc-cccc-4ccc-cccc-cccccccccccc.0'"));
+        assert!(sql.contains("0x112233"));
+        assert!(sql.contains("0xDDEE"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
