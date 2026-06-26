@@ -3420,6 +3420,11 @@ mod tests {
             root.join("StyleItems/ВажнаяНадписьШрифт.xml"),
         )
         .unwrap();
+        std::fs::copy(
+            lab_root.join("StyleItems/ЗавершенныйБизнесПроцесс.xml"),
+            root.join("StyleItems/ЗавершенныйБизнесПроцесс.xml"),
+        )
+        .unwrap();
 
         let manifest = scan_sources(&root).unwrap();
         let _ = std::fs::remove_dir_all(&root);
@@ -3455,6 +3460,11 @@ mod tests {
             "StyleItems/ВажнаяНадписьШрифт.xml",
             SourceKind::MetadataXml,
             Some("StyleItems/ВажнаяНадписьШрифт")
+        )));
+        assert!(files.contains(&(
+            "StyleItems/ЗавершенныйБизнесПроцесс.xml",
+            SourceKind::MetadataXml,
+            Some("StyleItems/ЗавершенныйБизнесПроцесс")
         )));
     }
 
