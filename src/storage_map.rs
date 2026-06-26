@@ -35,6 +35,8 @@ pub enum StorageStageRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageOperationFamily {
+    ConfigHeader,
+    ConfigVersion,
     ConfigBundle,
     CommonModuleBody,
     CommonModuleMetadata,
@@ -344,16 +346,21 @@ fn classify_family(group: &crate::trace::QueryGroup) -> StorageOperationFamily {
     if sql == "begin transaction" || sql == "commit transaction" || sql == "rollback transaction" {
         return StorageOperationFamily::TransactionBoundary;
     }
-    if sql.starts_with("select count_big(*) from configsave")
-        || (sql.starts_with("insert into configsave")
-            && sample_lower.contains("n'root'")
-            && sample_lower.contains("n'version'"))
+    if sql.starts_with("select count_big(*) from configsave") {
+        return StorageOperationFamily::ConfigHeader;
+    }
+    if sql.starts_with("insert into configsave")
+        && sample_lower.contains("n'root'")
+        && sample_lower.contains("n'version'")
     {
-        return StorageOperationFamily::ConfigBundle;
+        return StorageOperationFamily::ConfigHeader;
     }
     if sql.starts_with("insert into configsave")
         || sql.starts_with("update configsave set binarydata")
     {
+        if sample_lower.contains("n'versions'") {
+            return StorageOperationFamily::ConfigVersion;
+        }
         if sample_lower.contains("n'module'") || sample_lower.contains("file_name = n'module'") {
             return StorageOperationFamily::CommonModuleBody;
         }
@@ -364,14 +371,11 @@ fn classify_family(group: &crate::trace::QueryGroup) -> StorageOperationFamily {
         if sample_lower.contains("n'newobject'") || sample_lower.contains("values (n'") {
             return StorageOperationFamily::CommonModuleObject;
         }
-        if sample_lower.contains("n'versions'") {
-            return StorageOperationFamily::ConfigBundle;
-        }
         return StorageOperationFamily::ConfigBundle;
     }
     if sql.starts_with("update configsave set attributes") {
         if sample_lower.contains("file_name = n'versions'") {
-            return StorageOperationFamily::ConfigBundle;
+            return StorageOperationFamily::ConfigVersion;
         }
         if sample_lower.contains("file_name = n'module'") {
             return StorageOperationFamily::CommonModuleBody;
@@ -588,6 +592,18 @@ mod tests {
         );
         assert!(
             report
+                .entries
+                .iter()
+                .any(|entry| entry.family == StorageOperationFamily::ConfigHeader)
+        );
+        assert!(
+            report
+                .entries
+                .iter()
+                .any(|entry| entry.family == StorageOperationFamily::ConfigVersion)
+        );
+        assert!(
+            report
                 .summaries
                 .iter()
                 .any(|summary| summary.kind == StorageMutationKind::ConfigSaveMerge)
@@ -621,6 +637,18 @@ mod tests {
                 .families
                 .iter()
                 .any(|summary| summary.family == StorageOperationFamily::CommonModuleBody)
+        );
+        assert!(
+            report
+                .families
+                .iter()
+                .any(|summary| summary.family == StorageOperationFamily::ConfigHeader)
+        );
+        assert!(
+            report
+                .families
+                .iter()
+                .any(|summary| summary.family == StorageOperationFamily::ConfigVersion)
         );
         assert!(
             report
