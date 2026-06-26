@@ -200,6 +200,11 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    let object_refs = if extract_metadata_xml {
+        build_metadata_object_reference_index(&rows)
+    } else {
+        BTreeMap::new()
+    };
 
     let mut manifests = Vec::new();
     let mut binary_bytes = 0;
@@ -282,6 +287,7 @@ fn dump_table_rows(
                 &bytes,
                 &row.file_name,
                 &type_index,
+                &object_refs,
                 &form_refs,
                 &template_refs,
                 &subsystem_refs,
@@ -3029,6 +3035,14 @@ struct DefinedTypeProperties {
     value_types: Vec<ConstantValueType>,
 }
 
+struct CommandGroupProperties {
+    representation: &'static str,
+    picture_ref: Option<String>,
+    picture_load_transparent: bool,
+    tooltip: Vec<(String, String)>,
+    category: &'static str,
+}
+
 struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
 }
@@ -3231,6 +3245,7 @@ fn extract_metadata_source_xml(
         blob,
         uuid,
         type_index,
+        &BTreeMap::new(),
         form_refs,
         template_refs,
         &BTreeMap::new(),
@@ -3241,6 +3256,7 @@ fn extract_metadata_source_xml_with_refs(
     blob: &[u8],
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
@@ -3268,6 +3284,15 @@ fn extract_metadata_source_xml_with_refs(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
         let xml = format_constant_source_xml(&header, &constant).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
+    if object_code == 3 {
+        let header = parse_metadata_header_from_text(text, uuid)?;
+        let command_group = parse_command_group_properties_from_text(text, uuid, object_refs)?;
+        let relative_path = PathBuf::from("CommandGroups")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_command_group_source_xml(&header, &command_group).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 0 && is_defined_type_metadata_text(text, uuid) {
@@ -3396,6 +3421,7 @@ fn metadata_source_for_text(
         2 if header_index == Some(1) && field_starts_with(fields.get(1), "{0,") => {
             Some(("SettingsStorage", "SettingsStorages"))
         }
+        3 if header_index == Some(6) => Some(("CommandGroup", "CommandGroups")),
         2 if header_index == Some(1)
             && field_is_quoted_string(fields.get(2))
             && field_is_quoted_string(fields.get(3)) =>
@@ -3620,6 +3646,87 @@ fn parse_defined_type_properties_from_text(
     }
 
     Some(DefinedTypeProperties { value_types })
+}
+
+fn parse_command_group_properties_from_text(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<CommandGroupProperties> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let inner_start = text[..marker_start].rfind("{3,")?;
+    let group_start = text[..inner_start].rfind("{3,")?;
+    let fields = split_1c_braced_fields(text, group_start)?;
+    if fields.len() < 7 {
+        return None;
+    }
+    let (picture_ref, picture_load_transparent) =
+        parse_command_group_picture_value(fields.get(1)?, object_refs)?;
+    let category = command_group_category_xml(fields.get(2)?.trim().parse().ok()?);
+    let representation = command_group_representation_xml(fields.get(3)?.trim().parse().ok()?);
+    let tooltip = parse_1c_synonyms(fields.get(4).copied().unwrap_or("{0}"));
+
+    Some(CommandGroupProperties {
+        representation,
+        picture_ref,
+        picture_load_transparent,
+        tooltip,
+        category,
+    })
+}
+
+fn parse_command_group_picture_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(Option<String>, bool)> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let picture_kind = fields.get(1)?.trim().parse::<i32>().ok()?;
+    let load_transparent = fields
+        .get(6)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    if picture_kind == 0 {
+        return Some((None, load_transparent));
+    }
+    if picture_kind == 1 {
+        let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+        if ref_fields.first()?.trim() == "0" {
+            let uuid = ref_fields.get(1)?.trim();
+            if let Some(reference) = object_refs.get(uuid)
+                && reference.starts_with("CommonPicture.")
+            {
+                return Some((Some(reference.clone()), load_transparent));
+            }
+        }
+        if ref_fields.first()?.trim() == "-13" {
+            return Some((Some("StdPicture.Print".to_string()), load_transparent));
+        }
+    }
+    Some((None, load_transparent))
+}
+
+fn command_group_representation_xml(value: u8) -> &'static str {
+    match value {
+        0 => "Text",
+        1 => "Picture",
+        2 => "PictureAndText",
+        3 => "Auto",
+        _ => "Auto",
+    }
+}
+
+fn command_group_category_xml(value: u8) -> &'static str {
+    match value {
+        1 => "NavigationPanel",
+        2 => "FormNavigationPanel",
+        4 => "ActionsPanel",
+        8 => "FormCommandBar",
+        _ => "FormCommandBar",
+    }
 }
 
 fn parse_metadata_type_pattern(
@@ -3935,6 +4042,84 @@ fn format_template_source_xml(kind: &str, header: &MetadataHeader, template_type
         escape_xml_text(template_type)
     );
     xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
+    xml
+}
+
+fn format_command_group_source_xml(
+    header: &MetadataHeader,
+    properties: &CommandGroupProperties,
+) -> String {
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<CommandGroup uuid=\"{}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&header.uuid),
+        escape_xml_text(&header.name)
+    );
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    xml.push_str(&format!(
+        "\t\t\t<Comment>{}</Comment>\r\n\
+\t\t\t<Representation>{}</Representation>\r\n",
+        escape_xml_text(&header.comment),
+        properties.representation
+    ));
+    if properties.tooltip.is_empty() {
+        xml.push_str("\t\t\t<ToolTip/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<ToolTip>\r\n");
+        for (lang, content) in &properties.tooltip {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</ToolTip>\r\n");
+    }
+    xml.push_str("\t\t\t<Picture>\r\n");
+    match &properties.picture_ref {
+        Some(reference) => {
+            xml.push_str(&format!(
+                "\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n",
+                escape_xml_text(reference)
+            ));
+        }
+        None => xml.push_str("\t\t\t\t<xr:Ref/>\r\n"),
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+\t\t\t</Picture>\r\n\
+\t\t\t<Category>{}</Category>\r\n\
+\t\t</Properties>\r\n\
+\t</CommandGroup>\r\n\
+</MetaDataObject>\r\n",
+        xml_bool(properties.picture_load_transparent),
+        properties.category
+    ));
     xml
 }
 
@@ -5696,6 +5881,64 @@ mod tests {
         assert_eq!(properties.kind, "CommonCommand");
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "OpenSettings");
+    }
+
+    #[test]
+    fn writes_command_group_metadata_xml_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let group_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let picture_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let group_metadata = deflate_for_test(
+            format!(
+                "{{1,{{3,{{4,1,{{0,{picture_uuid}}},\"\",-1,-1,0,0,\"\"}},8,1,{{0}},{{0}},{{3,{{1,0,{group_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}}}},0}}"
+            )
+            .as_bytes(),
+        );
+        let picture_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{picture_uuid}}},\"AdminPicture\",{{1,\"en\",\"Admin picture\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: picture_uuid.to_string(),
+                part_no: 0,
+                data_size: picture_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&picture_metadata),
+            },
+            ConfigRow {
+                file_name: group_uuid.to_string(),
+                part_no: 0,
+                data_size: group_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&group_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 2);
+        let xml = fs::read_to_string(root.join("CommandGroups/Admin.xml")).unwrap();
+        assert!(xml.contains(r#"<CommandGroup uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">"#));
+        assert!(xml.contains("<Representation>Picture</Representation>"));
+        assert!(xml.contains("<xr:Ref>CommonPicture.AdminPicture</xr:Ref>"));
+        assert!(xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
+        assert!(xml.contains("<Category>FormCommandBar</Category>"));
+        let group_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == group_uuid)
+            .unwrap();
+        assert_eq!(
+            group_row.metadata_xml_path.as_deref(),
+            Some("CommandGroups/Admin.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
