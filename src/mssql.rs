@@ -70,6 +70,8 @@ pub struct StorageTableManifest {
     pub file_name: String,
     pub row_count: i64,
     pub binary_bytes: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_checksum: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -423,6 +425,7 @@ pub fn export_storage_bundle(args: &MssqlStorageExportArgs) -> Result<StorageBun
                 .to_string(),
             row_count: stats.row_count,
             binary_bytes: stats.binary_bytes,
+            row_checksum: stats.row_checksum,
         });
     }
 
@@ -474,6 +477,7 @@ pub fn import_storage_bundle(args: &MssqlStorageImportArgs) -> Result<StorageBun
         .iter()
         .map(|table| storage_table_stats(&args.sqlcmd, &args.server, &args.database, table))
         .collect::<Result<Vec<_>>>()?;
+    compare_storage_bundle_tables(&manifest.tables, &after)?;
 
     Ok(StorageBundleImportReport {
         database: args.database.clone(),
@@ -551,17 +555,7 @@ pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImp
     run_bcp_in(&args.bcp, &args.server, &args.database, "ConfigSave", &file)?;
 
     let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
-    if after.row_count != manifest.table.row_count
-        || after.binary_bytes != manifest.table.binary_bytes
-    {
-        return Err(anyhow!(
-            "imported ConfigSave stats do not match manifest: rows {} vs {}, bytes {} vs {}",
-            after.row_count,
-            manifest.table.row_count,
-            after.binary_bytes,
-            manifest.table.binary_bytes
-        ));
-    }
+    compare_storage_table_manifests(&manifest.table, &after)?;
 
     Ok(DeltaBundleImportReport {
         database: args.database.clone(),
@@ -1295,7 +1289,7 @@ fn storage_table_stats(
     table: &str,
 ) -> Result<StorageTableManifest> {
     let sql = format!(
-        "SET NOCOUNT ON; USE {db}; SELECT N'{table}' AS table_name, COUNT_BIG(*) AS row_count, ISNULL(SUM(CONVERT(bigint, DATALENGTH(BinaryData))), 0) AS binary_bytes FROM {table_ident} FOR JSON PATH;",
+        "SET NOCOUNT ON; USE {db}; SELECT N'{table}' AS table_name, COUNT_BIG(*) AS row_count, ISNULL(SUM(CONVERT(bigint, DATALENGTH(BinaryData))), 0) AS binary_bytes, CONVERT(bigint, CHECKSUM_AGG(BINARY_CHECKSUM(*))) AS row_checksum FROM {table_ident} FOR JSON PATH;",
         db = quote_ident(database),
         table = quote_string(table),
         table_ident = quote_ident(table),
@@ -1608,6 +1602,69 @@ fn validate_delta_manifest(manifest: &DeltaBundleManifest) -> Result<()> {
             manifest.rows.len()
         ));
     }
+    Ok(())
+}
+
+fn compare_storage_table_manifests(
+    expected: &StorageTableManifest,
+    actual: &StorageTableManifest,
+) -> Result<()> {
+    if expected.table_name != actual.table_name {
+        return Err(anyhow!(
+            "table name mismatch: {} vs {}",
+            expected.table_name,
+            actual.table_name
+        ));
+    }
+    if expected.row_count != actual.row_count {
+        return Err(anyhow!(
+            "row count mismatch for {}: {} vs {}",
+            expected.table_name,
+            expected.row_count,
+            actual.row_count
+        ));
+    }
+    if expected.binary_bytes != actual.binary_bytes {
+        return Err(anyhow!(
+            "binary byte mismatch for {}: {} vs {}",
+            expected.table_name,
+            expected.binary_bytes,
+            actual.binary_bytes
+        ));
+    }
+    if let Some(expected_checksum) = expected.row_checksum {
+        if actual.row_checksum != Some(expected_checksum) {
+            return Err(anyhow!(
+                "row checksum mismatch for {}: {:?} vs {:?}",
+                expected.table_name,
+                expected.row_checksum,
+                actual.row_checksum
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn compare_storage_bundle_tables(
+    expected: &[StorageTableManifest],
+    actual: &[StorageTableManifest],
+) -> Result<()> {
+    let expected_by_name = expected
+        .iter()
+        .map(|table| (table.table_name.as_str(), table))
+        .collect::<BTreeMap<_, _>>();
+    let actual_by_name = actual
+        .iter()
+        .map(|table| (table.table_name.as_str(), table))
+        .collect::<BTreeMap<_, _>>();
+
+    for (name, expected_table) in expected_by_name {
+        let actual_table = actual_by_name
+            .get(name)
+            .ok_or_else(|| anyhow!("imported bundle is missing table {name}"))?;
+        compare_storage_table_manifests(expected_table, actual_table)?;
+    }
+
     Ok(())
 }
 
@@ -1927,8 +1984,9 @@ fn quote_string_path(path: &Path) -> String {
 mod tests {
     use super::{
         ColumnShape, CommonModuleStageSpec, PreparedCommonModuleObjectStage,
-        PreparedCommonModuleStage, PreparedMetadataObjectStage, TableShape, compare_shapes,
-        infer_common_module_text_path, quote_ident, quote_string, require_non_lab_confirmation,
+        PreparedCommonModuleStage, PreparedMetadataObjectStage, StorageTableManifest, TableShape,
+        compare_shapes, compare_storage_table_manifests, infer_common_module_text_path,
+        quote_ident, quote_string, require_non_lab_confirmation,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -1987,6 +2045,47 @@ mod tests {
                 .iter()
                 .any(|difference| difference.kind == "checksum")
         );
+    }
+
+    #[test]
+    fn compare_storage_table_manifests_checks_row_counts_and_checksums() {
+        let expected = StorageTableManifest {
+            table_name: "ConfigSave".to_string(),
+            file_name: "ConfigSave.bcp".to_string(),
+            row_count: 2,
+            binary_bytes: 128,
+            row_checksum: Some(42),
+        };
+        let actual = StorageTableManifest {
+            table_name: "ConfigSave".to_string(),
+            file_name: "ConfigSave.bcp".to_string(),
+            row_count: 2,
+            binary_bytes: 128,
+            row_checksum: Some(42),
+        };
+
+        compare_storage_table_manifests(&expected, &actual).unwrap();
+    }
+
+    #[test]
+    fn compare_storage_table_manifests_rejects_checksum_differences() {
+        let expected = StorageTableManifest {
+            table_name: "ConfigSave".to_string(),
+            file_name: "ConfigSave.bcp".to_string(),
+            row_count: 2,
+            binary_bytes: 128,
+            row_checksum: Some(42),
+        };
+        let actual = StorageTableManifest {
+            table_name: "ConfigSave".to_string(),
+            file_name: "ConfigSave.bcp".to_string(),
+            row_count: 2,
+            binary_bytes: 128,
+            row_checksum: Some(41),
+        };
+
+        let error = compare_storage_table_manifests(&expected, &actual).unwrap_err();
+        assert!(error.to_string().contains("row checksum mismatch"));
     }
 
     #[test]
