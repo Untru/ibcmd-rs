@@ -6,7 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::cli::MssqlDumpConfigArgs;
 use crate::module_blob::unpack_module_blob_text;
@@ -57,15 +57,20 @@ struct MssqlDumpRowManifest {
     metadata_xml_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct ConfigRow {
-    #[serde(rename = "file_name")]
     file_name: String,
-    #[serde(rename = "part_no")]
     part_no: i32,
-    #[serde(rename = "data_size")]
     data_size: i64,
-    #[serde(rename = "binary_hex")]
+    binary_hex: String,
+}
+
+#[derive(Debug)]
+struct ConfigChunkRow {
+    file_name: String,
+    part_no: i32,
+    data_size: i64,
+    chunk_index: i32,
     binary_hex: String,
 }
 
@@ -1375,6 +1380,19 @@ fn fetch_rows(
     table: &str,
     selected_file_names: &BTreeSet<String>,
 ) -> Result<Vec<ConfigRow>> {
+    let sql = build_fetch_rows_sql(database, table, selected_file_names);
+    let stdout = run_sql_capture_tsv(sqlcmd, server, &sql)?;
+    let chunks = parse_config_chunk_rows(&stdout)
+        .with_context(|| format!("failed to parse {table} row chunks for {database}"))?;
+    assemble_config_rows(chunks)
+        .with_context(|| format!("failed to assemble {table} row chunks for {database}"))
+}
+
+fn build_fetch_rows_sql(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> String {
     let filter = if selected_file_names.is_empty() {
         String::new()
     } else {
@@ -1385,26 +1403,165 @@ fn fetch_rows(
             .join(", ");
         format!("WHERE FileName IN ({values})\n")
     };
-    let sql = format!(
-        "SET NOCOUNT ON; USE {db};\n\
-         SELECT FileName AS file_name,\n\
-                PartNo AS part_no,\n\
-                DataSize AS data_size,\n\
-                CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
-         FROM {table}\n\
-         {filter}\
-         ORDER BY FileName, PartNo\n\
-         FOR JSON PATH;",
-        db = quote_ident(database),
-        table = quote_ident(table),
+
+    format!(
+        "SET NOCOUNT ON;\n\
+         DECLARE @chunk_size int = {chunk_size};\n\
+         WITH SourceRows AS (\n\
+             SELECT FileName, PartNo, DataSize, BinaryData\n\
+             FROM {qualified_table}\n\
+             {filter}\
+         )\n\
+         SELECT rows.FileName AS file_name,\n\
+                rows.PartNo AS part_no,\n\
+                rows.DataSize AS data_size,\n\
+                chunks.chunk_index,\n\
+                CONVERT(varchar(max), SUBSTRING(rows.BinaryData, chunks.chunk_index * @chunk_size + 1, @chunk_size), 2) AS binary_hex\n\
+         FROM SourceRows rows\n\
+         CROSS APPLY (\n\
+             SELECT chunk_count = CASE\n\
+                 WHEN DATALENGTH(rows.BinaryData) = 0 THEN 1\n\
+                 ELSE (DATALENGTH(rows.BinaryData) + @chunk_size - 1) / @chunk_size\n\
+             END\n\
+         ) counts\n\
+         CROSS APPLY (\n\
+             SELECT TOP (counts.chunk_count)\n\
+                    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS chunk_index\n\
+             FROM sys.all_objects a CROSS JOIN sys.all_objects b\n\
+         ) chunks\n\
+         ORDER BY rows.FileName, rows.PartNo, chunks.chunk_index\n\
+         ;",
+        chunk_size = SQLCMD_BINARY_CHUNK_SIZE,
+        qualified_table = qualified_storage_table(database, table),
         filter = filter,
-    );
-    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout, &format!("dump {table} rows from {database}"))?;
-    let json = normalize_sqlcmd_json(&json);
-    serde_json::from_str(&json)
-        .with_context(|| format!("failed to parse {table} rows JSON for {database}"))
+    )
 }
+
+fn parse_config_chunk_rows(stdout: &str) -> Result<Vec<ConfigChunkRow>> {
+    let mut rows = Vec::new();
+    for (line_index, line) in stdout.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if is_sqlcmd_header_or_separator(line) {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 5 {
+            bail!(
+                "unexpected sqlcmd row chunk line {}: expected 5 tab-separated fields, got {}",
+                line_index + 1,
+                fields.len()
+            );
+        }
+        rows.push(ConfigChunkRow {
+            file_name: fields[0].trim_end().to_string(),
+            part_no: fields[1]
+                .trim()
+                .parse()
+                .with_context(|| format!("invalid part_no on chunk line {}", line_index + 1))?,
+            data_size: fields[2]
+                .trim()
+                .parse()
+                .with_context(|| format!("invalid data_size on chunk line {}", line_index + 1))?,
+            chunk_index: fields[3]
+                .trim()
+                .parse()
+                .with_context(|| format!("invalid chunk_index on chunk line {}", line_index + 1))?,
+            binary_hex: fields[4].trim_end().to_string(),
+        });
+    }
+    Ok(rows)
+}
+
+fn is_sqlcmd_header_or_separator(line: &str) -> bool {
+    if line
+        .split('\t')
+        .next()
+        .is_some_and(|field| field.trim() == "file_name")
+    {
+        return true;
+    }
+    line.chars().all(|ch| ch == '-' || ch == '\t' || ch == ' ')
+}
+
+fn assemble_config_rows(chunks: Vec<ConfigChunkRow>) -> Result<Vec<ConfigRow>> {
+    let mut parts = BTreeMap::<(String, i32), ConfigRow>::new();
+    let mut expected_chunk = BTreeMap::<(String, i32), i32>::new();
+
+    for chunk in chunks {
+        let key = (chunk.file_name.clone(), chunk.part_no);
+        let expected = expected_chunk.entry(key.clone()).or_insert(0);
+        if chunk.chunk_index != *expected {
+            bail!(
+                "Config row {} part {} chunk order gap: expected {}, got {}",
+                chunk.file_name,
+                chunk.part_no,
+                expected,
+                chunk.chunk_index
+            );
+        }
+        *expected += 1;
+
+        parts
+            .entry(key)
+            .and_modify(|row| {
+                row.binary_hex.push_str(&chunk.binary_hex);
+            })
+            .or_insert_with(|| ConfigRow {
+                file_name: chunk.file_name,
+                part_no: chunk.part_no,
+                data_size: chunk.data_size,
+                binary_hex: chunk.binary_hex,
+            });
+    }
+
+    let mut rows = BTreeMap::<String, ConfigRow>::new();
+    let mut expected_part = BTreeMap::<String, i32>::new();
+    for part in parts.into_values() {
+        let expected = expected_part.entry(part.file_name.clone()).or_insert(0);
+        if part.part_no != *expected {
+            bail!(
+                "Config row {} part order gap: expected {}, got {}",
+                part.file_name,
+                expected,
+                part.part_no
+            );
+        }
+        *expected += 1;
+
+        rows.entry(part.file_name.clone())
+            .and_modify(|row| {
+                if row.data_size != part.data_size {
+                    row.data_size = part.data_size;
+                }
+                row.binary_hex.push_str(&part.binary_hex);
+            })
+            .or_insert_with(|| ConfigRow {
+                file_name: part.file_name,
+                part_no: 0,
+                data_size: part.data_size,
+                binary_hex: part.binary_hex,
+            });
+    }
+
+    for row in rows.values() {
+        let binary_bytes = row.binary_hex.len() / 2;
+        if binary_bytes != row.data_size as usize {
+            bail!(
+                "Config row {} DataSize {} does not match assembled BinaryData length {}",
+                row.file_name,
+                row.data_size,
+                binary_bytes
+            );
+        }
+    }
+
+    Ok(rows.into_values().collect())
+}
+
+const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
 
 fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
     let mut selected = BTreeSet::new();
@@ -1435,15 +1592,19 @@ fn metadata_id_from_module_file_name(file_name: &str) -> Option<&str> {
 
 const MODULE_BODY_SUFFIXES: &[&str] = &["0", "1", "2", "3", "5", "6", "7", "8", "15", "16"];
 
-fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
+fn run_sql_capture_tsv(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
     let output = Command::new(sqlcmd)
         .arg("-C")
         .arg("-S")
         .arg(server)
-        .arg("-y")
-        .arg("0")
+        .arg("-s")
+        .arg("\t")
         .arg("-w")
         .arg("65535")
+        .arg("-y")
+        .arg("0")
+        .arg("-Y")
+        .arg("0")
         .arg("-Q")
         .arg(sql)
         .output()
@@ -1459,6 +1620,7 @@ fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[cfg(test)]
 fn normalize_sqlcmd_json(value: &str) -> String {
     value.replace(['\r', '\n'], "")
 }
@@ -1522,6 +1684,7 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>> {
         .collect()
 }
 
+#[cfg(test)]
 fn extract_json_array(stdout: &str, context: &str) -> Result<String> {
     let start = stdout
         .find('[')
@@ -1537,6 +1700,10 @@ fn extract_json_array(stdout: &str, context: &str) -> Result<String> {
 
 fn quote_ident(value: &str) -> String {
     format!("[{}]", value.replace(']', "]]"))
+}
+
+fn qualified_storage_table(database: &str, table: &str) -> String {
+    format!("{}.dbo.{}", quote_ident(database), quote_ident(table))
 }
 
 fn quote_string(value: &str) -> String {
@@ -1595,6 +1762,115 @@ mod tests {
         let rows: Vec<serde_json::Value> = serde_json::from_str(&normalized).unwrap();
 
         assert_eq!(rows[0]["binary_hex"], "AABBCCDD");
+    }
+
+    #[test]
+    fn fetch_rows_sql_chunks_large_binary_values() {
+        let selected = BTreeSet::from(["aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()]);
+        let sql = build_fetch_rows_sql("TestDb", "Config", &selected);
+
+        assert!(sql.contains("DECLARE @chunk_size int = 16384"));
+        assert!(sql.contains("FROM [TestDb].dbo.[Config]"));
+        assert!(sql.contains("SUBSTRING(rows.BinaryData"));
+        assert!(sql.contains("chunks.chunk_index * @chunk_size + 1"));
+        assert!(sql.contains("WHERE FileName IN (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa')"));
+        assert!(sql.contains("ORDER BY rows.FileName, rows.PartNo, chunks.chunk_index"));
+        assert!(!sql.contains("FOR JSON"));
+    }
+
+    #[test]
+    fn parses_config_chunk_rows_from_sqlcmd_tsv() {
+        let rows = parse_config_chunk_rows(
+            "file_name\tpart_no\tdata_size\tchunk_index\tbinary_hex\r\n\
+             ---------\t-------\t---------\t-----------\t----------\r\n\
+             large   \t0\t4\t0\tAABB   \r\n\
+             large\t0\t4\t1\tCCDD\r\n",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].file_name, "large");
+        assert_eq!(rows[0].part_no, 0);
+        assert_eq!(rows[0].data_size, 4);
+        assert_eq!(rows[0].chunk_index, 0);
+        assert_eq!(rows[0].binary_hex, "AABB");
+        assert_eq!(rows[1].chunk_index, 1);
+        assert_eq!(rows[1].binary_hex, "CCDD");
+    }
+
+    #[test]
+    fn assembles_config_rows_from_ordered_chunks() {
+        let rows = assemble_config_rows(vec![
+            ConfigChunkRow {
+                file_name: "large".to_string(),
+                part_no: 0,
+                data_size: 4,
+                chunk_index: 0,
+                binary_hex: "AABB".to_string(),
+            },
+            ConfigChunkRow {
+                file_name: "large".to_string(),
+                part_no: 0,
+                data_size: 4,
+                chunk_index: 1,
+                binary_hex: "CCDD".to_string(),
+            },
+            ConfigChunkRow {
+                file_name: "small".to_string(),
+                part_no: 0,
+                data_size: 1,
+                chunk_index: 0,
+                binary_hex: "EE".to_string(),
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].file_name, "large");
+        assert_eq!(rows[0].binary_hex, "AABBCCDD");
+        assert_eq!(rows[1].file_name, "small");
+        assert_eq!(rows[1].binary_hex, "EE");
+    }
+
+    #[test]
+    fn assembles_config_rows_from_multiple_physical_parts() {
+        let rows = assemble_config_rows(vec![
+            ConfigChunkRow {
+                file_name: "large".to_string(),
+                part_no: 0,
+                data_size: 4,
+                chunk_index: 0,
+                binary_hex: "AABB".to_string(),
+            },
+            ConfigChunkRow {
+                file_name: "large".to_string(),
+                part_no: 1,
+                data_size: 4,
+                chunk_index: 0,
+                binary_hex: "CCDD".to_string(),
+            },
+        ])
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].file_name, "large");
+        assert_eq!(rows[0].part_no, 0);
+        assert_eq!(rows[0].data_size, 4);
+        assert_eq!(rows[0].binary_hex, "AABBCCDD");
+    }
+
+    #[test]
+    fn rejects_config_row_chunk_order_gaps() {
+        let err = assemble_config_rows(vec![ConfigChunkRow {
+            file_name: "large".to_string(),
+            part_no: 0,
+            data_size: 4,
+            chunk_index: 1,
+            binary_hex: "AABB".to_string(),
+        }])
+        .unwrap_err();
+
+        assert!(err.to_string().contains("chunk order gap"));
     }
 
     #[test]
