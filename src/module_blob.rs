@@ -3377,6 +3377,53 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_common_form_and_template_from_lab_sources() -> anyhow::Result<()> {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+
+        for (kind, file, uuid, expected_name) in [
+            (
+                "CommonForm",
+                "CommonForms/ФормаОтчета.xml",
+                "9d6d77a9-1f55-4162-93a5-14bb3f3febaf",
+                "ФормаОтчета",
+            ),
+            (
+                "CommonTemplate",
+                "CommonTemplates/ВидыДокументовУдостоверяющихЛичность.xml",
+                "1682d528-87bf-48c5-acf9-57ab654a615a",
+                "ВидыДокументовУдостоверяющихЛичность",
+            ),
+        ] {
+            let xml = std::fs::read(lab_root.join(file))?;
+            let mut active = b"\xEF\xBB\xBF".to_vec();
+            active.extend_from_slice(
+                format!(
+                    "{{1,\n{{3,\n{{1,0,{uuid}}},\"OldName\",\n{{1,\"ru\",\"Old synonym\"}},\"Old comment\",0,0,00000000-0000-0000-0000-000000000000,0}},0}}"
+                )
+                .as_bytes(),
+            );
+            let base_blob = deflate_raw(&active)?;
+
+            let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, &xml)?;
+            let inflated = String::from_utf8(inflate_raw(&packed.blob)?)?;
+
+            assert_eq!(packed.properties.kind, kind);
+            assert_eq!(packed.properties.uuid, uuid);
+            assert!(
+                inflated.contains(&format!("\"{expected_name}\"")),
+                "{inflated}"
+            );
+            assert!(inflated.as_bytes().starts_with(b"\xEF\xBB\xBF"));
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn patches_session_parameter_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
