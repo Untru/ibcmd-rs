@@ -20,6 +20,7 @@ use crate::module_blob::{
     pack_simple_metadata_blob_from_xml_with_source, parse_common_module_xml_properties,
     parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
 };
+use crate::parallel;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
@@ -754,19 +755,20 @@ pub fn stage_common_module_objects(
     }
     require_non_lab_confirmation(args.allow_non_lab, "common module object batch staging")?;
 
-    let prepared = args
-        .xmls
-        .par_iter()
-        .map(|xml| {
-            prepare_common_module_object_stage(
-                &args.sqlcmd,
-                &args.server,
-                &args.database,
-                xml.clone(),
-                None,
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let prepared = parallel::install(|| {
+        args.xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_common_module_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    None,
+                )
+            })
+            .collect::<Result<Vec<_>>>()
+    })??;
     ensure_unique_common_module_object_ids(&prepared)?;
 
     stage_prepared_common_module_objects(
@@ -794,19 +796,20 @@ pub fn stage_metadata_objects(
     }
 
     let source = args.source_root.clone().map(MetadataSourceContext::new);
-    let prepared = args
-        .xmls
-        .par_iter()
-        .map(|xml| {
-            prepare_metadata_object_stage(
-                &args.sqlcmd,
-                &args.server,
-                &args.database,
-                xml.clone(),
-                source.as_ref(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let prepared = parallel::install(|| {
+        args.xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_metadata_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    source.as_ref(),
+                )
+            })
+            .collect::<Result<Vec<_>>>()
+    })??;
     ensure_unique_metadata_object_ids(&prepared)?;
 
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
@@ -1021,23 +1024,25 @@ fn stage_common_module_specs(
     }
     ensure_unique_module_ids(&specs)?;
 
-    let prepared = specs
-        .into_par_iter()
-        .map(|spec| {
-            let module_body_id = format!("{}.0", spec.module_id);
-            let text = fs::read(&spec.text)
-                .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
-            let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
-            let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
-            Ok(PreparedCommonModuleStage {
-                spec,
-                module_body_id,
-                text_bytes: text.len(),
-                blob_sha256: packed_module.output_sha256,
-                blob: packed_module.blob,
+    let prepared = parallel::install(|| {
+        specs
+            .into_par_iter()
+            .map(|spec| {
+                let module_body_id = format!("{}.0", spec.module_id);
+                let text = fs::read(&spec.text)
+                    .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
+                let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
+                let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
+                Ok(PreparedCommonModuleStage {
+                    spec,
+                    module_body_id,
+                    text_bytes: text.len(),
+                    blob_sha256: packed_module.output_sha256,
+                    blob: packed_module.blob,
+                })
             })
-        })
-        .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()
+    })??;
 
     let versions_blob = fetch_config_blob(sqlcmd, server, database, "versions")?;
     let changes = prepared

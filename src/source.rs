@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+use crate::parallel;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SourceManifest {
     pub root: PathBuf,
@@ -69,10 +71,12 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
         entries.push((path.to_path_buf(), relative.to_path_buf()));
     }
 
-    let mut files = entries
-        .into_par_iter()
-        .map(|(path, relative)| scan_file(&path, &relative))
-        .collect::<Result<Vec<_>>>()?;
+    let mut files = parallel::install(|| {
+        entries
+            .into_par_iter()
+            .map(|(path, relative)| scan_file(&path, &relative))
+            .collect::<Result<Vec<_>>>()
+    })??;
     files.sort_by(|left, right| left.path.cmp(&right.path));
 
     Ok(SourceManifest {

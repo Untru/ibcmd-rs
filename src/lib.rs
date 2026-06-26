@@ -2,6 +2,7 @@ pub mod cli;
 pub mod compatibility;
 pub mod module_blob;
 pub mod mssql;
+pub mod parallel;
 pub mod plan;
 pub mod probe;
 pub mod profile;
