@@ -1187,6 +1187,7 @@ mod tests {
         ));
         std::fs::create_dir_all(root.join("Languages")).unwrap();
         std::fs::create_dir_all(root.join("SettingsStorages")).unwrap();
+        std::fs::create_dir_all(root.join("StyleItems")).unwrap();
 
         std::fs::copy(
             lab_root.join("Languages/Русский.xml"),
@@ -1196,6 +1197,11 @@ mod tests {
         std::fs::copy(
             lab_root.join("SettingsStorages/ХранилищеВариантовОтчетов.xml"),
             root.join("SettingsStorages/ХранилищеВариантовОтчетов.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("StyleItems/ВажнаяНадписьШрифт.xml"),
+            root.join("StyleItems/ВажнаяНадписьШрифт.xml"),
         )
         .unwrap();
 
@@ -1223,6 +1229,11 @@ mod tests {
             "SettingsStorages/ХранилищеВариантовОтчетов.xml",
             SourceKind::MetadataXml,
             Some("SettingsStorages/ХранилищеВариантовОтчетов")
+        )));
+        assert!(files.contains(&(
+            "StyleItems/ВажнаяНадписьШрифт.xml",
+            SourceKind::MetadataXml,
+            Some("StyleItems/ВажнаяНадписьШрифт")
         )));
     }
 
