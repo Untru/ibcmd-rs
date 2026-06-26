@@ -2398,6 +2398,21 @@ mod tests {
                 metadata_blob: vec![0xC3, 0x97, 0x50, 0xCA],
                 metadata_blob_sha256: "0badc0de".to_string(),
             },
+            PreparedMetadataObjectStage {
+                object_id: "ad083c26-7461-4e94-b524-0174242fbd91".to_string(),
+                kind: "ChartOfCharacteristicTypes".to_string(),
+                xml: PathBuf::from("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач.xml"),
+                properties: SimpleMetadataXmlProperties {
+                    kind: "ChartOfCharacteristicTypes".to_string(),
+                    uuid: "ad083c26-7461-4e94-b524-0174242fbd91".to_string(),
+                    name: "ОбъектыАдресацииЗадач".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                },
+                metadata_plain_bytes: 21,
+                metadata_blob: vec![0x10, 0x20, 0x30, 0x40],
+                metadata_blob_sha256: "c0ffee00".to_string(),
+            },
         ];
 
         let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xAA, 0xBB]);
@@ -2419,8 +2434,9 @@ mod tests {
         assert!(sql.contains("0x99AA"));
         assert!(sql.contains("0xDEADBEEF"));
         assert!(sql.contains("0xC39750CA"));
+        assert!(sql.contains("0x10203040"));
         assert!(sql.contains("0xAABB"));
-        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 11"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 12"));
     }
 
     #[test]
