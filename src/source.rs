@@ -365,6 +365,38 @@ mod tests {
         );
         assert_eq!(
             infer_object_hint(
+                "AccumulationRegisters/Продажи/Forms/ФормаСписка/Form.xml",
+                &SourceKind::Form,
+                Some("Form")
+            ),
+            Some("AccumulationRegisters/Продажи".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "AccountingRegisters/Хозрасчеты/Ext/Help.xml",
+                &SourceKind::MetadataXml,
+                Some("Help")
+            ),
+            Some("AccountingRegisters/Хозрасчеты".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "CalculationRegisters/Премии/Commands/Печать/Ext/CommandModule.bsl",
+                &SourceKind::Module,
+                None
+            ),
+            Some("CalculationRegisters/Премии".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
+                "ChartsOfAccounts/ПланСчетов/Ext/Help.xml",
+                &SourceKind::MetadataXml,
+                Some("Help")
+            ),
+            Some("ChartsOfAccounts/ПланСчетов".to_string())
+        );
+        assert_eq!(
+            infer_object_hint(
                 "CommonForms/АвтономнаяРабота.xml",
                 &SourceKind::MetadataXml,
                 Some("MetaDataObject")
@@ -740,6 +772,12 @@ mod tests {
         std::fs::create_dir_all(root.join("BusinessProcesses/Задание/Ext")).unwrap();
         std::fs::create_dir_all(root.join("DefinedTypes")).unwrap();
         std::fs::create_dir_all(root.join("CommonAttributes")).unwrap();
+        std::fs::create_dir_all(root.join("AccumulationRegisters/Продажи/Forms/ФормаСписка"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("AccountingRegisters/Хозрасчеты/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("CalculationRegisters/Премии/Commands/Печать/Ext"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfAccounts/ПланСчетов/Ext")).unwrap();
         std::fs::create_dir_all(root.join("FunctionalOptions")).unwrap();
         std::fs::create_dir_all(root.join("FunctionalOptionsParameters")).unwrap();
         std::fs::create_dir_all(root.join("EventSubscriptions")).unwrap();
@@ -812,6 +850,86 @@ mod tests {
     <Name>ДопРеквизит</Name>
   </Properties>
 </CommonAttribute>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccumulationRegisters/Продажи.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccumulationRegister uuid="11111111-1111-4111-8111-111111111111">
+    <Properties>
+      <Name>Продажи</Name>
+    </Properties>
+  </AccumulationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccumulationRegisters/Продажи/Forms/ФормаСписка/Form.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccountingRegisters/Хозрасчеты.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccountingRegister uuid="22222222-2222-4222-8222-222222222222">
+    <Properties>
+      <Name>Хозрасчеты</Name>
+    </Properties>
+  </AccountingRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccountingRegisters/Хозрасчеты/Ext/Help.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+  <Page>ru</Page>
+</Help>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CalculationRegisters/Премии.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <CalculationRegister uuid="33333333-3333-4333-8333-333333333333">
+    <Properties>
+      <Name>Премии</Name>
+    </Properties>
+  </CalculationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CalculationRegisters/Премии/Commands/Печать/Ext/CommandModule.bsl"),
+            "Procedure Test()\nEndProcedure\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfAccounts uuid="44444444-4444-4444-8444-444444444444">
+    <Properties>
+      <Name>ПланСчетов</Name>
+    </Properties>
+  </ChartOfAccounts>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов/Ext/Help.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
 "#,
         )
         .unwrap();
@@ -919,6 +1037,46 @@ mod tests {
             "CommonAttributes/ДопРеквизит.xml",
             SourceKind::MetadataXml,
             Some("CommonAttributes/ДопРеквизит")
+        )));
+        assert!(files.contains(&(
+            "AccumulationRegisters/Продажи.xml",
+            SourceKind::MetadataXml,
+            Some("AccumulationRegisters/Продажи")
+        )));
+        assert!(files.contains(&(
+            "AccumulationRegisters/Продажи/Forms/ФормаСписка/Form.xml",
+            SourceKind::Form,
+            Some("AccumulationRegisters/Продажи")
+        )));
+        assert!(files.contains(&(
+            "AccountingRegisters/Хозрасчеты.xml",
+            SourceKind::MetadataXml,
+            Some("AccountingRegisters/Хозрасчеты")
+        )));
+        assert!(files.contains(&(
+            "AccountingRegisters/Хозрасчеты/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("AccountingRegisters/Хозрасчеты")
+        )));
+        assert!(files.contains(&(
+            "CalculationRegisters/Премии.xml",
+            SourceKind::MetadataXml,
+            Some("CalculationRegisters/Премии")
+        )));
+        assert!(files.contains(&(
+            "CalculationRegisters/Премии/Commands/Печать/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("CalculationRegisters/Премии")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfAccounts/ПланСчетов")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfAccounts/ПланСчетов")
         )));
         assert!(files.contains(&(
             "FunctionalOptions/ВыполнятьЗамерыПроизводительности.xml",

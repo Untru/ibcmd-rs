@@ -2671,6 +2671,12 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "ChartOfCalculationRegistersSelection"
         | "ChartOfCalculationRegistersList"
         | "ChartOfCalculationRegistersManager" => Some("ChartsOfCalculationRegisters"),
+        "CalculationRegisterObject"
+        | "CalculationRegisterRecordSet"
+        | "CalculationRegisterRecordKey"
+        | "CalculationRegisterSelection"
+        | "CalculationRegisterList"
+        | "CalculationRegisterManager" => Some("CalculationRegisters"),
         "DataProcessorObject"
         | "DataProcessorManager"
         | "DataProcessorTabularSection"
@@ -2708,7 +2714,16 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
 fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'static str)> {
     let prefix = reference.split_once('.')?.0;
     match prefix {
+        "AccumulationRegister" => Some(("AccumulationRegister", "AccumulationRegisters")),
+        "AccountingRegister" => Some(("AccountingRegister", "AccountingRegisters")),
         "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
+        "CalculationRegister" => Some(("CalculationRegister", "CalculationRegisters")),
+        "ChartOfAccounts" => Some(("ChartOfAccounts", "ChartsOfAccounts")),
+        "ChartOfCalculationTypes" => Some(("ChartOfCalculationTypes", "ChartsOfCalculationTypes")),
+        "ChartOfCalculationRegisters" => Some((
+            "ChartOfCalculationRegisters",
+            "ChartsOfCalculationRegisters",
+        )),
         "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
         "FilterCriterion" => Some(("FilterCriterion", "FilterCriteria")),
@@ -4128,6 +4143,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             Some("ChartsOfCalculationRegisters")
         );
         assert_eq!(
+            super::metadata_type_source_folder("CalculationRegisterObject.Premiums"),
+            Some("CalculationRegisters")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("ChartOfAccountsObject.Plan"),
+            Some("ChartsOfAccounts")
+        );
+        assert_eq!(
             super::metadata_type_source_folder("BusinessProcessRoutePointRef.Sales"),
             Some("BusinessProcesses")
         );
@@ -4621,6 +4644,288 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         ] {
             assert_eq!(
                 source.resolve_command_group_uuid(reference).unwrap(),
+                expected_uuid
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_additional_metadata_type_ids_from_synthetic_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-module-types-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("AccumulationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("AccountingRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("CalculationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfAccounts")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfCalculationTypes")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters")).unwrap();
+
+        std::fs::write(
+            root.join("AccumulationRegisters/Продажи.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccumulationRegister uuid="11111111-1111-4111-8111-111111111111">
+    <Properties>
+      <Name>Продажи</Name>
+      <GeneratedTypes>
+        <GeneratedType name="AccumulationRegisterObject.Продажи">
+          <TypeId>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </AccumulationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccountingRegisters/Хозрасчеты.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccountingRegister uuid="22222222-2222-4222-8222-222222222222">
+    <Properties>
+      <Name>Хозрасчеты</Name>
+      <GeneratedTypes>
+        <GeneratedType name="AccountingRegisterManager.Хозрасчеты">
+          <TypeId>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </AccountingRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CalculationRegisters/Премии.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <CalculationRegister uuid="33333333-3333-4333-8333-333333333333">
+    <Properties>
+      <Name>Премии</Name>
+      <GeneratedTypes>
+        <GeneratedType name="CalculationRegisterList.Премии">
+          <TypeId>cccccccc-cccc-4ccc-8ccc-cccccccccccc</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </CalculationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfAccounts uuid="44444444-4444-4444-8444-444444444444">
+    <Properties>
+      <Name>ПланСчетов</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ChartOfAccountsObject.ПланСчетов">
+          <TypeId>dddddddd-dddd-4ddd-8ddd-dddddddddddd</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </ChartOfAccounts>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationTypes/ВидыРасчета.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCalculationTypes uuid="55555555-5555-4555-8555-555555555555">
+    <Properties>
+      <Name>ВидыРасчета</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ChartOfCalculationTypesSelection.ВидыРасчета">
+          <TypeId>eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </ChartOfCalculationTypes>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationRegisters/Начисления.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCalculationRegisters uuid="66666666-6666-4666-8666-666666666666">
+    <Properties>
+      <Name>Начисления</Name>
+      <GeneratedTypes>
+        <GeneratedType name="ChartOfCalculationRegistersManager.Начисления">
+          <TypeId>ffffffff-ffff-4fff-8fff-ffffffffffff</TypeId>
+        </GeneratedType>
+      </GeneratedTypes>
+    </Properties>
+  </ChartOfCalculationRegisters>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+
+        let source = MetadataSourceContext::new(root);
+        for (reference, expected_type_id) in [
+            (
+                "AccumulationRegisterObject.Продажи",
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "AccountingRegisterManager.Хозрасчеты",
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            ),
+            (
+                "CalculationRegisterList.Премии",
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            ),
+            (
+                "ChartOfAccountsObject.ПланСчетов",
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            ),
+            (
+                "ChartOfCalculationTypesSelection.ВидыРасчета",
+                "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            ),
+            (
+                "ChartOfCalculationRegistersManager.Начисления",
+                "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_additional_metadata_references_from_synthetic_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-module-refs-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("AccumulationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("AccountingRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("CalculationRegisters")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfAccounts")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfCalculationTypes")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters")).unwrap();
+
+        std::fs::write(
+            root.join("AccumulationRegisters/Продажи.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccumulationRegister uuid="11111111-1111-4111-8111-111111111111">
+    <Properties>
+      <Name>Продажи</Name>
+    </Properties>
+  </AccumulationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccountingRegisters/Хозрасчеты.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccountingRegister uuid="22222222-2222-4222-8222-222222222222">
+    <Properties>
+      <Name>Хозрасчеты</Name>
+    </Properties>
+  </AccountingRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CalculationRegisters/Премии.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <CalculationRegister uuid="33333333-3333-4333-8333-333333333333">
+    <Properties>
+      <Name>Премии</Name>
+    </Properties>
+  </CalculationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfAccounts uuid="44444444-4444-4444-8444-444444444444">
+    <Properties>
+      <Name>ПланСчетов</Name>
+    </Properties>
+  </ChartOfAccounts>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationTypes/ВидыРасчета.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCalculationTypes uuid="55555555-5555-4555-8555-555555555555">
+    <Properties>
+      <Name>ВидыРасчета</Name>
+    </Properties>
+  </ChartOfCalculationTypes>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfCalculationRegisters/Начисления.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfCalculationRegisters uuid="66666666-6666-4666-8666-666666666666">
+    <Properties>
+      <Name>Начисления</Name>
+    </Properties>
+  </ChartOfCalculationRegisters>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+
+        let source = MetadataSourceContext::new(root);
+        for (reference, expected_uuid) in [
+            (
+                "AccumulationRegister.Продажи",
+                "11111111-1111-4111-8111-111111111111",
+            ),
+            (
+                "AccountingRegister.Хозрасчеты",
+                "22222222-2222-4222-8222-222222222222",
+            ),
+            (
+                "CalculationRegister.Премии",
+                "33333333-3333-4333-8333-333333333333",
+            ),
+            (
+                "ChartOfAccounts.ПланСчетов",
+                "44444444-4444-4444-8444-444444444444",
+            ),
+            (
+                "ChartOfCalculationTypes.ВидыРасчета",
+                "55555555-5555-4555-8555-555555555555",
+            ),
+            (
+                "ChartOfCalculationRegisters.Начисления",
+                "66666666-6666-4666-8666-666666666666",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_reference_uuid(reference).unwrap(),
                 expected_uuid
             );
         }
