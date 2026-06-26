@@ -1966,6 +1966,15 @@ mod tests {
     }
 
     #[test]
+    fn sanitizes_file_parts_for_paths() {
+        assert_eq!(
+            super::sanitize_file_part("Db name[]/2026"),
+            "Db_name___2026"
+        );
+        assert_eq!(super::sanitize_file_part("safe-name_1"), "safe-name_1");
+    }
+
+    #[test]
     fn derives_sibling_path_from_source_parent() {
         let path = super::sibling_path(r"C:\temp\source\db.mdf", "target.mdf").unwrap();
 
