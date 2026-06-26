@@ -790,6 +790,19 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            for item_asset in extract_form_item_assets(bytes) {
+                let item_path = output_dir
+                    .join(asset.primary_path.with_extension(""))
+                    .join("Items")
+                    .join(sanitize_source_path_segment(&item_asset.item_name))
+                    .join(&item_asset.file_name);
+                if let Some(parent) = item_path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("failed to create {}", parent.display()))?;
+                }
+                fs::write(&item_path, &item_asset.content)
+                    .with_context(|| format!("failed to write {}", item_path.display()))?;
+            }
         }
         SourceAssetKind::Help => {
             let help = parse_help_blob(bytes).with_context(|| {
@@ -983,6 +996,12 @@ struct HelpFile {
 struct HelpContent {
     pages: Vec<HelpPage>,
     files: Vec<HelpFile>,
+}
+
+struct FormItemAsset {
+    item_name: String,
+    file_name: String,
+    content: Vec<u8>,
 }
 
 struct CommandInterfaceEntry {
@@ -3403,6 +3422,146 @@ fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
     }
 
     Some(format_form_body_xml())
+}
+
+fn extract_form_item_assets(bytes: &[u8]) -> Vec<FormItemAsset> {
+    let Ok(inflated) = inflate_raw_deflate(bytes) else {
+        return Vec::new();
+    };
+    let Ok(text) = String::from_utf8(inflated) else {
+        return Vec::new();
+    };
+    let text = text.trim_start_matches('\u{feff}');
+    if !split_1c_braced_fields(text, 0)
+        .and_then(|fields| fields.first().map(|value| value.trim() == "4"))
+        .unwrap_or(false)
+    {
+        return Vec::new();
+    }
+
+    let mut assets = Vec::new();
+    let mut occurrences_by_item = BTreeMap::<String, usize>::new();
+    let mut offset = 0usize;
+    let prefix = "{#base64:";
+    while let Some(relative_start) = text[offset..].find(prefix) {
+        let marker_start = offset + relative_start;
+        let payload_start = marker_start + prefix.len();
+        let Some(relative_end) = text[payload_start..].find('}') else {
+            break;
+        };
+        let payload_end = payload_start + relative_end;
+        if let Some(content) = decode_base64_mime(&text[payload_start..payload_end])
+            && is_form_item_picture_content(&content)
+            && let Some(item_name) = nearest_form_item_name(text, marker_start)
+        {
+            let occurrence = occurrences_by_item.entry(item_name.clone()).or_insert(0);
+            let file_name = form_item_picture_file_name(&item_name, &content, *occurrence);
+            *occurrence += 1;
+            assets.push(FormItemAsset {
+                item_name,
+                file_name,
+                content,
+            });
+        }
+        offset = payload_end + 1;
+    }
+
+    dedup_form_item_assets(assets)
+}
+
+fn is_form_item_picture_content(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"GIF87a")
+        || bytes.starts_with(b"GIF89a")
+        || bytes.starts_with(b"\x00\x00\x01\x00")
+}
+
+fn nearest_form_item_name(text: &str, marker_start: usize) -> Option<String> {
+    nearest_form_item_name_in_window(text, marker_start, 4096)
+        .or_else(|| nearest_form_item_name_in_window(text, marker_start, 12_288))
+}
+
+fn nearest_form_item_name_in_window(
+    text: &str,
+    marker_start: usize,
+    window_size: usize,
+) -> Option<String> {
+    let mut window_start = marker_start.saturating_sub(window_size);
+    while window_start > 0 && !text.is_char_boundary(window_start) {
+        window_start -= 1;
+    }
+    let window = &text[window_start..marker_start];
+    let mut candidates = Vec::<String>::new();
+    let mut offset = 0usize;
+    while let Some(relative_quote) = window[offset..].find('"') {
+        let quote_start = offset + relative_quote;
+        let content_start = quote_start + 1;
+        let Some(relative_end) = window[content_start..].find('"') else {
+            break;
+        };
+        let quote_end = content_start + relative_end;
+        let value = &window[content_start..quote_end];
+        let before = window[..quote_start].trim_end().chars().last();
+        let after = window[quote_end + 1..].trim_start().chars().next();
+        if before == Some(',') && after == Some(',') && is_probable_form_item_name(value) {
+            candidates.push(value.replace("\"\"", "\""));
+        }
+        offset = quote_end + 1;
+    }
+    candidates.pop()
+}
+
+fn is_probable_form_item_name(value: &str) -> bool {
+    if value.len() < 3
+        || matches!(
+            value,
+            "Pattern" | "DataParameters" | "Settings" | "Use" | "ru"
+        )
+        || value.chars().any(char::is_whitespace)
+    {
+        return false;
+    }
+    value.chars().all(|ch| {
+        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
+    })
+}
+
+fn form_item_picture_file_name(item_name: &str, content: &[u8], occurrence: usize) -> String {
+    let property_name = if item_name.contains("ИндексКартинки") {
+        if occurrence == 0 {
+            "HeaderPicture"
+        } else {
+            "ValuesPicture"
+        }
+    } else if item_name.contains("Авторегистрация") || item_name.ends_with("Пиктограмма")
+    {
+        "ValuesPicture"
+    } else if (item_name.starts_with("Дерево") || item_name.starts_with("Список"))
+        && !item_name.contains("КонтекстноеМеню")
+        && !item_name.contains("Добавить")
+        && !item_name.contains("Удалить")
+        && !item_name.contains("Показать")
+    {
+        "RowsPicture"
+    } else {
+        "Picture"
+    };
+    let extension = ext_picture_file_name(content)
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or("bin");
+    format!("{property_name}.{extension}")
+}
+
+fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
+    let mut seen = BTreeSet::<(String, String)>::new();
+    let mut deduped = Vec::new();
+    for asset in assets {
+        if seen.insert((asset.item_name.clone(), asset.file_name.clone())) {
+            deduped.push(asset);
+        }
+    }
+    deduped
 }
 
 fn format_form_body_xml() -> String {
@@ -6883,6 +7042,78 @@ mod tests {
             body_row.source_asset_path.as_deref(),
             Some("Catalogs/Products/Forms/ListForm/Ext/Form.xml")
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_form_item_pictures_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let form_body = deflate_for_test(
+            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}},{31,{60,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваровАвторегистрация\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}}}}".as_bytes(),
+        );
+        let assets = extract_form_item_assets(&form_body);
+        assert_eq!(
+            assets
+                .iter()
+                .map(|asset| (asset.item_name.as_str(), asset.file_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("ДеревоТоваров", "RowsPicture.png"),
+                ("ДеревоТоваровАвторегистрация", "ValuesPicture.png")
+            ]
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: form_uuid.to_string(),
+                part_no: 0,
+                data_size: form_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&form_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{form_uuid}.0"),
+                part_no: 0,
+                data_size: form_body.len() as i64,
+                binary_hex: encode_hex_for_test(&form_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert!(
+            root.join(
+                "Catalogs/Products/Forms/ListForm/Ext/Form/Items/ДеревоТоваров/RowsPicture.png"
+            )
+            .exists()
+        );
+        assert!(root
+            .join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/ДеревоТоваровАвторегистрация/ValuesPicture.png")
+            .exists());
 
         let _ = fs::remove_dir_all(root);
     }
