@@ -323,6 +323,7 @@ enum SourceAssetKind {
     InflatedBinary,
     RoleRights {
         object_refs: BTreeMap<String, String>,
+        field_refs: BTreeMap<String, String>,
     },
     Schedule,
 }
@@ -336,6 +337,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     let command_refs = build_command_interface_reference_index(rows);
     let metadata_refs = build_metadata_command_reference_index(rows);
     let object_refs = build_metadata_object_reference_index(rows);
+    let field_refs = build_metadata_field_reference_index(rows);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -391,6 +393,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             &command_refs,
             &metadata_refs,
             &object_refs,
+            &field_refs,
         ) {
             paths.insert(body_id, asset);
         }
@@ -417,6 +420,7 @@ fn source_assets_from_metadata_blob(
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
 ) -> Vec<(String, SourceAsset)> {
     source_assets_from_metadata_blob_inner(
         blob,
@@ -426,6 +430,7 @@ fn source_assets_from_metadata_blob(
         command_refs,
         metadata_refs,
         object_refs,
+        field_refs,
     )
     .unwrap_or_default()
 }
@@ -438,6 +443,7 @@ fn source_assets_from_metadata_blob_inner(
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<(String, SourceAsset)>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
@@ -467,13 +473,14 @@ fn source_assets_from_metadata_blob_inner(
                 if rows_by_file_name
                     .get(body_id.as_str())
                     .and_then(|row| decode_hex(&row.binary_hex).ok())
-                    .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs))
+                    .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs, field_refs))
                     .is_some() =>
             {
                 Some(SourceAsset {
                     primary_path: object_path.join("Ext").join("Rights.xml"),
                     kind: SourceAssetKind::RoleRights {
                         object_refs: object_refs.clone(),
+                        field_refs: field_refs.clone(),
                     },
                 })
             }
@@ -621,13 +628,17 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, inflated)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::RoleRights { object_refs } => {
-            let rights = parse_role_rights_blob(bytes, object_refs).with_context(|| {
-                format!(
-                    "failed to extract role rights from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+        SourceAssetKind::RoleRights {
+            object_refs,
+            field_refs,
+        } => {
+            let rights =
+                parse_role_rights_blob(bytes, object_refs, field_refs).with_context(|| {
+                    format!(
+                        "failed to extract role rights from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -672,6 +683,7 @@ struct CommandInterfaceEntry {
 }
 
 struct RoleRights {
+    set_for_new_objects: bool,
     objects: Vec<RoleObjectRights>,
     restriction_templates: Vec<RoleRestrictionTemplate>,
 }
@@ -684,7 +696,13 @@ struct RoleObjectRights {
 struct RoleRight {
     name: String,
     value: bool,
-    restriction_by_condition: Option<String>,
+    restriction_by_condition: Option<RoleRightRestriction>,
+}
+
+#[derive(Clone)]
+struct RoleRightRestriction {
+    field: Option<String>,
+    condition: String,
 }
 
 struct RoleRestrictionTemplate {
@@ -749,6 +767,35 @@ fn build_metadata_object_reference_index(rows: &[ConfigRow]) -> BTreeMap<String,
                 command.uuid,
                 format!("{}.{}.Command.{}", kind, header.name, command.name),
             );
+        }
+        if kind == "WebService" {
+            for operation in nested_web_service_operation_headers_from_text(&text, &row.file_name) {
+                index.insert(
+                    operation.uuid,
+                    format!("WebService.{}.Operation.{}", header.name, operation.name),
+                );
+            }
+        }
+    }
+    index
+}
+
+fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Some((_kind, _header, text)) =
+            parse_metadata_command_reference_blob(&bytes, &row.file_name)
+        else {
+            continue;
+        };
+        for header in nested_metadata_headers_from_text(&text, &row.file_name) {
+            index.insert(header.uuid, header.name);
         }
     }
     index
@@ -911,6 +958,7 @@ fn command_interface_standard_command(kind: &str) -> Option<&'static str> {
 fn parse_role_rights_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
 ) -> Option<RoleRights> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
@@ -938,7 +986,7 @@ fn parse_role_rights_blob(
         }
         let object_name = object_refs.get(object_uuid)?.clone();
 
-        let rights = parse_role_object_rights(entry[1])?;
+        let rights = parse_role_object_rights(entry[1], field_refs)?;
         objects.push(RoleObjectRights {
             name: object_name,
             rights,
@@ -947,13 +995,18 @@ fn parse_role_rights_blob(
 
     objects.reverse();
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
+    let set_for_new_objects = parse_role_bool_field(fields.get(4)?)?;
     Some(RoleRights {
+        set_for_new_objects,
         objects,
         restriction_templates,
     })
 }
 
-fn parse_role_object_rights(value: &str) -> Option<Vec<RoleRight>> {
+fn parse_role_object_rights(
+    value: &str,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RoleRight>> {
     let fields = split_1c_braced_fields(value, 0)?;
     match fields.first()?.trim() {
         "0" if (fields.len() - 1) % 2 == 0 => {
@@ -970,6 +1023,7 @@ fn parse_role_object_rights(value: &str) -> Option<Vec<RoleRight>> {
             let restrictions = parse_role_right_restrictions(
                 fields.get(restrictions_count_index)?.trim(),
                 &fields[restrictions_count_index + 1..],
+                field_refs,
             )?;
             parse_role_right_pairs(&fields, pairs_start, count, &restrictions)
         }
@@ -981,7 +1035,7 @@ fn parse_role_right_pairs(
     fields: &[&str],
     start: usize,
     count: usize,
-    restrictions: &BTreeMap<String, String>,
+    restrictions: &BTreeMap<String, RoleRightRestriction>,
 ) -> Option<Vec<RoleRight>> {
     let mut rights = Vec::with_capacity(count);
     for index in 0..count {
@@ -990,11 +1044,7 @@ fn parse_role_right_pairs(
         if !is_uuid_text(right_uuid) {
             return None;
         }
-        let value = match fields.get(offset + 1)?.trim() {
-            "0" => false,
-            "1" => true,
-            _ => return None,
-        };
+        let value = parse_role_right_value(fields.get(offset + 1)?.trim())?;
         rights.push(RoleRight {
             name: role_right_name(right_uuid)?.to_string(),
             value,
@@ -1004,10 +1054,27 @@ fn parse_role_right_pairs(
     Some(rights)
 }
 
+fn parse_role_bool_field(value: &str) -> Option<bool> {
+    match value.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_role_right_value(value: &str) -> Option<bool> {
+    match value {
+        "-1" | "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
 fn parse_role_right_restrictions(
     count_text: &str,
     values: &[&str],
-) -> Option<BTreeMap<String, String>> {
+    field_refs: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, RoleRightRestriction>> {
     let count = count_text.parse::<usize>().ok()?;
     let mut restrictions = BTreeMap::new();
     if count == 0 {
@@ -1026,7 +1093,7 @@ fn parse_role_right_restrictions(
             if !is_uuid_text(right_uuid) {
                 return None;
             }
-            let condition = parse_role_restriction_condition(pair.get(1)?)?;
+            let condition = parse_role_restriction_condition(pair.get(1)?, field_refs)?;
             restrictions.insert(right_uuid.to_string(), condition);
         }
         return Some(restrictions);
@@ -1042,7 +1109,7 @@ fn parse_role_right_restrictions(
     {
         for entry in entries.chunks(2) {
             let right_uuid = entry.first()?.trim();
-            let condition = parse_role_restriction_condition(entry.get(1)?)?;
+            let condition = parse_role_restriction_condition(entry.get(1)?, field_refs)?;
             restrictions.insert(right_uuid.to_string(), condition);
         }
         return Some(restrictions);
@@ -1059,22 +1126,61 @@ fn parse_role_right_restrictions(
         if !is_uuid_text(right_uuid) {
             return None;
         }
-        let condition = parse_role_restriction_condition(pair.get(1)?)?;
+        let condition = parse_role_restriction_condition(pair.get(1)?, field_refs)?;
         restrictions.insert(right_uuid.to_string(), condition);
     }
     Some(restrictions)
 }
 
-fn parse_role_restriction_condition(value: &str) -> Option<String> {
+fn parse_role_restriction_condition(
+    value: &str,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<RoleRightRestriction> {
     let wrapper = split_1c_braced_fields(value, 0)?;
-    if wrapper.first()?.trim() != "1" {
-        return None;
+    match wrapper.first()?.trim() {
+        "1" => parse_role_restriction_condition_body(wrapper.get(1)?),
+        "2" => {
+            let mut restriction = parse_role_restriction_condition_body(wrapper.get(2)?)?;
+            let field = parse_role_restriction_field(wrapper.get(2)?, field_refs)?;
+            restriction.field = Some(field);
+            Some(restriction)
+        }
+        _ => None,
     }
-    let condition_fields = split_1c_braced_fields(wrapper.get(1)?, 0)?;
+}
+
+fn parse_role_restriction_condition_body(value: &str) -> Option<RoleRightRestriction> {
+    let condition_fields = split_1c_braced_fields(value, 0)?;
     if condition_fields.first()?.trim() != "1" {
         return None;
     }
-    parse_1c_quoted_string_with_len(condition_fields.get(1)?.trim()).map(|(value, _)| value)
+    parse_1c_quoted_string_with_len(condition_fields.get(1)?.trim()).map(|(condition, _)| {
+        RoleRightRestriction {
+            field: None,
+            condition,
+        }
+    })
+}
+
+fn parse_role_restriction_field(
+    value: &str,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if let Some((_, name)) = field_refs
+        .iter()
+        .find(|(uuid, _)| value.contains(uuid.as_str()))
+    {
+        return Some(name.clone());
+    }
+    let field_wrapper = split_1c_braced_fields(value, 0)?;
+    if field_wrapper.first()?.trim() != "0" {
+        return None;
+    }
+    let field_fields = split_1c_braced_fields(field_wrapper.get(1)?, 0)?;
+    if field_fields.first()?.trim() != "1" {
+        return None;
+    }
+    parse_1c_quoted_string_with_len(field_fields.get(1)?.trim()).map(|(value, _)| value)
 }
 
 fn parse_role_restriction_templates(value: &str) -> Option<Vec<RoleRestrictionTemplate>> {
@@ -1129,6 +1235,10 @@ const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
     ("b5f861d3-d9c5-45ec-98bf-0ed4d489a351", "InputByString"),
     ("33200740-82b0-4de7-8556-d3fb25ca4328", "Insert"),
     (
+        "3b869658-ebc9-49ff-9bb3-e7c59686f538",
+        "InteractiveActivate",
+    ),
+    (
         "b0c0cbfc-f2cc-4b80-8460-5d5d7a599d9d",
         "InteractiveChangeOfPosted",
     ),
@@ -1179,6 +1289,7 @@ const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
         "4d0d77ec-8511-430d-bd77-8407f27bc8f4",
         "InteractiveUndoPosting",
     ),
+    ("5e664189-f0ee-439c-bdc5-eb81cca41ddf", "InteractiveExecute"),
     (
         "b9b44b51-3ac9-47cd-8b5a-df51afdcceb0",
         "MainWindowModeEmbeddedWorkplace",
@@ -1211,6 +1322,7 @@ const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
     ("d8682bbb-7800-4aa0-8590-d3cb11fe2a29", "SaveUserData"),
     ("1d306db2-d97e-4b57-9b28-5d21e838cd9e", "Set"),
     ("65b6855f-85d5-4d33-ab75-be4485326dd5", "Start"),
+    ("84487e82-eb6c-4c51-ae16-3a6db17e886d", "InteractiveStart"),
     (
         "479a42c0-c3e9-4ae7-bf4a-75cebc14fec4",
         "SwitchToDataHistoryVersion",
@@ -1408,12 +1520,13 @@ fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
 }
 
 fn format_role_rights_xml(rights: &RoleRights) -> String {
-    let mut xml = String::from(
+    let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Rights xmlns=\"http://v8.1c.ru/8.2/roles\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Rights\" version=\"2.20\">\r\n\
-\t<setForNewObjects>false</setForNewObjects>\r\n\
+\t<setForNewObjects>{}</setForNewObjects>\r\n\
 \t<setForAttributesByDefault>true</setForAttributesByDefault>\r\n\
 \t<independentRightsOfChildObjects>false</independentRightsOfChildObjects>\r\n",
+        xml_bool(rights.set_for_new_objects)
     );
     for object in &rights.objects {
         xml.push_str("\t<object>\r\n\t\t<name>");
@@ -1425,9 +1538,15 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
             xml.push_str("</name>\r\n\t\t\t<value>");
             xml.push_str(xml_bool(right.value));
             xml.push_str("</value>\r\n");
-            if let Some(condition) = &right.restriction_by_condition {
-                xml.push_str("\t\t\t<restrictionByCondition>\r\n\t\t\t\t<condition>");
-                xml.push_str(&escape_xml_element_text(condition));
+            if let Some(restriction) = &right.restriction_by_condition {
+                xml.push_str("\t\t\t<restrictionByCondition>\r\n");
+                if let Some(field) = &restriction.field {
+                    xml.push_str("\t\t\t\t<field>");
+                    xml.push_str(&escape_xml_element_text(field));
+                    xml.push_str("</field>\r\n");
+                }
+                xml.push_str("\t\t\t\t<condition>");
+                xml.push_str(&escape_xml_element_text(&restriction.condition));
                 xml.push_str("</condition>\r\n\t\t\t</restrictionByCondition>\r\n");
             }
             xml.push_str("\t\t</right>\r\n");
@@ -1760,6 +1879,35 @@ fn metadata_kind_can_own_commands(kind: &str) -> bool {
 }
 
 fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
+    nested_headers_from_text_inside_object_code(text, owner_uuid, 9)
+}
+
+fn nested_metadata_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
+    nested_headers_from_text(text, owner_uuid, |_| true)
+}
+
+fn nested_web_service_operation_headers_from_text(
+    text: &str,
+    owner_uuid: &str,
+) -> Vec<MetadataHeader> {
+    nested_headers_from_text_inside_object_code(text, owner_uuid, 1)
+}
+
+fn nested_headers_from_text_inside_object_code(
+    text: &str,
+    owner_uuid: &str,
+    code: u32,
+) -> Vec<MetadataHeader> {
+    nested_headers_from_text(text, owner_uuid, |marker_start| {
+        is_offset_inside_metadata_object_code(text, marker_start, code)
+    })
+}
+
+fn nested_headers_from_text(
+    text: &str,
+    owner_uuid: &str,
+    accepts_marker: impl Fn(usize) -> bool,
+) -> Vec<MetadataHeader> {
     let mut headers = Vec::new();
     let mut seen = BTreeSet::new();
     let mut offset = 0usize;
@@ -1777,7 +1925,7 @@ fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<Metadat
         if uuid == owner_uuid || !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
             continue;
         }
-        if !is_offset_inside_metadata_object_code(text, marker_start, 9) {
+        if !accepts_marker(marker_start) {
             continue;
         }
         if !seen.insert(uuid.to_string()) {
@@ -4247,7 +4395,6 @@ mod tests {
                 binary_hex: encode_hex_for_test(&text_picture),
             },
         ];
-
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 2);
@@ -4467,7 +4614,10 @@ mod tests {
         let role_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let register_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let field_uuid = "77777777-7777-4777-8777-777777777777";
         let configuration_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let web_service_uuid = "99999999-9999-4999-9999-999999999999";
+        let operation_uuid = "88888888-8888-4888-8888-888888888888";
         let role_metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{6,\r\n{{3,\r\n{{1,0,{role_uuid}}},\"Editor\",{{1,\"en\",\"Editor\"}},\"\"}},0}}\r\n}}"
@@ -4488,16 +4638,31 @@ mod tests {
         );
         let register_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{33,dddddddd-dddd-4ddd-dddd-dddddddddddd,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}}\r\n}}"
+                "{{1,\r\n{{33,dddddddd-dddd-4ddd-dddd-dddddddddddd,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\r\n{{3,\r\n{{1,0,{field_uuid}}},\"ВерсияОбъекта\",{{1,\"ru\",\"Версия объекта\"}},\"\"}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
-        let rights = deflate_for_test(
+        let web_service_metadata = deflate_for_test(
             format!(
-                "{{10,{{3,{{{{1,{catalog_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},{{{{1,{configuration_uuid},0,0}},{{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1}}}},{{{{1,{register_uuid},0,0}},{{1,3,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,2,{{{{1c87578f-9e09-4ec0-a991-5629c87b1588,{{1,{{1,\"#Если &Allowed #Тогда \"\"OK\"\"\",0}}}}}},{{287b74b8-3a66-4a76-ba27-4f1f6a93770e,{{1,{{1,\"ГДЕ Owner = &User\",0}}}}}}}}}}}}}},{{1,{{\"OnlyAllowed\",\"// Template & \"\"quoted\"\"\"}}}},4294967295,1,0,4294967295}}"
+                "{{1,\r\n{{4,\"http://example.com/svc\",\r\n{{3,\r\n{{1,0,{web_service_uuid}}},\"RemoteApi\",{{1,\"en\",\"Remote api\"}},\"\"}},{{0,0}},\"RemoteApi.1cws\",{{0}},0,20}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,\r\n{{\r\n{{1,\r\n{{3,\r\n{{1,0,{operation_uuid}}},\"Ping\",{{1,\"en\",\"Ping\"}},\"\"}},{{0,\"http://www.w3.org/2001/XMLSchema\",\"boolean\"}},0,0,\"Ping\",1}},1,\r\n{{22222222-2222-4222-8222-222222222222,0}}\r\n}}\r\n}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
+        let rights_text = r##"{10,{4,
+{{1,@catalog_uuid@,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}},
+{{1,@configuration_uuid@,0,0},{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1}},
+{{1,@operation_uuid@,0,0},{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}},
+{{1,@register_uuid@,0,0},{1,4,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4,-1,3,
+{{1c87578f-9e09-4ec0-a991-5629c87b1588,{1,{1,"#Если &Allowed #Тогда ""OK""",0}}},
+{287b74b8-3a66-4a76-ba27-4f1f6a93770e,{1,{1,"ГДЕ Owner = &User",0}}},
+{24abfe06-289a-48c5-8bb4-032c733e45c5,{2,{1,"",0},{1,"ГДЕ ЛОЖЬ",1,{{0},{0,@field_uuid@}}}}}}}}},
+{1,{"OnlyAllowed","// Template & ""quoted"""}},4294967295,1,0,4294967295}"##
+            .replace("@catalog_uuid@", catalog_uuid)
+            .replace("@configuration_uuid@", configuration_uuid)
+            .replace("@operation_uuid@", operation_uuid)
+            .replace("@register_uuid@", register_uuid)
+            .replace("@field_uuid@", field_uuid);
+        let rights = deflate_for_test(rights_text.as_bytes());
         let rows = vec![
             ConfigRow {
                 file_name: configuration_uuid.to_string(),
@@ -4529,8 +4694,13 @@ mod tests {
                 data_size: register_metadata.len() as i64,
                 binary_hex: encode_hex_for_test(&register_metadata),
             },
+            ConfigRow {
+                file_name: web_service_uuid.to_string(),
+                part_no: 0,
+                data_size: web_service_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&web_service_metadata),
+            },
         ];
-
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.source_asset_rows, 1);
@@ -4542,12 +4712,30 @@ mod tests {
         );
         assert!(xml.contains("<name>Configuration.DemoApp</name>"));
         assert!(xml.contains("<name>MainWindowModeNormal</name>"));
+        assert!(xml.contains("<name>WebService.RemoteApi.Operation.Ping</name>"));
+        assert_eq!(
+            role_right_name("3b869658-ebc9-49ff-9bb3-e7c59686f538"),
+            Some("InteractiveActivate")
+        );
+        assert_eq!(
+            role_right_name("5e664189-f0ee-439c-bdc5-eb81cca41ddf"),
+            Some("InteractiveExecute")
+        );
+        assert_eq!(
+            role_right_name("84487e82-eb6c-4c51-ae16-3a6db17e886d"),
+            Some("InteractiveStart")
+        );
         assert!(xml.contains("<name>Read</name>"));
+        assert!(xml.contains("<setForNewObjects>true</setForNewObjects>"));
         assert!(xml.contains("<restrictionByCondition>"));
         assert!(xml.contains("#Если &amp;Allowed #Тогда \"OK\""));
         assert!(xml.contains("<name>Update</name>"));
         assert!(xml.contains("ГДЕ Owner = &amp;User"));
         assert!(xml.contains("<name>TotalsControl</name>"));
+        assert!(xml.contains("<field>ВерсияОбъекта</field>"));
+        assert!(xml.contains("ГДЕ ЛОЖЬ"));
+        assert!(xml.contains("<name>Delete</name>"));
+        assert!(xml.contains("<value>false</value>"));
         assert!(xml.contains("<name>Insert</name>"));
         assert!(xml.contains("<name>View</name>"));
         assert!(xml.contains("<restrictionTemplate>"));
