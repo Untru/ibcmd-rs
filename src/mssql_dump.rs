@@ -343,6 +343,7 @@ enum SourceAssetKind {
     },
     ExtPicture,
     Help,
+    InflatedBase64OrBinary,
     InflatedBinary,
     RoleRights {
         object_refs: BTreeMap<String, String>,
@@ -362,6 +363,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     let object_refs = build_metadata_object_reference_index(rows);
     let field_refs = build_metadata_field_reference_index(rows);
     let form_refs = build_form_source_reference_index(rows);
+    let template_refs = build_template_source_reference_index(rows);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -423,8 +425,51 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
+    paths.extend(template_body_asset_paths(&template_refs, &file_names));
 
     paths
+}
+
+fn template_body_asset_paths(
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    file_names: &BTreeSet<&str>,
+) -> BTreeMap<String, SourceAsset> {
+    let mut paths = BTreeMap::new();
+    for (uuid, template_ref) in template_refs {
+        let body_id = format!("{uuid}.0");
+        if !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let Some((file_name, kind)) = template_body_source_asset(template_ref.template_type) else {
+            continue;
+        };
+        paths.insert(
+            body_id,
+            SourceAsset {
+                primary_path: template_ref
+                    .relative_path
+                    .with_extension("")
+                    .join("Ext")
+                    .join(file_name),
+                kind,
+            },
+        );
+    }
+
+    paths
+}
+
+fn template_body_source_asset(template_type: &str) -> Option<(&'static str, SourceAssetKind)> {
+    match template_type {
+        "AddIn" => Some(("Template.bin", SourceAssetKind::InflatedBase64OrBinary)),
+        "BinaryData" => Some(("Template.bin", SourceAssetKind::InflatedBase64OrBinary)),
+        "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
+        "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
+        "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
+        // SpreadsheetDocument bodies are stored as MOXCEL and need a separate MXL->XML converter.
+        "SpreadsheetDocument" => None,
+        _ => None,
+    }
 }
 
 const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
@@ -651,6 +696,28 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
             fs::write(&path, inflated)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::InflatedBase64OrBinary => {
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let content = if let Ok(text) = std::str::from_utf8(&inflated) {
+                extract_base64_payload(text)
+                    .and_then(decode_base64_mime)
+                    .unwrap_or(inflated)
+            } else {
+                inflated
+            };
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, content)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
         SourceAssetKind::RoleRights {
@@ -969,10 +1036,13 @@ fn build_template_source_reference_index(
             "Template"
         };
         let body_id = format!("{}.0", template.uuid);
-        let template_type = rows_by_file_name
-            .get(body_id.as_str())
-            .and_then(|row| decode_hex(&row.binary_hex).ok())
-            .and_then(|bytes| infer_template_type_from_body(&bytes))
+        let template_type = template_template_type_from_metadata(&template)
+            .or_else(|| {
+                rows_by_file_name
+                    .get(body_id.as_str())
+                    .and_then(|row| decode_hex(&row.binary_hex).ok())
+                    .and_then(|bytes| infer_template_type_from_body(&bytes))
+            })
             .unwrap_or("BinaryData");
         index.insert(
             template.uuid,
@@ -1005,6 +1075,22 @@ fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
         Some("HTMLDocument")
     } else {
         Some("TextDocument")
+    }
+}
+
+fn template_template_type_from_metadata(header: &MetadataHeader) -> Option<&'static str> {
+    template_type_from_code(header.template_type_code?)
+}
+
+fn template_type_from_code(code: u32) -> Option<&'static str> {
+    match code {
+        0 => Some("SpreadsheetDocument"),
+        1 => Some("BinaryData"),
+        3 => Some("HTMLDocument"),
+        4 => Some("TextDocument"),
+        6 => Some("DataCompositionSchema"),
+        9 => Some("AddIn"),
+        _ => None,
     }
 }
 
@@ -2347,6 +2433,7 @@ struct MetadataHeader {
     name: String,
     synonyms: Vec<(String, String)>,
     comment: String,
+    template_type_code: Option<u32>,
 }
 
 struct CommonModuleFlags {
@@ -2718,6 +2805,9 @@ fn metadata_source_for_text(
         {
             Some(("ScheduledJob", "ScheduledJobs"))
         }
+        4 if is_common_template_metadata_fields(&fields, uuid) => {
+            Some(("CommonTemplate", "CommonTemplates"))
+        }
         4 if header_index == Some(1) => Some(("CommonPicture", "CommonPictures")),
         5 => Some(("CommonAttribute", "CommonAttributes")),
         6 => Some(("Role", "Roles")),
@@ -2766,10 +2856,21 @@ fn is_template_metadata_text(text: &str, uuid: &str) -> bool {
     let Some(fields) = metadata_object_fields(text) else {
         return false;
     };
-    parse_metadata_object_code(text) == Some(2)
-        && metadata_header_field_index(&fields, uuid) == Some(2)
-        && field_is_unsigned_integer(fields.get(1))
-        && !contains_wrapped_metadata_object_code(text, 9, uuid)
+    match parse_metadata_object_code(text) {
+        Some(2) => {
+            metadata_header_field_index(&fields, uuid) == Some(2)
+                && field_is_unsigned_integer(fields.get(1))
+                && !contains_wrapped_metadata_object_code(text, 9, uuid)
+        }
+        Some(4) => is_common_template_metadata_fields(&fields, uuid),
+        _ => false,
+    }
+}
+
+fn is_common_template_metadata_fields(fields: &[&str], uuid: &str) -> bool {
+    fields.len() == 3
+        && metadata_header_field_index(fields, uuid) == Some(1)
+        && field_is_unsigned_integer(fields.get(2))
 }
 
 fn is_defined_type_metadata_text(text: &str, uuid: &str) -> bool {
@@ -3026,7 +3127,21 @@ fn parse_metadata_header_from_text(text: &str, uuid: &str) -> Option<MetadataHea
         name,
         synonyms,
         comment,
+        template_type_code: template_type_code_from_metadata_text(text, uuid),
     })
+}
+
+fn template_type_code_from_metadata_text(text: &str, uuid: &str) -> Option<u32> {
+    let fields = metadata_object_fields(text)?;
+    match parse_metadata_object_code(text)? {
+        2 if metadata_header_field_index(&fields, uuid) == Some(2) => {
+            fields.get(1)?.trim().parse().ok()
+        }
+        4 if is_common_template_metadata_fields(&fields, uuid) => {
+            fields.get(2)?.trim().parse().ok()
+        }
+        _ => None,
+    }
 }
 
 fn parse_1c_quoted_string_with_len(input: &str) -> Option<(String, usize)> {
@@ -4994,7 +5109,7 @@ mod tests {
         );
         let text_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{text_uuid}}},\"DocumentKinds\",{{1,\"en\",\"Document kinds\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},4}},0}}"
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{text_uuid}}},\"DocumentKinds\",{{1,\"en\",\"Document kinds\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0}},0}}"
             )
             .as_bytes(),
         );
@@ -5278,7 +5393,7 @@ mod tests {
         let owned_template_body = deflate_for_test(b"MOXCEL\0\x08\0\x01\0\x0c\0{}");
         let common_template_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{2,0,\r\n{{3,\r\n{{1,0,{common_template_uuid}}},\"SharedText\",{{1,\"en\",\"Shared text\"}},\"\"}}\r\n,0}}\r\n}}"
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{common_template_uuid}}},\"SharedText\",{{1,\"en\",\"Shared text\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},4}},0}}"
             )
             .as_bytes(),
         );
@@ -5319,15 +5434,19 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 3);
+        assert_eq!(dumped.source_asset_rows, 1);
         let owned_xml =
             fs::read_to_string(root.join("Catalogs/Products/Templates/Print.xml")).unwrap();
         let common_xml = fs::read_to_string(root.join("CommonTemplates/SharedText.xml")).unwrap();
+        let common_body =
+            fs::read(root.join("CommonTemplates/SharedText/Ext/Template.txt")).unwrap();
         assert!(owned_xml.contains("<Template uuid=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
         assert!(owned_xml.contains("<TemplateType>SpreadsheetDocument</TemplateType>"));
         assert!(
             common_xml.contains("<CommonTemplate uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">")
         );
         assert!(common_xml.contains("<TemplateType>TextDocument</TemplateType>"));
+        assert_eq!(common_body, b"\xef\xbb\xbfPlain text");
         let template_row = dumped
             .rows
             .iter()
@@ -5336,6 +5455,15 @@ mod tests {
         assert_eq!(
             template_row.metadata_xml_path.as_deref(),
             Some("Catalogs/Products/Templates/Print.xml")
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{common_template_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("CommonTemplates/SharedText/Ext/Template.txt")
         );
 
         let _ = fs::remove_dir_all(root);
