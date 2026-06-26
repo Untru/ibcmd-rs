@@ -1956,6 +1956,16 @@ mod tests {
     }
 
     #[test]
+    fn defaults_stage_script_path_with_sanitized_parts() {
+        let path = super::default_stage_script_path("Test Db]", "common modules/2");
+
+        assert_eq!(
+            path,
+            PathBuf::from(r"C:\temp\ibcmd-rs\stage_Test_Db__common_modules_2.sql")
+        );
+    }
+
+    #[test]
     fn builds_metadata_object_stage_sql_with_expected_row_counts() {
         let prepared = vec![PreparedMetadataObjectStage {
             object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
