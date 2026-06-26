@@ -4130,6 +4130,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             Some("BusinessProcesses")
         );
         assert_eq!(
+            super::metadata_type_source_folder("BusinessProcessObject.Sales"),
+            Some("BusinessProcesses")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("BusinessProcessRef.Sales"),
+            Some("BusinessProcesses")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("BusinessProcessSelection.Sales"),
+            Some("BusinessProcesses")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("BusinessProcessList.Sales"),
+            Some("BusinessProcesses")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("BusinessProcessManager.Sales"),
+            Some("BusinessProcesses")
+        );
+        assert_eq!(
             super::metadata_type_source_folder("CatalogTabularSection.Goods.Items"),
             Some("Catalogs")
         );
