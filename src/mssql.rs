@@ -1911,10 +1911,13 @@ fn quote_string_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ColumnShape, PreparedMetadataObjectStage, TableShape, compare_shapes,
-        infer_common_module_text_path, quote_ident, quote_string, require_non_lab_confirmation,
+        ColumnShape, PreparedCommonModuleObjectStage, PreparedMetadataObjectStage, TableShape,
+        compare_shapes, infer_common_module_text_path, quote_ident, quote_string,
+        require_non_lab_confirmation,
     };
-    use crate::module_blob::SimpleMetadataXmlProperties;
+    use crate::module_blob::{
+        CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -1978,6 +1981,47 @@ mod tests {
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xAABB"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 4"));
+    }
+
+    #[test]
+    fn builds_common_module_object_stage_sql_with_expected_row_counts() {
+        let prepared = vec![PreparedCommonModuleObjectStage {
+            module_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+            module_body_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string(),
+            xml: PathBuf::from("CommonModules/TestModule.xml"),
+            text: PathBuf::from("CommonModules/TestModule/Ext/Module.bsl"),
+            properties: CommonModuleXmlProperties {
+                uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                name: "TestModule".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                global: true,
+                client_managed_application: false,
+                server: true,
+                external_connection: false,
+                client_ordinary_application: false,
+                server_call: false,
+                privileged: false,
+                return_values_reuse: ReturnValuesReuse::DontUse,
+            },
+            metadata_plain_bytes: 14,
+            metadata_blob: vec![0x10, 0x20],
+            metadata_blob_sha256: "cafebabe".to_string(),
+            text_bytes: 7,
+            module_blob: vec![0xAA, 0xBB, 0xCC],
+            module_blob_sha256: "feedface".to_string(),
+        }];
+
+        let sql = super::build_stage_common_module_objects_sql("TestDb", &prepared, &[0xCC, 0xDD]);
+
+        assert!(sql.contains("USE [TestDb];"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 2 THROW 53000"));
+        assert!(sql.contains("N'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb'"));
+        assert!(sql.contains("N'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0'"));
+        assert!(sql.contains("0x1020"));
+        assert!(sql.contains("0xAABBCC"));
+        assert!(sql.contains("0xCCDD"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
     #[test]
