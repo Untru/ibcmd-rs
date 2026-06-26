@@ -13,7 +13,8 @@ use crate::cli::{
     MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
     MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
     MssqlStageDocumentJournalObjectArgs, MssqlStageExchangePlanObjectArgs,
-    MssqlStageMetadataObjectsArgs, MssqlStorageExportArgs, MssqlStorageImportArgs,
+    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStorageExportArgs,
+    MssqlStorageImportArgs,
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
@@ -900,6 +901,20 @@ pub fn stage_business_process_object(
 pub fn stage_document_journal_object(
     args: &MssqlStageDocumentJournalObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_report_object(args: &MssqlStageReportObjectArgs) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
         database: args.database.clone(),
