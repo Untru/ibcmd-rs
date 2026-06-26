@@ -2365,6 +2365,170 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_catalog_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-catalog-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs/Валюты/Ext/Help")).unwrap();
+        std::fs::create_dir_all(root.join("Catalogs/Валюты/Forms/ФормаСписка/Ext/Form")).unwrap();
+        std::fs::create_dir_all(root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form")).unwrap();
+        std::fs::create_dir_all(root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты.xml"),
+            root.join("Catalogs/Валюты.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Ext/Help.xml"),
+            root.join("Catalogs/Валюты/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Ext/ManagerModule.bsl"),
+            root.join("Catalogs/Валюты/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Ext/ObjectModule.bsl"),
+            root.join("Catalogs/Валюты/Ext/ObjectModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Ext/Help/ru.html"),
+            root.join("Catalogs/Валюты/Ext/Help/ru.html"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаСписка.xml"),
+            root.join("Catalogs/Валюты/Forms/ФормаСписка.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаСписка/Ext/Form.xml"),
+            root.join("Catalogs/Валюты/Forms/ФормаСписка/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+            root.join("Catalogs/Валюты/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаЭлемента.xml"),
+            root.join("Catalogs/Валюты/Forms/ФормаЭлемента.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form.xml"),
+            root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help.xml"),
+            root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form/Module.bsl"),
+            root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help/ru.html"),
+            root.join("Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help/ru.html"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "Catalogs/Валюты.xml",
+            SourceKind::MetadataXml,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Ext/ManagerModule.bsl",
+            SourceKind::Module,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Ext/ObjectModule.bsl",
+            SourceKind::Module,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Ext/Help/ru.html",
+            SourceKind::Other,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаСписка.xml",
+            SourceKind::Form,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаСписка/Ext/Form.xml",
+            SourceKind::Form,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаСписка/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаЭлемента.xml",
+            SourceKind::Form,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form.xml",
+            SourceKind::Form,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help.xml",
+            SourceKind::Form,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("Catalogs/Валюты")
+        )));
+        assert!(files.contains(&(
+            "Catalogs/Валюты/Forms/ФормаЭлемента/Ext/Help/ru.html",
+            SourceKind::Form,
+            Some("Catalogs/Валюты")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_attribute_and_session_parameter_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
