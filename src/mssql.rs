@@ -2383,6 +2383,21 @@ mod tests {
                 metadata_blob: vec![0xDE, 0xAD, 0xBE, 0xEF],
                 metadata_blob_sha256: "b16b00b5".to_string(),
             },
+            PreparedMetadataObjectStage {
+                object_id: "c39750ca-e33f-40c2-b830-119423d9a2ae".to_string(),
+                kind: "Enum".to_string(),
+                xml: PathBuf::from("Enums/ВариантыВажностиЗадачи.xml"),
+                properties: SimpleMetadataXmlProperties {
+                    kind: "Enum".to_string(),
+                    uuid: "c39750ca-e33f-40c2-b830-119423d9a2ae".to_string(),
+                    name: "ВариантыВажностиЗадачи".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                },
+                metadata_plain_bytes: 17,
+                metadata_blob: vec![0xC3, 0x97, 0x50, 0xCA],
+                metadata_blob_sha256: "0badc0de".to_string(),
+            },
         ];
 
         let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xAA, 0xBB]);
@@ -2395,6 +2410,7 @@ mod tests {
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54005"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54006"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54007"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54008"));
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xABCD"));
         assert!(sql.contains("0x112233"));
@@ -2402,8 +2418,9 @@ mod tests {
         assert!(sql.contains("0x7788"));
         assert!(sql.contains("0x99AA"));
         assert!(sql.contains("0xDEADBEEF"));
+        assert!(sql.contains("0xC39750CA"));
         assert!(sql.contains("0xAABB"));
-        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 10"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 11"));
     }
 
     #[test]
