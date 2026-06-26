@@ -3394,6 +3394,12 @@ mod tests {
                 "Подсистема",
             ),
             (
+                "SettingsStorage",
+                "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0",
+                "ХранилищеВариантовОтчетов",
+                "Хранилище настроек",
+            ),
+            (
                 "Task",
                 "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
                 "ЗадачаИсполнителя",
