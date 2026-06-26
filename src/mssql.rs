@@ -2299,6 +2299,21 @@ mod tests {
                 metadata_blob_sha256: "deadbeef".to_string(),
             },
             PreparedMetadataObjectStage {
+                object_id: "abababab-abab-4aba-baba-abababababab".to_string(),
+                kind: "CommonAttribute".to_string(),
+                xml: PathBuf::from("CommonAttributes/ОтредактированныеПредопределенныеРеквизиты.xml"),
+                properties: SimpleMetadataXmlProperties {
+                    kind: "CommonAttribute".to_string(),
+                    uuid: "abababab-abab-4aba-baba-abababababab".to_string(),
+                    name: "ОтредактированныеПредопределенныеРеквизиты".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                },
+                metadata_plain_bytes: 14,
+                metadata_blob: vec![0xAA, 0xBB, 0xCC],
+                metadata_blob_sha256: "abad1dea".to_string(),
+            },
+            PreparedMetadataObjectStage {
                 object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
                 kind: "CommonForm".to_string(),
                 xml: PathBuf::from("CommonForms/ФормаОтчета.xml"),
@@ -2431,7 +2446,9 @@ mod tests {
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54006"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54007"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54008"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54009"));
         assert!(sql.contains("0x012345"));
+        assert!(sql.contains("0xAABBCC"));
         assert!(sql.contains("0xABCD"));
         assert!(sql.contains("0x112233"));
         assert!(sql.contains("0x445566"));
@@ -2441,7 +2458,7 @@ mod tests {
         assert!(sql.contains("0xC39750CA"));
         assert!(sql.contains("0x10203040"));
         assert!(sql.contains("0xAABB"));
-        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 12"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 13"));
     }
 
     #[test]
