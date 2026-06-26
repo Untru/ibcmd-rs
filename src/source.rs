@@ -1154,6 +1154,131 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_business_process_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-business-process-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("BusinessProcesses/Задание/Ext/Help")).unwrap();
+        std::fs::create_dir_all(
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help"),
+        )
+        .unwrap();
+
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание.xml"),
+            root.join("BusinessProcesses/Задание.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Ext/Flowchart.xml"),
+            root.join("BusinessProcesses/Задание/Ext/Flowchart.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Ext/Help.xml"),
+            root.join("BusinessProcesses/Задание/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Ext/ManagerModule.bsl"),
+            root.join("BusinessProcesses/Задание/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Ext/ObjectModule.bsl"),
+            root.join("BusinessProcesses/Задание/Ext/ObjectModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса.xml"),
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form.xml"),
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help.xml"),
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root
+                .join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form/Module.bsl"),
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help/ru.html"),
+            root.join("BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help/ru.html"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание.xml",
+            SourceKind::MetadataXml,
+            Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Ext/Flowchart.xml",
+            SourceKind::MetadataXml,
+            Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса.xml",
+            SourceKind::Form,
+            Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form.xml",
+            SourceKind::Form,
+            Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help.xml",
+            SourceKind::Form,
+            Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("BusinessProcesses/Задание")
+        )));
+        assert!(files.contains(&(
+            "BusinessProcesses/Задание/Forms/ФормаБизнесПроцесса/Ext/Help/ru.html",
+            SourceKind::Form,
+            Some("BusinessProcesses/Задание")
+        )));
+    }
+
+    #[test]
     fn scans_real_role_and_scheduled_job_ext_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
