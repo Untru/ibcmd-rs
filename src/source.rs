@@ -740,6 +740,9 @@ mod tests {
         std::fs::create_dir_all(root.join("BusinessProcesses/Задание/Ext")).unwrap();
         std::fs::create_dir_all(root.join("DefinedTypes")).unwrap();
         std::fs::create_dir_all(root.join("CommonAttributes")).unwrap();
+        std::fs::create_dir_all(root.join("FunctionalOptions")).unwrap();
+        std::fs::create_dir_all(root.join("EventSubscriptions")).unwrap();
+        std::fs::create_dir_all(root.join("HTTPServices")).unwrap();
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
 
         std::fs::write(
@@ -812,6 +815,45 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
+            root.join("FunctionalOptions/ВыполнятьЗамерыПроизводительности.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <FunctionalOption uuid="d2ae6d0f-6c08-4a70-a8fe-2b1adf77e2f9">
+    <Properties>
+      <Name>ВыполнятьЗамерыПроизводительности</Name>
+    </Properties>
+  </FunctionalOption>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("EventSubscriptions/СобытиеПередЗаписью.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <EventSubscription uuid="54fe3d5c-898c-43be-8a9f-1d5d1f9677a7">
+    <Properties>
+      <Name>СобытиеПередЗаписью</Name>
+    </Properties>
+  </EventSubscription>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("HTTPServices/exchange_dsl_1_0_0_1.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <HTTPService uuid="e6a45fd4-b11f-47c8-9d21-4c6bc3f05a4a">
+    <Properties>
+      <Name>exchange_dsl_1_0_0_1</Name>
+    </Properties>
+  </HTTPService>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
             root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml"),
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
@@ -863,6 +905,21 @@ mod tests {
             "CommonAttributes/ДопРеквизит.xml",
             SourceKind::MetadataXml,
             Some("CommonAttributes/ДопРеквизит")
+        )));
+        assert!(files.contains(&(
+            "FunctionalOptions/ВыполнятьЗамерыПроизводительности.xml",
+            SourceKind::MetadataXml,
+            Some("FunctionalOptions/ВыполнятьЗамерыПроизводительности")
+        )));
+        assert!(files.contains(&(
+            "EventSubscriptions/СобытиеПередЗаписью.xml",
+            SourceKind::MetadataXml,
+            Some("EventSubscriptions/СобытиеПередЗаписью")
+        )));
+        assert!(files.contains(&(
+            "HTTPServices/exchange_dsl_1_0_0_1.xml",
+            SourceKind::MetadataXml,
+            Some("HTTPServices/exchange_dsl_1_0_0_1")
         )));
         assert!(files.contains(&(
             "Tasks/ЗадачаИсполнителя/Commands/ВсеЗадачи/Ext/CommandModule.bsl",
