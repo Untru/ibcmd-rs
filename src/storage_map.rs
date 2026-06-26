@@ -57,6 +57,7 @@ pub struct StorageMappingReport {
     pub summaries: Vec<StorageMutationSummary>,
     pub roles: Vec<StorageStageRoleSummary>,
     pub families: Vec<StorageOperationFamilySummary>,
+    pub signals: Vec<StorageSignalSummary>,
     pub entries: Vec<StorageMappingEntry>,
 }
 
@@ -65,6 +66,7 @@ pub struct StorageMapOverview {
     pub dominant_kind: Option<StorageMutationSummary>,
     pub dominant_role: Option<StorageStageRoleSummary>,
     pub dominant_family: Option<StorageOperationFamilySummary>,
+    pub dominant_signal: Option<StorageSignalSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +86,13 @@ pub struct StorageStageRoleSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageOperationFamilySummary {
     pub family: StorageOperationFamily,
+    pub groups: usize,
+    pub total_duration_us: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageSignalSummary {
+    pub signal: String,
     pub groups: usize,
     pub total_duration_us: u64,
 }
@@ -123,6 +132,7 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
     let mut summaries = summarize_entries(&entries);
     let mut roles = summarize_roles(&entries);
     let mut families = summarize_families(&entries);
+    let mut signals = summarize_signals(&entries);
 
     entries.sort_by(|left, right| {
         right
@@ -150,6 +160,12 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             .cmp(&left.total_duration_us)
             .then_with(|| left.family.cmp(&right.family))
     });
+    signals.sort_by(|left, right| {
+        right
+            .total_duration_us
+            .cmp(&left.total_duration_us)
+            .then_with(|| left.signal.cmp(&right.signal))
+    });
 
     let mapped_groups = entries
         .iter()
@@ -165,10 +181,12 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             dominant_kind: summaries.first().cloned(),
             dominant_role: roles.first().cloned(),
             dominant_family: families.first().cloned(),
+            dominant_signal: signals.first().cloned(),
         },
         summaries,
         roles,
         families,
+        signals,
         entries,
     }
 }
@@ -223,6 +241,27 @@ fn summarize_families(entries: &[StorageMappingEntry]) -> Vec<StorageOperationFa
         .map(
             |(family, (groups, total_duration_us))| StorageOperationFamilySummary {
                 family,
+                groups,
+                total_duration_us,
+            },
+        )
+        .collect()
+}
+
+fn summarize_signals(entries: &[StorageMappingEntry]) -> Vec<StorageSignalSummary> {
+    let mut totals = std::collections::BTreeMap::<String, (usize, u64)>::new();
+    for entry in entries {
+        for signal in &entry.signals {
+            let value = totals.entry(signal.clone()).or_insert((0, 0));
+            value.0 += 1;
+            value.1 += entry.total_duration_us;
+        }
+    }
+    totals
+        .into_iter()
+        .map(
+            |(signal, (groups, total_duration_us))| StorageSignalSummary {
+                signal,
                 groups,
                 total_duration_us,
             },
@@ -461,7 +500,8 @@ fn primary_table_detail(group: &crate::trace::QueryGroup, fallback: &str) -> Str
 #[cfg(test)]
 mod tests {
     use super::{
-        StorageMutationKind, StorageOperationFamily, StorageStageRole, build_storage_mapping,
+        StorageMutationKind, StorageOperationFamily, StorageSignalSummary, StorageStageRole,
+        build_storage_mapping,
     };
     use crate::trace::{QueryGroup, TraceAnalysis};
 
@@ -580,6 +620,7 @@ mod tests {
         assert!(report.overview.dominant_kind.is_some());
         assert!(report.overview.dominant_role.is_some());
         assert!(report.overview.dominant_family.is_some());
+        assert!(report.overview.dominant_signal.is_some());
         assert!(
             report
                 .entries
@@ -736,6 +777,11 @@ mod tests {
                 .iter()
                 .any(|summary| summary.family == StorageOperationFamily::ConfigBundle)
         );
+        assert!(!report.signals.is_empty());
+        assert_eq!(
+            report.overview.dominant_signal.as_ref().unwrap().signal,
+            report.signals.first().unwrap().signal
+        );
         assert_eq!(
             report.overview.dominant_kind.as_ref().unwrap().kind,
             report.summaries.first().unwrap().kind
@@ -765,5 +811,13 @@ mod tests {
         assert_eq!(report.entries[0].role, StorageStageRole::Other);
         assert_eq!(report.entries[0].family, StorageOperationFamily::Other);
         assert_eq!(report.entries[0].signals, vec!["unclassified".to_string()]);
+        assert_eq!(
+            report.overview.dominant_signal,
+            Some(StorageSignalSummary {
+                signal: "unclassified".to_string(),
+                groups: 1,
+                total_duration_us: 4,
+            })
+        );
     }
 }
