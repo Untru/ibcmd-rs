@@ -2378,21 +2378,28 @@ fn by_table_name(tables: &[TableShape]) -> BTreeMap<String, &TableShape> {
 }
 
 fn run_sql(sqlcmd: &Path, server: &str, sql: &str) -> Result<()> {
-    let output = sqlcmd_command(sqlcmd, server, sql).output()?;
+    let output = sqlcmd_command(sqlcmd, server, sql)
+        .output()
+        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if output.status.success() {
         return Ok(());
     }
+    // sqlcmd writes error text to stdout as well as stderr, so surface both.
     Err(anyhow!(
-        "sqlcmd failed: {}",
+        "sqlcmd failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     ))
 }
 
 fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
-    let output = sqlcmd_command(sqlcmd, server, sql).output()?;
+    let output = sqlcmd_command(sqlcmd, server, sql)
+        .output()
+        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if !output.status.success() {
         return Err(anyhow!(
-            "sqlcmd failed: {}",
+            "sqlcmd failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -2400,7 +2407,9 @@ fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
 }
 
 fn run_sql_file(sqlcmd: &Path, server: &str, script: &Path) -> Result<()> {
-    let output = sqlcmd_file_command(sqlcmd, server, script).output()?;
+    let output = sqlcmd_file_command(sqlcmd, server, script)
+        .output()
+        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if output.status.success() {
         return Ok(());
     }
@@ -2464,7 +2473,10 @@ fn bcp_command(
 }
 
 fn run_bcp(mut command: Command) -> Result<()> {
-    let output = command.output()?;
+    let program = command.get_program().to_string_lossy().to_string();
+    let output = command
+        .output()
+        .with_context(|| format!("failed to launch bcp at {program}"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -3221,6 +3233,38 @@ mod tests {
     fn quotes_sql_identifier_and_string() {
         assert_eq!(quote_ident("a]b"), "[a]]b]");
         assert_eq!(quote_string("a'b"), "a''b");
+    }
+
+    #[test]
+    fn bcp_command_adds_trust_cert_only_when_requested() {
+        use std::path::Path;
+        let collect_args = |trust: bool| -> Vec<String> {
+            super::bcp_command(
+                Path::new("bcp"),
+                "db.dbo.ConfigSave",
+                "out",
+                Path::new("out.bcp"),
+                "localhost",
+                trust,
+            )
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect()
+        };
+
+        let without = collect_args(false);
+        assert!(without.contains(&"-T".to_string()));
+        assert!(without.contains(&"-n".to_string()));
+        assert!(
+            !without.contains(&"-u".to_string()),
+            "default invocation must not pass -u (rejected by bcp 13)"
+        );
+
+        let with = collect_args(true);
+        assert!(
+            with.contains(&"-u".to_string()),
+            "--bcp-trust-cert must add -u for bcp 18+"
+        );
     }
 
     #[test]
