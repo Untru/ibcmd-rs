@@ -270,6 +270,9 @@ pub struct MssqlDumpConfigArgs {
     /// Include pending ConfigSave rows in addition to Config.
     #[arg(long)]
     pub include_config_save: bool,
+    /// Dump only selected Config/ConfigSave FileName values. Can be repeated.
+    #[arg(long = "file-name")]
+    pub file_names: Vec<String>,
     /// Try to inflate raw deflate blobs and write readable *.txt files.
     #[arg(long)]
     pub inflate: bool,
@@ -2717,6 +2720,8 @@ mod tests {
             "mssql-dump-config",
             "--database",
             "TestDb",
+            "--file-name",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
             "-o",
             r"C:\dump",
             "--include-config-save",
@@ -2728,6 +2733,10 @@ mod tests {
         match cli.command {
             Commands::MssqlDumpConfig(args) => {
                 assert_eq!(args.database, "TestDb");
+                assert_eq!(
+                    args.file_names,
+                    vec!["aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()]
+                );
                 assert_eq!(args.output_dir, PathBuf::from(r"C:\dump"));
                 assert!(args.include_config_save);
                 assert!(args.inflate);

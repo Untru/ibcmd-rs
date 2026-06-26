@@ -76,8 +76,15 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
 
     let mut reports = Vec::new();
     let mut manifest_tables = Vec::new();
+    let selected_file_names = expand_selected_file_names(&args.file_names);
     for table in table_names {
-        let rows = fetch_rows(&args.sqlcmd, &args.server, &args.database, table)?;
+        let rows = fetch_rows(
+            &args.sqlcmd,
+            &args.server,
+            &args.database,
+            table,
+            &selected_file_names,
+        )?;
         let dumped = dump_table_rows(
             &args.output_dir,
             table,
@@ -330,7 +337,23 @@ fn sanitize_source_path_segment(value: &str) -> String {
     }
 }
 
-fn fetch_rows(sqlcmd: &Path, server: &str, database: &str, table: &str) -> Result<Vec<ConfigRow>> {
+fn fetch_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<Vec<ConfigRow>> {
+    let filter = if selected_file_names.is_empty() {
+        String::new()
+    } else {
+        let values = selected_file_names
+            .iter()
+            .map(|value| format!("N'{}'", quote_string(value)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("WHERE FileName IN ({values})\n")
+    };
     let sql = format!(
         "SET NOCOUNT ON; USE {db};\n\
          SELECT FileName AS file_name,\n\
@@ -338,15 +361,37 @@ fn fetch_rows(sqlcmd: &Path, server: &str, database: &str, table: &str) -> Resul
                 DataSize AS data_size,\n\
                 CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
          FROM {table}\n\
+         {filter}\
          ORDER BY FileName, PartNo\n\
          FOR JSON PATH;",
         db = quote_ident(database),
         table = quote_ident(table),
+        filter = filter,
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
     let json = extract_json_array(&stdout, &format!("dump {table} rows from {database}"))?;
+    let json = normalize_sqlcmd_json(&json);
     serde_json::from_str(&json)
         .with_context(|| format!("failed to parse {table} rows JSON for {database}"))
+}
+
+fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
+    let mut selected = BTreeSet::new();
+    for file_name in file_names {
+        let file_name = file_name.trim();
+        if file_name.is_empty() {
+            continue;
+        }
+        selected.insert(file_name.to_string());
+        if let Some(metadata_id) = file_name.strip_suffix(".0") {
+            if !metadata_id.is_empty() {
+                selected.insert(metadata_id.to_string());
+            }
+        } else {
+            selected.insert(format!("{file_name}.0"));
+        }
+    }
+    selected
 }
 
 fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
@@ -354,7 +399,10 @@ fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
         .arg("-C")
         .arg("-S")
         .arg(server)
-        .arg("-W")
+        .arg("-y")
+        .arg("0")
+        .arg("-w")
+        .arg("65535")
         .arg("-Q")
         .arg(sql)
         .output()
@@ -368,6 +416,10 @@ fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn normalize_sqlcmd_json(value: &str) -> String {
+    value.replace(['\r', '\n'], "")
 }
 
 fn prepare_output_dir(path: &Path, overwrite: bool) -> Result<()> {
@@ -446,6 +498,10 @@ fn quote_ident(value: &str) -> String {
     format!("[{}]", value.replace(']', "]]"))
 }
 
+fn quote_string(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
 fn safe_storage_file_name(file_name: &str, part_no: i32) -> String {
     let mut safe = String::with_capacity(file_name.len() + 16);
     for ch in file_name.chars() {
@@ -488,12 +544,42 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_wrapped_sqlcmd_json() {
+        let stdout = "Changed database context.\r\n[{\"binary_hex\":\"AABB\r\nCCDD\"}]\r\n";
+        let json = extract_json_array(stdout, "test").unwrap();
+        let normalized = normalize_sqlcmd_json(&json);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&normalized).unwrap();
+
+        assert_eq!(rows[0]["binary_hex"], "AABBCCDD");
+    }
+
+    #[test]
     fn sanitizes_storage_file_names() {
         assert_eq!(
             safe_storage_file_name("abc/def:ghi", 0),
             "abc_def_ghi__part0"
         );
         assert_eq!(safe_storage_file_name("", 2), "row__part2");
+    }
+
+    #[test]
+    fn expands_selected_file_names_with_module_pairs() {
+        let selected = expand_selected_file_names(&[
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string(),
+            "".to_string(),
+        ]);
+
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0"));
+        assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
+        assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0"));
+        assert_eq!(selected.len(), 4);
+    }
+
+    #[test]
+    fn quotes_sql_string_literals() {
+        assert_eq!(quote_string("a'b"), "a''b");
     }
 
     #[test]
