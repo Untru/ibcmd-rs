@@ -27,6 +27,8 @@ pub enum Commands {
     TraceTemplate(TraceTemplateArgs),
     /// Analyze exported SQL Server Extended Events XML.
     TraceAnalyze(TraceAnalyzeArgs),
+    /// Build a storage-mapping report from exported SQL Server Extended Events XML.
+    StorageMap(TraceAnalyzeArgs),
     /// Compare two SQL Server 1C databases by table shape and row counts.
     MssqlCompare(MssqlCompareArgs),
     /// Clone a SQL Server database with backup/restore.

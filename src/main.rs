@@ -55,6 +55,16 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&analysis)?);
             }
         }
+        Commands::StorageMap(args) => {
+            let analysis = ibcmd_rs::trace::analyze_trace_files(&args.input)?;
+            let report = ibcmd_rs::storage_map::build_storage_mapping(&analysis);
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::MssqlCompare(args) => {
             let report = ibcmd_rs::mssql::compare_databases(&args)?;
             if let Some(output) = args.output {
