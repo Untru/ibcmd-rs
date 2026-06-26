@@ -156,11 +156,11 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             "CommonForm",
             "CommonTemplate",
             "CommonAttribute",
-            "CommandGroup",
             "DocumentJournal",
             "Report",
             "DataProcessor",
             "Enum",
+            "BusinessProcess",
             "ExchangePlan",
             "EventSubscription",
             "FilterCriterion",
@@ -233,6 +233,19 @@ mod tests {
             report
                 .supported_metadata_families
                 .contains(&"CommonCommand")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"BusinessProcess")
+        );
+        assert_eq!(
+            report
+                .supported_metadata_families
+                .iter()
+                .filter(|value| **value == "CommandGroup")
+                .count(),
+            1
         );
         assert!(report.supported_metadata_families.contains(&"Task"));
     }
