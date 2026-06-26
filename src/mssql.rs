@@ -1984,6 +1984,23 @@ mod tests {
     }
 
     #[test]
+    fn builds_common_module_metadata_stage_sql_with_expected_row_counts() {
+        let sql = super::build_stage_common_module_metadata_sql(
+            "TestDb",
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+            &[0x10, 0x20, 0x30],
+            &[0xAA, 0xBB],
+        );
+
+        assert!(sql.contains("USE [TestDb];"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 2 THROW 52000"));
+        assert!(sql.contains("N'dddddddd-dddd-4ddd-dddd-dddddddddddd'"));
+        assert!(sql.contains("0x102030"));
+        assert!(sql.contains("0xAABB"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 4"));
+    }
+
+    #[test]
     fn builds_common_module_object_stage_sql_with_expected_row_counts() {
         let prepared = vec![PreparedCommonModuleObjectStage {
             module_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
