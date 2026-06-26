@@ -1927,6 +1927,7 @@ mod tests {
             uuid::Uuid::new_v4().hyphenated()
         ));
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("CommonCommands/ЗагрузитьКурсыВалют/Ext")).unwrap();
         std::fs::create_dir_all(root.join("CommonCommands/АвтономнаяРабота/Ext/CommandInterface"))
             .unwrap();
 
@@ -1938,6 +1939,16 @@ mod tests {
         std::fs::copy(
             lab_root.join("CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl"),
             root.join("CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonCommands/ЗагрузитьКурсыВалют.xml"),
+            root.join("CommonCommands/ЗагрузитьКурсыВалют.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonCommands/ЗагрузитьКурсыВалют/Ext/CommandModule.bsl"),
+            root.join("CommonCommands/ЗагрузитьКурсыВалют/Ext/CommandModule.bsl"),
         )
         .unwrap();
         std::fs::write(
@@ -1977,6 +1988,16 @@ mod tests {
             "CommonCommands/АвтономнаяРабота/Ext/CommandModule.bsl",
             SourceKind::Module,
             Some("CommonCommands/АвтономнаяРабота")
+        )));
+        assert!(files.contains(&(
+            "CommonCommands/ЗагрузитьКурсыВалют.xml",
+            SourceKind::MetadataXml,
+            Some("CommonCommands/ЗагрузитьКурсыВалют")
+        )));
+        assert!(files.contains(&(
+            "CommonCommands/ЗагрузитьКурсыВалют/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("CommonCommands/ЗагрузитьКурсыВалют")
         )));
         assert!(files.contains(&(
             "CommonCommands/АвтономнаяРабота/Ext/CommandInterface.xml",
