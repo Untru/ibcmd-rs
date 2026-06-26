@@ -1106,6 +1106,156 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_register_family_layouts() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-registers-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("AccumulationRegisters/Продажи/Forms/ФормаСписка"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("AccountingRegisters/Хозрасчеты/Commands/Печать/Ext"))
+            .unwrap();
+        std::fs::create_dir_all(root.join("CalculationRegisters/Премии/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("ChartsOfAccounts/ПланСчетов/Forms/ФормаСписка"))
+            .unwrap();
+
+        std::fs::write(
+            root.join("AccumulationRegisters/Продажи.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccumulationRegister uuid="11111111-1111-4111-8111-111111111111">
+    <Properties>
+      <Name>Продажи</Name>
+    </Properties>
+  </AccumulationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccumulationRegisters/Продажи/Forms/ФормаСписка/Form.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccountingRegisters/Хозрасчеты.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <AccountingRegister uuid="22222222-2222-4222-8222-222222222222">
+    <Properties>
+      <Name>Хозрасчеты</Name>
+    </Properties>
+  </AccountingRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("AccountingRegisters/Хозрасчеты/Commands/Печать/Ext/CommandModule.bsl"),
+            "Procedure Test()\nEndProcedure\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CalculationRegisters/Премии.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <CalculationRegister uuid="33333333-3333-4333-8333-333333333333">
+    <Properties>
+      <Name>Премии</Name>
+    </Properties>
+  </CalculationRegister>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CalculationRegisters/Премии/Ext/Help.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <ChartOfAccounts uuid="44444444-4444-4444-8444-444444444444">
+    <Properties>
+      <Name>ПланСчетов</Name>
+    </Properties>
+  </ChartOfAccounts>
+</MetaDataObject>
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ChartsOfAccounts/ПланСчетов/Forms/ФормаСписка/Form.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>
+"#,
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "AccumulationRegisters/Продажи.xml",
+            SourceKind::MetadataXml,
+            Some("AccumulationRegisters/Продажи")
+        )));
+        assert!(files.contains(&(
+            "AccumulationRegisters/Продажи/Forms/ФормаСписка/Form.xml",
+            SourceKind::Form,
+            Some("AccumulationRegisters/Продажи")
+        )));
+        assert!(files.contains(&(
+            "AccountingRegisters/Хозрасчеты.xml",
+            SourceKind::MetadataXml,
+            Some("AccountingRegisters/Хозрасчеты")
+        )));
+        assert!(files.contains(&(
+            "AccountingRegisters/Хозрасчеты/Commands/Печать/Ext/CommandModule.bsl",
+            SourceKind::Module,
+            Some("AccountingRegisters/Хозрасчеты")
+        )));
+        assert!(files.contains(&(
+            "CalculationRegisters/Премии.xml",
+            SourceKind::MetadataXml,
+            Some("CalculationRegisters/Премии")
+        )));
+        assert!(files.contains(&(
+            "CalculationRegisters/Премии/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("CalculationRegisters/Премии")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfAccounts/ПланСчетов")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfAccounts/ПланСчетов/Forms/ФормаСписка/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfAccounts/ПланСчетов")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_form_template_and_package_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
