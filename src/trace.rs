@@ -322,7 +322,10 @@ impl FileAnalysis {
     fn merge_from(&mut self, other: FileAnalysis) {
         self.events_seen += other.events_seen;
         for (normalized_sql, group) in other.groups {
-            self.groups.entry(normalized_sql).or_default().merge_from(group);
+            self.groups
+                .entry(normalized_sql)
+                .or_default()
+                .merge_from(group);
         }
     }
 }
@@ -425,7 +428,9 @@ fn extract_table_names(sql: &str) -> BTreeSet<String> {
             "insert"
                 if next.as_deref() != Some("into")
                     && raw_next.is_some_and(|value| !value.starts_with('('))
-                    && next.as_ref().is_some_and(|value| looks_like_table_token(value)) =>
+                    && next
+                        .as_ref()
+                        .is_some_and(|value| looks_like_table_token(value)) =>
             {
                 tokens.get(index + 1)
             }
@@ -910,7 +915,9 @@ mod tests {
         );
         assert_eq!(
             group.table_names,
-            ["ConfigSave".to_string()].into_iter().collect::<BTreeSet<_>>()
+            ["ConfigSave".to_string()]
+                .into_iter()
+                .collect::<BTreeSet<_>>()
         );
         assert_eq!(
             group.session_ids,

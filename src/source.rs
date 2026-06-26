@@ -1462,8 +1462,10 @@ mod tests {
             "ibcmd-rs-charts-of-calculation-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
-        std::fs::create_dir_all(root.join("ChartsOfCalculationTypes/ВидыРасчета/Forms/ФормаСписка"))
-            .unwrap();
+        std::fs::create_dir_all(
+            root.join("ChartsOfCalculationTypes/ВидыРасчета/Forms/ФормаСписка"),
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("ChartsOfCalculationRegisters/Начисления/Ext")).unwrap();
 
         std::fs::write(
@@ -1513,7 +1515,13 @@ mod tests {
         let files = manifest
             .files
             .iter()
-            .map(|file| (file.path.as_str(), file.kind.clone(), file.object_hint.as_deref()))
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
             .collect::<Vec<_>>();
 
         assert!(files.contains(&(
@@ -1839,8 +1847,12 @@ mod tests {
         )
         .unwrap();
         std::fs::copy(
-            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl"),
-            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl"),
+            lab_root.join(
+                "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl",
+            ),
+            root.join(
+                "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/ObjectModule.bsl",
+            ),
         )
         .unwrap();
         std::fs::copy(
@@ -1849,13 +1861,18 @@ mod tests {
         )
         .unwrap();
         std::fs::copy(
-            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help.xml"),
+            lab_root
+                .join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help.xml"),
             root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help.xml"),
         )
         .unwrap();
         std::fs::copy(
-            lab_root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html"),
-            root.join("ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html"),
+            lab_root.join(
+                "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html",
+            ),
+            root.join(
+                "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Ext/Help/ru.html",
+            ),
         )
         .unwrap();
 
@@ -3472,8 +3489,10 @@ mod tests {
             "ibcmd-rs-source-xdto-variant-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
-        std::fs::create_dir_all(root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1/Ext"))
-            .unwrap();
+        std::fs::create_dir_all(
+            root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1/Ext"),
+        )
+        .unwrap();
 
         std::fs::copy(
             lab_root.join("XDTOPackages/ApplicationExtensionsManagement_1_0_1_1.xml"),
@@ -3740,18 +3759,23 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(root.join("WebServices/InterfaceVersion/Ext")).unwrap();
         std::fs::create_dir_all(root.join("WebServices/Exchange/Ext")).unwrap();
-        std::fs::create_dir_all(root.join("WebServices/EnterpriseDataUpload_1_0_1_1/Ext"))
-            .unwrap();
+        std::fs::create_dir_all(root.join("WebServices/EnterpriseDataUpload_1_0_1_1/Ext")).unwrap();
         std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_2_2/Ext")).unwrap();
         std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_2_1/Ext")).unwrap();
-        std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange_2_4_5_1/Ext"))
-            .unwrap();
+        std::fs::create_dir_all(
+            root.join("WebServices/RemoteAdministrationOfExchange_2_4_5_1/Ext"),
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("WebServices/Exchange_2_0_1_6/Ext")).unwrap();
-        std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1/Ext"))
-            .unwrap();
+        std::fs::create_dir_all(
+            root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1/Ext"),
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_1_1/Ext")).unwrap();
-        std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange_2_0_1_6/Ext"))
-            .unwrap();
+        std::fs::create_dir_all(
+            root.join("WebServices/RemoteAdministrationOfExchange_2_0_1_6/Ext"),
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("WebServices/Сервис/Ext")).unwrap();
 
         std::fs::copy(

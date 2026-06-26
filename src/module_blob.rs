@@ -1773,8 +1773,11 @@ fn parse_common_command_picture(
         return Ok(CommonCommandPicture::Empty);
     }
     if reference == "StdPicture.User" {
-        let load_transparent =
-            parse_required_metadata_bool("CommonCommand", "Picture/LoadTransparent", load_transparent)?;
+        let load_transparent = parse_required_metadata_bool(
+            "CommonCommand",
+            "Picture/LoadTransparent",
+            load_transparent,
+        )?;
         return Ok(CommonCommandPicture::CommonPicture {
             uuid: STD_PICTURE_USER_UUID.to_string(),
             load_transparent,
@@ -1821,8 +1824,11 @@ fn parse_command_group_picture(
         return Ok(CommandGroupPicture::StdPicturePrint);
     }
     if reference == "StdPicture.InformationRegister" {
-        let load_transparent =
-            parse_required_metadata_bool("CommandGroup", "Picture/LoadTransparent", load_transparent)?;
+        let load_transparent = parse_required_metadata_bool(
+            "CommandGroup",
+            "Picture/LoadTransparent",
+            load_transparent,
+        )?;
         return Ok(CommandGroupPicture::CommonPicture {
             uuid: STD_PICTURE_INFORMATION_REGISTER_UUID.to_string(),
             load_transparent,
@@ -2749,19 +2755,15 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "AccumulationRegister" => Some(("AccumulationRegister", "AccumulationRegisters")),
         "AccountingRegister" => Some(("AccountingRegister", "AccountingRegisters")),
         "BusinessProcess" => Some(("BusinessProcess", "BusinessProcesses")),
-        "ChartOfCharacteristicTypes" => Some((
-            "ChartOfCharacteristicTypes",
-            "ChartsOfCharacteristicTypes",
-        )),
+        "ChartOfCharacteristicTypes" => {
+            Some(("ChartOfCharacteristicTypes", "ChartsOfCharacteristicTypes"))
+        }
         "Catalog" => Some(("Catalog", "Catalogs")),
         "CommonAttribute" => Some(("CommonAttribute", "CommonAttributes")),
         "CommonForm" => Some(("CommonForm", "CommonForms")),
         "CalculationRegister" => Some(("CalculationRegister", "CalculationRegisters")),
         "ChartOfAccounts" => Some(("ChartOfAccounts", "ChartsOfAccounts")),
-        "ChartOfCalculationTypes" => Some((
-            "ChartOfCalculationTypes",
-            "ChartsOfCalculationTypes",
-        )),
+        "ChartOfCalculationTypes" => Some(("ChartOfCalculationTypes", "ChartsOfCalculationTypes")),
         "ChartOfCalculationRegisters" => Some((
             "ChartOfCalculationRegisters",
             "ChartsOfCalculationRegisters",
@@ -3169,7 +3171,7 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_INFO, CommonCommandRepresentation, MetadataSourceContext, build_module_inner,
+        CommonCommandRepresentation, DEFAULT_INFO, MetadataSourceContext, build_module_inner,
         common_command_representation_code, deflate_raw, inflate_raw,
         parse_common_command_representation, parse_v8_container,
     };
@@ -3586,8 +3588,14 @@ mod tests {
 
         for (kind, file) in [
             ("Bot", "Bots/ОповещенияПользователейОСобытиях.xml"),
-            ("DocumentNumerator", "DocumentNumerators/ДенежныеДокументы.xml"),
-            ("IntegrationService", "IntegrationServices/ОбменСообщениями.xml"),
+            (
+                "DocumentNumerator",
+                "DocumentNumerators/ДенежныеДокументы.xml",
+            ),
+            (
+                "IntegrationService",
+                "IntegrationServices/ОбменСообщениями.xml",
+            ),
             ("Sequence", "Sequences/ДокументыОрганизаций.xml"),
             ("Style", "Styles/Основной.xml"),
             ("WSReference", "WSReferences/UpdateFilesApiImplService.xml"),
@@ -3611,7 +3619,10 @@ mod tests {
 
             assert_eq!(packed.properties.kind, kind);
             assert_eq!(packed.properties.uuid, parsed.uuid);
-            assert!(inflated.contains(&format!("\"{}\"", parsed.name)), "{inflated}");
+            assert!(
+                inflated.contains(&format!("\"{}\"", parsed.name)),
+                "{inflated}"
+            );
             if !parsed.comment.is_empty() {
                 assert!(
                     inflated.contains(&format!("\"{}\"", parsed.comment)),
@@ -4253,8 +4264,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 </MetaDataObject>
 "#
             );
-            let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes())
-                .unwrap();
+            let packed =
+                super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes()).unwrap();
             let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
             assert!(inflated.contains(expected_code), "{inflated}");
         }
@@ -4578,7 +4589,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
         let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
         assert!(inflated.contains(super::STD_PICTURE_USER_UUID));
-        assert!(inflated.contains("{4,1,{0,6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f},\"\",-1,-1,0,0,\"\"}"));
+        assert!(
+            inflated.contains("{4,1,{0,6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f},\"\",-1,-1,0,0,\"\"}")
+        );
         assert!(!inflated.contains("StdPicture.User"));
     }
 
@@ -4616,13 +4629,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 </MetaDataObject>
 "#;
 
-        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes())
-            .unwrap();
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes()).unwrap();
         let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
         assert!(inflated.contains(super::STD_PICTURE_INFORMATION_REGISTER_UUID));
-        assert!(inflated.contains(
-            "{4,1,{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c},\"\",-1,-1,1,0,\"\"}"
-        ));
+        assert!(
+            inflated.contains("{4,1,{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c},\"\",-1,-1,1,0,\"\"}")
+        );
         assert!(!inflated.contains("StdPicture.InformationRegister"));
     }
 
@@ -4955,7 +4967,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "DefinedType.Пользователь",
                 "a72517c3-8c91-4e40-81ac-83c762789e87",
             ),
-            ("Catalog.РолиИсполнителей", "45c0003f-0ed7-4582-b84e-217fdc4ddeaf"),
+            (
+                "Catalog.РолиИсполнителей",
+                "45c0003f-0ed7-4582-b84e-217fdc4ddeaf",
+            ),
             (
                 "BusinessProcess.Задание",
                 "dad11c2e-08fc-4a6b-8829-8be6c64c15fc",
@@ -4968,7 +4983,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "InformationRegister.ДополнительныеСведения",
                 "3ad5d8a7-3071-46aa-aebf-306bdb67983b",
             ),
-            ("Report.БизнесПроцессы", "c5f91669-13d8-4f0a-a054-2701078da38a"),
+            (
+                "Report.БизнесПроцессы",
+                "c5f91669-13d8-4f0a-a054-2701078da38a",
+            ),
             (
                 "Task.ЗадачаИсполнителя",
                 "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
@@ -6093,26 +6111,126 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         ));
 
         let cases = [
-            ("CommonAttributes", "ОтредактированныеПредопределенныеРеквизиты", "CommonAttribute", "41414141-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("CommonForms", "ФормаОтчета", "CommonForm", "42424242-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("CommonTemplates", "СтруктураПодчиненности", "CommonTemplate", "43434343-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("EventSubscriptions", "ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных", "EventSubscription", "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("FunctionalOptions", "ВыполнятьЗамерыПроизводительности", "FunctionalOption", "45454545-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("FunctionalOptionsParameters", "ОбщиеНастройкиУзлов", "FunctionalOptionsParameter", "46464646-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("HTTPServices", "exchange_dsl_1_0_0_1", "HTTPService", "47474747-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Languages", "Русский", "Language", "48484848-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Roles", "АдминистраторСистемы", "Role", "49494949-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("ScheduledJobs", "ЗагрузкаКурсовВалют", "ScheduledJob", "4a4a4a4a-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("SettingsStorages", "ХранилищеВариантовОтчетов", "SettingsStorage", "4b4b4b4b-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("StyleItems", "ВажнаяНадписьШрифт", "StyleItem", "4c4c4c4c-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Subsystems", "СтандартныеПодсистемы", "Subsystem", "4d4d4d4d-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Tasks", "ЗадачаИсполнителя", "Task", "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("WebServices", "RemoteControl", "WebService", "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("XDTOPackages", "АдминистрированиеОбменаДанными_2_4_5_1", "XDTOPackage", "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("BusinessProcesses", "Задание", "BusinessProcess", "51515151-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("DataProcessors", "АвтоматическоеИзвлечениеТекстов", "DataProcessor", "52525252-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("ExchangePlans", "ОбновлениеИнформационнойБазы", "ExchangePlan", "53535353-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Reports", "БизнесПроцессы", "Report", "54545454-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "CommonAttributes",
+                "ОтредактированныеПредопределенныеРеквизиты",
+                "CommonAttribute",
+                "41414141-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "CommonForms",
+                "ФормаОтчета",
+                "CommonForm",
+                "42424242-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "CommonTemplates",
+                "СтруктураПодчиненности",
+                "CommonTemplate",
+                "43434343-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "EventSubscriptions",
+                "ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных",
+                "EventSubscription",
+                "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "FunctionalOptions",
+                "ВыполнятьЗамерыПроизводительности",
+                "FunctionalOption",
+                "45454545-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "FunctionalOptionsParameters",
+                "ОбщиеНастройкиУзлов",
+                "FunctionalOptionsParameter",
+                "46464646-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "HTTPServices",
+                "exchange_dsl_1_0_0_1",
+                "HTTPService",
+                "47474747-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Languages",
+                "Русский",
+                "Language",
+                "48484848-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Roles",
+                "АдминистраторСистемы",
+                "Role",
+                "49494949-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ScheduledJobs",
+                "ЗагрузкаКурсовВалют",
+                "ScheduledJob",
+                "4a4a4a4a-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "SettingsStorages",
+                "ХранилищеВариантовОтчетов",
+                "SettingsStorage",
+                "4b4b4b4b-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "StyleItems",
+                "ВажнаяНадписьШрифт",
+                "StyleItem",
+                "4c4c4c4c-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Subsystems",
+                "СтандартныеПодсистемы",
+                "Subsystem",
+                "4d4d4d4d-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Tasks",
+                "ЗадачаИсполнителя",
+                "Task",
+                "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "WebServices",
+                "RemoteControl",
+                "WebService",
+                "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "XDTOPackages",
+                "АдминистрированиеОбменаДанными_2_4_5_1",
+                "XDTOPackage",
+                "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "BusinessProcesses",
+                "Задание",
+                "BusinessProcess",
+                "51515151-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "DataProcessors",
+                "АвтоматическоеИзвлечениеТекстов",
+                "DataProcessor",
+                "52525252-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "ExchangePlans",
+                "ОбновлениеИнформационнойБазы",
+                "ExchangePlan",
+                "53535353-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Reports",
+                "БизнесПроцессы",
+                "Report",
+                "54545454-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
         ];
 
         for (folder, name, kind, uuid) in cases {
@@ -6177,15 +6295,30 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "SettingsStorage.ХранилищеВариантовОтчетов",
                 "4b4b4b4b-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
-            ("StyleItem.ВажнаяНадписьШрифт", "4c4c4c4c-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Subsystem.СтандартныеПодсистемы", "4d4d4d4d-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("Task.ЗадачаИсполнителя", "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("WebService.RemoteControl", "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "StyleItem.ВажнаяНадписьШрифт",
+                "4c4c4c4c-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Subsystem.СтандартныеПодсистемы",
+                "4d4d4d4d-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "Task.ЗадачаИсполнителя",
+                "4e4e4e4e-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
+            (
+                "WebService.RemoteControl",
+                "4f4f4f4f-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
             (
                 "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1",
                 "50505050-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
-            ("BusinessProcess.Задание", "51515151-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "BusinessProcess.Задание",
+                "51515151-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
             (
                 "DataProcessor.АвтоматическоеИзвлечениеТекстов",
                 "52525252-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -6194,7 +6327,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 "ExchangePlan.ОбновлениеИнформационнойБазы",
                 "53535353-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             ),
-            ("Report.БизнесПроцессы", "54545454-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            (
+                "Report.БизнесПроцессы",
+                "54545454-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            ),
         ] {
             assert_eq!(
                 source.resolve_metadata_reference_uuid(reference).unwrap(),

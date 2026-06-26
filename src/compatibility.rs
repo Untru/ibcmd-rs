@@ -269,7 +269,11 @@ mod tests {
 
         assert!(report.supported_source_families.contains(&"Tasks"));
         assert!(report.supported_source_families.contains(&"CommonCommands"));
-        assert!(report.supported_source_families.contains(&"CommonAttributes"));
+        assert!(
+            report
+                .supported_source_families
+                .contains(&"CommonAttributes")
+        );
         assert!(
             report
                 .supported_source_families
@@ -278,8 +282,16 @@ mod tests {
         assert!(report.supported_source_families.contains(&"Styles"));
         assert!(report.supported_source_families.contains(&"Bots"));
         assert!(report.supported_source_families.contains(&"DefinedTypes"));
-        assert!(report.supported_source_families.contains(&"DocumentNumerators"));
-        assert!(report.supported_source_families.contains(&"IntegrationServices"));
+        assert!(
+            report
+                .supported_source_families
+                .contains(&"DocumentNumerators")
+        );
+        assert!(
+            report
+                .supported_source_families
+                .contains(&"IntegrationServices")
+        );
         assert!(report.supported_source_families.contains(&"Sequences"));
         assert!(report.supported_source_families.contains(&"WSReferences"));
         assert!(
@@ -307,19 +319,47 @@ mod tests {
                 .supported_metadata_families
                 .contains(&"ChartOfCalculationRegisters")
         );
-        assert!(report.supported_metadata_families.contains(&"AccumulationRegister"));
-        assert!(report.supported_metadata_families.contains(&"AccountingRegister"));
-        assert!(report.supported_metadata_families.contains(&"CalculationRegister"));
-        assert!(report.supported_metadata_families.contains(&"ChartOfAccounts"));
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"AccumulationRegister")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"AccountingRegister")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"CalculationRegister")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"ChartOfAccounts")
+        );
         assert!(
             report
                 .supported_metadata_families
                 .contains(&"BusinessProcess")
         );
         assert!(report.supported_metadata_families.contains(&"Bot"));
-        assert!(report.supported_metadata_families.contains(&"SettingsStorage"));
-        assert!(report.supported_metadata_families.contains(&"DocumentNumerator"));
-        assert!(report.supported_metadata_families.contains(&"IntegrationService"));
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"SettingsStorage")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"DocumentNumerator")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"IntegrationService")
+        );
         assert!(report.supported_metadata_families.contains(&"Sequence"));
         assert!(report.supported_metadata_families.contains(&"Style"));
         assert!(report.supported_metadata_families.contains(&"WSReference"));

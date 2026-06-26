@@ -23,6 +23,10 @@ pub enum Commands {
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
     ProfileRun(ProfileRunArgs),
+    /// Export a 1C infobase configuration or extension to hierarchical XML sources.
+    DumpSources(DumpSourcesArgs),
+    /// Dump Config/ConfigSave storage rows directly from SQL Server.
+    MssqlDumpConfig(MssqlDumpConfigArgs),
     /// Write SQL Server and tech-log trace templates for an ibcmd run.
     TraceTemplate(TraceTemplateArgs),
     /// Analyze exported SQL Server Extended Events XML.
@@ -94,9 +98,7 @@ pub enum Commands {
     /// Stage one functional option object from XML.
     MssqlStageFunctionalOptionObject(MssqlStageFunctionalOptionObjectArgs),
     /// Stage one functional options parameter object from XML.
-    MssqlStageFunctionalOptionsParameterObject(
-        MssqlStageFunctionalOptionsParameterObjectArgs,
-    ),
+    MssqlStageFunctionalOptionsParameterObject(MssqlStageFunctionalOptionsParameterObjectArgs),
     /// Stage one event subscription object from XML.
     MssqlStageEventSubscriptionObject(MssqlStageEventSubscriptionObjectArgs),
     /// Stage one HTTP service object from XML.
@@ -140,17 +142,13 @@ pub enum Commands {
     /// Stage one calculation register object from XML.
     MssqlStageCalculationRegisterObject(MssqlStageCalculationRegisterObjectArgs),
     /// Stage one chart of characteristic types object from XML.
-    MssqlStageChartOfCharacteristicTypesObject(
-        MssqlStageChartOfCharacteristicTypesObjectArgs,
-    ),
+    MssqlStageChartOfCharacteristicTypesObject(MssqlStageChartOfCharacteristicTypesObjectArgs),
     /// Stage one chart of accounts object from XML.
     MssqlStageChartOfAccountsObject(MssqlStageChartOfAccountsObjectArgs),
     /// Stage one chart of calculation types object from XML.
     MssqlStageChartOfCalculationTypesObject(MssqlStageChartOfCalculationTypesObjectArgs),
     /// Stage one chart of calculation registers object from XML.
-    MssqlStageChartOfCalculationRegistersObject(
-        MssqlStageChartOfCalculationRegistersObjectArgs,
-    ),
+    MssqlStageChartOfCalculationRegistersObject(MssqlStageChartOfCalculationRegistersObjectArgs),
     /// Stage one common command object from XML.
     MssqlStageCommonCommandObject(MssqlStageCommonCommandObjectArgs),
     /// Stage one common form object from XML.
@@ -204,6 +202,77 @@ pub struct ProfileRunArgs {
     /// Command and arguments to run. Use `--` before the command.
     #[arg(required = true, trailing_var_arg = true)]
     pub command: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DumpSourcesArgs {
+    /// Optional autumn-properties.json compatible settings file.
+    #[arg(long)]
+    pub settings: Option<PathBuf>,
+    /// ibcmd executable path. Auto-detects a recent 8.3 build when omitted.
+    #[arg(long)]
+    pub ibcmd: Option<PathBuf>,
+    /// DBMS type passed to ibcmd.
+    #[arg(long)]
+    pub dbms: Option<String>,
+    /// Database server passed to ibcmd.
+    #[arg(long)]
+    pub db_server: Option<String>,
+    /// Database name passed to ibcmd.
+    #[arg(long)]
+    pub db_name: Option<String>,
+    /// Database user passed to ibcmd.
+    #[arg(long)]
+    pub db_user: Option<String>,
+    /// Database password passed to ibcmd. Prefer --db-pwd-env for shell history.
+    #[arg(long)]
+    pub db_pwd: Option<String>,
+    /// Environment variable containing the database password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub db_pwd_env: String,
+    /// Output directory for hierarchical XML sources.
+    #[arg(short, long)]
+    pub output_dir: PathBuf,
+    /// Extension name. Omit to export the main configuration.
+    #[arg(long)]
+    pub extension: Option<String>,
+    /// ibcmd --data directory. Uses a temporary directory when omitted.
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+    /// Kill ibcmd after this many seconds.
+    #[arg(long, default_value_t = 300)]
+    pub timeout_sec: u64,
+    /// Replace files under the output directory after a successful export.
+    #[arg(long)]
+    pub overwrite: bool,
+    /// Convert TaxiEnableVersion8_2 to TaxiEnableOld in exported Configuration.xml.
+    #[arg(long)]
+    pub normalize_taxi_old: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlDumpConfigArgs {
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// SQL Server name.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// SQL Server database name.
+    #[arg(long)]
+    pub database: String,
+    /// Output directory for dumped rows and manifest.json.
+    #[arg(short, long)]
+    pub output_dir: PathBuf,
+    /// Replace files under the output directory.
+    #[arg(long)]
+    pub overwrite: bool,
+    /// Include pending ConfigSave rows in addition to Config.
+    #[arg(long)]
+    pub include_config_save: bool,
+    /// Try to inflate raw deflate blobs and write readable *.txt files.
+    #[arg(long)]
+    pub inflate: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2150,15 +2219,15 @@ mod tests {
         ]);
 
         match cli.command {
-        Commands::MssqlStageRoleObject(args) => {
-            assert_eq!(args.database, "TestDb");
-            assert_eq!(args.xml, PathBuf::from(r"Roles\АдминистраторСистемы.xml"));
-            assert!(args.replace_config_save);
-            assert!(args.allow_non_lab);
+            Commands::MssqlStageRoleObject(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(args.xml, PathBuf::from(r"Roles\АдминистраторСистемы.xml"));
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
         }
-        other => panic!("unexpected command: {other:?}"),
     }
-}
 
     #[test]
     fn parses_constant_stage_command() {
@@ -2312,9 +2381,7 @@ mod tests {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(
                     args.xml,
-                    PathBuf::from(
-                        r"FunctionalOptionsParameters\ОбщиеНастройкиУзлов.xml"
-                    )
+                    PathBuf::from(r"FunctionalOptionsParameters\ОбщиеНастройкиУзлов.xml")
                 );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
@@ -2366,7 +2433,10 @@ mod tests {
         match cli.command {
             Commands::MssqlStageHTTPServiceObject(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(args.xml, PathBuf::from(r"HTTPServices\exchange_dsl_1_0_0_1.xml"));
+                assert_eq!(
+                    args.xml,
+                    PathBuf::from(r"HTTPServices\exchange_dsl_1_0_0_1.xml")
+                );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
@@ -2465,7 +2535,10 @@ mod tests {
         match cli.command {
             Commands::MssqlStageStyleItemObject(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(args.xml, PathBuf::from(r"StyleItems\ВажнаяНадписьШрифт.xml"));
+                assert_eq!(
+                    args.xml,
+                    PathBuf::from(r"StyleItems\ВажнаяНадписьШрифт.xml")
+                );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
@@ -2593,6 +2666,68 @@ mod tests {
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_dump_sources_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "dump-sources",
+            "--settings",
+            r"C:\repo\autumn-properties.json",
+            "--extension",
+            "EmergingTravelGroup",
+            "-o",
+            r"C:\repo\src\cfe\EmergingTravelGroup",
+            "--timeout-sec",
+            "180",
+            "--overwrite",
+            "--normalize-taxi-old",
+        ]);
+
+        match cli.command {
+            Commands::DumpSources(args) => {
+                assert_eq!(
+                    args.settings,
+                    Some(PathBuf::from(r"C:\repo\autumn-properties.json"))
+                );
+                assert_eq!(args.extension, Some("EmergingTravelGroup".to_string()));
+                assert_eq!(
+                    args.output_dir,
+                    PathBuf::from(r"C:\repo\src\cfe\EmergingTravelGroup")
+                );
+                assert_eq!(args.timeout_sec, 180);
+                assert!(args.overwrite);
+                assert!(args.normalize_taxi_old);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_mssql_dump_config_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "TestDb",
+            "-o",
+            r"C:\dump",
+            "--include-config-save",
+            "--inflate",
+            "--overwrite",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpConfig(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(args.output_dir, PathBuf::from(r"C:\dump"));
+                assert!(args.include_config_save);
+                assert!(args.inflate);
+                assert!(args.overwrite);
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -2740,10 +2875,7 @@ mod tests {
         match cli.command {
             Commands::MssqlStageFilterCriteriaObject(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(
-                    args.xml,
-                    PathBuf::from(r"FilterCriteria\ВажныеОтборы.xml")
-                );
+                assert_eq!(args.xml, PathBuf::from(r"FilterCriteria\ВажныеОтборы.xml"));
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
@@ -2875,7 +3007,10 @@ mod tests {
         match cli.command {
             Commands::MssqlStageChartOfAccountsObject(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(args.xml, PathBuf::from(r"ChartsOfAccounts\Хозрасчетный.xml"));
+                assert_eq!(
+                    args.xml,
+                    PathBuf::from(r"ChartsOfAccounts\Хозрасчетный.xml")
+                );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
@@ -2980,10 +3115,7 @@ mod tests {
         match cli.command {
             Commands::MssqlStageCommonFormObject(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(
-                    args.xml,
-                    PathBuf::from(r"CommonForms\АвтономнаяРабота.xml")
-                );
+                assert_eq!(args.xml, PathBuf::from(r"CommonForms\АвтономнаяРабота.xml"));
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
@@ -3007,10 +3139,7 @@ mod tests {
         match cli.command {
             Commands::MssqlStageCommonPictureObject(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(
-                    args.xml,
-                    PathBuf::from(r"CommonPictures\Адрес.xml")
-                );
+                assert_eq!(args.xml, PathBuf::from(r"CommonPictures\Адрес.xml"));
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }

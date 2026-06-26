@@ -1,7 +1,9 @@
 pub mod cli;
 pub mod compatibility;
+pub mod dump_sources;
 pub mod module_blob;
 pub mod mssql;
+pub mod mssql_dump;
 pub mod parallel;
 pub mod plan;
 pub mod probe;
