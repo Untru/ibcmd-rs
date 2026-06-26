@@ -3539,6 +3539,8 @@ mod tests {
         std::fs::create_dir_all(root.join("WebServices/EnterpriseDataExchange_1_0_1_1/Ext"))
             .unwrap();
         std::fs::create_dir_all(root.join("WebServices/RemoteControl/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange/Ext"))
+            .unwrap();
 
         std::fs::copy(
             lab_root.join("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml"),
@@ -3573,6 +3575,16 @@ mod tests {
         std::fs::copy(
             lab_root.join("WebServices/RemoteControl/Ext/Module.bsl"),
             root.join("WebServices/RemoteControl/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/RemoteAdministrationOfExchange.xml"),
+            root.join("WebServices/RemoteAdministrationOfExchange.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/RemoteAdministrationOfExchange/Ext/Module.bsl"),
+            root.join("WebServices/RemoteAdministrationOfExchange/Ext/Module.bsl"),
         )
         .unwrap();
 
@@ -3625,6 +3637,16 @@ mod tests {
             "WebServices/RemoteControl/Ext/Module.bsl",
             SourceKind::Module,
             Some("WebServices/RemoteControl")
+        )));
+        assert!(files.contains(&(
+            "WebServices/RemoteAdministrationOfExchange.xml",
+            SourceKind::MetadataXml,
+            Some("WebServices/RemoteAdministrationOfExchange")
+        )));
+        assert!(files.contains(&(
+            "WebServices/RemoteAdministrationOfExchange/Ext/Module.bsl",
+            SourceKind::Module,
+            Some("WebServices/RemoteAdministrationOfExchange")
         )));
     }
 
