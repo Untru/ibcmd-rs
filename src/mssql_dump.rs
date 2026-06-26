@@ -452,6 +452,8 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
     let module_file = match (kind, suffix) {
         ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
         ("CommonCommand", "2") => Some("CommandModule.bsl"),
+        ("Constant", "0") => Some("ValueManagerModule.bsl"),
+        ("Constant", "1") => Some("ManagerModule.bsl"),
         ("Catalog", "0") => Some("ObjectModule.bsl"),
         ("Catalog", "3") => Some("ManagerModule.bsl"),
         ("Report", "0") => Some("ObjectModule.bsl"),
@@ -834,6 +836,7 @@ fn metadata_source_for_text(
         6 => Some(("Role", "Roles")),
         9 => Some(("CommonCommand", "CommonCommands")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
+        16 => Some(("Constant", "Constants")),
         17 => Some(("DataProcessor", "DataProcessors")),
         19 => Some(("Report", "Reports")),
         20 if header_index == Some(5) => Some(("Enum", "Enums")),
@@ -2146,6 +2149,20 @@ mod tests {
                 "2",
                 PathBuf::from("CommonCommands/OpenSettings/Ext/CommandModule.bsl"),
             ),
+            (
+                "Constant",
+                "Constants",
+                "UseFeature",
+                "0",
+                PathBuf::from("Constants/UseFeature/Ext/ValueManagerModule.bsl"),
+            ),
+            (
+                "Constant",
+                "Constants",
+                "UseFeature",
+                "1",
+                PathBuf::from("Constants/UseFeature/Ext/ManagerModule.bsl"),
+            ),
         ];
 
         for (kind, folder, name, suffix, expected) in cases {
@@ -2411,6 +2428,80 @@ mod tests {
         assert_eq!(
             body_row.module_text_path.as_deref(),
             Some("DataProcessors/Scanning/Commands/ScanSheet/Ext/CommandModule.bsl")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_constant_module_text_to_source_layout_when_metadata_is_present() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let value_text = b"Procedure BeforeWrite(Value, StandardProcessing)\r\nEndProcedure\r\n";
+        let manager_text = b"Procedure SetDefault()\r\nEndProcedure\r\n";
+        let value_body = pack_module_blob_bytes(value_text, None, None).unwrap().blob;
+        let manager_body = pack_module_blob_bytes(manager_text, None, None)
+            .unwrap()
+            .blob;
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: value_body.len() as i64,
+                binary_hex: encode_hex_for_test(&value_body),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.1"),
+                part_no: 0,
+                data_size: manager_body.len() as i64,
+                binary_hex: encode_hex_for_test(&manager_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 2);
+        assert_eq!(
+            fs::read(root.join("Constants/UseFeature/Ext/ValueManagerModule.bsl")).unwrap(),
+            value_text
+        );
+        assert_eq!(
+            fs::read(root.join("Constants/UseFeature/Ext/ManagerModule.bsl")).unwrap(),
+            manager_text
+        );
+        let value_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        let manager_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            value_row.module_text_path.as_deref(),
+            Some("Constants/UseFeature/Ext/ValueManagerModule.bsl")
+        );
+        assert_eq!(
+            manager_row.module_text_path.as_deref(),
+            Some("Constants/UseFeature/Ext/ManagerModule.bsl")
         );
 
         let _ = fs::remove_dir_all(root);
