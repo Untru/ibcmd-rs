@@ -315,6 +315,7 @@ fn dump_table_rows(
 enum SourceAssetKind {
     Binary,
     ExtPicture,
+    Help,
     Schedule,
 }
 
@@ -324,6 +325,10 @@ struct SourceAsset {
 }
 
 fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
+    let rows_by_file_name = rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
     let file_names = rows
         .iter()
         .map(|row| row.file_name.as_str())
@@ -367,11 +372,14 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
         let Ok(bytes) = decode_hex(&row.binary_hex) else {
             continue;
         };
-        let Some(asset) = source_asset_from_metadata_blob(&bytes, &row.file_name, &file_names)
-        else {
-            continue;
-        };
-        paths.insert(format!("{}.0", row.file_name), asset);
+        for (body_id, asset) in source_assets_from_metadata_blob(
+            &bytes,
+            &row.file_name,
+            &file_names,
+            &rows_by_file_name,
+        ) {
+            paths.insert(body_id, asset);
+        }
     }
 
     paths
@@ -387,40 +395,65 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     ),
 ];
 
-fn source_asset_from_metadata_blob(
+fn source_assets_from_metadata_blob(
     blob: &[u8],
     uuid: &str,
     file_names: &BTreeSet<&str>,
-) -> Option<SourceAsset> {
-    let body_id = format!("{uuid}.0");
-    if !file_names.contains(body_id.as_str()) {
-        return None;
-    }
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+) -> Vec<(String, SourceAsset)> {
+    source_assets_from_metadata_blob_inner(blob, uuid, file_names, rows_by_file_name)
+        .unwrap_or_default()
+}
+
+fn source_assets_from_metadata_blob_inner(
+    blob: &[u8],
+    uuid: &str,
+    file_names: &BTreeSet<&str>,
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+) -> Option<Vec<(String, SourceAsset)>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
     let object_code = parse_metadata_object_code(text)?;
     let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
     let header = parse_metadata_header_from_text(text, uuid)?;
-    match kind {
-        "CommonPicture" => Some(SourceAsset {
-            primary_path: PathBuf::from(folder)
-                .join(sanitize_source_path_segment(&header.name))
-                .join("Ext")
-                .join("Picture.xml"),
-            kind: SourceAssetKind::ExtPicture,
-        }),
-        "ScheduledJob" => Some(SourceAsset {
-            primary_path: PathBuf::from(folder)
-                .join(sanitize_source_path_segment(&header.name))
-                .join("Ext")
-                .join("Schedule.xml"),
-            kind: SourceAssetKind::Schedule,
-        }),
-        _ => None,
-    }
-}
+    let object_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+    let mut assets = Vec::new();
 
+    let body_id = format!("{uuid}.0");
+    if file_names.contains(body_id.as_str()) {
+        let asset = match kind {
+            "CommonPicture" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("Picture.xml"),
+                kind: SourceAssetKind::ExtPicture,
+            }),
+            "ScheduledJob" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("Schedule.xml"),
+                kind: SourceAssetKind::Schedule,
+            }),
+            _ => None,
+        };
+        if let Some(asset) = asset {
+            assets.push((body_id, asset));
+        }
+    }
+
+    let help_id = format!("{uuid}.1");
+    if let Some(help_row) = rows_by_file_name.get(help_id.as_str())
+        && let Ok(help_bytes) = decode_hex(&help_row.binary_hex)
+        && parse_help_blob_pages(&help_bytes).is_some()
+    {
+        assets.push((
+            help_id,
+            SourceAsset {
+                primary_path: object_path.join("Ext").join("Help.xml"),
+                kind: SourceAssetKind::Help,
+            },
+        ));
+    }
+
+    Some(assets)
+}
 fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
     match asset.kind {
         SourceAssetKind::Binary => {
@@ -469,9 +502,66 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::Help => {
+            let pages = parse_help_blob_pages(bytes).with_context(|| {
+                format!(
+                    "failed to extract help from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let xml_path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = xml_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+
+            let help_dir = output_dir.join(asset.primary_path.with_extension(""));
+            fs::create_dir_all(&help_dir)
+                .with_context(|| format!("failed to create {}", help_dir.display()))?;
+            for page in &pages {
+                let page_path = help_dir.join(&page.file_name);
+                fs::write(&page_path, &page.content)
+                    .with_context(|| format!("failed to write {}", page_path.display()))?;
+            }
+            fs::write(&xml_path, format_help_xml(&pages))
+                .with_context(|| format!("failed to write {}", xml_path.display()))?;
+        }
     }
 
     Ok(asset.primary_path.clone())
+}
+
+struct HelpPage {
+    page: String,
+    file_name: String,
+    content: Vec<u8>,
+}
+
+fn parse_help_blob_pages(bytes: &[u8]) -> Option<Vec<HelpPage>> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "5" {
+        return None;
+    }
+    let page_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut index = 2usize;
+    let mut pages = Vec::with_capacity(page_count);
+    for _ in 0..page_count {
+        let (language, _) = parse_1c_quoted_string_with_len(fields.get(index)?.trim())?;
+        index += 1;
+        let payload = extract_base64_payload(fields.get(index)?.trim())?;
+        index += 1;
+        let content = decode_base64_mime(payload)?;
+        let page = sanitize_source_path_segment(&language);
+        pages.push(HelpPage {
+            file_name: format!("{page}.html"),
+            page,
+            content,
+        });
+    }
+
+    if pages.is_empty() { None } else { Some(pages) }
 }
 
 fn extract_ext_picture(bytes: &[u8]) -> Result<Vec<u8>> {
@@ -570,6 +660,20 @@ fn format_ext_picture_xml(file_name: &str) -> String {
 \t</Picture>\r\n\
 </ExtPicture>\r\n"
     )
+}
+
+fn format_help_xml(pages: &[HelpPage]) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+    );
+    for page in pages {
+        xml.push_str("\t<Page>");
+        xml.push_str(&escape_xml_text(&page.page));
+        xml.push_str("</Page>\r\n");
+    }
+    xml.push_str("</Help>\r\n");
+    xml
 }
 
 struct JobSchedule {
@@ -3458,6 +3562,62 @@ mod tests {
         assert_eq!(
             schedule_row.source_asset_path.as_deref(),
             Some("ScheduledJobs/LoadRates/Ext/Schedule.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_help_xml_and_html_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let help = deflate_for_test(b"{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},0}");
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.1"),
+                part_no: 0,
+                data_size: help.len() as i64,
+                binary_hex: encode_hex_for_test(&help),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert!(
+            fs::read_to_string(root.join("Catalogs/Products/Ext/Help.xml"))
+                .unwrap()
+                .contains("<Page>ru</Page>")
+        );
+        assert_eq!(
+            fs::read(root.join("Catalogs/Products/Ext/Help/ru.html")).unwrap(),
+            b"<html></html>"
+        );
+        let help_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            help_row.source_asset_path.as_deref(),
+            Some("Catalogs/Products/Ext/Help.xml")
         );
 
         let _ = fs::remove_dir_all(root);
