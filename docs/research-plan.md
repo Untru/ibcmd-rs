@@ -169,6 +169,9 @@ For each family, the implementation should cover:
      object;
    - bounded worker pools for expensive source parsing;
    - explicit safety gates before any non-lab destructive write path.
+   - current implementation already parallelizes source scanning and staging
+     preparation with Rayon; the next step is to profile the remaining serial
+     hot paths before changing the worker model.
 10. Keep the compatibility matrix current for platform build, DBMS, source tree
     shape, and supported operation set.
 
@@ -180,3 +183,11 @@ For each family, the implementation should cover:
 4. Re-run the trace experiments and compare against `ibcmd`.
 5. Fill the compatibility matrix and performance notes.
 6. Commit the validated changes in small atomic steps.
+
+### Current Parallelization Notes
+
+- `src/source.rs` already uses Rayon to scan files in parallel.
+- `src/mssql.rs` already prepares common-module and metadata staging inputs in
+  parallel before SQL generation.
+- The remaining work is to identify which parsing or blob-building steps still
+  justify a bounded worker pool rather than widening the current fan-out.
