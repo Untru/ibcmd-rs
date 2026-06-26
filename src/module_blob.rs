@@ -3455,6 +3455,100 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_additional_business_metadata_families() {
+        for (kind, uuid, name, comment) in [
+            (
+                "Catalog",
+                "13131313-1313-4131-8131-131313131313",
+                "РолиИсполнителей",
+                "Справочник",
+            ),
+            (
+                "Document",
+                "14141414-1414-4141-8141-141414141414",
+                "АктОбУничтоженииПерсональныхДанных",
+                "Документ",
+            ),
+            (
+                "BusinessProcess",
+                "15151515-1515-4151-8151-151515151515",
+                "Задание",
+                "Бизнес-процесс",
+            ),
+            (
+                "ExchangePlan",
+                "16161616-1616-4161-8161-161616161616",
+                "ОбновлениеИнформационнойБазы",
+                "План обмена",
+            ),
+            (
+                "Report",
+                "17171717-1717-4171-8171-171717171717",
+                "БизнесПроцессы",
+                "Отчет",
+            ),
+            (
+                "DataProcessor",
+                "18181818-1818-4181-8181-181818181818",
+                "АвтоматическоеИзвлечениеТекстов",
+                "Обработка",
+            ),
+            (
+                "Enum",
+                "19191919-1919-4191-8191-191919191919",
+                "ВариантыВажностиЗадачи",
+                "Перечисление",
+            ),
+            (
+                "ChartOfCharacteristicTypes",
+                "1a1a1a1a-1a1a-41a1-81a1-1a1a1a1a1a1a",
+                "ОбъектыАдресацииЗадач",
+                "План видов характеристик",
+            ),
+        ] {
+            let base_blob = {
+                let mut active = b"\xEF\xBB\xBF".to_vec();
+                active.extend_from_slice(
+                    format!(
+                        "{{1,\n{{3,\n{{1,0,{uuid}}},\"OldName\",\n{{1,\"ru\",\"Old synonym\"}},\"Old comment\",0,0,00000000-0000-0000-0000-000000000000,0}},0}}"
+                    )
+                    .as_bytes(),
+                );
+                deflate_raw(&active).unwrap()
+            };
+
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <{kind} uuid="{uuid}">
+    <Properties>
+      <Name>{name}</Name>
+      <Synonym>
+        <item>
+          <lang>ru</lang>
+          <content>{name}</content>
+        </item>
+      </Synonym>
+      <Comment>{comment}</Comment>
+    </Properties>
+  </{kind}>
+</MetaDataObject>
+"#
+            );
+
+            let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml.as_bytes())
+                .unwrap_or_else(|error| panic!("{kind}: {error}"));
+            let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+            assert_eq!(packed.properties.kind, kind);
+            assert_eq!(packed.properties.uuid, uuid);
+            assert!(inflated.contains(&format!("\"{name}\"")), "{inflated}");
+            assert!(inflated.contains(&format!("\"{comment}\"")), "{inflated}");
+            assert!(inflated.contains("00000000-0000-0000-0000-000000000000"));
+        }
+    }
+
+    #[test]
     fn round_trips_common_form_and_template_from_lab_sources() -> anyhow::Result<()> {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
