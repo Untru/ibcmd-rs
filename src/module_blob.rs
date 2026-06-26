@@ -3351,6 +3351,54 @@ mod tests {
                 "Начисления",
                 "План начислений",
             ),
+            (
+                "EventSubscription",
+                "77777777-7777-4777-8777-777777777777",
+                "ЗаписатьВерсиюОбъекта",
+                "Подписка на запись",
+            ),
+            (
+                "FunctionalOption",
+                "88888888-8888-4888-8888-888888888888",
+                "ВыполнятьЗамерыПроизводительности",
+                "Функциональная опция",
+            ),
+            (
+                "FunctionalOptionsParameter",
+                "99999999-9999-4999-9999-999999999999",
+                "ОбщиеНастройкиУзлов",
+                "Параметр функциональных опций",
+            ),
+            (
+                "Role",
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "АдминистраторСистемы",
+                "Роль пользователя",
+            ),
+            (
+                "ScheduledJob",
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "ЗагрузкаКурсовВалют",
+                "Регламентное задание",
+            ),
+            (
+                "StyleItem",
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                "ВажнаяНадписьШрифт",
+                "Элемент стиля",
+            ),
+            (
+                "Subsystem",
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "СтандартныеПодсистемы",
+                "Подсистема",
+            ),
+            (
+                "Task",
+                "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                "ЗадачаИсполнителя",
+                "Задача",
+            ),
         ] {
             let base_blob = {
                 let mut active = b"\xEF\xBB\xBF".to_vec();
