@@ -1050,6 +1050,177 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_chart_of_characteristic_types_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-chart-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form",
+        ))
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join(
+                "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form",
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help"),
+        )
+        .unwrap();
+
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач.xml"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root
+                .join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента.xml"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form.xml"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form/Module.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root
+                .join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка.xml"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join(
+                "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form.xml",
+            ),
+            root.join(
+                "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form.xml",
+            ),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Predefined.xml"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Predefined.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/ObjectModule.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/ObjectModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root
+                .join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/ManagerModule.bsl"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help.xml"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help/ru.html"),
+            root.join("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help/ru.html"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаЭлемента/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form.xml",
+            SourceKind::Form,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Forms/ФормаСписка/Ext/Form/Module.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Predefined.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/ObjectModule.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/ManagerModule.bsl",
+            SourceKind::Module,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help.xml",
+            SourceKind::MetadataXml,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+        assert!(files.contains(&(
+            "ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач/Ext/Help/ru.html",
+            SourceKind::Other,
+            Some("ChartsOfCharacteristicTypes/ОбъектыАдресацииЗадач")
+        )));
+    }
+
+    #[test]
     fn scans_real_task_form_and_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")

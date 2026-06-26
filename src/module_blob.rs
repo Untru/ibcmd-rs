@@ -4443,6 +4443,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         for (reference, expected_type_id) in [
             (
+                "ChartOfCharacteristicTypesObject.ОбъектыАдресацииЗадач",
+                "20630724-4f14-4d31-b479-6b01d7d318e0",
+            ),
+            (
+                "ChartOfCharacteristicTypesRef.ОбъектыАдресацииЗадач",
+                "48723115-46af-4d1f-8070-bc9ce5745356",
+            ),
+            (
+                "ChartOfCharacteristicTypesSelection.ОбъектыАдресацииЗадач",
+                "e676427d-6d38-4ea2-b363-157ba41d7156",
+            ),
+            (
+                "ChartOfCharacteristicTypesList.ОбъектыАдресацииЗадач",
+                "4f89d4d5-72f5-4640-9c43-e6c104c86198",
+            ),
+            (
+                "Characteristic.ОбъектыАдресацииЗадач",
+                "6357c29c-abbc-467d-961b-8ccb5be8c151",
+            ),
+            (
+                "ChartOfCharacteristicTypesManager.ОбъектыАдресацииЗадач",
+                "5b41e3e3-086e-45b2-b05c-aeae98d85834",
+            ),
+        ] {
+            assert_eq!(
+                source.resolve_metadata_type_id(reference).unwrap(),
+                expected_type_id
+            );
+        }
+
+        for (reference, expected_type_id) in [
+            (
                 "EnumRef.ВажностьПроблемыУчета",
                 "c8f0f421-adcf-417b-8509-93d4569c4435",
             ),
