@@ -58,6 +58,7 @@ pub struct StorageMappingReport {
     pub roles: Vec<StorageStageRoleSummary>,
     pub families: Vec<StorageOperationFamilySummary>,
     pub signals: Vec<StorageSignalSummary>,
+    pub tables: Vec<StorageTableSummary>,
     pub entries: Vec<StorageMappingEntry>,
 }
 
@@ -67,6 +68,7 @@ pub struct StorageMapOverview {
     pub dominant_role: Option<StorageStageRoleSummary>,
     pub dominant_family: Option<StorageOperationFamilySummary>,
     pub dominant_signal: Option<StorageSignalSummary>,
+    pub dominant_table: Option<StorageTableSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +95,13 @@ pub struct StorageOperationFamilySummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageSignalSummary {
     pub signal: String,
+    pub groups: usize,
+    pub total_duration_us: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageTableSummary {
+    pub table: String,
     pub groups: usize,
     pub total_duration_us: u64,
 }
@@ -133,6 +142,7 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
     let mut roles = summarize_roles(&entries);
     let mut families = summarize_families(&entries);
     let mut signals = summarize_signals(&entries);
+    let mut tables = summarize_tables(&entries);
 
     entries.sort_by(|left, right| {
         right
@@ -166,6 +176,12 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             .cmp(&left.total_duration_us)
             .then_with(|| left.signal.cmp(&right.signal))
     });
+    tables.sort_by(|left, right| {
+        right
+            .total_duration_us
+            .cmp(&left.total_duration_us)
+            .then_with(|| left.table.cmp(&right.table))
+    });
 
     let mapped_groups = entries
         .iter()
@@ -182,11 +198,13 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             dominant_role: roles.first().cloned(),
             dominant_family: families.first().cloned(),
             dominant_signal: signals.first().cloned(),
+            dominant_table: tables.first().cloned(),
         },
         summaries,
         roles,
         families,
         signals,
+        tables,
         entries,
     }
 }
@@ -266,6 +284,25 @@ fn summarize_signals(entries: &[StorageMappingEntry]) -> Vec<StorageSignalSummar
                 total_duration_us,
             },
         )
+        .collect()
+}
+
+fn summarize_tables(entries: &[StorageMappingEntry]) -> Vec<StorageTableSummary> {
+    let mut totals = std::collections::BTreeMap::<String, (usize, u64)>::new();
+    for entry in entries {
+        for table in &entry.table_names {
+            let value = totals.entry(table.clone()).or_insert((0, 0));
+            value.0 += 1;
+            value.1 += entry.total_duration_us;
+        }
+    }
+    totals
+        .into_iter()
+        .map(|(table, (groups, total_duration_us))| StorageTableSummary {
+            table,
+            groups,
+            total_duration_us,
+        })
         .collect()
 }
 
@@ -794,6 +831,22 @@ mod tests {
             report.overview.dominant_family.as_ref().unwrap().family,
             report.families.first().unwrap().family
         );
+        assert_eq!(
+            report.overview.dominant_table.as_ref().unwrap().table,
+            report.tables.first().unwrap().table
+        );
+        assert!(
+            report
+                .tables
+                .iter()
+                .any(|summary| summary.table == "ConfigSave")
+        );
+        assert!(
+            report
+                .tables
+                .iter()
+                .any(|summary| summary.table == "Params")
+        );
     }
 
     #[test]
@@ -801,7 +854,7 @@ mod tests {
         let analysis = TraceAnalysis {
             files: vec!["trace.xml".into()],
             events_seen: 1,
-            groups: vec![group("select 1", vec![], 1, 4)],
+            groups: vec![group("select 1", vec!["Table"], 1, 4)],
         };
 
         let report = build_storage_mapping(&analysis);
@@ -815,6 +868,14 @@ mod tests {
             report.overview.dominant_signal,
             Some(StorageSignalSummary {
                 signal: "unclassified".to_string(),
+                groups: 1,
+                total_duration_us: 4,
+            })
+        );
+        assert_eq!(
+            report.overview.dominant_table,
+            Some(super::StorageTableSummary {
+                table: "Table".to_string(),
                 groups: 1,
                 total_duration_us: 4,
             })
