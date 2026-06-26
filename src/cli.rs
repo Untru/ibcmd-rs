@@ -57,6 +57,10 @@ pub enum Commands {
     MssqlStageCommonModuleObjects(MssqlStageCommonModuleObjectsArgs),
     /// Stage metadata-only XML changes for several simple metadata objects.
     MssqlStageMetadataObjects(MssqlStageMetadataObjectsArgs),
+    /// Stage all root metadata XML objects found under a source tree.
+    MssqlStageSourceMetadataObjects(MssqlStageSourceMetadataObjectsArgs),
+    /// Stage all common module objects found under a source tree.
+    MssqlStageSourceCommonModuleObjects(MssqlStageSourceCommonModuleObjectsArgs),
     /// Stage one exchange plan object from XML.
     MssqlStageExchangePlanObject(MssqlStageExchangePlanObjectArgs),
     /// Stage one business process object from XML.
@@ -540,6 +544,56 @@ pub struct MssqlStageMetadataObjectsArgs {
     /// Root folder with full XML sources, used to resolve metadata references.
     #[arg(long)]
     pub source_root: Option<PathBuf>,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageSourceMetadataObjectsArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Root folder with XML sources to scan.
+    #[arg(long)]
+    pub source_root: PathBuf,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Required confirmation: delete existing ConfigSave rows first.
+    #[arg(long)]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlStageSourceCommonModuleObjectsArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Target database name.
+    #[arg(long)]
+    pub database: String,
+    /// Root folder with XML sources to scan.
+    #[arg(long)]
+    pub source_root: PathBuf,
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
@@ -2429,6 +2483,49 @@ mod tests {
             "mssql-stage-ws-reference-object",
             MssqlStageWSReferenceObject
         );
+    }
+
+    #[test]
+    fn parses_source_tree_stage_commands() {
+        let metadata = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-source-metadata-objects",
+            "--database",
+            "TestDb",
+            "--source-root",
+            r"C:\sources",
+            "--replace-config-save",
+            "--allow-non-lab",
+        ]);
+        match metadata.command {
+            Commands::MssqlStageSourceMetadataObjects(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let common_modules = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-source-common-module-objects",
+            "--database",
+            "TestDb",
+            "--source-root",
+            r"C:\sources",
+            "--replace-config-save",
+            "--allow-non-lab",
+        ]);
+        match common_modules.command {
+            Commands::MssqlStageSourceCommonModuleObjects(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

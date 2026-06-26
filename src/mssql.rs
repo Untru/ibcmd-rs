@@ -37,6 +37,7 @@ use crate::cli::{
     MssqlStageChartOfCalculationRegistersObjectArgs,
     MssqlStageChartOfCalculationTypesObjectArgs,
     MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageXdtopackageObjectArgs,
+    MssqlStageSourceCommonModuleObjectsArgs, MssqlStageSourceMetadataObjectsArgs,
     MssqlStorageExportArgs, MssqlStorageImportArgs,
 };
 use crate::module_blob::{
@@ -46,6 +47,7 @@ use crate::module_blob::{
     parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
 };
 use crate::parallel;
+use crate::source::scan_sources;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
@@ -889,6 +891,53 @@ pub fn stage_metadata_objects(
     })
 }
 
+pub fn stage_source_metadata_objects(
+    args: &MssqlStageSourceMetadataObjectsArgs,
+) -> Result<StageMetadataObjectsReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "source metadata staging")?;
+    let manifest = scan_sources(&args.source_root)?;
+    let xmls = manifest
+        .files
+        .iter()
+        .filter(|file| is_root_metadata_xml(&file.path))
+        .map(|file| args.source_root.join(&file.path))
+        .collect::<Vec<_>>();
+    let stage_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls,
+        source_root: Some(args.source_root.clone()),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&stage_args)
+}
+
+pub fn stage_source_common_module_objects(
+    args: &MssqlStageSourceCommonModuleObjectsArgs,
+) -> Result<StageCommonModuleObjectsReport> {
+    require_non_lab_confirmation(args.allow_non_lab, "source common module staging")?;
+    let manifest = scan_sources(&args.source_root)?;
+    let xmls = manifest
+        .files
+        .iter()
+        .filter(|file| is_root_common_module_xml(&file.path))
+        .map(|file| args.source_root.join(&file.path))
+        .collect::<Vec<_>>();
+    let stage_args = MssqlStageCommonModuleObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls,
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_common_module_objects(&stage_args)
+}
+
 pub fn stage_exchange_plan_object(
     args: &MssqlStageExchangePlanObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
@@ -903,6 +952,24 @@ pub fn stage_exchange_plan_object(
         script_output: args.script_output.clone(),
     };
     stage_metadata_objects(&metadata_args)
+}
+
+fn is_root_metadata_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    if !lower.ends_with(".xml") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && parts[0] != "commonmodules"
+}
+
+fn is_root_common_module_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    if !lower.ends_with(".xml") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && parts[0] == "commonmodules"
 }
 
 pub fn stage_business_process_object(
@@ -2663,16 +2730,84 @@ mod tests {
         StorageBundleManifest, StorageTableManifest, TableShape, compare_shapes,
         compare_storage_table_manifests, infer_common_module_text_path, quote_ident, quote_string,
         require_non_lab_confirmation, validate_delta_manifest, validate_storage_manifest,
+        is_root_common_module_xml, is_root_metadata_xml,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
     };
+    use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::path::PathBuf;
 
     #[test]
     fn quotes_sql_identifier_and_string() {
         assert_eq!(quote_ident("a]b"), "[a]]b]");
         assert_eq!(quote_string("a'b"), "a''b");
+    }
+
+    #[test]
+    fn selects_root_objects_from_scanned_source_tree() {
+        let manifest = SourceManifest {
+            root: PathBuf::from(r"C:\sources"),
+            generated_at_unix: 0,
+            files: vec![
+                SourceFile {
+                    path: "CommonModules/Foo.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("CommonModule".to_string()),
+                    object_hint: Some("CommonModules/Foo".to_string()),
+                },
+                SourceFile {
+                    path: "CommonModules/Foo/Ext/Module.bsl".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Module,
+                    xml_root: None,
+                    object_hint: Some("CommonModules/Foo".to_string()),
+                },
+                SourceFile {
+                    path: "Bots/Notify.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("Bot".to_string()),
+                    object_hint: Some("Bots/Notify".to_string()),
+                },
+                SourceFile {
+                    path: "CommonModules/Foo/Ext/Module.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("CommonModule".to_string()),
+                    object_hint: Some("CommonModules/Foo".to_string()),
+                },
+                SourceFile {
+                    path: "Configuration.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::ConfigurationRoot,
+                    xml_root: Some("Configuration".to_string()),
+                    object_hint: Some("Configuration".to_string()),
+                },
+            ],
+        };
+
+        let metadata = manifest
+            .files
+            .iter()
+            .filter(|file| is_root_metadata_xml(&file.path))
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        let modules = manifest
+            .files
+            .iter()
+            .filter(|file| is_root_common_module_xml(&file.path))
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(metadata, vec!["Bots/Notify.xml"]);
+        assert_eq!(modules, vec!["CommonModules/Foo.xml"]);
     }
 
     #[test]
