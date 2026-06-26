@@ -1966,6 +1966,13 @@ mod tests {
     }
 
     #[test]
+    fn derives_sibling_path_from_source_parent() {
+        let path = super::sibling_path(r"C:\temp\source\db.mdf", "target.mdf").unwrap();
+
+        assert_eq!(path, r"C:\temp\source\target.mdf");
+    }
+
+    #[test]
     fn builds_metadata_object_stage_sql_with_expected_row_counts() {
         let prepared = vec![PreparedMetadataObjectStage {
             object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
