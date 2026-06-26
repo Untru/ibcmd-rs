@@ -321,6 +321,9 @@ enum SourceAssetKind {
     ExtPicture,
     Help,
     InflatedBinary,
+    RoleRights {
+        object_refs: BTreeMap<String, String>,
+    },
     Schedule,
 }
 
@@ -332,6 +335,7 @@ struct SourceAsset {
 fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     let command_refs = build_command_interface_reference_index(rows);
     let metadata_refs = build_metadata_command_reference_index(rows);
+    let object_refs = build_metadata_object_reference_index(rows);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -386,6 +390,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
             &rows_by_file_name,
             &command_refs,
             &metadata_refs,
+            &object_refs,
         ) {
             paths.insert(body_id, asset);
         }
@@ -411,6 +416,7 @@ fn source_assets_from_metadata_blob(
     rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Vec<(String, SourceAsset)> {
     source_assets_from_metadata_blob_inner(
         blob,
@@ -419,6 +425,7 @@ fn source_assets_from_metadata_blob(
         rows_by_file_name,
         command_refs,
         metadata_refs,
+        object_refs,
     )
     .unwrap_or_default()
 }
@@ -430,6 +437,7 @@ fn source_assets_from_metadata_blob_inner(
     rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<(String, SourceAsset)>> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
@@ -455,6 +463,20 @@ fn source_assets_from_metadata_blob_inner(
                 primary_path: object_path.join("Ext").join("Package.bin"),
                 kind: SourceAssetKind::InflatedBinary,
             }),
+            "Role"
+                if rows_by_file_name
+                    .get(body_id.as_str())
+                    .and_then(|row| decode_hex(&row.binary_hex).ok())
+                    .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs))
+                    .is_some() =>
+            {
+                Some(SourceAsset {
+                    primary_path: object_path.join("Ext").join("Rights.xml"),
+                    kind: SourceAssetKind::RoleRights {
+                        object_refs: object_refs.clone(),
+                    },
+                })
+            }
             _ => None,
         };
         if let Some(asset) = asset {
@@ -599,6 +621,21 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, inflated)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::RoleRights { object_refs } => {
+            let rights = parse_role_rights_blob(bytes, object_refs).with_context(|| {
+                format!(
+                    "failed to extract role rights from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, format_role_rights_xml(&rights))
+                .with_context(|| format!("failed to write {}", path.display()))?;
+        }
         SourceAssetKind::CommandInterface {
             command_refs,
             metadata_refs,
@@ -634,6 +671,20 @@ struct CommandInterfaceEntry {
     common: bool,
 }
 
+struct RoleRights {
+    objects: Vec<RoleObjectRights>,
+}
+
+struct RoleObjectRights {
+    name: String,
+    rights: Vec<RoleRight>,
+}
+
+struct RoleRight {
+    name: String,
+    value: bool,
+}
+
 #[derive(Clone)]
 struct MetadataCommandReference {
     kind: String,
@@ -665,6 +716,53 @@ fn build_metadata_command_reference_index(
         );
     }
     index
+}
+
+fn build_metadata_object_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        if let Some(name) = parse_configuration_reference_blob(&bytes) {
+            index.insert(row.file_name.clone(), format!("Configuration.{name}"));
+            continue;
+        }
+        let Some((kind, header, text)) =
+            parse_metadata_command_reference_blob(&bytes, &row.file_name)
+        else {
+            continue;
+        };
+        index.insert(row.file_name.clone(), format!("{kind}.{}", header.name));
+        for command in nested_command_headers_from_text(&text, &row.file_name) {
+            index.insert(
+                command.uuid,
+                format!("{}.{}.Command.{}", kind, header.name, command.name),
+            );
+        }
+    }
+    index
+}
+
+fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    if !text.trim_start().starts_with("{2,") {
+        return None;
+    }
+    let marker = "{1,0,";
+    let marker_start = text.find(marker)?;
+    let uuid_start = marker_start + marker.len();
+    let uuid_end = uuid_start + 36;
+    let uuid = text.get(uuid_start..uuid_end)?;
+    if !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
+        return None;
+    }
+    parse_metadata_header_from_text(text, uuid).map(|header| header.name)
 }
 
 fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
@@ -802,6 +900,218 @@ fn command_interface_standard_command(kind: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+fn parse_role_rights_blob(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<RoleRights> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "10" {
+        return None;
+    }
+    let object_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let count = object_fields.first()?.trim().parse::<usize>().ok()?;
+    if object_fields.len() != count + 1 {
+        return None;
+    }
+
+    let mut objects = Vec::with_capacity(count);
+    for object_field in object_fields.iter().skip(1) {
+        let entry = split_1c_braced_fields(object_field, 0)?;
+        if entry.len() != 2 {
+            return None;
+        }
+
+        let object_ref = split_1c_braced_fields(entry[0], 0)?;
+        let object_uuid = object_ref.get(1)?.trim();
+        if !is_uuid_text(object_uuid) {
+            return None;
+        }
+        let object_name = object_refs.get(object_uuid)?.clone();
+
+        let right_ref = split_1c_braced_fields(entry[1], 0)?;
+        if right_ref.first()?.trim() != "0" || (right_ref.len() - 1) % 2 != 0 {
+            return None;
+        }
+        let mut rights = Vec::new();
+        for pair in right_ref[1..].chunks(2) {
+            let right_uuid = pair.first()?.trim();
+            if !is_uuid_text(right_uuid) {
+                return None;
+            }
+            let value = match pair.get(1)?.trim() {
+                "0" => false,
+                "1" => true,
+                _ => return None,
+            };
+            let right_name = role_right_name(right_uuid)?.to_string();
+            rights.push(RoleRight {
+                name: right_name,
+                value,
+            });
+        }
+        objects.push(RoleObjectRights {
+            name: object_name,
+            rights,
+        });
+    }
+
+    objects.reverse();
+    Some(RoleRights { objects })
+}
+
+fn role_right_name(uuid: &str) -> Option<&'static str> {
+    ROLE_RIGHT_NAMES
+        .iter()
+        .find_map(|(right_uuid, name)| (*right_uuid == uuid).then_some(*name))
+}
+
+const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
+    ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
+    ("900e3c92-6e18-4874-846a-b28780b5b54c", "Administration"),
+    (
+        "f7c6a0bb-bca6-4cd3-9146-832971cd7073",
+        "AnalyticsSystemClient",
+    ),
+    ("07ef4641-f7da-417a-bd75-35c40a17c2f7", "Automation"),
+    (
+        "399d7390-8d83-4a57-b4d7-c902c15b701f",
+        "ConfigurationExtensionsAdministration",
+    ),
+    ("10b8ce49-ae3d-4a2e-afe7-1e3648bd59f7", "DataAdministration"),
+    ("c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4", "Delete"),
+    ("b7bab52d-c1b1-4bd8-8276-02db08d42352", "Edit"),
+    (
+        "8497054a-ffd1-4ca7-bdfe-340b9ddc050a",
+        "EditDataHistoryVersionComment",
+    ),
+    ("1c799cf9-342d-4bf7-9b6f-951a009228ce", "EventLog"),
+    ("8fb221e3-0d4f-43f2-ad71-1984cad63375", "ExclusiveMode"),
+    ("74fd69fa-368e-4292-956a-65eb2f9877bd", "Execute"),
+    ("02119c69-f08a-4142-9426-3725d74b7719", "ExternalConnection"),
+    ("499e8968-ca89-43f0-9955-8756058b1b53", "Get"),
+    ("b5f861d3-d9c5-45ec-98bf-0ed4d489a351", "InputByString"),
+    ("33200740-82b0-4de7-8556-d3fb25ca4328", "Insert"),
+    (
+        "b0c0cbfc-f2cc-4b80-8460-5d5d7a599d9d",
+        "InteractiveChangeOfPosted",
+    ),
+    (
+        "798cf688-ad74-44fe-a464-236b49e910e0",
+        "InteractiveClearDeletionMark",
+    ),
+    (
+        "e7f9daf9-eac2-4ada-9c26-c380858f3589",
+        "InteractiveClearDeletionMarkPredefinedData",
+    ),
+    ("b53db6ed-6e5b-4035-8d24-f10083d646ed", "InteractiveDelete"),
+    (
+        "fa6dbe86-856a-4ac4-b8ac-bce99f8b8b22",
+        "InteractiveDeleteMarked",
+    ),
+    (
+        "65e5f92c-40ff-4130-9652-c0e7612d0609",
+        "InteractiveDeleteMarkedPredefinedData",
+    ),
+    (
+        "013a262e-165f-4815-bdae-7a1bed6a68e4",
+        "InteractiveDeletePredefinedData",
+    ),
+    ("fb88c756-91c9-4351-9cdf-e027879886c6", "InteractiveInsert"),
+    (
+        "7b8359dd-7d4e-4bcd-a61c-b4b26eae19c6",
+        "InteractiveOpenExtDataProcessors",
+    ),
+    (
+        "eb29e198-c338-4a20-a253-be6fc3dd44d9",
+        "InteractiveOpenExtReports",
+    ),
+    ("5d167fcc-b11f-403a-9a37-1eda64c19df1", "InteractivePosting"),
+    (
+        "21b4742a-d335-4234-bf0f-a3074a0e31ac",
+        "InteractivePostingRegular",
+    ),
+    (
+        "d76b72ba-5388-4b7f-af64-1b351f63a1e1",
+        "InteractiveSetDeletionMark",
+    ),
+    (
+        "408c56c0-e210-4e2e-8e82-610050a08a39",
+        "InteractiveSetDeletionMarkPredefinedData",
+    ),
+    (
+        "4d0d77ec-8511-430d-bd77-8407f27bc8f4",
+        "InteractiveUndoPosting",
+    ),
+    (
+        "b9b44b51-3ac9-47cd-8b5a-df51afdcceb0",
+        "MainWindowModeEmbeddedWorkplace",
+    ),
+    (
+        "818fc6c3-4691-44e3-a80c-e8d424730ead",
+        "MainWindowModeFullscreenWorkplace",
+    ),
+    (
+        "155a0b35-4343-4047-989b-d385373b063e",
+        "MainWindowModeKiosk",
+    ),
+    (
+        "d066966a-ff6a-4a41-bd68-6191cab083bc",
+        "MainWindowModeNormal",
+    ),
+    (
+        "f6168734-8b8d-4a88-ab39-ef6b51758e83",
+        "MainWindowModeWorkplace",
+    ),
+    ("1e50809b-73ed-4935-bb77-2616c4cabdf5", "MobileClient"),
+    ("31c3d4f6-7d02-4654-a14e-06aacafcb4fa", "Output"),
+    ("e060de25-bffd-42fd-bb09-f3a788d65760", "Posting"),
+    ("1c87578f-9e09-4ec0-a991-5629c87b1588", "Read"),
+    ("64319ca1-f3d8-472e-82ce-5da233e6daaa", "ReadDataHistory"),
+    (
+        "1b762bf9-df7f-4255-bbe6-f7578f41368d",
+        "ReadDataHistoryOfMissingData",
+    ),
+    ("d8682bbb-7800-4aa0-8590-d3cb11fe2a29", "SaveUserData"),
+    ("1d306db2-d97e-4b57-9b28-5d21e838cd9e", "Set"),
+    ("65b6855f-85d5-4d33-ab75-be4485326dd5", "Start"),
+    (
+        "479a42c0-c3e9-4ae7-bf4a-75cebc14fec4",
+        "SwitchToDataHistoryVersion",
+    ),
+    (
+        "265eec41-3ce1-4a07-bc3b-253d44c9a4f4",
+        "TechnicalSpecialistMode",
+    ),
+    ("29da0973-3b85-40e5-89da-bce02dbab08e", "ThickClient"),
+    ("3c00c6ee-844e-4620-85e4-671e72f114d9", "ThinClient"),
+    ("24abfe06-289a-48c5-8bb4-032c733e45c5", "TotalsControl"),
+    ("f55a8f7f-2c65-404f-b530-093d9006adba", "UndoPosting"),
+    ("287b74b8-3a66-4a76-ba27-4f1f6a93770e", "Update"),
+    (
+        "4d87a22d-ca7f-40ba-a367-a4eae62f4a7f",
+        "UpdateDataBaseConfiguration",
+    ),
+    ("b162ff57-0296-483e-9af8-dc37576802cb", "UpdateDataHistory"),
+    (
+        "c4ab1331-e58d-4a46-ad2e-fe6d80b72aa4",
+        "UpdateDataHistoryOfMissingData",
+    ),
+    (
+        "a679c969-8ea1-4b8b-9e61-8a414ba448f4",
+        "UpdateDataHistorySettings",
+    ),
+    (
+        "5b3ea0e2-fdb9-41f6-bf6c-25747906b4cb",
+        "UpdateDataHistoryVersionComment",
+    ),
+    ("c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1", "Use"),
+    ("aa6448f2-be0f-42ea-ba26-1af7f52b5b65", "View"),
+    ("9342b152-a7ae-4c79-9b7b-f4f028a36479", "ViewDataHistory"),
+    ("bd33c881-192c-4ef7-a51d-b146e38c5078", "WebClient"),
+];
 
 fn parse_help_blob_pages(bytes: &[u8]) -> Option<Vec<HelpPage>> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
@@ -960,6 +1270,31 @@ fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
         ));
     }
     xml.push_str("\t</CommandsVisibility>\r\n</CommandInterface>\r\n");
+    xml
+}
+
+fn format_role_rights_xml(rights: &RoleRights) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Rights xmlns=\"http://v8.1c.ru/8.2/roles\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Rights\" version=\"2.20\">\r\n\
+\t<setForNewObjects>false</setForNewObjects>\r\n\
+\t<setForAttributesByDefault>true</setForAttributesByDefault>\r\n\
+\t<independentRightsOfChildObjects>false</independentRightsOfChildObjects>\r\n",
+    );
+    for object in &rights.objects {
+        xml.push_str("\t<object>\r\n\t\t<name>");
+        xml.push_str(&escape_xml_text(&object.name));
+        xml.push_str("</name>\r\n");
+        for right in &object.rights {
+            xml.push_str("\t\t<right>\r\n\t\t\t<name>");
+            xml.push_str(&escape_xml_text(&right.name));
+            xml.push_str("</name>\r\n\t\t\t<value>");
+            xml.push_str(xml_bool(right.value));
+            xml.push_str("</value>\r\n\t\t</right>\r\n");
+        }
+        xml.push_str("\t</object>\r\n");
+    }
+    xml.push_str("</Rights>\r\n");
     xml
 }
 
@@ -3957,6 +4292,109 @@ mod tests {
         assert_eq!(
             body_row.source_asset_path.as_deref(),
             Some("XDTOPackages/Exchange/Ext/Package.bin")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_role_rights_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let role_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let register_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let configuration_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let role_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{6,\r\n{{3,\r\n{{1,0,{role_uuid}}},\"Editor\",{{1,\"en\",\"Editor\"}},\"\"}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let configuration_metadata = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{configuration_uuid}}},7,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let register_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,dddddddd-dddd-4ddd-dddd-dddddddddddd,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let rights = deflate_for_test(
+            format!(
+                "{{10,{{3,{{{{1,{catalog_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,33200740-82b0-4de7-8556-d3fb25ca4328,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},{{{{1,{configuration_uuid},0,0}},{{0,d066966a-ff6a-4a41-bd68-6191cab083bc,1}}}},{{{{1,{register_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1}}}}}},{{0}},4294967295,1,0,4294967295}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: configuration_uuid.to_string(),
+                part_no: 0,
+                data_size: configuration_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&configuration_metadata),
+            },
+            ConfigRow {
+                file_name: role_uuid.to_string(),
+                part_no: 0,
+                data_size: role_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&role_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{role_uuid}.0"),
+                part_no: 0,
+                data_size: rights.len() as i64,
+                binary_hex: encode_hex_for_test(&rights),
+            },
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: register_uuid.to_string(),
+                part_no: 0,
+                data_size: register_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&register_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("Roles/Editor/Ext/Rights.xml")).unwrap();
+        assert!(xml.contains(r#"<Rights xmlns="http://v8.1c.ru/8.2/roles""#));
+        assert!(
+            xml.find("<name>InformationRegister.Prices</name>").unwrap()
+                < xml.find("<name>Catalog.Products</name>").unwrap()
+        );
+        assert!(xml.contains("<name>Configuration.DemoApp</name>"));
+        assert!(xml.contains("<name>MainWindowModeNormal</name>"));
+        assert!(xml.contains("<name>Read</name>"));
+        assert!(xml.contains("<name>Update</name>"));
+        assert!(xml.contains("<name>TotalsControl</name>"));
+        assert!(xml.contains("<name>Insert</name>"));
+        assert!(xml.contains("<name>View</name>"));
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{role_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Roles/Editor/Ext/Rights.xml")
         );
 
         let _ = fs::remove_dir_all(root);
