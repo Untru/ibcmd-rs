@@ -323,6 +323,24 @@ struct MetadataHeader {
     comment: String,
 }
 
+struct CommonModuleFlags {
+    global: bool,
+    client_managed_application: bool,
+    server: bool,
+    external_connection: bool,
+    client_ordinary_application: bool,
+    server_call: bool,
+    privileged: bool,
+    return_values_reuse: ReturnValuesReuseValue,
+}
+
+#[derive(Clone, Copy)]
+enum ReturnValuesReuseValue {
+    DontUse,
+    DuringRequest,
+    DuringSession,
+}
+
 fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
@@ -331,6 +349,15 @@ fn extract_metadata_source_xml(blob: &[u8], uuid: &str) -> Option<ExtractedMetad
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
     let object_code = parse_metadata_object_code(text)?;
+    if object_code == 12 {
+        let header = parse_metadata_header_from_text(text, uuid)?;
+        let flags = parse_common_module_flags_from_text(text, uuid)?;
+        let relative_path = PathBuf::from("CommonModules")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_common_module_source_xml(&header, &flags).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
     let (kind, folder) = metadata_source_for_object_code(object_code)?;
     let header = parse_metadata_header_from_text(text, uuid)?;
     let relative_path = PathBuf::from(folder)
@@ -365,6 +392,53 @@ fn metadata_source_for_object_code(code: u32) -> Option<(&'static str, &'static 
         33 => Some(("InformationRegister", "InformationRegisters")),
         40 => Some(("Document", "Documents")),
         57 => Some(("Catalog", "Catalogs")),
+        _ => None,
+    }
+}
+
+fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonModuleFlags> {
+    let marker = format!("{{1,0,{uuid}}},");
+    let marker_start = text.find(&marker)?;
+    let base_object_start = text[..marker_start].rfind("{3,")?;
+    let owner_object_start = text[..base_object_start].rfind("{12,")?;
+    let base_object_end = scan_1c_braced_value(text, base_object_start)?;
+    let flags_start = expect_comma_at(text, base_object_end)?;
+    let owner_object_end = scan_1c_braced_value(text, owner_object_start)?;
+    let flags_end = owner_object_end.checked_sub(1)?;
+    let flags = text[flags_start..flags_end]
+        .split(',')
+        .map(str::trim)
+        .take(8)
+        .collect::<Vec<_>>();
+    if flags.len() != 8 {
+        return None;
+    }
+
+    Some(CommonModuleFlags {
+        client_ordinary_application: parse_1c_bool_flag(flags[0])?,
+        server: parse_1c_bool_flag(flags[1])?,
+        external_connection: parse_1c_bool_flag(flags[2])?,
+        privileged: parse_1c_bool_flag(flags[3])?,
+        global: parse_1c_bool_flag(flags[4])?,
+        client_managed_application: parse_1c_bool_flag(flags[5])?,
+        return_values_reuse: parse_return_values_reuse_flag(flags[6])?,
+        server_call: parse_1c_bool_flag(flags[7])?,
+    })
+}
+
+fn parse_1c_bool_flag(value: &str) -> Option<bool> {
+    match value {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_return_values_reuse_flag(value: &str) -> Option<ReturnValuesReuseValue> {
+    match value {
+        "0" => Some(ReturnValuesReuseValue::DontUse),
+        "1" => Some(ReturnValuesReuseValue::DuringRequest),
+        "2" => Some(ReturnValuesReuseValue::DuringSession),
         _ => None,
     }
 }
@@ -523,6 +597,45 @@ fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
         name = escape_xml_text(&header.name),
         comment = escape_xml_text(&header.comment),
     )
+}
+
+fn format_common_module_source_xml(header: &MetadataHeader, flags: &CommonModuleFlags) -> String {
+    let mut xml = format_metadata_source_xml("CommonModule", header);
+    let insert = format!(
+        "\t\t\t<Global>{}</Global>\r\n\
+\t\t\t<ClientManagedApplication>{}</ClientManagedApplication>\r\n\
+\t\t\t<Server>{}</Server>\r\n\
+\t\t\t<ExternalConnection>{}</ExternalConnection>\r\n\
+\t\t\t<ClientOrdinaryApplication>{}</ClientOrdinaryApplication>\r\n\
+\t\t\t<ServerCall>{}</ServerCall>\r\n\
+\t\t\t<Privileged>{}</Privileged>\r\n\
+\t\t\t<ReturnValuesReuse>{}</ReturnValuesReuse>\r\n",
+        xml_bool(flags.global),
+        xml_bool(flags.client_managed_application),
+        xml_bool(flags.server),
+        xml_bool(flags.external_connection),
+        xml_bool(flags.client_ordinary_application),
+        xml_bool(flags.server_call),
+        xml_bool(flags.privileged),
+        return_values_reuse_xml(flags.return_values_reuse),
+    );
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn xml_bool(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+fn return_values_reuse_xml(value: ReturnValuesReuseValue) -> &'static str {
+    match value {
+        ReturnValuesReuseValue::DontUse => "DontUse",
+        ReturnValuesReuseValue::DuringRequest => "DuringRequest",
+        ReturnValuesReuseValue::DuringSession => "DuringSession",
+    }
 }
 
 fn escape_xml_text(value: &str) -> String {
@@ -782,7 +895,10 @@ mod tests {
     use flate2::write::DeflateEncoder;
     use std::io::Write;
 
-    use crate::module_blob::{pack_module_blob_bytes, parse_simple_metadata_xml_properties};
+    use crate::module_blob::{
+        ReturnValuesReuse, pack_module_blob_bytes, parse_common_module_xml_properties,
+        parse_simple_metadata_xml_properties,
+    };
 
     #[test]
     fn decodes_plain_hex_and_sql_hex() {
@@ -940,6 +1056,40 @@ mod tests {
         assert_eq!(properties.name, "SalesCatalog");
         assert_eq!(properties.comment, "Comment");
         assert_eq!(properties.synonyms.len(), 2);
+    }
+
+    #[test]
+    fn extracts_common_module_xml_from_metadata_blob() {
+        let uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let blob = deflate_for_test(
+            format!(
+                "\u{feff}{{1,\r\n{{12,\r\n{{3,\r\n{{1,0,{uuid}}},\"SalesModule\",{{1,\"ru\",\"Модуль продаж\"}},\"Module comment\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,0,1,1,1,2,0}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(&blob, uuid).unwrap();
+        let properties = parse_common_module_xml_properties(&extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("CommonModules").join("SalesModule.xml")
+        );
+        assert_eq!(properties.uuid, uuid);
+        assert_eq!(properties.name, "SalesModule");
+        assert_eq!(properties.comment, "Module comment");
+        assert_eq!(properties.synonyms[0].content, "Модуль продаж");
+        assert!(properties.global);
+        assert!(properties.client_managed_application);
+        assert!(properties.server);
+        assert!(!properties.external_connection);
+        assert!(!properties.client_ordinary_application);
+        assert!(!properties.server_call);
+        assert!(properties.privileged);
+        assert_eq!(
+            properties.return_values_reuse,
+            ReturnValuesReuse::DuringSession
+        );
     }
 
     #[test]
