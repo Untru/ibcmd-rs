@@ -3549,6 +3549,9 @@ mod tests {
         std::fs::create_dir_all(root.join("WebServices/Exchange_3_0_2_1/Ext")).unwrap();
         std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange_2_4_5_1/Ext"))
             .unwrap();
+        std::fs::create_dir_all(root.join("WebServices/Exchange_2_0_1_6/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1/Ext"))
+            .unwrap();
 
         std::fs::copy(
             lab_root.join("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml"),
@@ -3653,6 +3656,26 @@ mod tests {
         std::fs::copy(
             lab_root.join("WebServices/RemoteAdministrationOfExchange_2_4_5_1/Ext/Module.bsl"),
             root.join("WebServices/RemoteAdministrationOfExchange_2_4_5_1/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/Exchange_2_0_1_6.xml"),
+            root.join("WebServices/Exchange_2_0_1_6.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/Exchange_2_0_1_6/Ext/Module.bsl"),
+            root.join("WebServices/Exchange_2_0_1_6/Ext/Module.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1.xml"),
+            root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1/Ext/Module.bsl"),
+            root.join("WebServices/RemoteAdministrationOfExchange_2_1_6_1/Ext/Module.bsl"),
         )
         .unwrap();
 
@@ -3775,6 +3798,26 @@ mod tests {
             "WebServices/RemoteAdministrationOfExchange_2_4_5_1/Ext/Module.bsl",
             SourceKind::Module,
             Some("WebServices/RemoteAdministrationOfExchange_2_4_5_1")
+        )));
+        assert!(files.contains(&(
+            "WebServices/Exchange_2_0_1_6.xml",
+            SourceKind::MetadataXml,
+            Some("WebServices/Exchange_2_0_1_6")
+        )));
+        assert!(files.contains(&(
+            "WebServices/Exchange_2_0_1_6/Ext/Module.bsl",
+            SourceKind::Module,
+            Some("WebServices/Exchange_2_0_1_6")
+        )));
+        assert!(files.contains(&(
+            "WebServices/RemoteAdministrationOfExchange_2_1_6_1.xml",
+            SourceKind::MetadataXml,
+            Some("WebServices/RemoteAdministrationOfExchange_2_1_6_1")
+        )));
+        assert!(files.contains(&(
+            "WebServices/RemoteAdministrationOfExchange_2_1_6_1/Ext/Module.bsl",
+            SourceKind::Module,
+            Some("WebServices/RemoteAdministrationOfExchange_2_1_6_1")
         )));
     }
 
