@@ -2242,6 +2242,78 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_exchange_plan_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-exchange-plan-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext"))
+            .unwrap();
+
+        std::fs::copy(
+            lab_root.join("ExchangePlans/ОбновлениеИнформационнойБазы.xml"),
+            root.join("ExchangePlans/ОбновлениеИнформационнойБазы.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext/Content.xml"),
+            root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext/Content.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext/ManagerModule.bsl"),
+            root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext/ManagerModule.bsl"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext/ObjectModule.bsl"),
+            root.join("ExchangePlans/ОбновлениеИнформационнойБазы/Ext/ObjectModule.bsl"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "ExchangePlans/ОбновлениеИнформационнойБазы.xml",
+            SourceKind::MetadataXml,
+            Some("ExchangePlans/ОбновлениеИнформационнойБазы")
+        )));
+        assert!(files.contains(&(
+            "ExchangePlans/ОбновлениеИнформационнойБазы/Ext/Content.xml",
+            SourceKind::MetadataXml,
+            Some("ExchangePlans/ОбновлениеИнформационнойБазы")
+        )));
+        assert!(files.contains(&(
+            "ExchangePlans/ОбновлениеИнформационнойБазы/Ext/ManagerModule.bsl",
+            SourceKind::Module,
+            Some("ExchangePlans/ОбновлениеИнформационнойБазы")
+        )));
+        assert!(files.contains(&(
+            "ExchangePlans/ОбновлениеИнформационнойБазы/Ext/ObjectModule.bsl",
+            SourceKind::Module,
+            Some("ExchangePlans/ОбновлениеИнформационнойБазы")
+        )));
+    }
+
+    #[test]
     fn scans_real_common_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
