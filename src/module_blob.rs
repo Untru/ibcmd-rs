@@ -2734,6 +2734,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "CommonPicture" => Some(("CommonPicture", "CommonPictures")),
         "CommonTemplate" => Some(("CommonTemplate", "CommonTemplates")),
         "Constant" => Some(("Constant", "Constants")),
+        "DefinedType" => Some(("DefinedType", "DefinedTypes")),
         "DocumentJournal" => Some(("DocumentJournal", "DocumentJournals")),
         "CommandGroup" => Some(("CommandGroup", "CommandGroups")),
         "EventSubscription" => Some(("EventSubscription", "EventSubscriptions")),
@@ -4584,6 +4585,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             (
                 "SessionParameter.АвторизованныйПользователь",
                 "5efc4bc4-b711-4620-8d2e-9d947c6cc141",
+            ),
+            (
+                "DefinedType.Пользователь",
+                "a72517c3-8c91-4e40-81ac-83c762789e87",
             ),
             (
                 "StyleItem.ВажнаяНадписьШрифт",
