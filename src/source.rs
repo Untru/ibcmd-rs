@@ -2429,6 +2429,7 @@ mod tests {
             uuid::Uuid::new_v4().hyphenated()
         ));
         std::fs::create_dir_all(root.join("CommonPictures/Адрес/Ext/Picture")).unwrap();
+        std::fs::create_dir_all(root.join("CommonPictures/Взаимодействия/Ext/Picture")).unwrap();
         std::fs::create_dir_all(root.join("CommonPictures/ТранспортHTTP/Ext/Picture")).unwrap();
         std::fs::create_dir_all(root.join("CommonPictures/ФорматPDF/Ext/Picture")).unwrap();
 
@@ -2445,6 +2446,21 @@ mod tests {
         std::fs::copy(
             lab_root.join("CommonPictures/Адрес/Ext/Picture/Picture.zip"),
             root.join("CommonPictures/Адрес/Ext/Picture/Picture.zip"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/Взаимодействия.xml"),
+            root.join("CommonPictures/Взаимодействия.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/Взаимодействия/Ext/Picture.xml"),
+            root.join("CommonPictures/Взаимодействия/Ext/Picture.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("CommonPictures/Взаимодействия/Ext/Picture/Picture.zip"),
+            root.join("CommonPictures/Взаимодействия/Ext/Picture/Picture.zip"),
         )
         .unwrap();
         std::fs::copy(
@@ -2507,6 +2523,21 @@ mod tests {
             "CommonPictures/Адрес/Ext/Picture/Picture.zip",
             SourceKind::Binary,
             Some("CommonPictures/Адрес")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/Взаимодействия.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/Взаимодействия/Ext/Picture.xml",
+            SourceKind::MetadataXml,
+            Some("CommonPictures/Взаимодействия")
+        )));
+        assert!(files.contains(&(
+            "CommonPictures/Взаимодействия/Ext/Picture/Picture.zip",
+            SourceKind::Binary,
+            Some("CommonPictures/Взаимодействия")
         )));
         assert!(files.contains(&(
             "CommonPictures/ТранспортHTTP.xml",
