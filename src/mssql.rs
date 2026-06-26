@@ -1983,10 +1983,11 @@ fn quote_string_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ColumnShape, CommonModuleStageSpec, PreparedCommonModuleObjectStage,
-        PreparedCommonModuleStage, PreparedMetadataObjectStage, StorageTableManifest, TableShape,
-        compare_shapes, compare_storage_table_manifests, infer_common_module_text_path,
-        quote_ident, quote_string, require_non_lab_confirmation,
+        ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest, DeltaBundleManifest,
+        PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataObjectStage,
+        StorageBundleManifest, StorageTableManifest, TableShape, compare_shapes,
+        compare_storage_table_manifests, infer_common_module_text_path, quote_ident, quote_string,
+        require_non_lab_confirmation, validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -2086,6 +2087,112 @@ mod tests {
 
         let error = compare_storage_table_manifests(&expected, &actual).unwrap_err();
         assert!(error.to_string().contains("row checksum mismatch"));
+    }
+
+    #[test]
+    fn validate_storage_manifest_accepts_checksum_backed_bundles() {
+        let manifest = StorageBundleManifest {
+            source_database: Some("Demo".to_string()),
+            format: "mssql-native-bcp-v1".to_string(),
+            tables: vec![
+                StorageTableManifest {
+                    table_name: "ConfigSave".to_string(),
+                    file_name: "ConfigSave.bcp".to_string(),
+                    row_count: 2,
+                    binary_bytes: 128,
+                    row_checksum: Some(42),
+                },
+                StorageTableManifest {
+                    table_name: "Params".to_string(),
+                    file_name: "Params.bcp".to_string(),
+                    row_count: 1,
+                    binary_bytes: 64,
+                    row_checksum: Some(7),
+                },
+            ],
+        };
+
+        validate_storage_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn validate_storage_manifest_rejects_missing_required_tables() {
+        let manifest = StorageBundleManifest {
+            source_database: None,
+            format: "mssql-native-bcp-v1".to_string(),
+            tables: vec![StorageTableManifest {
+                table_name: "ConfigSave".to_string(),
+                file_name: "ConfigSave.bcp".to_string(),
+                row_count: 2,
+                binary_bytes: 128,
+                row_checksum: Some(42),
+            }],
+        };
+
+        let error = validate_storage_manifest(&manifest).unwrap_err();
+        assert!(error.to_string().contains("missing required table Params"));
+    }
+
+    #[test]
+    fn validate_delta_manifest_accepts_row_digests_and_checksum() {
+        let manifest = DeltaBundleManifest {
+            source_database: Some("Demo".to_string()),
+            format: "mssql-configsave-delta-v1".to_string(),
+            table: StorageTableManifest {
+                table_name: "ConfigSave".to_string(),
+                file_name: "ConfigSave.bcp".to_string(),
+                row_count: 2,
+                binary_bytes: 128,
+                row_checksum: Some(42),
+            },
+            rows: vec![
+                ConfigSaveRowDigest {
+                    file_name: "root".to_string(),
+                    part_no: 0,
+                    data_size: 64,
+                    binary_bytes: 64,
+                    sha256: "aa".repeat(32),
+                },
+                ConfigSaveRowDigest {
+                    file_name: "version".to_string(),
+                    part_no: 0,
+                    data_size: 64,
+                    binary_bytes: 64,
+                    sha256: "bb".repeat(32),
+                },
+            ],
+        };
+
+        validate_delta_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn validate_delta_manifest_rejects_row_count_mismatches() {
+        let manifest = DeltaBundleManifest {
+            source_database: None,
+            format: "mssql-configsave-delta-v1".to_string(),
+            table: StorageTableManifest {
+                table_name: "ConfigSave".to_string(),
+                file_name: "ConfigSave.bcp".to_string(),
+                row_count: 3,
+                binary_bytes: 128,
+                row_checksum: Some(42),
+            },
+            rows: vec![ConfigSaveRowDigest {
+                file_name: "root".to_string(),
+                part_no: 0,
+                data_size: 64,
+                binary_bytes: 64,
+                sha256: "aa".repeat(32),
+            }],
+        };
+
+        let error = validate_delta_manifest(&manifest).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("delta manifest row_count 3 does not match digest rows 1")
+        );
     }
 
     #[test]
