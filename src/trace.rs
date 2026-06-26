@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,13 +71,28 @@ struct GroupAccumulator {
     rollback_transaction_count: usize,
 }
 
+#[derive(Debug, Default)]
+struct FileAnalysis {
+    events_seen: usize,
+    groups: BTreeMap<String, GroupAccumulator>,
+}
+
 pub fn analyze_trace_files(inputs: &[PathBuf]) -> Result<TraceAnalysis> {
+    let analyses = inputs
+        .par_iter()
+        .map(|input| {
+            analyze_one_file(input)
+                .with_context(|| format!("failed to analyze {}", input.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let mut events_seen = 0;
     let mut groups = BTreeMap::<String, GroupAccumulator>::new();
-
-    for input in inputs {
-        analyze_one_file(input, &mut events_seen, &mut groups)
-            .with_context(|| format!("failed to analyze {}", input.display()))?;
+    for analysis in analyses {
+        events_seen += analysis.events_seen;
+        for (normalized_sql, group) in analysis.groups {
+            groups.entry(normalized_sql).or_default().merge_from(group);
+        }
     }
 
     let mut groups = groups
@@ -134,11 +150,7 @@ pub fn write_trace_analysis(analysis: &TraceAnalysis, output: &Path) -> Result<(
     fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
 }
 
-fn analyze_one_file(
-    path: &Path,
-    events_seen: &mut usize,
-    groups: &mut BTreeMap<String, GroupAccumulator>,
-) -> Result<()> {
+fn analyze_one_file(path: &Path) -> Result<FileAnalysis> {
     let text = fs::read_to_string(path)?;
     let mut reader = Reader::from_str(&text);
     reader.config_mut().trim_text(true);
@@ -146,6 +158,8 @@ fn analyze_one_file(
     let mut current_event = None::<EventState>;
     let mut current_field = None::<String>;
     let mut in_value = false;
+    let mut events_seen = 0;
+    let mut groups = BTreeMap::<String, GroupAccumulator>::new();
 
     loop {
         match reader.read_event() {
@@ -182,8 +196,8 @@ fn analyze_one_file(
                 match name.as_str() {
                     "event" => {
                         if let Some(event) = current_event.take() {
-                            *events_seen += 1;
-                            record_event(event, groups);
+                            events_seen += 1;
+                            record_event(event, &mut groups);
                         }
                     }
                     "data" | "action" => {
@@ -201,7 +215,10 @@ fn analyze_one_file(
         }
     }
 
-    Ok(())
+    Ok(FileAnalysis {
+        events_seen,
+        groups,
+    })
 }
 
 fn record_event(event: EventState, groups: &mut BTreeMap<String, GroupAccumulator>) {
@@ -275,6 +292,34 @@ fn record_event(event: EventState, groups: &mut BTreeMap<String, GroupAccumulato
             TransactionBoundaryKind::Commit => entry.commit_transaction_count += 1,
             TransactionBoundaryKind::Rollback => entry.rollback_transaction_count += 1,
         }
+    }
+}
+
+impl GroupAccumulator {
+    fn merge_from(&mut self, other: GroupAccumulator) {
+        if self.sample_sql.is_empty() {
+            self.sample_sql = other.sample_sql;
+        }
+        self.count += other.count;
+        self.total_duration_us += other.total_duration_us;
+        self.max_duration_us = self.max_duration_us.max(other.max_duration_us);
+        self.total_row_count += other.total_row_count;
+        self.max_row_count = self.max_row_count.max(other.max_row_count);
+        self.event_names.extend(other.event_names);
+        self.session_ids.extend(other.session_ids);
+        self.database_names.extend(other.database_names);
+        self.client_hostnames.extend(other.client_hostnames);
+        self.client_app_names.extend(other.client_app_names);
+        self.usernames.extend(other.usernames);
+        self.transaction_ids.extend(other.transaction_ids);
+        self.attach_activity_ids.extend(other.attach_activity_ids);
+        self.attach_activity_id_xfers
+            .extend(other.attach_activity_id_xfers);
+        self.object_names.extend(other.object_names);
+        self.table_names.extend(other.table_names);
+        self.begin_transaction_count += other.begin_transaction_count;
+        self.commit_transaction_count += other.commit_transaction_count;
+        self.rollback_transaction_count += other.rollback_transaction_count;
     }
 }
 
@@ -454,12 +499,12 @@ fn transaction_boundary_kind(sql: &str) -> Option<TransactionBoundaryKind> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
     use std::fs;
 
     use super::{
-        GroupAccumulator, analyze_one_file, analyze_trace_files, extract_table_names,
-        normalize_sql, transaction_boundary_kind,
+        analyze_one_file, analyze_trace_files, extract_table_names, normalize_sql,
+        transaction_boundary_kind,
     };
 
     #[test]
@@ -545,9 +590,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut events_seen = 0;
-        let mut groups = BTreeMap::<String, GroupAccumulator>::new();
-        analyze_one_file(&path, &mut events_seen, &mut groups).unwrap();
+        let analysis = analyze_one_file(&path).unwrap();
+        let events_seen = analysis.events_seen;
+        let groups = analysis.groups;
 
         assert_eq!(events_seen, 3);
         assert_eq!(groups.len(), 2);
@@ -651,9 +696,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut events_seen = 0;
-        let mut groups = BTreeMap::<String, GroupAccumulator>::new();
-        analyze_one_file(&path, &mut events_seen, &mut groups).unwrap();
+        let analysis = analyze_one_file(&path).unwrap();
+        let events_seen = analysis.events_seen;
+        let groups = analysis.groups;
 
         assert_eq!(events_seen, 4);
         assert_eq!(groups.len(), 3);
