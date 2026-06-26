@@ -190,6 +190,11 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    let template_refs = if extract_metadata_xml {
+        build_template_source_reference_index(&rows)
+    } else {
+        BTreeMap::new()
+    };
 
     let mut manifests = Vec::new();
     let mut binary_bytes = 0;
@@ -268,7 +273,13 @@ fn dump_table_rows(
         };
 
         let metadata_xml_relative = if extract_metadata_xml {
-            match extract_metadata_source_xml(&bytes, &row.file_name, &type_index, &form_refs) {
+            match extract_metadata_source_xml(
+                &bytes,
+                &row.file_name,
+                &type_index,
+                &form_refs,
+                &template_refs,
+            ) {
                 Some(extracted) => {
                     let path = output_dir.join(&extracted.relative_path);
                     if let Some(parent) = path.parent() {
@@ -887,6 +898,114 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
     }
 
     index
+}
+
+fn build_template_source_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, TemplateSourceReference> {
+    let rows_by_file_name = rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut templates = Vec::<MetadataHeader>::new();
+    let mut owners = Vec::<(String, PathBuf)>::new();
+
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        let text = text.trim_start_matches('\u{feff}');
+        let Some(object_code) = parse_metadata_object_code(text) else {
+            continue;
+        };
+        if is_template_metadata_text(text, &row.file_name) {
+            if let Some(header) = parse_metadata_header_from_text(text, &row.file_name) {
+                templates.push(header);
+            }
+            continue;
+        }
+        let Some((kind, folder)) = metadata_source_for_text(object_code, text, &row.file_name)
+        else {
+            continue;
+        };
+        if !metadata_kind_can_own_templates(kind) {
+            continue;
+        }
+        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
+            continue;
+        };
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        owners.push((text.to_string(), owner_path));
+    }
+
+    let mut index = BTreeMap::new();
+    for template in templates {
+        let owner_matches = owners
+            .iter()
+            .filter(|(owner_text, _)| owner_text.contains(&template.uuid))
+            .collect::<Vec<_>>();
+        let relative_path = if let [(_, owner_path)] = owner_matches.as_slice() {
+            owner_path
+                .join("Templates")
+                .join(sanitize_source_path_segment(&template.name))
+                .with_extension("xml")
+        } else {
+            PathBuf::from("CommonTemplates")
+                .join(sanitize_source_path_segment(&template.name))
+                .with_extension("xml")
+        };
+        let kind = if relative_path.starts_with("CommonTemplates") {
+            "CommonTemplate"
+        } else {
+            "Template"
+        };
+        let body_id = format!("{}.0", template.uuid);
+        let template_type = rows_by_file_name
+            .get(body_id.as_str())
+            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .and_then(|bytes| infer_template_type_from_body(&bytes))
+            .unwrap_or("BinaryData");
+        index.insert(
+            template.uuid,
+            TemplateSourceReference {
+                relative_path,
+                kind,
+                template_type,
+            },
+        );
+    }
+
+    index
+}
+
+fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    if inflated.starts_with(b"MOXCEL") {
+        return Some("SpreadsheetDocument");
+    }
+    let Ok(text) = std::str::from_utf8(&inflated) else {
+        return Some("BinaryData");
+    };
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
+        Some("DataCompositionSchema")
+    } else if text.starts_with("<!DOCTYPE")
+        || text.starts_with("<html")
+        || text.starts_with("<?xml") && text.contains("<html")
+    {
+        Some("HTMLDocument")
+    } else {
+        Some("TextDocument")
+    }
 }
 
 fn form_help_asset_paths(
@@ -2066,6 +2185,29 @@ fn metadata_kind_can_own_forms(kind: &str) -> bool {
     )
 }
 
+fn metadata_kind_can_own_templates(kind: &str) -> bool {
+    matches!(
+        kind,
+        "AccumulationRegister"
+            | "AccountingRegister"
+            | "BusinessProcess"
+            | "CalculationRegister"
+            | "Catalog"
+            | "ChartOfAccounts"
+            | "ChartOfCalculationTypes"
+            | "ChartOfCharacteristicTypes"
+            | "DataProcessor"
+            | "Document"
+            | "DocumentJournal"
+            | "Enum"
+            | "ExchangePlan"
+            | "InformationRegister"
+            | "Report"
+            | "SettingsStorage"
+            | "Task"
+    )
+}
+
 fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
     nested_headers_from_text_inside_object_code(text, owner_uuid, 9)
 }
@@ -2192,6 +2334,12 @@ struct ExtractedMetadataSourceXml {
 struct FormSourceReference {
     relative_path: PathBuf,
     kind: &'static str,
+}
+
+struct TemplateSourceReference {
+    relative_path: PathBuf,
+    kind: &'static str,
+    template_type: &'static str,
 }
 
 struct MetadataHeader {
@@ -2422,6 +2570,7 @@ fn extract_metadata_source_xml(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
@@ -2471,6 +2620,25 @@ fn extract_metadata_source_xml(
             .map(|form_ref| form_ref.kind)
             .unwrap_or("CommonForm");
         let xml = format_form_source_xml(kind, &header).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
+    if is_template_metadata_text(text, uuid) {
+        let header = parse_metadata_header_from_text(text, uuid)?;
+        let template_ref = template_refs.get(uuid);
+        let relative_path = template_ref
+            .map(|template_ref| template_ref.relative_path.clone())
+            .unwrap_or_else(|| {
+                PathBuf::from("CommonTemplates")
+                    .join(sanitize_source_path_segment(&header.name))
+                    .with_extension("xml")
+            });
+        let kind = template_ref
+            .map(|template_ref| template_ref.kind)
+            .unwrap_or("CommonTemplate");
+        let template_type = template_ref
+            .map(|template_ref| template_ref.template_type)
+            .unwrap_or("BinaryData");
+        let xml = format_template_source_xml(kind, &header, template_type).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
@@ -2592,6 +2760,16 @@ fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> b
 
 fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
     contains_wrapped_metadata_object_code(text, 13, uuid)
+}
+
+fn is_template_metadata_text(text: &str, uuid: &str) -> bool {
+    let Some(fields) = metadata_object_fields(text) else {
+        return false;
+    };
+    parse_metadata_object_code(text) == Some(2)
+        && metadata_header_field_index(&fields, uuid) == Some(2)
+        && field_is_unsigned_integer(fields.get(1))
+        && !contains_wrapped_metadata_object_code(text, 9, uuid)
 }
 
 fn is_defined_type_metadata_text(text: &str, uuid: &str) -> bool {
@@ -3035,6 +3213,16 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
 \t</{kind}>\r\n\
 </MetaDataObject>\r\n"
     ));
+    xml
+}
+
+fn format_template_source_xml(kind: &str, header: &MetadataHeader, template_type: &str) -> String {
+    let mut xml = format_metadata_source_xml(kind, header);
+    let insert = format!(
+        "\t\t\t<TemplateType>{}</TemplateType>\r\n",
+        escape_xml_text(template_type)
+    );
+    xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
     xml
 }
 
@@ -4554,8 +4742,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
 
         assert_eq!(
@@ -4735,8 +4929,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
 
         assert_eq!(
@@ -4758,8 +4958,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
 
         assert_eq!(
@@ -5042,6 +5248,94 @@ mod tests {
         assert_eq!(
             help_row.source_asset_path.as_deref(),
             Some("Catalogs/Products/Forms/ItemForm/Ext/Help.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_template_metadata_xml_to_owner_or_common_template_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let owned_template_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let common_template_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_template_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let owned_template_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,0,\r\n{{3,\r\n{{1,0,{owned_template_uuid}}},\"Print\",{{1,\"en\",\"Print\"}},\"\"}}\r\n,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let owned_template_body = deflate_for_test(b"MOXCEL\0\x08\0\x01\0\x0c\0{}");
+        let common_template_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,0,\r\n{{3,\r\n{{1,0,{common_template_uuid}}},\"SharedText\",{{1,\"en\",\"Shared text\"}},\"\"}}\r\n,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let common_template_body = deflate_for_test(b"\xef\xbb\xbfPlain text");
+        let rows = vec![
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: owned_template_uuid.to_string(),
+                part_no: 0,
+                data_size: owned_template_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&owned_template_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{owned_template_uuid}.0"),
+                part_no: 0,
+                data_size: owned_template_body.len() as i64,
+                binary_hex: encode_hex_for_test(&owned_template_body),
+            },
+            ConfigRow {
+                file_name: common_template_uuid.to_string(),
+                part_no: 0,
+                data_size: common_template_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&common_template_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{common_template_uuid}.0"),
+                part_no: 0,
+                data_size: common_template_body.len() as i64,
+                binary_hex: encode_hex_for_test(&common_template_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 3);
+        let owned_xml =
+            fs::read_to_string(root.join("Catalogs/Products/Templates/Print.xml")).unwrap();
+        let common_xml = fs::read_to_string(root.join("CommonTemplates/SharedText.xml")).unwrap();
+        assert!(owned_xml.contains("<Template uuid=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
+        assert!(owned_xml.contains("<TemplateType>SpreadsheetDocument</TemplateType>"));
+        assert!(
+            common_xml.contains("<CommonTemplate uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">")
+        );
+        assert!(common_xml.contains("<TemplateType>TextDocument</TemplateType>"));
+        let template_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == owned_template_uuid)
+            .unwrap();
+        assert_eq!(
+            template_row.metadata_xml_path.as_deref(),
+            Some("Catalogs/Products/Templates/Print.xml")
         );
 
         let _ = fs::remove_dir_all(root);
@@ -5391,15 +5685,22 @@ mod tests {
         );
 
         assert_eq!(
-            extract_metadata_source_xml(&enum_blob, enum_uuid, &BTreeMap::new(), &BTreeMap::new())
-                .unwrap()
-                .relative_path,
+            extract_metadata_source_xml(
+                &enum_blob,
+                enum_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .relative_path,
             PathBuf::from("Enums").join("Status.xml")
         );
         assert_eq!(
             extract_metadata_source_xml(
                 &report_blob,
                 report_uuid,
+                &BTreeMap::new(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
             )
@@ -5413,6 +5714,7 @@ mod tests {
                 subsystem_uuid,
                 &BTreeMap::new(),
                 &BTreeMap::new(),
+                &BTreeMap::new(),
             )
             .unwrap()
             .relative_path,
@@ -5424,15 +5726,22 @@ mod tests {
                 accounting_uuid,
                 &BTreeMap::new(),
                 &BTreeMap::new(),
+                &BTreeMap::new(),
             )
             .unwrap()
             .relative_path,
             PathBuf::from("AccountingRegisters").join("Ledger.xml")
         );
         assert_eq!(
-            extract_metadata_source_xml(&task_blob, task_uuid, &BTreeMap::new(), &BTreeMap::new())
-                .unwrap()
-                .relative_path,
+            extract_metadata_source_xml(
+                &task_blob,
+                task_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .relative_path,
             PathBuf::from("Tasks").join("Task.xml")
         );
     }
@@ -5486,8 +5795,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_common_module_xml_properties(&extracted.xml).unwrap();
 
         assert_eq!(
@@ -5521,8 +5836,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
 
@@ -5554,8 +5875,14 @@ mod tests {
             "cfg:CatalogRef.Users".to_string(),
         )]);
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &type_index, &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
         let xml = String::from_utf8_lossy(&extracted.xml);
@@ -5580,8 +5907,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
         let xml = String::from_utf8_lossy(&extracted.xml);
@@ -5609,8 +5942,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
 
@@ -5635,8 +5974,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
 
@@ -5720,9 +6065,14 @@ mod tests {
                 PathBuf::from("ScheduledJobs").join("LoadRates.xml"),
             ),
         ] {
-            let extracted =
-                extract_metadata_source_xml(blob, uuid, &BTreeMap::new(), &BTreeMap::new())
-                    .unwrap();
+            let extracted = extract_metadata_source_xml(
+                blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap();
             let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
             let repacked = pack_simple_metadata_blob_from_xml(blob, &extracted.xml).unwrap();
 
@@ -5743,8 +6093,14 @@ mod tests {
             .as_bytes(),
         );
 
-        let extracted =
-            extract_metadata_source_xml(&blob, uuid, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
         let xml = String::from_utf8_lossy(&extracted.xml);
