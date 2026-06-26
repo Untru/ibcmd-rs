@@ -90,6 +90,7 @@ pub struct StorageMappingEntry {
     pub kind: StorageMutationKind,
     pub role: StorageStageRole,
     pub family: StorageOperationFamily,
+    pub signals: Vec<String>,
     pub detail: String,
 }
 
@@ -106,6 +107,7 @@ pub fn build_storage_mapping(analysis: &TraceAnalysis) -> StorageMappingReport {
             kind: classify_group(group),
             role: classify_role(group),
             family: classify_family(group),
+            signals: classify_signals(group),
             detail: classify_detail(group),
         })
         .collect::<Vec<_>>();
@@ -397,6 +399,49 @@ fn classify_family(group: &crate::trace::QueryGroup) -> StorageOperationFamily {
     StorageOperationFamily::Other
 }
 
+fn classify_signals(group: &crate::trace::QueryGroup) -> Vec<String> {
+    let sql = group.normalized_sql.as_str();
+    let sample_lower = group.sample_sql.to_ascii_lowercase();
+    let mut signals = Vec::new();
+
+    if sql == "begin transaction" || sql == "commit transaction" || sql == "rollback transaction" {
+        signals.push("transaction boundary".to_string());
+    }
+    if sql.starts_with("select count_big(*) from configsave") {
+        signals.push("counts ConfigSave rows".to_string());
+    }
+    if sample_lower.contains("n'root'") && sample_lower.contains("n'version'") {
+        signals.push("copies root/version rows".to_string());
+    }
+    if sample_lower.contains("n'versions'") {
+        signals.push("touches versions row".to_string());
+    }
+    if sample_lower.contains("n'module'") || sample_lower.contains("file_name = n'module'") {
+        signals.push("module body row".to_string());
+    }
+    if sample_lower.contains("n'metadata'") || sample_lower.contains("file_name = n'metadata'") {
+        signals.push("metadata row".to_string());
+    }
+    if sample_lower.contains("n'newobject'") {
+        signals.push("new object row".to_string());
+    }
+    if sql.starts_with("merge into configsave") {
+        signals.push("merge-based staging".to_string());
+    }
+    if sql.starts_with("insert into params")
+        || sql.starts_with("update params")
+        || sql.starts_with("delete from params")
+    {
+        signals.push("Params table mutation".to_string());
+    }
+
+    if signals.is_empty() {
+        signals.push("unclassified".to_string());
+    }
+
+    signals
+}
+
 fn primary_table_detail(group: &crate::trace::QueryGroup, fallback: &str) -> String {
     if let Some(table) = group.table_names.first() {
         format!("{} {}", fallback, table)
@@ -602,6 +647,24 @@ mod tests {
                 .iter()
                 .any(|entry| entry.family == StorageOperationFamily::ConfigVersion)
         );
+        assert!(report.entries.iter().any(|entry| {
+            entry
+                .signals
+                .iter()
+                .any(|signal| signal == "merge-based staging")
+        }));
+        assert!(report.entries.iter().any(|entry| {
+            entry
+                .signals
+                .iter()
+                .any(|signal| signal == "touches versions row")
+        }));
+        assert!(report.entries.iter().any(|entry| {
+            entry
+                .signals
+                .iter()
+                .any(|signal| signal == "Params table mutation")
+        }));
         assert!(
             report
                 .summaries
@@ -678,5 +741,6 @@ mod tests {
         assert_eq!(report.entries[0].kind, StorageMutationKind::Other);
         assert_eq!(report.entries[0].role, StorageStageRole::Other);
         assert_eq!(report.entries[0].family, StorageOperationFamily::Other);
+        assert_eq!(report.entries[0].signals, vec!["unclassified".to_string()]);
     }
 }
