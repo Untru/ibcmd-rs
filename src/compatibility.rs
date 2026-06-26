@@ -99,7 +99,7 @@ pub fn current_compatibility_report() -> CompatibilityReport {
             OperationSupport {
                 name: "mssql-stage-*",
                 status: SupportStatus::Partial,
-                detail: "Common-module and simple metadata staging are implemented; broader family coverage remains under research.",
+                detail: "Common-module, metadata-object, and simple metadata staging are implemented; broader family coverage remains under research.",
             },
             OperationSupport {
                 name: "ibcmd comparison matrix",
@@ -253,6 +253,7 @@ mod tests {
 
         assert!(report.supported_source_families.contains(&"Tasks"));
         assert!(report.supported_source_families.contains(&"CommonCommands"));
+        assert!(report.supported_source_families.contains(&"CommonAttributes"));
         assert!(
             report
                 .supported_source_families
@@ -263,6 +264,11 @@ mod tests {
             report
                 .supported_metadata_families
                 .contains(&"CommonCommand")
+        );
+        assert!(
+            report
+                .supported_metadata_families
+                .contains(&"CommonAttribute")
         );
         assert!(
             report
@@ -284,6 +290,7 @@ mod tests {
                 .supported_metadata_families
                 .contains(&"BusinessProcess")
         );
+        assert!(report.supported_metadata_families.contains(&"SettingsStorage"));
         assert_eq!(
             report
                 .supported_metadata_families
