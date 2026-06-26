@@ -3604,6 +3604,57 @@ mod tests {
     }
 
     #[test]
+    fn scans_real_event_subscription_layouts() {
+        let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("lab")
+            .join("ssl_3_1_11_461")
+            .join("src")
+            .join("ssl");
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-event-subscriptions-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("EventSubscriptions")).unwrap();
+
+        std::fs::copy(
+            lab_root.join("EventSubscriptions/ЗаписатьВерсиюОбъекта.xml"),
+            root.join("EventSubscriptions/ЗаписатьВерсиюОбъекта.xml"),
+        )
+        .unwrap();
+        std::fs::copy(
+            lab_root.join("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml"),
+            root.join("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml"),
+        )
+        .unwrap();
+
+        let manifest = scan_sources(&root).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let files = manifest
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.kind.clone(),
+                    file.object_hint.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(files.contains(&(
+            "EventSubscriptions/ЗаписатьВерсиюОбъекта.xml",
+            SourceKind::MetadataXml,
+            Some("EventSubscriptions/ЗаписатьВерсиюОбъекта")
+        )));
+        assert!(files.contains(&(
+            "EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных.xml",
+            SourceKind::MetadataXml,
+            Some("EventSubscriptions/ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных")
+        )));
+    }
+
+    #[test]
     fn scans_real_filter_criteria_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
