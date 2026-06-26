@@ -2242,7 +2242,7 @@ fn load_table_shapes(sqlcmd: &Path, server: &str, database: &str) -> Result<Vec<
         db = quote_ident(database)
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout)?;
+    let json = extract_json_array(&stdout, &format!("load_table_shapes({database})"))?;
     serde_json::from_str(&json)
         .with_context(|| format!("failed to parse table JSON for {database}"))
 }
@@ -2253,7 +2253,7 @@ fn load_database_files(sqlcmd: &Path, server: &str, database: &str) -> Result<Ve
         db = quote_ident(database)
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout)?;
+    let json = extract_json_array(&stdout, &format!("load_database_files({database})"))?;
     serde_json::from_str(&json).with_context(|| format!("failed to parse file JSON for {database}"))
 }
 
@@ -2270,7 +2270,7 @@ fn storage_table_stats(
         table_ident = quote_ident(table),
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout)?;
+    let json = extract_json_array(&stdout, &format!("storage_table_stats({table})"))?;
     let mut values: Vec<StorageTableManifest> = serde_json::from_str(&json)
         .with_context(|| format!("failed to parse storage stats JSON for {table}"))?;
     let mut value = values
@@ -2298,7 +2298,7 @@ fn configsave_row_digests(
         db = quote_ident(database),
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout)?;
+    let json = extract_json_array(&stdout, &format!("configsave_row_digests({database})"))?;
     serde_json::from_str(&json)
         .with_context(|| format!("failed to parse ConfigSave digests JSON for {database}"))
 }
@@ -2321,7 +2321,7 @@ fn fetch_config_blob(
         file_name = quote_string(file_name),
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(&stdout)?;
+    let json = extract_json_array(&stdout, &format!("fetch_config_blob({file_name})"))?;
     let mut rows: Vec<BinaryBlobRow> = serde_json::from_str(&json)
         .with_context(|| format!("failed to parse Config blob JSON for {file_name}"))?;
     let row = rows
@@ -2484,17 +2484,32 @@ fn first_i32(stdout: &str) -> Option<i32> {
         .find_map(|line| line.parse::<i32>().ok())
 }
 
-fn extract_json_array(stdout: &str) -> Result<String> {
+fn extract_json_array(stdout: &str, context: &str) -> Result<String> {
     let start = stdout
         .find('[')
-        .ok_or_else(|| anyhow!("sqlcmd output does not contain JSON array"))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "{context}: sqlcmd output does not contain JSON array: {}",
+                summarize_text(stdout)
+            )
+        })?;
     let end = stdout
         .rfind(']')
-        .ok_or_else(|| anyhow!("sqlcmd output does not contain JSON array end"))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "{context}: sqlcmd output does not contain JSON array end: {}",
+                summarize_text(stdout)
+            )
+        })?;
     Ok(stdout[start..=end]
         .chars()
         .filter(|ch| !ch.is_control())
         .collect())
+}
+
+fn summarize_text(text: &str) -> String {
+    let summary: String = text.chars().take(400).collect();
+    summary.replace('\r', "\\r").replace('\n', "\\n")
 }
 
 fn write_storage_manifest(output_dir: &Path, manifest: &StorageBundleManifest) -> Result<()> {
