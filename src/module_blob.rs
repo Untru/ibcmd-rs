@@ -2648,6 +2648,9 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
             Some("Catalogs")
         }
         "CatalogTabularSection" | "CatalogTabularSectionRow" => Some("Catalogs"),
+        "CommandGroup" => Some("CommandGroups"),
+        "CommonCommand" => Some("CommonCommands"),
+        "CommonPicture" => Some("CommonPictures"),
         "CommonForm" => Some("CommonForms"),
         "ChartOfCharacteristicTypesObject"
         | "ChartOfCharacteristicTypesRef"
@@ -4380,6 +4383,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             Some("Catalogs")
         );
         assert_eq!(
+            super::metadata_type_source_folder("CommonCommand.АвтономнаяРабота"),
+            Some("CommonCommands")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("CommonPicture.Бот"),
+            Some("CommonPictures")
+        );
+        assert_eq!(
             super::metadata_type_source_folder("CommonForm.АвтономнаяРабота"),
             Some("CommonForms")
         );
@@ -4406,6 +4417,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(
             super::metadata_type_source_folder("ConstantValueKey.SomeConstant"),
             Some("Constants")
+        );
+        assert_eq!(
+            super::metadata_type_source_folder("CommandGroup.Органайзер"),
+            Some("CommandGroups")
         );
         assert_eq!(
             super::metadata_type_source_folder("CommonTemplate.СтруктураПодчиненности"),
