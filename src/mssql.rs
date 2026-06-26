@@ -12,9 +12,10 @@ use crate::cli::{
     MssqlStageBusinessProcessObjectArgs, MssqlStageCommonModuleArgs,
     MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
     MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
-    MssqlStageDataProcessorObjectArgs, MssqlStageDocumentJournalObjectArgs,
-    MssqlStageExchangePlanObjectArgs, MssqlStageMetadataObjectsArgs,
-    MssqlStageReportObjectArgs, MssqlStorageExportArgs, MssqlStorageImportArgs,
+    MssqlStageCatalogObjectArgs, MssqlStageDataProcessorObjectArgs,
+    MssqlStageDocumentJournalObjectArgs, MssqlStageExchangePlanObjectArgs,
+    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStorageExportArgs,
+    MssqlStorageImportArgs,
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
@@ -931,6 +932,20 @@ pub fn stage_report_object(args: &MssqlStageReportObjectArgs) -> Result<StageMet
 pub fn stage_data_processor_object(
     args: &MssqlStageDataProcessorObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
+    let metadata_args = MssqlStageMetadataObjectsArgs {
+        server: args.server.clone(),
+        database: args.database.clone(),
+        xmls: vec![args.xml.clone()],
+        source_root: args.source_root.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        script_output: args.script_output.clone(),
+    };
+    stage_metadata_objects(&metadata_args)
+}
+
+pub fn stage_catalog_object(args: &MssqlStageCatalogObjectArgs) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
         database: args.database.clone(),
