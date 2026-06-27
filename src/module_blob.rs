@@ -138,6 +138,25 @@ struct FormXmlDynamicListSettings {
     dynamic_data_read: Option<bool>,
     query_text: Option<String>,
     main_table: Option<String>,
+    list_settings: FormXmlListSettings,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettings {
+    order: Option<FormXmlListSettingsOrder>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsOrder {
+    items: Vec<FormXmlListSettingsOrderItem>,
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsOrderItem {
+    field: Option<String>,
+    order_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -3310,6 +3329,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_parameter = None::<FormXmlParameter>;
+    let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
     let mut current_child_title_lang = None::<String>;
@@ -3333,6 +3353,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DynamicDataRead"
                         | "QueryText"
                         | "MainTable"
+                        | "field"
+                        | "orderType"
+                        | "viewMode"
+                        | "userSettingID"
                         | "Command"
                         | "CommandGroup"
                         | "Index"
@@ -3377,6 +3401,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if let Some(attribute) = current_attribute.as_mut() {
                         attribute.settings = Some(FormXmlDynamicListSettings::default());
                     }
+                } else if local == "item"
+                    && path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                        ],
+                    )
+                {
+                    current_list_settings_order_item =
+                        Some(FormXmlListSettingsOrderItem::default());
                 } else if local == "Item"
                     && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
                 {
@@ -3450,6 +3489,56 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "field",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "orderType",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "userSettingID",
+                        ],
                     )
                     || path_ends_with(
                         &path,
@@ -3611,6 +3700,56 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "field",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "orderType",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "userSettingID",
+                        ],
                     )
                     || path_ends_with(
                         &path,
@@ -4040,6 +4179,122 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             settings.main_table = Some(text_value.trim().to_string());
                         }
                     }
+                    "field"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                                "field",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.as_mut() {
+                            item.field = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "orderType"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                                "orderType",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.as_mut() {
+                            item.order_type = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.take()
+                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .items
+                                .push(item);
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
                     "Attribute" if path_ends_with(&path, &["Form", "Attributes", "Attribute"]) => {
                         if let Some(attribute) = current_attribute.take() {
                             properties.attributes.push(attribute);
@@ -4219,6 +4474,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DynamicDataRead"
                         | "QueryText"
                         | "MainTable"
+                        | "field"
+                        | "orderType"
+                        | "viewMode"
+                        | "userSettingID"
                         | "Command"
                         | "CommandGroup"
                         | "Index"
@@ -5277,6 +5536,13 @@ fn patch_form_dynamic_list_settings(
             &format_form_setting_metadata_ref(source, main_table)?,
         )?;
     }
+    if let Some(order) = &settings.list_settings.order {
+        let _ = patch_form_setting_value(
+            text,
+            "Order",
+            &format_form_setting_dcs_order(order, text, "Order")?,
+        )?;
+    }
     Ok(())
 }
 
@@ -5308,6 +5574,103 @@ fn format_form_setting_metadata_ref(
 ) -> Result<String> {
     let uuid = source.resolve_metadata_reference_uuid(reference)?;
     Ok(format!("{{\"#\",{uuid}}}"))
+}
+
+fn format_form_setting_dcs_order(
+    order: &FormXmlListSettingsOrder,
+    settings_text: &str,
+    key: &str,
+) -> Result<String> {
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
+        .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
+    let xml = format_form_dcs_order_xml(order);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    ))
+}
+
+fn find_form_setting_ref_uuid(text: &str, key: &str) -> Option<String> {
+    let fields = scan_braced_fields(text, 0).ok()?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key != key {
+            continue;
+        }
+        let value_fields = scan_braced_fields(text, window[1].start).ok()?;
+        if value_fields.first().map(|range| text[range.clone()].trim()) != Some(r##""#""##) {
+            return None;
+        }
+        return value_fields
+            .iter()
+            .skip(1)
+            .find_map(|range| parse_non_zero_uuid(text[range.clone()].trim()));
+    }
+    None
+}
+
+fn parse_non_zero_uuid(value: &str) -> Option<String> {
+    let uuid = Uuid::parse_str(value.trim()).ok()?;
+    (uuid != Uuid::nil()).then(|| uuid.hyphenated().to_string())
+}
+
+fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
+    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+        .to_string();
+    for item in &order.items {
+        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
+            continue;
+        };
+        xml.push_str("\t<item xsi:type=\"OrderItemField\">\r\n");
+        xml.push_str(&format!(
+            "\t\t<field>{}</field>\r\n",
+            escape_xml_text(field)
+        ));
+        if let Some(order_type) = item.order_type.as_deref().filter(|value| !value.is_empty()) {
+            xml.push_str(&format!(
+                "\t\t<orderType>{}</orderType>\r\n",
+                escape_xml_text(order_type)
+            ));
+        }
+        xml.push_str("\t</item>\r\n");
+    }
+    if let Some(view_mode) = order.view_mode.as_deref().filter(|value| !value.is_empty()) {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = order
+        .user_setting_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str("</Order>");
+    xml
+}
+
+fn escape_xml_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            _ => output.push(ch),
+        }
+    }
+    output
 }
 
 fn patch_form_body_command(
@@ -12311,10 +12674,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )?;
         let source = super::MetadataSourceContext::new(root.clone());
         let base = super::deflate_raw(
-            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,4,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0}},{0,0}}},{0,0},{0,0},{0}}"##,
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,5,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}}},{0,0}}},{0,0},{0,0},{0}}"##,
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="Список" id="1">
 			<Type>
@@ -12326,6 +12689,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<DynamicDataRead>true</DynamicDataRead>
 				<QueryText>ВЫБРАТЬ Ссылка ИЗ Справочник.Товары</QueryText>
 				<MainTable>Catalog.Products</MainTable>
+				<ListSettings>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Код</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
+					</dcsset:order>
+				</ListSettings>
 			</Settings>
 		</Attribute>
 	</Attributes>
@@ -12340,7 +12713,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[0].contains(r#""Список""#));
-        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,4,"#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,5,"#));
         assert!(
             parsed.trailing[0]
                 .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
@@ -12349,6 +12722,13 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
         assert!(parsed.trailing[0].contains("\"MainTable\",{\"#\","));
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        assert!(parsed.trailing[0].contains(
+            "77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0JrQvtC0PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4="
+        ));
         assert!(!parsed.trailing[0].contains("88888888-8888-4888-8888-888888888888"));
         assert!(!parsed.trailing[0].contains("OldList"));
         assert!(!parsed.trailing[0].contains("Old query"));
