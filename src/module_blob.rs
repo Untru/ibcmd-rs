@@ -142,6 +142,7 @@ struct FormXmlChildItem {
     id: String,
     name: String,
     title: Vec<LocalizedString>,
+    events: Vec<FormXmlEvent>,
     command_name: Option<String>,
     data_path: Option<String>,
 }
@@ -3291,6 +3292,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
     let mut current_child_title_lang = None::<String>;
     let mut current_child_title_content = None::<String>;
+    let mut current_child_event_name = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -3362,6 +3364,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     current_child_title_lang = None;
                     current_child_title_content = None;
+                } else if local == "Event"
+                    && path_ends_with_for_child_events(&path, &current_child_items)
+                {
+                    current_child_event_name = xml_attribute_value(&event, "name")?;
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -3483,6 +3489,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                 {
@@ -3591,6 +3598,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                 {
@@ -3910,6 +3918,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.title.push(LocalizedString { lang, content });
                         }
                     }
+                    "Event" if path_ends_with_for_child_event(&path, &current_child_items) => {
+                        if let (Some(item), Some(name)) = (
+                            current_child_items.last_mut(),
+                            current_child_event_name.take(),
+                        ) {
+                            let handler = text_value.trim();
+                            if !handler.is_empty() {
+                                item.events.push(FormXmlEvent {
+                                    name,
+                                    handler: handler.to_string(),
+                                });
+                            }
+                        }
+                    }
                     "CommandName"
                         if path_ends_with_for_child_command_name(&path, &current_child_items) =>
                     {
@@ -4034,6 +4056,7 @@ fn parse_form_child_item_xml(
         id,
         name,
         title: Vec::new(),
+        events: Vec::new(),
         command_name: None,
         data_path: None,
     }))
@@ -4128,6 +4151,20 @@ fn path_ends_with_for_child_title(path: &[String], items: &[FormXmlChildItem]) -
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Title"])
+}
+
+fn path_ends_with_for_child_events(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Events"])
+}
+
+fn path_ends_with_for_child_event(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Events", "Event"])
 }
 
 fn path_ends_with_for_child_title_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -4401,6 +4438,7 @@ fn patch_form_layout_child_item_entry(
     for (range, replacement) in replacements.into_iter().rev() {
         text.replace_range(range, &replacement);
     }
+    patch_form_layout_events(text, &item.events)?;
     Ok(())
 }
 
@@ -4659,6 +4697,7 @@ fn form_event_layout_identifiers(name: &str) -> Vec<&str> {
         "ChoiceProcessing" => identifiers.push("1d632984-de3c-4b4b-ad9f-d69682a10182"),
         "NotificationProcessing" => identifiers.push("3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
         "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
+        "OnGetDataAtServer" => {}
         _ => {}
     }
     identifiers
@@ -12074,7 +12113,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0}}}},"Old module",{0}}"##
+            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0}},"OnGetDataAtServer","OldGetData"}},"Old module",{0}}"##
                 .as_bytes(),
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -12105,6 +12144,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				</Button>
 			</ChildItems>
 		</CommandBar>
+		<Table name="Rows" id="25">
+			<Events>
+				<Event name="OnGetDataAtServer">NewGetData</Event>
+			</Events>
+		</Table>
 	</ChildItems>
 </Form>
 "#
@@ -12128,6 +12172,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
         );
         assert!(parsed.layout.contains("{2,{25},{40}}"));
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnGetDataAtServer","NewGetData""#)
+        );
+        assert!(!parsed.layout.contains("OldGetData"));
         assert!(!parsed.layout.contains("OldBar"));
         assert!(!parsed.layout.contains("Old bar"));
         assert!(!parsed.layout.contains("OldButton"));

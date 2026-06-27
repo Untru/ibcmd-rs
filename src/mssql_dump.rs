@@ -3890,6 +3890,7 @@ struct FormChildItem {
     group: Option<&'static str>,
     item_type: Option<&'static str>,
     title: Vec<(String, String)>,
+    events: Vec<FormBodyEvent>,
     data_path: Option<String>,
     command_name: Option<String>,
     child_items: Vec<FormChildItem>,
@@ -4515,6 +4516,7 @@ fn parse_form_child_item(
         group: (tag == "UsualGroup").then_some("Vertical"),
         item_type: (tag == "Button").then_some("CommandBarButton"),
         title: parse_form_child_item_title(wrapper, &fields),
+        events: parse_form_child_item_event_fields(&fields),
         data_path,
         command_name: if tag == "Button" {
             fields
@@ -4584,6 +4586,43 @@ fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, S
             (!values.is_empty()).then_some(values)
         })
         .unwrap_or_default()
+}
+
+fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
+    let mut events = Vec::new();
+    for window in fields.windows(2) {
+        if let Some(event) = parse_form_child_item_event_pair(window[0], window[1]) {
+            events.push(event);
+        }
+    }
+    events
+}
+
+fn parse_form_child_item_event_pair(
+    event_field: &str,
+    handler_field: &str,
+) -> Option<FormBodyEvent> {
+    let event = parse_form_child_item_event_identifier(event_field)?;
+    let (handler, _) = parse_1c_quoted_string_with_len(handler_field.trim())?;
+    let handler = handler.trim();
+    if handler.is_empty() || !is_probable_form_event_handler(handler) {
+        return None;
+    }
+    Some(FormBodyEvent {
+        name: event,
+        handler: handler.to_string(),
+    })
+}
+
+fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
+    let field = field.trim();
+    let identifier = parse_1c_quoted_string_with_len(field)
+        .map(|(value, _)| value)
+        .unwrap_or_else(|| field.to_string());
+    match identifier.trim() {
+        "OnGetDataAtServer" => Some("OnGetDataAtServer".to_string()),
+        _ => parse_form_event_identifier(identifier.trim()),
+    }
 }
 
 fn parse_form_child_item_data_path(
@@ -5002,6 +5041,17 @@ fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
         &item.title,
         indent + 1,
     ));
+    if !item.events.is_empty() {
+        xml.push_str(&format!("{tab}\t<Events>\r\n"));
+        for event in &item.events {
+            xml.push_str(&format!(
+                "{tab}\t\t<Event name=\"{}\">{}</Event>\r\n",
+                escape_xml_text(&event.name),
+                escape_xml_text(&event.handler)
+            ));
+        }
+        xml.push_str(&format!("{tab}\t</Events>\r\n"));
+    }
     xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
@@ -11292,7 +11342,7 @@ mod tests {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let external_command_uuid = "11111111-1111-4111-8111-111111111111";
         let layout = format!(
-            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}}}}}}"#
+            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}},"OnGetDataAtServer","RowsGetData"}}}}"#
         );
         let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
         let attributes = vec![FormAttribute {
@@ -11319,6 +11369,11 @@ mod tests {
         assert!(xml.contains("<DataPath>Список</DataPath>"));
         assert!(xml.contains(r#"<InputField name="Наименование" id="40">"#));
         assert!(xml.contains("<DataPath>Список.Наименование</DataPath>"));
+        assert_eq!(
+            xml.matches(r#"<Event name="OnGetDataAtServer">RowsGetData</Event>"#)
+                .count(),
+            1
+        );
     }
 
     #[test]
