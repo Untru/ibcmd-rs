@@ -943,7 +943,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
         "{0}".to_string(),
         "{0}".to_string(),
     ];
-    for row in spreadsheet.rows {
+    for row in &spreadsheet.rows {
         for row_index in row.expanded_indexes() {
             fields.push(row_index.to_string());
             fields.push(row_format_index_for_moxel(row.format_index).to_string());
@@ -954,6 +954,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
             }
         }
     }
+    fields.extend(format_spreadsheet_column_sets_for_moxel(&spreadsheet));
     if !spreadsheet.merges.is_empty() {
         fields.push(format_spreadsheet_merges_for_moxel(&spreadsheet.merges));
     }
@@ -980,6 +981,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
 #[derive(Debug, Default)]
 struct SpreadsheetDocumentXml {
     column_count: usize,
+    column_sets: Vec<SpreadsheetDocumentXmlColumnSet>,
     rows: Vec<SpreadsheetDocumentXmlRow>,
     merges: Vec<SpreadsheetDocumentXmlMerge>,
     areas: Vec<SpreadsheetDocumentXmlArea>,
@@ -987,10 +989,24 @@ struct SpreadsheetDocumentXml {
 }
 
 #[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlColumnSet {
+    id: Option<String>,
+    size: usize,
+    columns: Vec<SpreadsheetDocumentXmlColumn>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlColumn {
+    index: usize,
+    format_index: usize,
+}
+
+#[derive(Debug, Default)]
 struct SpreadsheetDocumentXmlRow {
     index: usize,
     index_to: Option<usize>,
     format_index: usize,
+    columns_id: Option<String>,
     empty: bool,
     cells: Vec<SpreadsheetDocumentXmlCell>,
 }
@@ -1037,6 +1053,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut document = SpreadsheetDocumentXml::default();
+    let mut current_column_set = None::<SpreadsheetDocumentXmlColumnSet>;
+    let mut current_column = None::<SpreadsheetDocumentXmlColumn>;
     let mut current_row = None::<SpreadsheetDocumentXmlRow>;
     let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
     let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
@@ -1049,7 +1067,11 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if local == "rowsItem" {
+                if local == "columns" {
+                    current_column_set = Some(SpreadsheetDocumentXmlColumnSet::default());
+                } else if current_column_set.is_some() && local == "columnsItem" {
+                    current_column = Some(SpreadsheetDocumentXmlColumn::default());
+                } else if local == "rowsItem" {
                     current_row = Some(SpreadsheetDocumentXmlRow::default());
                     next_column_index = 0;
                 } else if local == "merge" {
@@ -1126,6 +1148,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     &local,
                     &text,
                     &mut document,
+                    current_column_set.as_mut(),
+                    current_column.as_mut(),
                     current_row.as_mut(),
                     current_cell.as_mut(),
                     current_merge.as_mut(),
@@ -1151,6 +1175,16 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                         row.cells.sort_by_key(|cell| cell.column_index);
                     }
                     document.rows.push(row);
+                } else if local == "columnsItem"
+                    && let Some(column) = current_column.take()
+                    && let Some(column_set) = current_column_set.as_mut()
+                {
+                    column_set.columns.push(column);
+                } else if local == "columns"
+                    && let Some(column_set) = current_column_set.take()
+                {
+                    document.column_count = document.column_count.max(column_set.size);
+                    document.column_sets.push(column_set);
                 } else if local == "merge"
                     && let Some(merge) = current_merge.take()
                 {
@@ -1186,6 +1220,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
     matches!(
         local,
         "size"
+            | "id"
             | "index"
             | "indexTo"
             | "formatIndex"
@@ -1214,6 +1249,8 @@ fn apply_spreadsheet_text_value(
     local: &str,
     text: &str,
     document: &mut SpreadsheetDocumentXml,
+    column_set: Option<&mut SpreadsheetDocumentXmlColumnSet>,
+    column: Option<&mut SpreadsheetDocumentXmlColumn>,
     row: Option<&mut SpreadsheetDocumentXmlRow>,
     cell: Option<&mut SpreadsheetDocumentXmlCell>,
     merge: Option<&mut SpreadsheetDocumentXmlMerge>,
@@ -1223,7 +1260,24 @@ fn apply_spreadsheet_text_value(
     match local {
         "size" if path_ends_with(path, &["columns", "size"]) => {
             if let Ok(size) = value.parse::<usize>() {
+                if let Some(column_set) = column_set {
+                    column_set.size = size;
+                }
                 document.column_count = document.column_count.max(size);
+            }
+        }
+        "id" if path_ends_with(path, &["columns", "id"]) => {
+            if let Some(column_set) = column_set
+                && !value.is_empty()
+            {
+                column_set.id = Some(text.to_string());
+            }
+        }
+        "index" if path_ends_with(path, &["columns", "columnsItem", "index"]) => {
+            if let Some(column) = column
+                && let Ok(index) = value.parse::<usize>()
+            {
+                column.index = index;
             }
         }
         "index" if path_ends_with(path, &["rowsItem", "index"]) => {
@@ -1245,6 +1299,22 @@ fn apply_spreadsheet_text_value(
                 && let Ok(format_index) = value.parse::<usize>()
             {
                 row.format_index = format_index;
+            }
+        }
+        "formatIndex"
+            if path_ends_with(path, &["columns", "columnsItem", "column", "formatIndex"]) =>
+        {
+            if let Some(column) = column
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                column.format_index = format_index;
+            }
+        }
+        "columnsID" if path_ends_with(path, &["rowsItem", "row", "columnsID"]) => {
+            if let Some(row) = row
+                && !value.is_empty()
+            {
+                row.columns_id = Some(text.to_string());
             }
         }
         "empty" if path_ends_with(path, &["rowsItem", "row", "empty"]) => {
@@ -1409,6 +1479,135 @@ fn format_spreadsheet_cell_for_moxel(cell: &SpreadsheetDocumentXmlCell) -> Strin
         );
     }
     format!("{{16,{format_index},{localized},0}}")
+}
+
+fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml) -> Vec<String> {
+    let has_column_metadata = spreadsheet
+        .column_sets
+        .iter()
+        .any(|column_set| column_set.id.is_some() || !column_set.columns.is_empty());
+    let has_row_columns_id = spreadsheet.rows.iter().any(|row| row.columns_id.is_some());
+    if !has_column_metadata && !has_row_columns_id {
+        return Vec::new();
+    }
+
+    let column_count = spreadsheet
+        .column_count
+        .max(
+            spreadsheet
+                .column_sets
+                .iter()
+                .flat_map(|column_set| column_set.columns.iter().map(|column| column.index + 1))
+                .max()
+                .unwrap_or(1),
+        )
+        .max(1);
+    let default_set = spreadsheet
+        .column_sets
+        .iter()
+        .find(|column_set| column_set.id.is_none());
+    let mut fields = vec![format_spreadsheet_column_set_for_moxel(
+        default_set,
+        column_count,
+        None,
+    )];
+
+    let additional_sets = spreadsheet
+        .column_sets
+        .iter()
+        .filter(|column_set| column_set.id.is_some())
+        .collect::<Vec<_>>();
+    let height = spreadsheet
+        .rows
+        .iter()
+        .map(|row| *row.expanded_indexes().end())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    fields.push(height.to_string());
+    fields.push(additional_sets.len().to_string());
+    for column_set in &additional_sets {
+        fields.push(format_spreadsheet_column_set_for_moxel(
+            Some(column_set),
+            column_count,
+            column_set.id.as_deref(),
+        ));
+    }
+
+    let mut row_pairs = Vec::<(usize, usize)>::new();
+    for row in &spreadsheet.rows {
+        let Some(columns_id) = row.columns_id.as_deref() else {
+            continue;
+        };
+        let Some(set_index) = additional_sets
+            .iter()
+            .position(|column_set| column_set.id.as_deref() == Some(columns_id))
+        else {
+            continue;
+        };
+        for row_index in row.expanded_indexes() {
+            row_pairs.push((row_index, set_index));
+        }
+    }
+    fields.push(row_pairs.len().to_string());
+    for (row_index, set_index) in row_pairs {
+        fields.push(row_index.to_string());
+        fields.push(set_index.to_string());
+    }
+
+    fields
+}
+
+fn format_spreadsheet_column_set_for_moxel(
+    column_set: Option<&SpreadsheetDocumentXmlColumnSet>,
+    fallback_size: usize,
+    id: Option<&str>,
+) -> String {
+    let declared_size = column_set
+        .map(|column_set| column_set.size)
+        .filter(|size| *size > 0)
+        .unwrap_or(fallback_size);
+    let size = declared_size
+        .max(
+            column_set
+                .into_iter()
+                .flat_map(|column_set| column_set.columns.iter().map(|column| column.index + 1))
+                .max()
+                .unwrap_or(1),
+        )
+        .max(1);
+    let synthesized;
+    let columns = if let Some(column_set) = column_set {
+        if column_set.columns.is_empty() {
+            synthesized = synthesize_spreadsheet_columns(size);
+            &synthesized
+        } else {
+            &column_set.columns
+        }
+    } else {
+        synthesized = synthesize_spreadsheet_columns(size);
+        &synthesized
+    };
+    let uuid = id.unwrap_or("00000000-0000-0000-0000-000000000000");
+    let mut fields = Vec::with_capacity(columns.len() * 2 + 4);
+    fields.push(size.to_string());
+    fields.push("0".to_string());
+    fields.push(uuid.to_string());
+    fields.push(columns.len().to_string());
+    for column in columns {
+        fields.push(column.index.to_string());
+        fields.push(column.format_index.max(1).to_string());
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn synthesize_spreadsheet_columns(size: usize) -> Vec<SpreadsheetDocumentXmlColumn> {
+    (0..size)
+        .map(|index| SpreadsheetDocumentXmlColumn {
+            index,
+            format_index: index + 1,
+        })
+        .collect()
 }
 
 fn format_spreadsheet_merges_for_moxel(merges: &[SpreadsheetDocumentXmlMerge]) -> String {
@@ -7540,6 +7739,56 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains(r#"{24,2,"Version",{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_column_sets_and_row_columns_id() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>2</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>4</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>5</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            "{2,0,00000000-0000-0000-0000-000000000000,2,0,3,1,4},2,1,{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,5},1,1,0"
+        ));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
