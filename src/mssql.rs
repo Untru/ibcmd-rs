@@ -39,11 +39,12 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, pack_base64_payload_blob_from_bytes, pack_command_interface_blob_from_xml,
-    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
-    pack_help_blob_from_parts, pack_module_blob_bytes, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
+    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
+    pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_bytes,
+    pack_form_body_blob_from_module_text, pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
+    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1935,6 +1936,9 @@ fn prepare_metadata_body_rows(
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
         }
+        "Configuration" => {
+            prepare_configuration_asset_body_rows(sqlcmd, server, database, xml_path, properties)
+        }
         "Catalog" | "ChartOfCharacteristicTypes" => {
             prepare_predefined_data_body_row(sqlcmd, server, database, xml_path, properties)
         }
@@ -2137,6 +2141,115 @@ fn prepare_common_picture_body_row(
         path: body_path,
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_asset_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let mut rows = Vec::new();
+    rows.extend(prepare_configuration_ext_picture_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "Splash.xml"),
+        "2",
+    )?);
+    rows.extend(prepare_configuration_binary_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
+        "4",
+    )?);
+    rows.extend(prepare_configuration_ext_picture_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
+        "c",
+    )?);
+    Ok(rows)
+}
+
+fn prepare_configuration_ext_picture_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration ExtPicture {}",
+            body_path.display()
+        )
+    })?;
+    let file_name = parse_ext_picture_file_name_from_xml(&xml).with_context(|| {
+        format!(
+            "failed to parse Configuration ExtPicture {}",
+            body_path.display()
+        )
+    })?;
+    let picture_path = body_path.with_extension("").join(&file_name);
+    let picture = fs::read(&picture_path).with_context(|| {
+        format!(
+            "failed to read Configuration ExtPicture file {}",
+            picture_path.display()
+        )
+    })?;
+    let packed = pack_ext_picture_blob_from_bytes(&picture).with_context(|| {
+        format!(
+            "failed to pack Configuration ExtPicture {}",
+            picture_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_binary_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let blob = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration binary {}",
+            body_path.display()
+        )
+    })?;
+    let blob_sha256 = hex_sha256(&blob);
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob,
+        blob_sha256,
     }])
 }
 
@@ -4017,6 +4130,13 @@ fn infer_configuration_module_body_path(xml: &Path, file_name: &str) -> PathBuf 
         .join(file_name)
 }
 
+fn infer_configuration_ext_body_path(xml: &Path, file_name: &str) -> PathBuf {
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join("Ext")
+        .join(file_name)
+}
+
 fn infer_form_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Form.xml")
 }
@@ -4712,6 +4832,21 @@ mod tests {
                 "ManagedApplicationModule.bsl"
             ),
             std::path::PathBuf::from(r"Ext\ManagedApplicationModule.bsl")
+        );
+    }
+
+    #[test]
+    fn infers_configuration_ext_body_paths() {
+        assert_eq!(
+            super::infer_configuration_ext_body_path(r"Configuration.xml".as_ref(), "Splash.xml"),
+            std::path::PathBuf::from(r"Ext\Splash.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "ParentConfigurations.bin"
+            ),
+            std::path::PathBuf::from(r"Ext\ParentConfigurations.bin")
         );
     }
 
