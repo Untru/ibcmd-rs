@@ -1023,6 +1023,7 @@ struct MoxelSpreadsheet {
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
+    fonts: Vec<MoxelFont>,
     default_format_index: usize,
     height: usize,
 }
@@ -1060,6 +1061,16 @@ struct MoxelMerge {
     column: i32,
     height: i32,
     width: i32,
+}
+
+struct MoxelFont {
+    face_name: String,
+    height: usize,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strikeout: bool,
+    scale: usize,
 }
 
 struct CommandInterfaceEntry {
@@ -3663,6 +3674,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     }
     let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
+    let fonts = parse_moxel_fonts(&fields);
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
@@ -3690,6 +3702,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
         rows,
         merges,
         areas,
+        fonts,
         default_format_index: max_format_index + 1,
         height,
     })
@@ -3827,6 +3840,31 @@ fn parse_moxel_areas(fields: &[&str]) -> Vec<MoxelArea> {
         .unwrap_or_default()
 }
 
+fn parse_moxel_fonts(fields: &[&str]) -> Vec<MoxelFont> {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_font(field))
+        .collect()
+}
+
+fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "7" || fields.len() < 19 {
+        return None;
+    }
+    let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
+    let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
+    Some(MoxelFont {
+        face_name: parse_1c_string(fields.get(16)?)?,
+        height: height_raw / 10,
+        bold: weight >= 700,
+        italic: fields.get(4)?.trim() != "0",
+        underline: fields.get(5)?.trim() != "0",
+        strikeout: fields.get(6)?.trim() != "0",
+        scale: fields.get(18)?.trim().parse::<usize>().ok()?,
+    })
+}
+
 fn parse_moxel_merges(fields: &[&str]) -> Vec<MoxelMerge> {
     fields
         .iter()
@@ -3952,6 +3990,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for area in &spreadsheet.areas {
         push_moxel_area_xml(&mut xml, area);
     }
+    for font in &spreadsheet.fonts {
+        push_moxel_font_xml(&mut xml, font);
+    }
     for _ in 0..spreadsheet.default_format_index.max(1) {
         xml.push_str("\t<format/>\r\n");
     }
@@ -3970,6 +4011,19 @@ fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
         xml.push_str(&format!("\t\t<w>{}</w>\r\n", merge.width));
     }
     xml.push_str("\t</merge>\r\n");
+}
+
+fn push_moxel_font_xml(xml: &mut String, font: &MoxelFont) {
+    xml.push_str(&format!(
+        "\t<font faceName=\"{}\" height=\"{}\" bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\" kind=\"Absolute\" scale=\"{}\"/>\r\n",
+        escape_xml_text(&font.face_name),
+        font.height,
+        font.bold,
+        font.italic,
+        font.underline,
+        font.strikeout,
+        font.scale
+    ));
 }
 
 fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
@@ -8318,7 +8372,7 @@ mod tests {
     #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -8361,6 +8415,15 @@ mod tests {
         assert!(xml.contains("<endRow>6</endRow>"));
         assert!(xml.contains("<beginColumn>1</beginColumn>"));
         assert!(xml.contains("<endColumn>2</endColumn>"));
+        assert!(xml.contains(
+            "<font faceName=\"Arial\" height=\"6\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
+        ));
+        assert!(xml.contains(
+            "<font faceName=\"Arial\" height=\"8\" bold=\"true\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
+        ));
+        let font_pos = xml.find("<font faceName=\"Arial\"").unwrap();
+        let format_pos = xml.find("<format/>").unwrap();
+        assert!(font_pos < format_pos);
     }
 
     #[test]
