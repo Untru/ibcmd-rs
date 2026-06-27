@@ -69,6 +69,13 @@ pub struct FormSourceAuditReport {
     pub forms_with_ext_form_files: usize,
     pub ext_form_files: usize,
     pub ext_form_bytes: u64,
+    pub forms_stageable_by_current_loader: usize,
+    pub forms_without_stageable_body: usize,
+    pub unsupported_form_xml_files: usize,
+    pub unsupported_form_xml_bytes: u64,
+    pub forms_with_ignored_ext_form_files: usize,
+    pub ignored_ext_form_files: usize,
+    pub ignored_ext_form_bytes: u64,
     pub top_level_elements: Vec<FormElementCount>,
     pub elements: Vec<FormElementCount>,
     pub errors: Vec<FormSourceAuditError>,
@@ -273,6 +280,13 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         forms_with_ext_form_files: 0,
         ext_form_files: 0,
         ext_form_bytes: 0,
+        forms_stageable_by_current_loader: 0,
+        forms_without_stageable_body: 0,
+        unsupported_form_xml_files: 0,
+        unsupported_form_xml_bytes: 0,
+        forms_with_ignored_ext_form_files: 0,
+        ignored_ext_form_files: 0,
+        ignored_ext_form_bytes: 0,
         top_level_elements: Vec::new(),
         elements: Vec::new(),
         errors: Vec::new(),
@@ -307,11 +321,17 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
             report.forms_with_module += 1;
             report.total_module_bytes += module_metadata.len();
         }
-        let (ext_files, ext_bytes) = count_form_ext_files(&form_ext_dir)?;
+        let (ext_files, ext_bytes, ignored_ext_files, ignored_ext_bytes) =
+            count_form_ext_files(&form_ext_dir)?;
         if ext_files > 0 {
             report.forms_with_ext_form_files += 1;
             report.ext_form_files += ext_files;
             report.ext_form_bytes += ext_bytes;
+        }
+        if ignored_ext_files > 0 {
+            report.forms_with_ignored_ext_form_files += 1;
+            report.ignored_ext_form_files += ignored_ext_files;
+            report.ignored_ext_form_bytes += ignored_ext_bytes;
         }
 
         let xml =
@@ -335,6 +355,12 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     report
         .errors
         .sort_by(|left, right| left.form_xml.cmp(&right.form_xml));
+    report.forms_stageable_by_current_loader = report.forms_with_module;
+    report.forms_without_stageable_body = report
+        .form_xml_files
+        .saturating_sub(report.forms_stageable_by_current_loader);
+    report.unsupported_form_xml_files = report.form_xml_files;
+    report.unsupported_form_xml_bytes = report.total_xml_bytes;
     report.top_level_elements = sorted_element_counts(top_level_elements);
     report.elements = sorted_element_counts(elements);
     Ok(report)
@@ -345,23 +371,35 @@ fn is_form_ext_xml(path: &Path) -> bool {
         && path.parent().and_then(|parent| parent.file_name()) == Some(std::ffi::OsStr::new("Ext"))
 }
 
-fn count_form_ext_files(form_ext_dir: &Path) -> Result<(usize, u64)> {
+fn count_form_ext_files(form_ext_dir: &Path) -> Result<(usize, u64, usize, u64)> {
     if !form_ext_dir.is_dir() {
-        return Ok((0, 0));
+        return Ok((0, 0, 0, 0));
     }
     let mut files = 0usize;
     let mut bytes = 0u64;
+    let mut ignored_files = 0usize;
+    let mut ignored_bytes = 0u64;
     for entry in WalkDir::new(form_ext_dir)
         .into_iter()
         .filter_entry(|entry| !is_ignored(entry.path()))
     {
         let entry = entry?;
         if entry.file_type().is_file() {
+            let len = entry.metadata()?.len();
             files += 1;
-            bytes += entry.metadata()?.len();
+            bytes += len;
+            if !is_form_module_file(form_ext_dir, entry.path()) {
+                ignored_files += 1;
+                ignored_bytes += len;
+            }
         }
     }
-    Ok((files, bytes))
+    Ok((files, bytes, ignored_files, ignored_bytes))
+}
+
+fn is_form_module_file(form_ext_dir: &Path, path: &Path) -> bool {
+    path.parent() == Some(form_ext_dir)
+        && path.file_name().and_then(|name| name.to_str()) == Some("Module.bsl")
 }
 
 fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
@@ -813,6 +851,13 @@ mod tests {
         assert_eq!(report.forms_with_module, 1);
         assert_eq!(report.forms_with_ext_form_files, 1);
         assert_eq!(report.ext_form_files, 2);
+        assert_eq!(report.forms_stageable_by_current_loader, 1);
+        assert_eq!(report.forms_without_stageable_body, 1);
+        assert_eq!(report.unsupported_form_xml_files, 2);
+        assert!(report.unsupported_form_xml_bytes > 0);
+        assert_eq!(report.forms_with_ignored_ext_form_files, 1);
+        assert_eq!(report.ignored_ext_form_files, 1);
+        assert_eq!(report.ignored_ext_form_bytes, 8);
         assert!(report.top_level_elements.contains(&FormElementCount {
             name: "Attributes".to_string(),
             count: 1

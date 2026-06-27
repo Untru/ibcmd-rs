@@ -64,7 +64,7 @@
 | Категория исходников | Количество в sfc | Текущее покрытие ibcmd-rs |
 |---|---:|---|
 | `*.bsl` | 29 818 | Загрузка и выгрузка модульных blob-ов реализованы. |
-| `Ext/Form.xml` | 13 044 | Добавлен `audit-form-sources`: все 13 044 XML валидно парсятся как XML-структура; 12 216 форм имеют `Ext/Form/Module.bsl`, 12 218 имеют вложенные файлы в `Ext/Form`. Выгрузка сейчас формирует каркас формы и вложенные assets; загрузка использует только `Ext/Form/Module.bsl`. Полная структура формы не восстанавливается. |
+| `Ext/Form.xml` | 13 044 | Добавлен `audit-form-sources`: все 13 044 XML валидно парсятся как XML-структура; 12 216 форм имеют `Ext/Form/Module.bsl`, 12 218 имеют вложенные файлы в `Ext/Form`. Текущий loader может подготовить body row только для 12 216 форм с модулем; 828 форм не попадут даже в body staging. Все 13 044 `Form.xml` / 590 173 726 XML bytes остаются неподдержанной полной структурой формы. Выгрузка сейчас формирует каркас формы и часть вложенных assets; загрузка использует только `Ext/Form/Module.bsl`. |
 | `Ext/Rights.xml` | 2 114 | Есть загрузка и выгрузка прав ролей, но нужна проверка на реальных RLS/шаблонах ограничений всей ERP. |
 | `Ext/Schedule.xml` | 262 | Есть загрузка и выгрузка расписаний регламентных заданий. |
 | `Ext/Template.xml` | 15 769 | Все найденные типы маршрутизируются. Для `SpreadsheetDocument` есть отдельный dry-run аудит: 14 046 из 14 046 файлов пакуются текущим кодом. |
@@ -122,8 +122,8 @@ BSL по именам:
 | `audit-spreadsheet-roundtrip D:\УХА\sfc` после сохранения row `columnsID` pair-mapping с нулевой строкой | 14 046 packed, 13 105 extracted, 13 105 repacked, 12 734 matched, 238 different, 1 074 extract/extract-repacked failures; 80.578 секунды release-прогона вместе с компиляцией | Закрыт массовый класс потери `columnsID`. Первые оставшиеся `compare` связаны с появлением/потерей пустых строк перед `templateMode`; отдельно остаются 941 первичный отказ `extract` и 133 отказа `extract-repacked`. |
 | `audit-spreadsheet-roundtrip D:\УХА\sfc` после ограничения fallback-сканера пустых строк | 14 046 packed, 13 105 extracted, 13 105 repacked, 12 972 matched, 0 different, 1 074 extract/extract-repacked failures; 77.736 секунды release-прогона вместе с компиляцией | Закрыты все оставшиеся compare-расхождения SpreadsheetDocument. Следующий фронт - 941 первичный отказ `extract` и 133 отказа `extract-repacked`. |
 | `audit-spreadsheet-roundtrip D:\УХА\sfc` после поддержки пустых листов в fallback-сканере | 14 046 packed, 14 046 extracted, 14 046 repacked, 14 046 matched, 0 different, 0 failed; 83.434 секунды release-прогона вместе с компиляцией | Текущий semantic round-trip всех табличных макетов `sfc` проходит полностью. Следующий фронт - SQL end-to-end проверка макетов и остальные крупные блоки, прежде всего формы. |
-| `audit-form-sources D:\УХА\sfc` | 13 044 `Form.xml`, 13 044 parsed, 0 failed, 590 173 726 XML bytes, max 1 375 225 bytes; 12 216 forms with module, 859 045 118 module bytes; 12 218 forms with nested `Ext/Form` files, 12 511 files, 860 770 681 bytes; 37.167 секунды release-прогона вместе с компиляцией | Получен измеримый baseline для следующего компилятора/декомпилятора форм. Самые массовые верхние секции: `Attributes`, `AutoCommandBar`, `Group`, `WindowOpeningMode` во всех формах; `ChildItems` в 12 941; `Events` в 11 918; `Commands` в 8 931. |
-| `cargo test` | 297 passed | Unit-покрытие текущего кода стабильно после изменений. |
+| `audit-form-sources D:\УХА\sfc` | 13 044 `Form.xml`, 13 044 parsed, 0 failed, 590 173 726 XML bytes, max 1 375 225 bytes; 12 216 forms with module, 859 045 118 module bytes; 12 218 forms with nested `Ext/Form` files, 12 511 files, 860 770 681 bytes; current loader stageable 12 216, without stageable body 828; ignored non-module `Ext/Form` files 295 / 1 725 563 bytes; 38.1 секунды release-прогона вместе с компиляцией | Получен измеримый baseline для следующего компилятора/декомпилятора форм. Самые массовые верхние секции: `Attributes`, `AutoCommandBar`, `Group`, `WindowOpeningMode` во всех формах; `ChildItems` в 12 941; `Events` в 11 918; `Commands` в 8 931. Проверка маленькой реальной формы `DataProcessors/ЭлектронноеВзаимодействие/Forms/ПустаяФорма` через `form-info`: `Group=Vertical`, `WindowOpeningMode=DontBlock`, событие `OnOpen -> ПриОткрытии`, `AutoCommandBar`. |
+| `cargo test` | 298 passed | Unit-покрытие текущего кода стабильно после изменений. |
 
 ## Загрузка XML -> SQL
 
@@ -208,7 +208,7 @@ BSL по именам:
 | Командный интерфейс | Средняя |
 | Макеты не SpreadsheetDocument | Средняя/высокая |
 | SpreadsheetDocument | Высокая для pack-аудита и dry-run semantic round-trip; нужна SQL end-to-end проверка |
-| Формы | Низкая для полного round-trip; есть source audit baseline по всем 13 044 формам |
+| Формы | Низкая для полного round-trip; есть source audit baseline по всем 13 044 формам, но текущая загрузка stageable только для 12 216 модулей форм и не компилирует полную XML-структуру формы |
 | Загрузка в новую пустую SQL-базу | Низкая/не доказана |
 
 ## Разбиение работ по агентам
@@ -218,7 +218,7 @@ BSL по именам:
 | Агент загрузки XML -> SQL | `src/mssql.rs`, stage/load CLI, batch-и, dry-run prepare | Есть отчет по всем объектам `sfc`: сколько root XML выбрано, сколько body rows подготовлено, сколько файлов проигнорировано; batch row count покрыт тестом. |
 | Агент выгрузки SQL -> XML | `src/mssql_dump.rs`, native `mssql-dump-config`, source layout writer | Есть structural diff между native dump и эталонным layout: missing/extra/different по типам файлов. |
 | Агент макетов и assets | `src/module_blob.rs`, `src/source_audit.rs`, MOXCEL, CommonPictures, Template.bin | `audit-spreadsheet-templates` дает 14 046 / 14 046 packed; `audit-spreadsheet-roundtrip` дает 14 046 / 14 046 matched без отказов и compare-расхождений. Следующий критерий - SQL end-to-end проверка SpreadsheetDocument и stress-test `BinaryData`/`AddIn`. |
-| Агент форм | compile/decompile `Ext/Form.xml`, form item assets | Есть `audit-form-sources` baseline: 13 044 форм, 590 МБ XML, 12 216 модулей, 12 511 вложенных файлов. Следующий критерий - реализовать decompile/compile минимального набора верхних секций (`Attributes`, `Commands`, `Events`, `ChildItems`) хотя бы на малой форме, затем расширять до `sfc`. |
+| Агент форм | compile/decompile `Ext/Form.xml`, form item assets | Есть `audit-form-sources` baseline: 13 044 форм, 590 МБ XML, 12 216 stageable-by-module, 828 без stageable body, 295 ignored non-module `Ext/Form` files. Следующий критерий - реализовать decompile/compile минимального набора верхних секций (`Attributes`, `Commands`, `Events`, `ChildItems`) хотя бы на малой форме, затем расширять до `sfc`. |
 | Агент интеграции | test harness, SQL clone, сравнение с `ibcmd` | Есть сценарий `ibcmd load` vs `ibcmd-rs stage/load` на копии базы и post-compare по `_Config`/`ConfigSave`/source dump. |
 
 Ближайший рациональный план работ:
