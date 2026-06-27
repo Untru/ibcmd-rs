@@ -143,7 +143,17 @@ struct FormXmlDynamicListSettings {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlListSettings {
+    filter: Option<FormXmlListSettingsStandardSection>,
     order: Option<FormXmlListSettingsOrder>,
+    conditional_appearance: Option<FormXmlListSettingsStandardSection>,
+    items_view_mode: Option<String>,
+    items_user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsStandardSection {
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -3357,6 +3367,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "orderType"
                         | "viewMode"
                         | "userSettingID"
+                        | "itemsViewMode"
+                        | "itemsUserSettingID"
                         | "Command"
                         | "CommandGroup"
                         | "Index"
@@ -3498,6 +3510,30 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Attribute",
                             "Settings",
                             "ListSettings",
+                            "filter",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
                             "order",
                             "item",
                             "field",
@@ -3538,6 +3574,52 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "ListSettings",
                             "order",
                             "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsViewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsUserSettingID",
                         ],
                     )
                     || path_ends_with(
@@ -3709,6 +3791,30 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Attribute",
                             "Settings",
                             "ListSettings",
+                            "filter",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
                             "order",
                             "item",
                             "field",
@@ -3749,6 +3855,52 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "ListSettings",
                             "order",
                             "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsViewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsUserSettingID",
                         ],
                     )
                     || path_ends_with(
@@ -4179,6 +4331,56 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             settings.main_table = Some(text_value.trim().to_string());
                         }
                     }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
                     "field"
                         if path_ends_with(
                             &path,
@@ -4293,6 +4495,98 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 .order
                                 .get_or_insert_with(FormXmlListSettingsOrder::default)
                                 .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "itemsViewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "itemsViewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.list_settings.items_view_mode =
+                                Some(text_value.trim().to_string());
+                        }
+                    }
+                    "itemsUserSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "itemsUserSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.list_settings.items_user_setting_id =
+                                Some(text_value.trim().to_string());
                         }
                     }
                     "Attribute" if path_ends_with(&path, &["Form", "Attributes", "Attribute"]) => {
@@ -4478,6 +4772,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "orderType"
                         | "viewMode"
                         | "userSettingID"
+                        | "itemsViewMode"
+                        | "itemsUserSettingID"
                         | "Command"
                         | "CommandGroup"
                         | "Index"
@@ -5536,17 +5832,70 @@ fn patch_form_dynamic_list_settings(
             &format_form_setting_metadata_ref(source, main_table)?,
         )?;
     }
+    let mut list_replacements = Vec::new();
+    let list_settings_text = text.clone();
     if let Some(order) = &settings.list_settings.order {
-        let _ = patch_form_setting_value(
-            text,
+        push_form_setting_replacement(
+            &list_settings_text,
             "Order",
-            &format_form_setting_dcs_order(order, text, "Order")?,
+            format_form_setting_dcs_order(order, &list_settings_text, "Order")?,
+            &mut list_replacements,
         )?;
+    }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ConditionalAppearance",
+            format_form_setting_dcs_standard_section(
+                conditional_appearance,
+                "ConditionalAppearance",
+                &list_settings_text,
+                "ConditionalAppearance",
+            )?,
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ItemsViewMode",
+            format_form_setting_string(items_view_mode),
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(items_user_setting_id) = &settings.list_settings.items_user_setting_id {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ItemsUserSettingID",
+            format_form_setting_string(items_user_setting_id),
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(filter) = &settings.list_settings.filter {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "Filter",
+            format_form_setting_dcs_standard_section(
+                filter,
+                "Filter",
+                &list_settings_text,
+                "Filter",
+            )?,
+            &mut list_replacements,
+        )?;
+    }
+    list_replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in list_replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
     }
     Ok(())
 }
 
 fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> Result<bool> {
+    if let Some(range) = find_form_setting_value_range(text, key) {
+        text.replace_range(range, replacement);
+        return Ok(true);
+    }
     let fields = scan_braced_fields(text, 0)?;
     for window in fields.windows(2) {
         let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
@@ -5558,6 +5907,118 @@ fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> 
         }
     }
     Ok(false)
+}
+
+fn push_form_setting_replacement(
+    text: &str,
+    key: &str,
+    replacement: String,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key) {
+        replacements.push((range, replacement));
+        return Ok(());
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key == key {
+            replacements.push((window[1].clone(), replacement));
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn find_form_setting_value_range(text: &str, key: &str) -> Option<Range<usize>> {
+    let needle = format!("\"{}\"", key.replace('"', "\"\""));
+    let mut offset = 0usize;
+    while let Some(relative) = text[offset..].find(&needle) {
+        let key_start = offset + relative;
+        let mut index = key_start + needle.len();
+        while text
+            .as_bytes()
+            .get(index)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            index += 1;
+        }
+        if text.as_bytes().get(index) != Some(&b',') {
+            offset = key_start + needle.len();
+            continue;
+        }
+        index += 1;
+        while text
+            .as_bytes()
+            .get(index)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            index += 1;
+        }
+        if let Some(range) = scan_1c_value_range(text, index) {
+            return Some(range);
+        }
+        offset = key_start + needle.len();
+    }
+    None
+}
+
+fn scan_1c_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    match text.as_bytes().get(start).copied()? {
+        b'{' => scan_1c_braced_value_range(text, start),
+        b'"' => scan_1c_quoted_value_range(text, start),
+        _ => {
+            let end = text[start..]
+                .find([',', '}'])
+                .map(|relative| start + relative)
+                .unwrap_or(text.len());
+            Some(trim_ascii_ws_range(text, start..end))
+        }
+    }
+}
+
+fn scan_1c_braced_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut index = start;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' if in_string && bytes.get(index + 1) == Some(&b'"') => {
+                index += 2;
+                continue;
+            }
+            b'"' => in_string = !in_string,
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start..index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn scan_1c_quoted_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            if bytes.get(index + 1) == Some(&b'"') {
+                index += 2;
+                continue;
+            }
+            return Some(start..index + 1);
+        }
+        index += 1;
+    }
+    None
 }
 
 fn format_form_setting_string(value: &str) -> String {
@@ -5584,6 +6045,23 @@ fn format_form_setting_dcs_order(
     let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
         .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
     let xml = format_form_dcs_order_xml(order);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    ))
+}
+
+fn format_form_setting_dcs_standard_section(
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+    settings_text: &str,
+    key: &str,
+) -> Result<String> {
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
+        .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
+    let xml = format_form_dcs_standard_section_xml(section, root_name);
     let mut bytes = b"\xEF\xBB\xBF".to_vec();
     bytes.extend_from_slice(xml.as_bytes());
     Ok(format!(
@@ -5656,6 +6134,38 @@ fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
         ));
     }
     xml.push_str("</Order>");
+    xml
+}
+
+fn format_form_dcs_standard_section_xml(
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+) -> String {
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<{root_name} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+    );
+    if let Some(view_mode) = section
+        .view_mode
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = section
+        .user_setting_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str(&format!("</{root_name}>"));
     xml
 }
 
@@ -10503,6 +11013,68 @@ mod tests {
     };
     use crate::module_blob::ModuleElement;
 
+    fn decode_base64_for_test(input: &str) -> anyhow::Result<Vec<u8>> {
+        fn value(byte: u8) -> anyhow::Result<u8> {
+            match byte {
+                b'A'..=b'Z' => Ok(byte - b'A'),
+                b'a'..=b'z' => Ok(byte - b'a' + 26),
+                b'0'..=b'9' => Ok(byte - b'0' + 52),
+                b'+' => Ok(62),
+                b'/' => Ok(63),
+                _ => anyhow::bail!("invalid base64 byte {byte}"),
+            }
+        }
+
+        let bytes: Vec<u8> = input
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect();
+        let mut output = Vec::with_capacity(bytes.len() / 4 * 3);
+        for chunk in bytes.chunks(4) {
+            if chunk.len() != 4 {
+                anyhow::bail!("invalid base64 length");
+            }
+            let first = value(chunk[0])?;
+            let second = value(chunk[1])?;
+            let third = if chunk[2] == b'=' {
+                0
+            } else {
+                value(chunk[2])?
+            };
+            let fourth = if chunk[3] == b'=' {
+                0
+            } else {
+                value(chunk[3])?
+            };
+            output.push((first << 2) | (second >> 4));
+            if chunk[2] != b'=' {
+                output.push((second << 4) | (third >> 2));
+            }
+            if chunk[3] != b'=' {
+                output.push((third << 6) | fourth);
+            }
+        }
+        Ok(output)
+    }
+
+    fn form_setting_base64_xml_for_test(text: &str, key: &str) -> anyhow::Result<String> {
+        let key_start = text
+            .find(&format!("\"{key}\""))
+            .ok_or_else(|| anyhow::anyhow!("setting {key} not found"))?;
+        let payload_prefix = "{#base64:";
+        let payload_start = text[key_start..]
+            .find(payload_prefix)
+            .map(|relative| key_start + relative + payload_prefix.len())
+            .ok_or_else(|| anyhow::anyhow!("setting {key} base64 payload not found"))?;
+        let payload_end = text[payload_start..]
+            .find('}')
+            .map(|relative| payload_start + relative)
+            .ok_or_else(|| anyhow::anyhow!("setting {key} base64 payload is not closed"))?;
+        let bytes = decode_base64_for_test(&text[payload_start..payload_end])?;
+        let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+        String::from_utf8(bytes.to_vec()).map_err(Into::into)
+    }
+
     #[test]
     fn packs_module_inner_with_plain_info_and_text() {
         let inner = build_module_inner(&[
@@ -12674,7 +13246,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )?;
         let source = super::MetadataSourceContext::new(root.clone());
         let base = super::deflate_raw(
-            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,5,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}}},{0,0}}},{0,0},{0,0},{0}}"##,
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,9,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Filter",{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}},"ConditionalAppearance",{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}},"ItemsViewMode",{"S","Normal"},"ItemsUserSettingID",{"S","911b6018-f537-43e8-a417-da56b22f9aec"}},{0,0}}},{0,0},{0,0},{0}}"##,
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
@@ -12690,6 +13262,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<QueryText>ВЫБРАТЬ Ссылка ИЗ Справочник.Товары</QueryText>
 				<MainTable>Catalog.Products</MainTable>
 				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Quick</dcsset:viewMode>
+						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+					</dcsset:filter>
 					<dcsset:order>
 						<dcsset:item xsi:type="dcsset:OrderItemField">
 							<dcsset:field>Код</dcsset:field>
@@ -12698,6 +13274,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 						<dcsset:viewMode>Normal</dcsset:viewMode>
 						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
 					</dcsset:order>
+					<dcsset:conditionalAppearance>
+						<dcsset:viewMode>Compact</dcsset:viewMode>
+						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+					</dcsset:conditionalAppearance>
+					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
+					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
 				</ListSettings>
 			</Settings>
 		</Attribute>
@@ -12706,6 +13288,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 "#
         .as_bytes();
 
+        let parsed_xml = super::parse_form_xml_body_properties(xml)?;
+        let parsed_order = parsed_xml.attributes[0]
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.list_settings.order.as_ref())
+            .ok_or_else(|| anyhow::anyhow!("order was not parsed from form XML"))?;
+        assert_eq!(parsed_order.items[0].field.as_deref(), Some("Код"));
+
         let packed =
             super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
@@ -12713,7 +13303,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[0].contains(r#""Список""#));
-        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,5,"#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,9,"#));
         assert!(
             parsed.trailing[0]
                 .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
@@ -12724,11 +13314,39 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
         assert!(
             parsed.trailing[0]
+                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
+        assert!(
+            filter_xml
+                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
                 .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
         );
+        let order_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+        assert!(order_xml.contains("<field>Код</field>"), "{order_xml}");
+        assert!(
+            order_xml.contains("<orderType>Asc</orderType>"),
+            "{order_xml}"
+        );
         assert!(parsed.trailing[0].contains(
-            "77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0JrQvtC0PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4="
+            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
         ));
+        let appearance_xml =
+            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
+        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        assert!(
+            appearance_xml
+                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
+        );
+        assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""ItemsUserSettingID",{"S","cccccccc-cccc-4ccc-cccc-cccccccccccc"}"#)
+        );
         assert!(!parsed.trailing[0].contains("88888888-8888-4888-8888-888888888888"));
         assert!(!parsed.trailing[0].contains("OldList"));
         assert!(!parsed.trailing[0].contains("Old query"));

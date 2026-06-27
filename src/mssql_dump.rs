@@ -3869,7 +3869,17 @@ struct FormDynamicListSettings {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormListSettings {
+    filter: Option<FormListSettingsStandardSection>,
     order: Option<FormListSettingsOrder>,
+    conditional_appearance: Option<FormListSettingsStandardSection>,
+    items_view_mode: Option<String>,
+    items_user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormListSettingsStandardSection {
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -4295,7 +4305,19 @@ fn parse_form_dynamic_list_settings(
             "DynamicalDataSelection" => {
                 dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
             }
+            "Filter" => {
+                list_settings.filter =
+                    parse_form_list_settings_standard_section(window[1], "Filter")
+            }
             "Order" => list_settings.order = parse_form_list_settings_order(window[1]),
+            "ConditionalAppearance" => {
+                list_settings.conditional_appearance =
+                    parse_form_list_settings_standard_section(window[1], "ConditionalAppearance")
+            }
+            "ItemsViewMode" => list_settings.items_view_mode = parse_form_setting_string(window[1]),
+            "ItemsUserSettingID" => {
+                list_settings.items_user_setting_id = parse_form_setting_string(window[1])
+            }
             _ => {}
         }
     }
@@ -4303,7 +4325,11 @@ fn parse_form_dynamic_list_settings(
         && main_table.is_none()
         && !manual_query
         && !dynamic_data_read
+        && list_settings.filter.is_none()
         && list_settings.order.is_none()
+        && list_settings.conditional_appearance.is_none()
+        && list_settings.items_view_mode.is_none()
+        && list_settings.items_user_setting_id.is_none()
     {
         return None;
     }
@@ -4372,6 +4398,76 @@ fn parse_form_list_settings_order(field: &str) -> Option<FormListSettingsOrder> 
     let xml = decode_base64_mime(payload)?;
     let xml = String::from_utf8(xml).ok()?;
     parse_form_list_settings_order_xml(&xml)
+}
+
+fn parse_form_list_settings_standard_section(
+    field: &str,
+    root_name: &str,
+) -> Option<FormListSettingsStandardSection> {
+    let payload = extract_base64_payload(field)?;
+    let xml = decode_base64_mime(payload)?;
+    let xml = String::from_utf8(xml).ok()?;
+    parse_form_list_settings_standard_section_xml(&xml, root_name)
+}
+
+fn parse_form_list_settings_standard_section_xml(
+    xml: &str,
+    root_name: &str,
+) -> Option<FormListSettingsStandardSection> {
+    let mut reader = Reader::from_str(xml.trim_start_matches('\u{feff}'));
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = String::new();
+    let mut section = FormListSettingsStandardSection::default();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if matches!(local.as_str(), "viewMode" | "userSettingID") {
+                    text.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(value)) => {
+                if path_ends_with(&path, &[root_name, "viewMode"])
+                    || path_ends_with(&path, &[root_name, "userSettingID"])
+                {
+                    text.push_str(value.xml_content().ok()?.as_ref());
+                }
+            }
+            Ok(Event::CData(value)) => {
+                if path_ends_with(&path, &[root_name, "viewMode"])
+                    || path_ends_with(&path, &[root_name, "userSettingID"])
+                {
+                    text.push_str(value.xml_content().ok()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "viewMode" if path_ends_with(&path, &[root_name, "viewMode"]) => {
+                        section.view_mode = Some(text.trim().to_string());
+                    }
+                    "userSettingID" if path_ends_with(&path, &[root_name, "userSettingID"]) => {
+                        section.user_setting_id = Some(text.trim().to_string());
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "viewMode" | "userSettingID") {
+                    text.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => return None,
+        }
+        buffer.clear();
+    }
+
+    (section.view_mode.is_some() || section.user_setting_id.is_some()).then_some(section)
 }
 
 fn parse_form_list_settings_order_xml(xml: &str) -> Option<FormListSettingsOrder> {
@@ -5334,10 +5430,20 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
 }
 
 fn format_form_list_settings_xml(settings: &FormListSettings) -> String {
-    if settings.order.is_none() {
+    if settings.filter.is_none()
+        && settings.order.is_none()
+        && settings.conditional_appearance.is_none()
+        && settings.items_view_mode.is_none()
+        && settings.items_user_setting_id.is_none()
+    {
         return String::new();
     }
     let mut xml = "\t\t\t\t<ListSettings>\r\n".to_string();
+    if let Some(filter) = &settings.filter {
+        xml.push_str(&format_form_list_settings_standard_section_xml(
+            "filter", filter,
+        ));
+    }
     if let Some(order) = &settings.order {
         xml.push_str("\t\t\t\t\t<dcsset:order>\r\n");
         for item in &order.items {
@@ -5368,7 +5474,46 @@ fn format_form_list_settings_xml(settings: &FormListSettings) -> String {
         }
         xml.push_str("\t\t\t\t\t</dcsset:order>\r\n");
     }
+    if let Some(conditional_appearance) = &settings.conditional_appearance {
+        xml.push_str(&format_form_list_settings_standard_section_xml(
+            "conditionalAppearance",
+            conditional_appearance,
+        ));
+    }
+    if let Some(items_view_mode) = &settings.items_view_mode {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<dcsset:itemsViewMode>{}</dcsset:itemsViewMode>\r\n",
+            escape_xml_text(items_view_mode)
+        ));
+    }
+    if let Some(items_user_setting_id) = &settings.items_user_setting_id {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<dcsset:itemsUserSettingID>{}</dcsset:itemsUserSettingID>\r\n",
+            escape_xml_text(items_user_setting_id)
+        ));
+    }
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
+    xml
+}
+
+fn format_form_list_settings_standard_section_xml(
+    name: &str,
+    section: &FormListSettingsStandardSection,
+) -> String {
+    let mut xml = format!("\t\t\t\t\t<dcsset:{name}>\r\n");
+    if let Some(view_mode) = &section.view_mode {
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<dcsset:viewMode>{}</dcsset:viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = &section.user_setting_id {
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<dcsset:userSettingID>{}</dcsset:userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str(&format!("\t\t\t\t\t</dcsset:{name}>\r\n"));
     xml
 }
 
@@ -11627,7 +11772,7 @@ mod tests {
         let parameter_type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let form_body = deflate_for_test(
             format!(
-                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,5,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}},"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}}}}}},{{0,0}}}}}},{{0,1,{{0,"Счет",{{"Pattern",{{"#",{parameter_type_uuid}}}}},1}}}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,9,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}},"Filter",{{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}}}},"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}}}},"ConditionalAppearance",{{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}}}},"ItemsViewMode",{{"S","Normal"}},"ItemsUserSettingID",{{"S","911b6018-f537-43e8-a417-da56b22f9aec"}}}},{{0,0}}}}}},{{0,1,{{0,"Счет",{{"Pattern",{{"#",{parameter_type_uuid}}}}},1}}}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
             )
             .as_bytes(),
         );
@@ -11654,12 +11799,24 @@ mod tests {
         assert!(form_xml.contains("<DynamicDataRead>true</DynamicDataRead>"));
         assert!(form_xml.contains("<MainTable>Catalog.Товары</MainTable>"));
         assert!(form_xml.contains("<ListSettings>"));
+        assert!(form_xml.contains("<dcsset:filter>"));
+        assert!(form_xml.contains(
+            "<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>"
+        ));
         assert!(form_xml.contains("<dcsset:order>"));
         assert!(form_xml.contains("<dcsset:field>НаименованиеПолное</dcsset:field>"));
         assert!(form_xml.contains("<dcsset:orderType>Asc</dcsset:orderType>"));
         assert!(form_xml.contains("<dcsset:viewMode>Normal</dcsset:viewMode>"));
         assert!(form_xml.contains(
             "<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>"
+        ));
+        assert!(form_xml.contains("<dcsset:conditionalAppearance>"));
+        assert!(form_xml.contains(
+            "<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>"
+        ));
+        assert!(form_xml.contains("<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>"));
+        assert!(form_xml.contains(
+            "<dcsset:itemsUserSettingID>911b6018-f537-43e8-a417-da56b22f9aec</dcsset:itemsUserSettingID>"
         ));
         assert!(form_xml.contains(r#"<Parameter name="Счет">"#));
         assert!(form_xml.contains("<v8:Type>cfg:ChartOfAccountsRef.Хозрасчетный</v8:Type>"));
