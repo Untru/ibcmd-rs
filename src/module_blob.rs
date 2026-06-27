@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
@@ -183,6 +183,16 @@ struct CommandInterfaceXmlEntry {
 struct ExchangePlanContentXmlItem {
     metadata: String,
     auto_record: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct PredefinedDataXmlItem {
+    id: String,
+    name: String,
+    code: String,
+    description: String,
+    is_folder: bool,
+    children: Vec<PredefinedDataXmlItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -1085,6 +1095,59 @@ pub fn pack_exchange_plan_content_blob_from_xml(
     })
 }
 
+pub fn pack_predefined_data_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let items = parse_predefined_data_xml(xml)?;
+    let by_id = flatten_predefined_xml_items(&items)?;
+    let inflated = inflate_raw(base_blob).context("failed to inflate base PredefinedData blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base PredefinedData blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base PredefinedData body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if !matches!(
+        fields.first().map(|range| plain[range.clone()].trim()),
+        Some("0" | "1")
+    ) {
+        return Err(anyhow!(
+            "base PredefinedData body does not start with type marker 0 or 1"
+        ));
+    }
+    let table_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("base PredefinedData body has no table field"))?
+        .clone();
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    let mut seen = BTreeSet::<String>::new();
+    collect_predefined_replacements(&plain, table_range, &by_id, &mut seen, &mut replacements)?;
+    let missing = by_id
+        .keys()
+        .filter(|id| !seen.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "PredefinedData XML contains items missing in base blob: {}",
+            missing.join(", ")
+        ));
+    }
+
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
 fn role_right_value_replacements(
     plain: &str,
     objects_range: Range<usize>,
@@ -1495,6 +1558,360 @@ fn parse_exchange_plan_auto_record_text(value: &str) -> Result<bool> {
         "Auto" => Ok(true),
         _ => Err(anyhow!("invalid ExchangePlanContent AutoRecord: {value}")),
     }
+}
+
+fn flatten_predefined_xml_items(
+    items: &[PredefinedDataXmlItem],
+) -> Result<BTreeMap<String, PredefinedDataXmlItem>> {
+    let mut by_id = BTreeMap::new();
+    flatten_predefined_xml_items_into(items, &mut by_id)?;
+    Ok(by_id)
+}
+
+fn flatten_predefined_xml_items_into(
+    items: &[PredefinedDataXmlItem],
+    by_id: &mut BTreeMap<String, PredefinedDataXmlItem>,
+) -> Result<()> {
+    for item in items {
+        if by_id.insert(item.id.clone(), item.clone()).is_some() {
+            return Err(anyhow!("duplicate PredefinedData item id {}", item.id));
+        }
+        flatten_predefined_xml_items_into(&item.children, by_id)?;
+    }
+    Ok(())
+}
+
+fn collect_predefined_replacements(
+    plain: &str,
+    table_range: Range<usize>,
+    by_id: &BTreeMap<String, PredefinedDataXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let table_fields = scan_wrapped_braced_fields(plain, table_range)?;
+    for field in table_fields {
+        if !range_starts_with_brace(plain, &field) {
+            continue;
+        }
+        let rowset_fields = scan_wrapped_braced_fields(plain, field)?;
+        if rowset_fields
+            .first()
+            .map(|range| plain[range.clone()].trim())
+            != Some("2")
+        {
+            continue;
+        }
+        for child_field in rowset_fields {
+            if range_starts_with_brace(plain, &child_field)
+                && scan_wrapped_braced_fields(plain, child_field.clone())
+                    .ok()
+                    .and_then(|fields| {
+                        fields
+                            .first()
+                            .map(|range| plain[range.clone()].trim() == "1")
+                    })
+                    == Some(true)
+            {
+                collect_predefined_children_replacements(
+                    plain,
+                    child_field,
+                    by_id,
+                    seen,
+                    replacements,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_predefined_children_replacements(
+    plain: &str,
+    children_range: Range<usize>,
+    by_id: &BTreeMap<String, PredefinedDataXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let fields = scan_wrapped_braced_fields(plain, children_range)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("1") {
+        return Ok(());
+    }
+    let count = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("PredefinedData children list has no count"))?
+        .clone();
+    let count = plain[count]
+        .trim()
+        .parse::<usize>()
+        .context("invalid PredefinedData children count")?;
+    for item_range in fields.into_iter().skip(2).take(count) {
+        collect_predefined_item_replacements(plain, item_range, by_id, seen, replacements)?;
+    }
+    Ok(())
+}
+
+fn collect_predefined_item_replacements(
+    plain: &str,
+    item_range: Range<usize>,
+    by_id: &BTreeMap<String, PredefinedDataXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let fields = scan_wrapped_braced_fields(plain, item_range)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+        return Ok(());
+    }
+    let value_count = fields
+        .get(2)
+        .ok_or_else(|| anyhow!("PredefinedData item has no value count"))?;
+    let value_count = plain[value_count.clone()]
+        .trim()
+        .parse::<usize>()
+        .context("invalid PredefinedData item value count")?;
+    let value_start = 3usize;
+    let after_values = value_start + value_count;
+    if fields.len() < after_values {
+        return Err(anyhow!(
+            "PredefinedData item has {} fields, expected at least {}",
+            fields.len(),
+            after_values
+        ));
+    }
+    let id = parse_predefined_uuid_value_from_plain(plain, fields[value_start].clone())?;
+    if let Some(item) = by_id.get(&id) {
+        seen.insert(id);
+        let is_folder_range = fields[value_start + 1].clone();
+        if parse_predefined_bool_value_from_plain(plain, is_folder_range.clone()).is_some() {
+            replacements.push((
+                is_folder_range,
+                format_predefined_bool_value(item.is_folder),
+            ));
+        }
+        let has_parent_ref = fields
+            .get(value_start + 2)
+            .and_then(|range| scan_wrapped_braced_fields(plain, range.clone()).ok())
+            .and_then(|fields| {
+                fields
+                    .first()
+                    .map(|range| plain[range.clone()].trim() == r##""#""##)
+            })
+            .unwrap_or(false);
+        let name_offset = if has_parent_ref {
+            value_start + 3
+        } else {
+            value_start + 2
+        };
+        push_predefined_string_replacement(
+            plain,
+            fields.get(name_offset).cloned(),
+            &item.name,
+            replacements,
+        );
+        push_predefined_string_replacement(
+            plain,
+            fields.get(name_offset + 1).cloned(),
+            &item.code,
+            replacements,
+        );
+        push_predefined_string_replacement(
+            plain,
+            fields.get(name_offset + 2).cloned(),
+            &item.description,
+            replacements,
+        );
+    }
+    if fields
+        .get(after_values)
+        .is_some_and(|range| plain[range.clone()].trim() == "1")
+        && let Some(children_range) = fields.get(after_values + 1)
+    {
+        collect_predefined_children_replacements(
+            plain,
+            children_range.clone(),
+            by_id,
+            seen,
+            replacements,
+        )?;
+    }
+    Ok(())
+}
+
+fn push_predefined_string_replacement(
+    plain: &str,
+    range: Option<Range<usize>>,
+    value: &str,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) {
+    let Some(range) = range else {
+        return;
+    };
+    if parse_predefined_string_value_from_plain(plain, range.clone()).is_some() {
+        replacements.push((range, format_predefined_string_value(value)));
+    }
+}
+
+fn scan_wrapped_braced_fields(plain: &str, range: Range<usize>) -> Result<Vec<Range<usize>>> {
+    let mut range = trim_ascii_ws_range(plain, range);
+    let mut fields = scan_braced_fields(plain, range.start)?;
+    while fields.len() == 1 && range_starts_with_brace(plain, &fields[0]) {
+        range = fields[0].clone();
+        fields = scan_braced_fields(plain, range.start)?;
+    }
+    Ok(fields)
+}
+
+fn range_starts_with_brace(plain: &str, range: &Range<usize>) -> bool {
+    plain[range.clone()].trim_start().starts_with('{')
+}
+
+fn parse_predefined_uuid_value_from_plain(plain: &str, range: Range<usize>) -> Result<String> {
+    let fields = scan_wrapped_braced_fields(plain, range)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some(r##""#""##) {
+        return Err(anyhow!("PredefinedData uuid value has unexpected marker"));
+    }
+    let ref_fields = scan_wrapped_braced_fields(
+        plain,
+        fields
+            .get(2)
+            .ok_or_else(|| anyhow!("PredefinedData uuid value has no ref payload"))?
+            .clone(),
+    )?;
+    let uuid = plain[ref_fields
+        .get(1)
+        .ok_or_else(|| anyhow!("PredefinedData uuid ref has no uuid"))?
+        .clone()]
+    .trim();
+    normalize_uuid_text(uuid)
+}
+
+fn parse_predefined_bool_value_from_plain(plain: &str, range: Range<usize>) -> Option<bool> {
+    let fields = scan_wrapped_braced_fields(plain, range).ok()?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some(r#""B""#) {
+        return None;
+    }
+    match plain[fields.get(1)?.clone()].trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_predefined_string_value_from_plain(plain: &str, range: Range<usize>) -> Option<String> {
+    let fields = scan_wrapped_braced_fields(plain, range).ok()?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some(r#""S""#) {
+        return None;
+    }
+    fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(plain[range.clone()].trim()).ok())
+}
+
+fn format_predefined_bool_value(value: bool) -> String {
+    format!(r#"{{{{"B",{}}}}}"#, if value { "1" } else { "0" })
+}
+
+fn format_predefined_string_value(value: &str) -> String {
+    format!(r#"{{{{"S",{}}}}}"#, format_1c_string(value))
+}
+
+fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut stack = Vec::<PredefinedDataXmlItem>::new();
+    let mut roots = Vec::<PredefinedDataXmlItem>::new();
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Item"
+                    && (path_ends_with(&path, &["PredefinedData"])
+                        || path_ends_with(&path, &["PredefinedData", "Item", "ChildItems"])
+                        || path.last().map(String::as_str) == Some("ChildItems"))
+                {
+                    let id = xml_attr_value(&event, "id")
+                        .ok_or_else(|| anyhow!("PredefinedData Item has no id attribute"))
+                        .and_then(|value| normalize_uuid_text(&value))?;
+                    stack.push(PredefinedDataXmlItem {
+                        id,
+                        name: String::new(),
+                        code: String::new(),
+                        description: String::new(),
+                        is_folder: false,
+                        children: Vec::new(),
+                    });
+                }
+                if matches!(local.as_str(), "Name" | "Code" | "Description" | "IsFolder") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if is_predefined_item_property_path(&path) {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if is_predefined_item_property_path(&path) {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "Name" | "Code" | "Description" | "IsFolder"
+                        if is_predefined_item_property_path(&path) =>
+                    {
+                        let item = stack
+                            .last_mut()
+                            .ok_or_else(|| anyhow!("PredefinedData property outside Item"))?;
+                        match local.as_str() {
+                            "Name" => item.name = text_value.trim().to_string(),
+                            "Code" => item.code = text_value.trim().to_string(),
+                            "Description" => item.description = text_value.trim().to_string(),
+                            "IsFolder" => {
+                                item.is_folder = parse_xml_bool_text(
+                                    "PredefinedData/Item/IsFolder",
+                                    text_value.trim(),
+                                )?;
+                            }
+                            _ => {}
+                        }
+                    }
+                    "Item" if path.last().map(String::as_str) == Some("Item") => {
+                        let item = stack.pop().ok_or_else(|| {
+                            anyhow!("PredefinedData ended Item without active item")
+                        })?;
+                        if let Some(parent) = stack.last_mut() {
+                            parent.children.push(item);
+                        } else {
+                            roots.push(item);
+                        }
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "Name" | "Code" | "Description" | "IsFolder") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(roots)
+}
+
+fn is_predefined_item_property_path(path: &[String]) -> bool {
+    matches!(
+        path.last().map(String::as_str),
+        Some("Name" | "Code" | "Description" | "IsFolder")
+    ) && path.iter().any(|part| part == "Item")
 }
 
 fn parse_xml_bool_text(name: &str, value: &str) -> Result<bool> {
@@ -3992,6 +4409,15 @@ fn scan_1c_quoted_string_end(text: &str, start: usize) -> Result<usize> {
     Err(anyhow!("unterminated 1C string at byte {start}"))
 }
 
+fn parse_1c_quoted_string(text: &str) -> Result<String> {
+    let text = text.trim();
+    let end = scan_1c_quoted_string_end(text, 0)?;
+    if end != text.len() {
+        return Err(anyhow!("unexpected trailing data after 1C string"));
+    }
+    Ok(text[1..end - 1].replace("\"\"", "\""))
+}
+
 fn scan_balanced_braces(text: &str, start: usize) -> Result<usize> {
     let bytes = text.as_bytes();
     if bytes.get(start) != Some(&b'{') {
@@ -6251,6 +6677,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(packed.plain_bytes, text.len());
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_predefined_data_xml_preserving_base_shape() -> anyhow::Result<()> {
+        let type_uuid = "ae135932-4f94-44df-92c1-c91f15a92848";
+        let folder_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let item_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let base_plain = format!(
+            "{{0,{{1,{{7}},{{2,{{1,1,{{2,0,5,{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Элементы\"}},{{\"S\",\"\"}},1,{{1,1,{{2,1,7,{{\"#\",{type_uuid},{{1,{folder_uuid}}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Folder\"}},{{\"S\",\"F\"}},{{\"S\",\"Folder description\"}},{{\"N\",0}},1,{{1,1,{{2,2,7,{{\"#\",{type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Item\"}},{{\"S\",\"I\"}},{{\"S\",\"Item description\"}},{{\"N\",0}},0}}}}}}}}}}}}}},-1,3}}}}"
+        );
+        let base = super::deflate_raw(base_plain.as_bytes())?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<PredefinedData xmlns="http://v8.1c.ru/8.3/xcf/predef" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CatalogPredefinedItems" version="2.20">
+	<Item id="{folder_uuid}">
+		<Name>NewFolder</Name>
+		<Code>NF</Code>
+		<Description>New folder description</Description>
+		<IsFolder>true</IsFolder>
+		<ChildItems>
+			<Item id="{item_uuid}">
+				<Name>NewItem</Name>
+				<Code>NI</Code>
+				<Description>New item description</Description>
+				<IsFolder>false</IsFolder>
+			</Item>
+		</ChildItems>
+	</Item>
+</PredefinedData>
+"#
+        );
+
+        let packed = super::pack_predefined_data_blob_from_xml(&base, xml.as_bytes())?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{{"S","NewFolder"}}"#));
+        assert!(text.contains(r#"{{"S","NF"}}"#));
+        assert!(text.contains(r#"{{"S","New folder description"}}"#));
+        assert!(text.contains(r#"{{"S","NewItem"}}"#));
+        assert!(text.contains(r#"{{"S","NI"}}"#));
+        assert!(text.contains(r#"{{"S","New item description"}}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
         Ok(())
     }
 
