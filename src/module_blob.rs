@@ -4966,6 +4966,7 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "InputField"
             | "LabelField"
             | "SearchStringAddition"
+            | "ViewStatusAddition"
             | "SearchControlAddition"
     )
 }
@@ -5017,6 +5018,7 @@ fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) ->
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Type"])
+        || path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Type"])
 }
 
 fn path_ends_with_for_child_command_name(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -5251,6 +5253,13 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((type_range.clone(), type_code.to_string()));
     }
+    if item.tag.ends_with("Addition")
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_search_addition_type_code(item_type)
+        && let Some(type_range) = fields.get(5)
+    {
+        replacements.push((type_range.clone(), type_code.to_string()));
+    }
     if item.tag == "Button"
         && let Some(command_name) = &item.command_name
         && let Some(command_range) = fields.get(8)
@@ -5285,6 +5294,15 @@ fn form_button_type_code(value: &str) -> Option<&'static str> {
         "UsualButton" => Some("0"),
         "CommandBarButton" => Some("1"),
         "Hyperlink" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_search_addition_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "SearchStringRepresentation" => Some("0"),
+        "ViewStatusRepresentation" => Some("1"),
+        "SearchControl" => Some("2"),
         _ => None,
     }
 }
@@ -5453,6 +5471,7 @@ fn form_layout_child_item_tag<'a>(
         }
         "6" => match fields.get(5).map(|range| text[range.clone()].trim())? {
             "0" => Some("SearchStringAddition"),
+            "1" => Some("ViewStatusAddition"),
             "2" => Some("SearchControlAddition"),
             _ => None,
         },
@@ -13655,6 +13674,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_search_addition_type() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"OldStatus",{1,0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<ViewStatusAddition name="NewStatus" id="134">
+			<AdditionSource>
+				<Type>ViewStatusRepresentation</Type>
+			</AdditionSource>
+		</ViewStatusAddition>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewStatus""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains("OldStatus"));
+        assert!(
+            parsed
+                .layout
+                .contains(r#",{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"NewStatus""#)
+                || parsed.layout.contains(
+                    r#"{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"NewStatus""#
+                ),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }

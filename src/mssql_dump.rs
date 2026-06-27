@@ -4814,6 +4814,10 @@ fn parse_form_child_item(
             fields
                 .get(7)
                 .and_then(|field| parse_form_button_type(field))
+        } else if tag.ends_with("Addition") {
+            fields
+                .get(5)
+                .and_then(|field| parse_form_search_addition_type(field))
         } else {
             None
         },
@@ -4840,6 +4844,15 @@ fn parse_form_button_type(field: &str) -> Option<&'static str> {
     }
 }
 
+fn parse_form_search_addition_type(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("SearchStringRepresentation"),
+        "1" => Some("ViewStatusRepresentation"),
+        "2" => Some("SearchControl"),
+        _ => None,
+    }
+}
+
 fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
     match wrapper {
         "22" => match fields.get(5).map(|value| value.trim())? {
@@ -4859,6 +4872,7 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
         }
         "6" => match fields.get(5).map(|value| value.trim())? {
             "0" => Some("SearchStringAddition"),
+            "1" => Some("ViewStatusAddition"),
             "2" => Some("SearchControlAddition"),
             _ => None,
         },
@@ -5341,7 +5355,14 @@ fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
         escape_xml_text(&item.name),
         escape_xml_text(&item.id)
     );
-    if let Some(item_type) = item.item_type {
+    if item.tag.ends_with("Addition") {
+        if let Some(item_type) = item.item_type {
+            xml.push_str(&format!(
+                "{tab}\t<AdditionSource>\r\n{tab}\t\t<Type>{}</Type>\r\n{tab}\t</AdditionSource>\r\n",
+                escape_xml_text(item_type)
+            ));
+        }
+    } else if let Some(item_type) = item.item_type {
         xml.push_str(&format!(
             "{tab}\t<Type>{}</Type>\r\n",
             escape_xml_text(item_type)
@@ -11913,6 +11934,42 @@ mod tests {
 
             assert_eq!(item.item_type, Some(expected_type));
         }
+    }
+
+    #[test]
+    fn extracts_form_search_addition_type_from_layout_code() {
+        let mut items = Vec::new();
+        for (code, expected_tag, expected_type) in [
+            ("0", "SearchStringAddition", "SearchStringRepresentation"),
+            ("1", "ViewStatusAddition", "ViewStatusRepresentation"),
+            ("2", "SearchControlAddition", "SearchControl"),
+        ] {
+            let item = parse_form_child_item(
+                &format!(
+                    r#"{{6,{{44,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,{code},"SearchAddition",{{1,0}}}}"#
+                ),
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, expected_tag);
+            assert_eq!(item.item_type, Some(expected_type));
+            items.push(item);
+        }
+
+        let xml = format_form_child_items_xml(&items, 1);
+
+        assert!(xml.contains("<SearchStringAddition"));
+        assert!(xml.contains("<Type>SearchStringRepresentation</Type>"));
+        assert!(xml.contains("<ViewStatusAddition"));
+        assert!(xml.contains("<Type>ViewStatusRepresentation</Type>"));
+        assert!(xml.contains("<SearchControlAddition"));
+        assert!(xml.contains("<Type>SearchControl</Type>"));
     }
 
     #[test]
