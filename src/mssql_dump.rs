@@ -4033,8 +4033,14 @@ fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
         "OnClose" => Some("OnClose"),
         "OnCreateAtServer" => Some("OnCreateAtServer"),
         "OnReadAtServer" => Some("OnReadAtServer"),
+        "AfterWrite" => Some("AfterWrite"),
+        "BeforeWrite" => Some("BeforeWrite"),
         "BeforeWriteAtServer" => Some("BeforeWriteAtServer"),
         "AfterWriteAtServer" => Some("AfterWriteAtServer"),
+        "OnWriteAtServer" => Some("OnWriteAtServer"),
+        "OnLoadDataFromSettingsAtServer" => Some("OnLoadDataFromSettingsAtServer"),
+        "BeforeLoadDataFromSettingsAtServer" => Some("BeforeLoadDataFromSettingsAtServer"),
+        "FillCheckProcessingAtServer" => Some("FillCheckProcessingAtServer"),
         "ChoiceProcessing" => Some("ChoiceProcessing"),
         "NotificationProcessing" => Some("NotificationProcessing"),
         "ExternalEvent" => Some("ExternalEvent"),
@@ -11276,7 +11282,7 @@ mod tests {
     #[test]
     fn extracts_form_events_to_body_xml() {
         let form_body = deflate_for_test(
-            b"{4,{7,{0,\"OnOpen\",\"PriOtkrytii\"},{1,\"ChoiceProcessing\",\"ObrabotkaVybora\"},{2,\"NotAFormEvent\",\"Ignored\"},{3,\"OnClose\",\"\"}},\"\",{0}}",
+            b"{4,{7,{0,\"OnOpen\",\"PriOtkrytii\"},{1,\"ChoiceProcessing\",\"ObrabotkaVybora\"},{2,\"AfterWrite\",\"PosleZapisi\"},{3,\"OnLoadDataFromSettingsAtServer\",\"LoadSettings\"},{4,\"FillCheckProcessingAtServer\",\"FillCheck\"},{5,\"NotAFormEvent\",\"Ignored\"},{6,\"OnClose\",\"\"}},\"\",{0}}",
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
@@ -11284,6 +11290,14 @@ mod tests {
         assert!(form_xml.contains("<Events>"));
         assert!(form_xml.contains(r#"<Event name="OnOpen">PriOtkrytii</Event>"#));
         assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ObrabotkaVybora</Event>"#));
+        assert!(form_xml.contains(r#"<Event name="AfterWrite">PosleZapisi</Event>"#));
+        assert!(
+            form_xml
+                .contains(r#"<Event name="OnLoadDataFromSettingsAtServer">LoadSettings</Event>"#)
+        );
+        assert!(
+            form_xml.contains(r#"<Event name="FillCheckProcessingAtServer">FillCheck</Event>"#)
+        );
         assert!(!form_xml.contains("NotAFormEvent"));
         assert!(!form_xml.contains(r#"<Event name="OnClose">"#));
     }

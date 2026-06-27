@@ -11874,13 +11874,17 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_events() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"},{2,\"AfterWrite\",\"OldAfterWrite\"},{3,\"BeforeWrite\",\"OldBeforeWrite\"},{4,\"OnWriteAtServer\",\"OldWriteAtServer\"},{5,\"FillCheckProcessingAtServer\",\"OldFillCheck\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
 	<Events>
 		<Event name="OnOpen">NewOpen</Event>
 		<Event name="ChoiceProcessing">NewChoice</Event>
+		<Event name="AfterWrite">NewAfterWrite</Event>
+		<Event name="BeforeWrite">NewBeforeWrite</Event>
+		<Event name="OnWriteAtServer">NewWriteAtServer</Event>
+		<Event name="FillCheckProcessingAtServer">NewFillCheck</Event>
 		<Event name="BeforeClose">ShouldNotBeAdded</Event>
 	</Events>
 </Form>
@@ -11891,8 +11895,24 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains("\"OnOpen\",\"NewOpen\""));
         assert!(parsed.layout.contains("\"ChoiceProcessing\",\"NewChoice\""));
+        assert!(parsed.layout.contains("\"AfterWrite\",\"NewAfterWrite\""));
+        assert!(parsed.layout.contains("\"BeforeWrite\",\"NewBeforeWrite\""));
+        assert!(
+            parsed
+                .layout
+                .contains("\"OnWriteAtServer\",\"NewWriteAtServer\"")
+        );
+        assert!(
+            parsed
+                .layout
+                .contains("\"FillCheckProcessingAtServer\",\"NewFillCheck\"")
+        );
         assert!(!parsed.layout.contains("OldOpen"));
         assert!(!parsed.layout.contains("OldChoice"));
+        assert!(!parsed.layout.contains("OldAfterWrite"));
+        assert!(!parsed.layout.contains("OldBeforeWrite"));
+        assert!(!parsed.layout.contains("OldWriteAtServer"));
+        assert!(!parsed.layout.contains("OldFillCheck"));
         assert!(!parsed.layout.contains("ShouldNotBeAdded"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
