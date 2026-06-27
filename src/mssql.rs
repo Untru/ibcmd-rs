@@ -69,6 +69,7 @@ pub struct MssqlCompareReport {
 pub struct MssqlSourceParityAuditReport {
     pub database: String,
     pub source_root: PathBuf,
+    pub path_prefixes: Vec<String>,
     pub source_coverage: SourceLoadCoverageAuditReport,
     pub selected_metadata_xml_files: usize,
     pub selected_common_module_xml_files: usize,
@@ -78,6 +79,7 @@ pub struct MssqlSourceParityAuditReport {
     pub prepared_total_config_rows: usize,
     pub prepare_failures: Vec<MssqlSourceParityPrepareFailure>,
     pub versions_blob: Option<GeneratedBlobReport>,
+    pub version_patch_error: Option<String>,
     pub version_replacements: Vec<VersionReplacement>,
     pub batches: Vec<MssqlSourceParityBatchReport>,
 }
@@ -478,8 +480,16 @@ pub fn audit_source_parity(
 ) -> Result<MssqlSourceParityAuditReport> {
     let source_coverage = audit_source_load_coverage(&args.source_root)?;
     let manifest = scan_sources(&args.source_root)?;
-    let metadata_xmls = source_metadata_xmls(&manifest, &args.source_root);
-    let common_module_xmls = source_common_module_xmls(&manifest, &args.source_root);
+    let metadata_xmls = filter_source_paths_by_prefix(
+        source_metadata_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
+    let common_module_xmls = filter_source_paths_by_prefix(
+        source_common_module_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
     if metadata_xmls.is_empty() && common_module_xmls.is_empty() {
         return Err(anyhow!(
             "no supported root XML objects or common modules found under {}",
@@ -551,7 +561,25 @@ pub fn audit_source_parity(
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
-    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+    let (versions_blob_report, version_replacements, version_patch_error) =
+        match patch_versions_blob_bytes(&versions_blob, &changes, true) {
+            Ok(patched_versions) => (
+                GeneratedBlobReport {
+                    bytes: patched_versions.blob.len(),
+                    sha256: patched_versions.output_sha256,
+                },
+                patched_versions.replacements,
+                None,
+            ),
+            Err(error) => (
+                GeneratedBlobReport {
+                    bytes: versions_blob.len(),
+                    sha256: hex_sha256(&versions_blob),
+                },
+                Vec::new(),
+                Some(error.to_string()),
+            ),
+        };
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
     let batches =
@@ -567,6 +595,7 @@ pub fn audit_source_parity(
     Ok(MssqlSourceParityAuditReport {
         database: args.database.clone(),
         source_root: source_coverage.root.clone(),
+        path_prefixes: args.path_prefix.clone(),
         source_coverage,
         selected_metadata_xml_files: metadata_xmls.len(),
         selected_common_module_xml_files: common_module_xmls.len(),
@@ -575,11 +604,9 @@ pub fn audit_source_parity(
         prepared_metadata_body_rows,
         prepared_total_config_rows,
         prepare_failures,
-        versions_blob: Some(GeneratedBlobReport {
-            bytes: patched_versions.blob.len(),
-            sha256: patched_versions.output_sha256,
-        }),
-        version_replacements: patched_versions.replacements,
+        versions_blob: Some(versions_blob_report),
+        version_patch_error,
+        version_replacements,
         batches: batch_reports,
     })
 }
@@ -3561,12 +3588,14 @@ fn fetch_config_blob(
 ) -> Result<Vec<u8>> {
     let sql = format!(
         "SET NOCOUNT ON; USE {db};\n\
-         SELECT FileName AS file_name,\n\
-                DataSize AS data_size,\n\
-                CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
-         FROM Config\n\
-         WHERE FileName = N'{file_name}' AND PartNo = 0\n\
-         FOR JSON PATH;",
+         SELECT COALESCE((\n\
+             SELECT FileName AS file_name,\n\
+                    DataSize AS data_size,\n\
+                    CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
+             FROM Config\n\
+             WHERE FileName = N'{file_name}' AND PartNo = 0\n\
+             FOR JSON PATH\n\
+         ), '[]');",
         db = quote_ident(database),
         file_name = quote_string(file_name),
     );
@@ -4373,6 +4402,31 @@ fn source_relative_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+fn filter_source_paths_by_prefix(
+    paths: Vec<PathBuf>,
+    root: &Path,
+    prefixes: &[String],
+) -> Vec<PathBuf> {
+    if prefixes.is_empty() {
+        return paths;
+    }
+    let normalized_prefixes = prefixes
+        .iter()
+        .map(|prefix| prefix.replace('\\', "/").trim_matches('/').to_string())
+        .collect::<Vec<_>>();
+    paths
+        .into_iter()
+        .filter(|path| {
+            let relative = source_relative_path(root, path);
+            normalized_prefixes.iter().any(|prefix| {
+                relative == *prefix
+                    || relative == format!("{prefix}.xml")
+                    || relative.starts_with(&format!("{prefix}/"))
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 enum SourceStageItem {
     Metadata(PreparedMetadataObjectStage),
@@ -4628,10 +4682,10 @@ mod tests {
         PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataBodyStage,
         PreparedMetadataObjectStage, StorageBundleManifest, StorageTableManifest, TableShape,
         build_source_stage_batches, compare_shapes, compare_storage_table_manifests,
-        infer_common_module_text_path, is_root_common_module_xml, is_root_metadata_xml,
-        is_stage_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
-        source_common_module_xmls, source_metadata_xmls, source_stage_batch_reports,
-        validate_delta_manifest, validate_storage_manifest,
+        filter_source_paths_by_prefix, infer_common_module_text_path, is_root_common_module_xml,
+        is_root_metadata_xml, is_stage_metadata_xml, quote_ident, quote_string,
+        require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
+        source_stage_batch_reports, validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -5357,6 +5411,38 @@ mod tests {
         assert!(!reports[1].include_stable_rows);
         assert!(reports[1].include_versions_row);
         assert_eq!(reports[1].expected_total_rows, 7);
+    }
+
+    #[test]
+    fn filters_source_paths_by_prefix() {
+        let root = PathBuf::from(r"C:\sources");
+        let paths = vec![
+            PathBuf::from(r"C:\sources\Catalogs\Products.xml"),
+            PathBuf::from(r"C:\sources\Catalogs\Products\Forms\ItemForm.xml"),
+            PathBuf::from(r"C:\sources\Catalogs\Services.xml"),
+            PathBuf::from(r"C:\sources\CommonModules\Utils.xml"),
+        ];
+
+        let filtered = filter_source_paths_by_prefix(
+            paths,
+            &root,
+            &[
+                "Catalogs/Products".to_string(),
+                r"CommonModules\Utils".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .collect::<Vec<_>>(),
+            vec![
+                "C:/sources/Catalogs/Products.xml",
+                "C:/sources/Catalogs/Products/Forms/ItemForm.xml",
+                "C:/sources/CommonModules/Utils.xml"
+            ]
+        );
     }
 
     #[test]

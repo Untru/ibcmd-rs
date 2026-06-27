@@ -385,6 +385,9 @@ pub struct MssqlAuditSourceParityArgs {
     /// Optional maximum number of staged XML objects per SQL batch.
     #[arg(long)]
     pub batch_size: Option<usize>,
+    /// Optional source path prefix to audit. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
@@ -2805,6 +2808,8 @@ mod tests {
             r"C:\sources",
             "--batch-size",
             "2",
+            "--path-prefix",
+            "Catalogs/Products",
             "-o",
             r"C:\audit\parity.json",
         ]);
@@ -2813,6 +2818,7 @@ mod tests {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
                 assert_eq!(args.batch_size, Some(2));
+                assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
                 assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\parity.json")));
             }
             other => panic!("unexpected command: {other:?}"),
