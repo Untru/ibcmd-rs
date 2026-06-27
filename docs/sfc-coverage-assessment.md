@@ -97,7 +97,7 @@ BSL по именам:
 
 | TemplateType | Количество | Текущее покрытие |
 |---|---:|---|
-| `SpreadsheetDocument` | 14 051 объектов, из них 14 046 с `Template.xml` | Pack-покрытие на `sfc` закрыто: `audit-spreadsheet-templates` упаковал 14 046 из 14 046. Есть строки, колонки, области, объединения, печать, форматы, цвета, шрифты, линии, пустые колонтитулы, рисунки и стандартные картинки `Print`, `InputFieldCalculator`, `Information`, `SaveFile`. Следующий этап - semantic/byte round-trip diff. |
+| `SpreadsheetDocument` | 14 051 объектов, из них 14 046 с `Template.xml` | Pack-покрытие на `sfc` закрыто: `audit-spreadsheet-templates` упаковал 14 046 из 14 046. Semantic round-trip `XML -> blob -> XML -> blob -> XML` пока стабилен только для 638 из 14 046, поэтому этот блок еще нельзя считать полноценно совместимым. |
 | `DataCompositionSchema` | 1 541 | Поддержан как raw deflated XML body. Семантической проверки СКД нет. |
 | `TextDocument` | 1 022 | Поддержан как raw deflated text body. |
 | `BinaryData` | 723 объекта, из них 719 с `Template.bin` | Поддержан как binary/base64 payload, но нужна проверка round-trip. |
@@ -116,7 +116,8 @@ BSL по именам:
 | `audit-spreadsheet-templates D:\УХА\sfc` до поддержки `v8ui:Print` | 14 034 / 14 046 `SpreadsheetDocument` packed | Ошибки были связаны не с узлами MOXCEL, а со стандартными картинками платформы. |
 | `audit-spreadsheet-templates D:\УХА\sfc` после поддержки `v8ui:Print` | 14 042 / 14 046 packed, 487.422 секунды | Осталось 4 ошибки: 2 `InputFieldCalculator`, 1 `Information`, 1 `SaveFile`. |
 | `audit-spreadsheet-templates D:\УХА\sfc` после поддержки всех найденных стандартных картинок | 14 046 / 14 046 packed, 488.805 секунды | Pack-аудит всех табличных макетов `sfc` проходит без отказов. |
-| `cargo test` | 287 passed | Unit-покрытие текущего кода стабильно после изменений. |
+| `audit-spreadsheet-roundtrip D:\УХА\sfc` после добавления параллельного аудита | 14 046 packed, 13 105 extracted, 13 105 repacked, 638 matched, 12 334 different, 1 074 extract failures; 81.049 секунды release-прогона вместе с компиляцией | Паковать все SpreadsheetDocument уже можем, но полноценный стабильный цикл выгрузки/загрузки макета пока проходит только на небольшой доле. Основной фронт работ - устранить XML-нормализационные отличия `compare` и 941 отказ первичного `extract` плюс 133 отказа `extract-repacked`. |
+| `cargo test` | 288 passed | Unit-покрытие текущего кода стабильно после изменений. |
 
 ## Загрузка XML -> SQL
 
@@ -200,7 +201,7 @@ BSL по именам:
 | Роли | Средняя, нужен stress-test |
 | Командный интерфейс | Средняя |
 | Макеты не SpreadsheetDocument | Средняя/высокая |
-| SpreadsheetDocument | Высокая для pack-аудита, средняя для полного round-trip |
+| SpreadsheetDocument | Высокая для pack-аудита, низкая/средняя для полного semantic round-trip |
 | Формы | Низкая для полного round-trip |
 | Загрузка в новую пустую SQL-базу | Низкая/не доказана |
 
@@ -210,13 +211,13 @@ BSL по именам:
 |---|---|---|
 | Агент загрузки XML -> SQL | `src/mssql.rs`, stage/load CLI, batch-и, dry-run prepare | Есть отчет по всем объектам `sfc`: сколько root XML выбрано, сколько body rows подготовлено, сколько файлов проигнорировано; batch row count покрыт тестом. |
 | Агент выгрузки SQL -> XML | `src/mssql_dump.rs`, native `mssql-dump-config`, source layout writer | Есть structural diff между native dump и эталонным layout: missing/extra/different по типам файлов. |
-| Агент макетов и assets | `src/module_blob.rs`, `src/source_audit.rs`, MOXCEL, CommonPictures, Template.bin | `audit-spreadsheet-templates` дает 14 046 / 14 046 packed; следующий критерий - stress-test CommonPictures и round-trip для `BinaryData`/`AddIn`. |
+| Агент макетов и assets | `src/module_blob.rs`, `src/source_audit.rs`, MOXCEL, CommonPictures, Template.bin | `audit-spreadsheet-templates` дает 14 046 / 14 046 packed; `audit-spreadsheet-roundtrip` должен вырасти с 638 / 14 046 matched до полного semantic round-trip. Следующий критерий - разбор `compare`-расхождений и stress-test `BinaryData`/`AddIn`. |
 | Агент форм | compile/decompile `Ext/Form.xml`, form item assets | Вместо каркаса формы выгружается и загружается реальная структура хотя бы для малого набора форм, затем расширение на `sfc`. |
 | Агент интеграции | test harness, SQL clone, сравнение с `ibcmd` | Есть сценарий `ibcmd load` vs `ibcmd-rs stage/load` на копии базы и post-compare по `_Config`/`ConfigSave`/source dump. |
 
 Ближайший рациональный план работ:
 
-1. Добавить semantic/byte diff для `SpreadsheetDocument`: `source Template.xml -> pack -> dump/extract -> Template.xml` на малом наборе, затем на всех 14 046 макетах `sfc`.
+1. Разобрать `audit-spreadsheet-roundtrip` для `SpreadsheetDocument`: сначала 941 первичный `extract` failure, затем 133 `extract-repacked`, затем массовые `compare`-расхождения XML.
 2. Проверить и покрыть тестом batch accounting в `mssql-stage-source-objects`, особенно второй batch и stable rows.
 3. Добавить dry-run prepare отчет для загрузки всех исходников `sfc` без записи в SQL.
 4. Начать отдельную ветку по полноценному `Form.xml` round-trip: сначала анализ реальной структуры, затем выгрузка, затем упаковка обратно.

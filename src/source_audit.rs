@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
+use rayon::prelude::*;
 use serde::Serialize;
 use walkdir::WalkDir;
 
@@ -11,6 +12,7 @@ use crate::module_blob::{
     parse_simple_metadata_xml_properties, parse_template_type_from_xml,
 };
 use crate::mssql_dump::extract_moxel_spreadsheet_xml;
+use crate::parallel;
 
 #[derive(Debug, Serialize)]
 pub struct SpreadsheetTemplateAuditReport {
@@ -49,6 +51,16 @@ pub struct SpreadsheetTemplateRoundTripAuditError {
     pub template_xml: String,
     pub phase: String,
     pub message: String,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetTemplateRoundTripItemAudit {
+    packed: usize,
+    extracted: usize,
+    repacked: usize,
+    matched: usize,
+    different: usize,
+    errors: Vec<SpreadsheetTemplateRoundTripAuditError>,
 }
 
 pub fn audit_spreadsheet_templates(root: &Path) -> Result<SpreadsheetTemplateAuditReport> {
@@ -125,13 +137,7 @@ pub fn audit_spreadsheet_template_roundtrip(
     let source = MetadataSourceContext::new(root.clone());
     let object_refs = common_picture_object_refs(&root)?;
     let mut template_xml_files = 0usize;
-    let mut spreadsheet_templates = 0usize;
-    let mut packed = 0usize;
-    let mut extracted = 0usize;
-    let mut repacked = 0usize;
-    let mut matched = 0usize;
-    let mut different = 0usize;
-    let mut errors = Vec::new();
+    let mut templates = Vec::new();
 
     for entry in WalkDir::new(&root)
         .into_iter()
@@ -151,87 +157,37 @@ pub fn audit_spreadsheet_template_roundtrip(
         if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
             continue;
         }
-        spreadsheet_templates += 1;
+        templates.push((metadata_xml, template_xml.to_path_buf()));
+    }
 
-        let xml = fs::read(template_xml)
-            .with_context(|| format!("failed to read {}", template_xml.display()))?;
-        let first = match pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(&source)) {
-            Ok(blob) => {
-                packed += 1;
-                blob
-            }
-            Err(error) => {
-                push_roundtrip_error(
+    let item_reports = parallel::install(|| {
+        templates
+            .par_iter()
+            .map(|(metadata_xml, template_xml)| {
+                audit_one_spreadsheet_template_roundtrip(
                     &root,
-                    &metadata_xml,
+                    &source,
+                    &object_refs,
+                    metadata_xml,
                     template_xml,
-                    "pack",
-                    error,
-                    &mut errors,
-                );
-                continue;
-            }
-        };
-        let extracted_xml = match extract_moxel_spreadsheet_xml(&first.blob, &object_refs) {
-            Some(xml) => {
-                extracted += 1;
-                xml
-            }
-            None => {
-                errors.push(SpreadsheetTemplateRoundTripAuditError {
-                    metadata_xml: relative_path_string(&root, &metadata_xml),
-                    template_xml: relative_path_string(&root, template_xml),
-                    phase: "extract".to_string(),
-                    message: "failed to extract SpreadsheetDocument XML from packed MOXCEL blob"
-                        .to_string(),
-                });
-                continue;
-            }
-        };
-        let second = match pack_moxel_spreadsheet_blob_from_xml_with_source(
-            extracted_xml.as_bytes(),
-            Some(&source),
-        ) {
-            Ok(blob) => {
-                repacked += 1;
-                blob
-            }
-            Err(error) => {
-                push_roundtrip_error(
-                    &root,
-                    &metadata_xml,
-                    template_xml,
-                    "repack",
-                    error,
-                    &mut errors,
-                );
-                continue;
-            }
-        };
-        let second_extracted_xml = match extract_moxel_spreadsheet_xml(&second.blob, &object_refs) {
-            Some(xml) => xml,
-            None => {
-                errors.push(SpreadsheetTemplateRoundTripAuditError {
-                    metadata_xml: relative_path_string(&root, &metadata_xml),
-                    template_xml: relative_path_string(&root, template_xml),
-                    phase: "extract-repacked".to_string(),
-                    message: "failed to extract SpreadsheetDocument XML from repacked MOXCEL blob"
-                        .to_string(),
-                });
-                continue;
-            }
-        };
-        if extracted_xml == second_extracted_xml {
-            matched += 1;
-        } else {
-            different += 1;
-            errors.push(SpreadsheetTemplateRoundTripAuditError {
-                metadata_xml: relative_path_string(&root, &metadata_xml),
-                template_xml: relative_path_string(&root, template_xml),
-                phase: "compare".to_string(),
-                message: roundtrip_difference_message(&extracted_xml, &second_extracted_xml),
-            });
-        }
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+    let spreadsheet_templates = templates.len();
+    let mut packed = 0usize;
+    let mut extracted = 0usize;
+    let mut repacked = 0usize;
+    let mut matched = 0usize;
+    let mut different = 0usize;
+    let mut errors = Vec::new();
+    for report in item_reports {
+        packed += report.packed;
+        extracted += report.extracted;
+        repacked += report.repacked;
+        matched += report.matched;
+        different += report.different;
+        errors.extend(report.errors);
     }
 
     errors.sort_by(|left, right| {
@@ -251,6 +207,108 @@ pub fn audit_spreadsheet_template_roundtrip(
         failed: errors.len(),
         errors,
     })
+}
+
+fn audit_one_spreadsheet_template_roundtrip(
+    root: &Path,
+    source: &MetadataSourceContext,
+    object_refs: &BTreeMap<String, String>,
+    metadata_xml: &Path,
+    template_xml: &Path,
+) -> SpreadsheetTemplateRoundTripItemAudit {
+    let mut report = SpreadsheetTemplateRoundTripItemAudit::default();
+    let xml = match fs::read(template_xml) {
+        Ok(xml) => xml,
+        Err(error) => {
+            push_roundtrip_error(
+                root,
+                metadata_xml,
+                template_xml,
+                "read",
+                error,
+                &mut report.errors,
+            );
+            return report;
+        }
+    };
+    let first = match pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(source)) {
+        Ok(blob) => {
+            report.packed += 1;
+            blob
+        }
+        Err(error) => {
+            push_roundtrip_error(
+                root,
+                metadata_xml,
+                template_xml,
+                "pack",
+                error,
+                &mut report.errors,
+            );
+            return report;
+        }
+    };
+    let extracted_xml = match extract_moxel_spreadsheet_xml(&first.blob, object_refs) {
+        Some(xml) => {
+            report.extracted += 1;
+            xml
+        }
+        None => {
+            report.errors.push(SpreadsheetTemplateRoundTripAuditError {
+                metadata_xml: relative_path_string(root, metadata_xml),
+                template_xml: relative_path_string(root, template_xml),
+                phase: "extract".to_string(),
+                message: "failed to extract SpreadsheetDocument XML from packed MOXCEL blob"
+                    .to_string(),
+            });
+            return report;
+        }
+    };
+    let second = match pack_moxel_spreadsheet_blob_from_xml_with_source(
+        extracted_xml.as_bytes(),
+        Some(source),
+    ) {
+        Ok(blob) => {
+            report.repacked += 1;
+            blob
+        }
+        Err(error) => {
+            push_roundtrip_error(
+                root,
+                metadata_xml,
+                template_xml,
+                "repack",
+                error,
+                &mut report.errors,
+            );
+            return report;
+        }
+    };
+    let second_extracted_xml = match extract_moxel_spreadsheet_xml(&second.blob, object_refs) {
+        Some(xml) => xml,
+        None => {
+            report.errors.push(SpreadsheetTemplateRoundTripAuditError {
+                metadata_xml: relative_path_string(root, metadata_xml),
+                template_xml: relative_path_string(root, template_xml),
+                phase: "extract-repacked".to_string(),
+                message: "failed to extract SpreadsheetDocument XML from repacked MOXCEL blob"
+                    .to_string(),
+            });
+            return report;
+        }
+    };
+    if extracted_xml == second_extracted_xml {
+        report.matched += 1;
+    } else {
+        report.different += 1;
+        report.errors.push(SpreadsheetTemplateRoundTripAuditError {
+            metadata_xml: relative_path_string(root, metadata_xml),
+            template_xml: relative_path_string(root, template_xml),
+            phase: "compare".to_string(),
+            message: roundtrip_difference_message(&extracted_xml, &second_extracted_xml),
+        });
+    }
+    report
 }
 
 fn template_metadata_xml_path(template_xml: &Path) -> Option<PathBuf> {
