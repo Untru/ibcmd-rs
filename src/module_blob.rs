@@ -82,6 +82,7 @@ struct FormXmlBodyProperties {
     group: Option<FormXmlGroup>,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
+    attributes: Vec<FormXmlAttribute>,
     commands: Vec<FormXmlCommand>,
 }
 
@@ -105,6 +106,21 @@ struct FormXmlCommand {
     tooltip: Vec<LocalizedString>,
     action: Option<String>,
     current_row_use: Option<FormXmlCommandCurrentRowUse>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlAttribute {
+    id: String,
+    name: String,
+    main_attribute: Option<bool>,
+    settings: Option<FormXmlDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlDynamicListSettings {
+    manual_query: Option<bool>,
+    dynamic_data_read: Option<bool>,
+    query_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3160,6 +3176,14 @@ pub fn pack_form_body_blob_from_form_xml(
                 plain.replace_range(commands_range, &commands);
             }
         }
+        if !properties.attributes.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
+                let mut attributes = plain[attributes_range.clone()].trim().to_string();
+                patch_form_body_attributes(&mut attributes, &properties.attributes)?;
+                plain.replace_range(attributes_range, &attributes);
+            }
+        }
     }
     if let Some(module_text) = module_text {
         let container = FormBodyContainer::parse(&plain)?;
@@ -3188,6 +3212,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_section = None::<String>;
     let mut current_localized_lang = None::<String>;
     let mut current_localized_content = None::<String>;
+    let mut current_attribute = None::<FormXmlAttribute>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -3200,6 +3225,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Event"
                         | "Action"
                         | "CurrentRowUse"
+                        | "MainAttribute"
+                        | "ManualQuery"
+                        | "DynamicDataRead"
+                        | "QueryText"
                         | "lang"
                         | "content"
                 ) {
@@ -3216,6 +3245,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
                     current_command = parse_form_command_xml(&event)?;
+                } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
+                    current_attribute = parse_form_attribute_xml(&event)?;
+                } else if local == "Settings"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && current_attribute
+                        .as_ref()
+                        .and_then(|attribute| attribute.settings.as_ref())
+                        .is_none()
+                {
+                    if let Some(attribute) = current_attribute.as_mut() {
+                        attribute.settings = Some(FormXmlDynamicListSettings::default());
+                    }
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -3241,6 +3282,25 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "DynamicDataRead",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "Title", "item", "lang"],
@@ -3267,6 +3327,25 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "DynamicDataRead",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "Title", "item", "lang"],
@@ -3386,6 +3465,75 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             properties.commands.push(command);
                         }
                     }
+                    "MainAttribute"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "MainAttribute"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.main_attribute = Some(parse_form_xml_bool(
+                                "Attribute/MainAttribute",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ManualQuery"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.manual_query = Some(parse_form_xml_bool(
+                                "Settings/ManualQuery",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "DynamicDataRead"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "DynamicDataRead",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.dynamic_data_read = Some(parse_form_xml_bool(
+                                "Settings/DynamicDataRead",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "QueryText"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.query_text = Some(text_value.to_string());
+                        }
+                    }
+                    "Attribute" if path_ends_with(&path, &["Form", "Attributes", "Attribute"]) => {
+                        if let Some(attribute) = current_attribute.take() {
+                            properties.attributes.push(attribute);
+                        }
+                    }
                     _ => {}
                 }
                 let _ = path.pop();
@@ -3396,6 +3544,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Event"
                         | "Action"
                         | "CurrentRowUse"
+                        | "MainAttribute"
+                        | "ManualQuery"
+                        | "DynamicDataRead"
+                        | "QueryText"
                         | "lang"
                         | "content"
                 ) {
@@ -3439,6 +3591,29 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         action: None,
         current_row_use: None,
     }))
+}
+
+fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttribute>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAttribute {
+        id,
+        name,
+        main_attribute: None,
+        settings: None,
+    }))
+}
+
+fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(anyhow!("unsupported Form {name} boolean value: {other}")),
+    }
 }
 
 fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandCurrentRowUse> {
@@ -3590,6 +3765,131 @@ fn patch_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> R
         let _ = patch_form_body_command(text, command)?;
     }
     Ok(())
+}
+
+fn patch_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute]) -> Result<()> {
+    for attribute in attributes {
+        let _ = patch_form_body_attribute(text, attribute)?;
+    }
+    Ok(())
+}
+
+fn patch_form_body_attribute(text: &mut String, attribute: &FormXmlAttribute) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_attribute_entry(&mut nested, attribute)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+        if patch_form_body_attribute(&mut nested, attribute)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_attribute_entry(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("9") {
+        return Ok(false);
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = fields
+        .get(3)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    let matches_attribute = existing_id.as_deref() == Some(attribute.id.as_str())
+        || existing_name.as_deref() == Some(attribute.name.as_str());
+    if !matches_attribute {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = fields.get(3)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range.clone(), format_1c_string(&attribute.name)));
+    }
+    if let Some(main_attribute) = attribute.main_attribute
+        && let Some(main_range) = fields.get(10)
+    {
+        replacements.push((
+            main_range.clone(),
+            if main_attribute { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if let Some(settings) = &attribute.settings
+        && let Some(settings_range) = fields.get(14)
+    {
+        let mut settings_text = text[settings_range.clone()].to_string();
+        patch_form_dynamic_list_settings(&mut settings_text, settings)?;
+        replacements.push((settings_range.clone(), settings_text));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(true)
+}
+
+fn patch_form_dynamic_list_settings(
+    text: &mut String,
+    settings: &FormXmlDynamicListSettings,
+) -> Result<()> {
+    if let Some(query_text) = &settings.query_text {
+        let _ =
+            patch_form_setting_value(text, "QueryText", &format_form_setting_string(query_text))?;
+    }
+    if let Some(manual_query) = settings.manual_query {
+        let _ =
+            patch_form_setting_value(text, "ManualQuery", &format_form_setting_bool(manual_query))?;
+    }
+    if let Some(dynamic_data_read) = settings.dynamic_data_read {
+        let data_selection = !dynamic_data_read;
+        let _ = patch_form_setting_value(
+            text,
+            "DynamicalDataSelection",
+            &format_form_setting_bool(data_selection),
+        )?;
+    }
+    Ok(())
+}
+
+fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key == key {
+            text.replace_range(window[1].clone(), replacement);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn format_form_setting_string(value: &str) -> String {
+    format!("{{\"S\",{}}}", format_1c_string(value))
+}
+
+fn format_form_setting_bool(value: bool) -> String {
+    format!("{{\"B\",{}}}", if value { "1" } else { "0" })
 }
 
 fn patch_form_body_command(text: &mut String, command: &FormXmlCommand) -> Result<bool> {
@@ -10521,6 +10821,56 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!parsed.layout.contains("OldBar"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_attributes() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,3,"QueryText",{"S","Old query"},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0}},{0,0}}},{0,0},{0,0},{0}}"##,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="Список" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<QueryText>ВЫБРАТЬ Ссылка ИЗ Справочник.Товары</QueryText>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[0].contains(r#""Список""#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,3,"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
+        );
+        assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
+        assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
+        assert!(!parsed.trailing[0].contains("OldList"));
+        assert!(!parsed.trailing[0].contains("Old query"));
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
         assert_eq!(
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
