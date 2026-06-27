@@ -1921,6 +1921,9 @@ fn prepare_metadata_body_rows(
     rows.extend(prepare_object_help_body_row(
         sqlcmd, server, database, xml_path, properties,
     )?);
+    rows.extend(prepare_object_module_body_rows(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
     Ok(rows)
 }
 
@@ -2164,6 +2167,61 @@ fn prepare_object_help_body_row(
 fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
     let suffix = if properties.kind == "Form" { "1" } else { "5" };
     format!("{}.{}", properties.uuid, suffix)
+}
+
+fn prepare_object_module_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let mut rows = Vec::new();
+    for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
+        let body_path = infer_object_module_body_path(xml_path, file_name);
+        if !body_path.exists() {
+            continue;
+        }
+        let body_id = format!("{}.{}", properties.uuid, suffix);
+        let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+        let text = fs::read(&body_path)
+            .with_context(|| format!("failed to read module body {}", body_path.display()))?;
+        let packed = pack_module_blob_bytes(&text, Some(&base_body), None)
+            .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
+        rows.push(PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        });
+    }
+    Ok(rows)
+}
+
+fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "Bot" => &[("1", "Module.bsl")],
+        "CommonCommand" => &[("2", "CommandModule.bsl")],
+        "Constant" => &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")],
+        "SettingsStorage" => &[("8", "ManagerModule.bsl")],
+        "Sequence" => &[("0", "RecordSetModule.bsl")],
+        "Catalog" => &[("0", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
+        "Report" | "DataProcessor" | "Document" => {
+            &[("0", "ObjectModule.bsl"), ("2", "ManagerModule.bsl")]
+        }
+        "Enum" => &[("0", "ManagerModule.bsl")],
+        "ExchangePlan" => &[("2", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
+        "AccumulationRegister"
+        | "AccountingRegister"
+        | "CalculationRegister"
+        | "InformationRegister" => &[("1", "RecordSetModule.bsl"), ("2", "ManagerModule.bsl")],
+        "DocumentJournal" => &[("1", "ManagerModule.bsl")],
+        "Task" => &[("6", "ObjectModule.bsl"), ("7", "ManagerModule.bsl")],
+        "BusinessProcess" => &[("6", "ObjectModule.bsl"), ("8", "ManagerModule.bsl")],
+        "ChartOfCharacteristicTypes" => &[("15", "ObjectModule.bsl"), ("16", "ManagerModule.bsl")],
+        "IntegrationService" => &[("0", "Module.bsl")],
+        _ => &[],
+    }
 }
 
 fn prepare_common_module_object_stage(
@@ -3540,6 +3598,10 @@ fn infer_object_help_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Help.xml")
 }
 
+fn infer_object_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
+    xml.with_extension("").join("Ext").join(file_name)
+}
+
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
     let package_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -4119,6 +4181,49 @@ mod tests {
         assert_eq!(
             super::infer_help_body_id(&form),
             "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.1"
+        );
+    }
+
+    #[test]
+    fn maps_object_module_body_suffixes_for_load() {
+        assert_eq!(
+            super::object_module_body_suffixes("Catalog"),
+            &[("0", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("InformationRegister"),
+            &[("1", "RecordSetModule.bsl"), ("2", "ManagerModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("Constant"),
+            &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("CommonCommand"),
+            &[("2", "CommandModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("IntegrationService"),
+            &[("0", "Module.bsl")]
+        );
+        assert!(super::object_module_body_suffixes("Role").is_empty());
+    }
+
+    #[test]
+    fn infers_object_module_body_paths() {
+        assert_eq!(
+            super::infer_object_module_body_path(
+                r"Catalogs\Products.xml".as_ref(),
+                "ObjectModule.bsl"
+            ),
+            std::path::PathBuf::from(r"Catalogs\Products\Ext\ObjectModule.bsl")
+        );
+        assert_eq!(
+            super::infer_object_module_body_path(
+                r"InformationRegisters\Prices.xml".as_ref(),
+                "RecordSetModule.bsl"
+            ),
+            std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
         );
     }
 
