@@ -740,6 +740,10 @@ fn source_assets_from_metadata_blob_inner(
                 primary_path: object_path.join("Ext").join("Package.bin"),
                 kind: SourceAssetKind::InflatedBinary,
             }),
+            "WSReference" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("WSDefinition.xml"),
+                kind: SourceAssetKind::InflatedBinary,
+            }),
             "Role"
                 if rows_by_file_name
                     .get(body_id.as_str())
@@ -6362,10 +6366,12 @@ fn is_offset_inside_metadata_object_code(text: &str, offset: usize, code: u32) -
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
     let module_file = match (kind, suffix) {
         ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
+        ("Bot", "1") | ("IntegrationService", "0") => Some("Module.bsl"),
         ("CommonCommand", "2") => Some("CommandModule.bsl"),
         ("Constant", "0") => Some("ValueManagerModule.bsl"),
         ("Constant", "1") => Some("ManagerModule.bsl"),
         ("SettingsStorage", "8") => Some("ManagerModule.bsl"),
+        ("Sequence", "0") => Some("RecordSetModule.bsl"),
         ("Catalog", "0") => Some("ObjectModule.bsl"),
         ("Catalog", "3") => Some("ManagerModule.bsl"),
         ("Report", "0") => Some("ObjectModule.bsl"),
@@ -6880,6 +6886,7 @@ fn metadata_source_for_text(
         0 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
             Some(("Language", "Languages"))
         }
+        0 if header_index == Some(1) => Some(("IntegrationService", "IntegrationServices")),
         1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
             Some(("EventSubscription", "EventSubscriptions"))
         }
@@ -6889,11 +6896,15 @@ fn metadata_source_for_text(
         1 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
             Some(("XDTOPackage", "XDTOPackages"))
         }
+        1 if header_index == Some(1) => Some(("Bot", "Bots")),
         2 if contains_wrapped_metadata_object_code(text, 9, uuid) => {
             Some(("CommonCommand", "CommonCommands"))
         }
         2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
             Some(("HTTPService", "HTTPServices"))
+        }
+        2 if header_index == Some(2) && field_starts_with(fields.get(1), "{") => {
+            Some(("WSReference", "WSReferences"))
         }
         4 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
             Some(("WebService", "WebServices"))
@@ -6909,6 +6920,8 @@ fn metadata_source_for_text(
         }
         3 if header_index == Some(6) => Some(("CommandGroup", "CommandGroups")),
         3 if header_index == Some(3) => Some(("StyleItem", "StyleItems")),
+        3 if header_index == Some(1) && fields.len() == 2 => Some(("Style", "Styles")),
+        3 if header_index == Some(1) => Some(("DocumentNumerator", "DocumentNumerators")),
         2 if header_index == Some(1)
             && field_is_quoted_string(fields.get(2))
             && field_is_quoted_string(fields.get(3)) =>
@@ -6920,7 +6933,8 @@ fn metadata_source_for_text(
         }
         4 if header_index == Some(1) => Some(("CommonPicture", "CommonPictures")),
         5 => Some(("CommonAttribute", "CommonAttributes")),
-        6 => Some(("Role", "Roles")),
+        6 if header_index == Some(1) => Some(("Role", "Roles")),
+        6 => Some(("Sequence", "Sequences")),
         9 => Some(("CommonCommand", "CommonCommands")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
         16 => Some(("Constant", "Constants")),
@@ -8754,6 +8768,27 @@ mod tests {
                 "UseFeature",
                 "1",
                 PathBuf::from("Constants/UseFeature/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "Bot",
+                "Bots",
+                "Notify",
+                "1",
+                PathBuf::from("Bots/Notify/Ext/Module.bsl"),
+            ),
+            (
+                "IntegrationService",
+                "IntegrationServices",
+                "MessageExchange",
+                "0",
+                PathBuf::from("IntegrationServices/MessageExchange/Ext/Module.bsl"),
+            ),
+            (
+                "Sequence",
+                "Sequences",
+                "Documents",
+                "0",
+                PathBuf::from("Sequences/Documents/Ext/RecordSetModule.bsl"),
             ),
         ];
 
@@ -12021,6 +12056,118 @@ mod tests {
             assert_eq!(properties.uuid, uuid);
             assert!(!repacked.blob.is_empty());
         }
+    }
+
+    #[test]
+    fn extracts_sfc_metadata_family_xml_from_blob_shapes() {
+        let cases = vec![
+            (
+                "66666666-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{0,\r\n{3,\r\n{1,0,66666666-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"MessageExchange\",{1,\"en\",\"Message exchange\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\"\"},0}",
+                ),
+                "IntegrationService",
+                PathBuf::from("IntegrationServices").join("MessageExchange.xml"),
+            ),
+            (
+                "77777777-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{1,\r\n{3,\r\n{1,0,77777777-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"NotifyUsers\",{1,\"en\",\"Notify users\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},0,{4,0,{0},\"\",-1,-1,1,0,\"\"}},0}",
+                ),
+                "Bot",
+                PathBuf::from("Bots").join("NotifyUsers.xml"),
+            ),
+            (
+                "88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{2,\r\n{\"https://example.invalid/ws?wsdl\",0},\r\n{3,\r\n{1,0,88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"UpdateFiles\",{1,\"en\",\"Update files\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222},0}",
+                ),
+                "WSReference",
+                PathBuf::from("WSReferences").join("UpdateFiles.xml"),
+            ),
+            (
+                "99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{3,\r\n{3,\r\n{1,0,99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"Main\",{1,\"en\",\"Main\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n},0}",
+                ),
+                "Style",
+                PathBuf::from("Styles").join("Main.xml"),
+            ),
+            (
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{3,\r\n{3,\r\n{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"CashDocuments\",{1,\"en\",\"Cash documents\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},1,11,1,1,0},0}",
+                ),
+                "DocumentNumerator",
+                PathBuf::from("DocumentNumerators").join("CashDocuments.xml"),
+            ),
+            (
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                deflate_for_test(
+                    b"{1,\r\n{6,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{0,\r\n{3,\r\n{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},\"CompanyDocuments\",{1,\"en\",\"Company documents\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n},{0}},0}",
+                ),
+                "Sequence",
+                PathBuf::from("Sequences").join("CompanyDocuments.xml"),
+            ),
+        ];
+
+        for (uuid, blob, expected_kind, expected_path) in cases {
+            let extracted = extract_metadata_source_xml(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+
+            assert_eq!(extracted.relative_path, expected_path);
+            assert_eq!(properties.kind, expected_kind);
+            assert_eq!(properties.uuid, uuid);
+        }
+    }
+
+    #[test]
+    fn writes_ws_reference_body_asset_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let ws_uuid = "88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let ws_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{\"https://example.invalid/ws?wsdl\",0}},\r\n{{3,\r\n{{1,0,{ws_uuid}}},\"UpdateFiles\",{{1,\"en\",\"Update files\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222}},0}}"
+            )
+            .as_bytes(),
+        );
+        let ws_body = deflate_for_test(b"<definitions/>");
+        let rows = vec![
+            ConfigRow {
+                file_name: ws_uuid.to_string(),
+                part_no: 0,
+                data_size: ws_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&ws_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{ws_uuid}.0"),
+                part_no: 0,
+                data_size: ws_body.len() as i64,
+                binary_hex: encode_hex_for_test(&ws_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
+            "<definitions/>"
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
