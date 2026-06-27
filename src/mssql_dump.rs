@@ -4091,6 +4091,9 @@ fn collect_form_body_events(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
+        if is_form_child_item_fields(&nested) {
+            continue;
+        }
         for event in parse_form_body_event_fields(&nested) {
             if seen.insert((event.name.clone(), event.handler.clone())) {
                 events.push(event);
@@ -4098,6 +4101,13 @@ fn collect_form_body_events(
         }
         collect_form_body_events(&nested, events, seen);
     }
+}
+
+fn is_form_child_item_fields(fields: &[&str]) -> bool {
+    let Some(wrapper) = fields.first().map(|value| value.trim()) else {
+        return false;
+    };
+    form_child_item_tag(wrapper, fields).is_some()
 }
 
 fn parse_form_body_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
@@ -5011,12 +5021,31 @@ fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, S
 
 fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
     let mut events = Vec::new();
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if let Some(event) = parse_form_child_item_event_record(&nested) {
+            events.push(event);
+        }
+    }
     for window in fields.windows(2) {
         if let Some(event) = parse_form_child_item_event_pair(window[0], window[1]) {
             events.push(event);
         }
     }
     events
+}
+
+fn parse_form_child_item_event_record(fields: &[&str]) -> Option<FormBodyEvent> {
+    if fields.first().map(|value| value.trim()) != Some("1") {
+        return None;
+    }
+    parse_form_child_item_event_pair(fields.get(1)?, fields.get(2)?)
 }
 
 fn parse_form_child_item_event_pair(
@@ -5061,6 +5090,7 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
         "OnActivateCell" => Some("OnActivateCell".to_string()),
         "OnActivateField" => Some("OnActivateField".to_string()),
         "OnActivateRow" => Some("OnActivateRow".to_string()),
+        "97365900-eadf-4dfd-a9aa-fbb9ecabd079" => Some("OnGetDataAtServer".to_string()),
         "BeforeAddRow" => Some("BeforeAddRow".to_string()),
         "Creating" => Some("Creating".to_string()),
         "OnCurrentPageChange" => Some("OnCurrentPageChange".to_string()),
@@ -12135,6 +12165,39 @@ mod tests {
                 r#"<Event name="213d1900-dcad-4616-9f20-3f077156a40f">NameUuidEvent</Event>"#
             )
             .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn extracts_form_body_xml_keeps_child_events_nested() {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let layout = format!(
+            r#"{{59,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"Список",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}},"OnChange","NameChanged",213d1900-dcad-4616-9f20-3f077156a40f,"NameUuidEvent"}},{{1,97365900-eadf-4dfd-a9aa-fbb9ecabd079,"RowsGetData",1,0,97365900-eadf-4dfd-a9aa-fbb9ecabd079,0,1}}}}}}"#
+        );
+        let form_body = deflate_for_test(format!(r#"{{4,{layout},"",{{0}}}}"#).as_bytes());
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(!form_xml.contains("\r\n\t<Events>\r\n"));
+        assert_eq!(
+            form_xml
+                .matches(r#"<Event name="OnGetDataAtServer">RowsGetData</Event>"#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            form_xml
+                .matches(r#"<Event name="OnChange">NameChanged</Event>"#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            form_xml
+                .matches(
+                    r#"<Event name="213d1900-dcad-4616-9f20-3f077156a40f">NameUuidEvent</Event>"#
+                )
+                .count(),
             1
         );
     }
