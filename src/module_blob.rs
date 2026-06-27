@@ -142,6 +142,13 @@ pub struct PackedRawDeflatedBlob {
 }
 
 #[derive(Debug, Clone)]
+pub struct PackedExtPictureBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
 }
@@ -860,6 +867,79 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
         plain_bytes: bytes.len(),
         output_sha256,
     })
+}
+
+pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPictureBlob> {
+    let payload = encode_base64(bytes);
+    let plain = format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedExtPictureBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn parse_ext_picture_file_name_from_xml(xml: &[u8]) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut file_name = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(xml_local_name(event.local_name().as_ref()));
+            }
+            Ok(Event::Text(event)) => {
+                if path_ends_with(&path, &["Picture", "Abs"]) {
+                    let value = event.xml_content()?;
+                    let value = unescape(value.as_ref())?;
+                    file_name
+                        .get_or_insert_with(String::new)
+                        .push_str(value.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path_ends_with(&path, &["Picture", "Abs"]) {
+                    file_name
+                        .get_or_insert_with(String::new)
+                        .push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Picture", "Abs"]) {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    file_name.get_or_insert_with(String::new).push_str(&value);
+                }
+            }
+            Ok(Event::End(_)) => {
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    let file_name = file_name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("ExtPicture Picture/xr:Abs is missing"))?;
+    if file_name.contains('/') || file_name.contains('\\') || file_name == "." || file_name == ".."
+    {
+        return Err(anyhow!("unsupported ExtPicture file name: {file_name}"));
+    }
+    Ok(file_name)
 }
 
 pub fn parse_template_type_from_xml(xml: &[u8]) -> Result<Option<String>> {
@@ -3762,6 +3842,29 @@ fn deflate_raw(input: &[u8]) -> Result<Vec<u8>> {
     encoder.finish().context("failed to finish deflate stream")
 }
 
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        output.push(ALPHABET[(first >> 2) as usize] as char);
+        output.push(ALPHABET[(((first & 0b0000_0011) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[(((second & 0b0000_1111) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(third & 0b0011_1111) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+    output
+}
+
 fn parse_hex_u32(bytes: &[u8]) -> Result<u32> {
     let text = std::str::from_utf8(bytes)?;
     Ok(u32::from_str_radix(text, 16)?)
@@ -5240,6 +5343,30 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
         assert_eq!(packed.plain_bytes, bytes.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_ext_picture_blob_from_xml_referenced_bytes() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<ExtPicture xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.17">
+	<Picture>
+		<xr:Abs>Picture.zip</xr:Abs>
+		<xr:LoadTransparent>false</xr:LoadTransparent>
+	</Picture>
+</ExtPicture>
+"#;
+
+        assert_eq!(
+            super::parse_ext_picture_file_name_from_xml(xml)?,
+            "Picture.zip"
+        );
+        let packed = super::pack_ext_picture_blob_from_bytes(b"PK\x03\x04")?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text, "{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
+        assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
     }

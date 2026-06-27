@@ -37,10 +37,11 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, pack_common_module_metadata_blob_from_xml, pack_module_blob_bytes,
-    pack_raw_deflated_blob_from_bytes, pack_schedule_blob_from_xml,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
-    parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
+    VersionReplacement, pack_common_module_metadata_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_module_blob_bytes, pack_raw_deflated_blob_from_bytes,
+    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
+    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
+    parse_ext_picture_file_name_from_xml, parse_simple_metadata_xml_properties,
     parse_template_type_from_xml, patch_versions_blob_bytes,
 };
 use crate::parallel;
@@ -1911,6 +1912,9 @@ fn prepare_metadata_body_rows(
         "CommonTemplate" | "Template" => {
             prepare_template_body_row(sqlcmd, server, database, xml_path, xml, properties)
         }
+        "CommonPicture" => {
+            prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
+        }
         _ => Ok(Vec::new()),
     }
 }
@@ -2019,6 +2023,36 @@ fn prepare_template_body_row(
         properties,
         "Template body",
     )
+}
+
+fn prepare_common_picture_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_common_picture_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read ExtPicture XML {}", body_path.display()))?;
+    let file_name = parse_ext_picture_file_name_from_xml(&xml)
+        .with_context(|| format!("failed to parse ExtPicture XML {}", body_path.display()))?;
+    let picture_path = body_path.with_extension("").join(&file_name);
+    let picture = fs::read(&picture_path)
+        .with_context(|| format!("failed to read ExtPicture file {}", picture_path.display()))?;
+    let packed = pack_ext_picture_blob_from_bytes(&picture)
+        .with_context(|| format!("failed to pack ExtPicture {}", picture_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
 }
 
 fn prepare_common_module_object_stage(
@@ -3373,6 +3407,15 @@ fn infer_style_body_path(xml: &Path) -> PathBuf {
         .join("Style.xml")
 }
 
+fn infer_common_picture_body_path(xml: &Path) -> PathBuf {
+    let picture_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(picture_name)
+        .join("Ext")
+        .join("Picture.xml")
+}
+
 fn infer_scheduled_job_schedule_path(xml: &Path) -> PathBuf {
     let job_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -3915,6 +3958,10 @@ mod tests {
 
     #[test]
     fn infers_raw_deflated_metadata_body_paths() {
+        assert_eq!(
+            super::infer_common_picture_body_path(r"CommonPictures\Address.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonPictures\Address\Ext\Picture.xml")
+        );
         assert_eq!(
             super::infer_xdto_package_body_path(r"XDTOPackages\Exchange.xml".as_ref()),
             std::path::PathBuf::from(r"XDTOPackages\Exchange\Ext\Package.bin")
