@@ -869,6 +869,18 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
     })
 }
 
+pub fn pack_base64_payload_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    let payload = encode_base64(bytes);
+    let plain = format!("{{#base64:{payload}}}").into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
 pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPictureBlob> {
     let payload = encode_base64(bytes);
     let plain = format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes();
@@ -5343,6 +5355,17 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
         assert_eq!(packed.plain_bytes, bytes.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_base64_payload_blob_from_bytes() -> anyhow::Result<()> {
+        let packed = super::pack_base64_payload_blob_from_bytes(b"PK\x03\x04")?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text, "{#base64:UEsDBA==}");
+        assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
     }

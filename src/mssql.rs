@@ -37,12 +37,12 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, pack_common_module_metadata_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_module_blob_bytes, pack_raw_deflated_blob_from_bytes,
-    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
-    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
-    parse_ext_picture_file_name_from_xml, parse_simple_metadata_xml_properties,
-    parse_template_type_from_xml, patch_versions_blob_bytes,
+    VersionReplacement, pack_base64_payload_blob_from_bytes,
+    pack_common_module_metadata_blob_from_xml, pack_ext_picture_blob_from_bytes,
+    pack_module_blob_bytes, pack_raw_deflated_blob_from_bytes, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
+    parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -2012,17 +2012,59 @@ fn prepare_template_body_row(
     let Some(template_type) = parse_template_type_from_xml(xml)? else {
         return Ok(Vec::new());
     };
-    let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type) else {
+    match template_type.as_str() {
+        "DataCompositionSchema" | "TextDocument" => {
+            let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type)
+            else {
+                return Ok(Vec::new());
+            };
+            prepare_raw_deflated_body_row(
+                sqlcmd,
+                server,
+                database,
+                body_path,
+                properties,
+                "Template body",
+            )
+        }
+        "AddIn" | "BinaryData" => {
+            prepare_binary_template_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn prepare_binary_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_binary_template_body_path(xml_path);
+    if !body_path.exists() {
         return Ok(Vec::new());
-    };
-    prepare_raw_deflated_body_row(
-        sqlcmd,
-        server,
-        database,
-        body_path,
-        properties,
-        "Template body",
-    )
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read binary Template body {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_base64_payload_blob_from_bytes(&bytes).with_context(|| {
+        format!(
+            "failed to pack binary Template body {}",
+            body_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
 }
 
 fn prepare_common_picture_body_row(
@@ -3452,6 +3494,10 @@ fn infer_raw_deflated_template_body_path(xml: &Path, template_type: &str) -> Opt
     Some(xml.with_extension("").join("Ext").join(file_name))
 }
 
+fn infer_binary_template_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Template.bin")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -3998,6 +4044,10 @@ mod tests {
                 "SpreadsheetDocument"
             ),
             None
+        );
+        assert_eq!(
+            super::infer_binary_template_body_path(r"CommonTemplates\Archive.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonTemplates\Archive\Ext\Template.bin")
         );
     }
 
