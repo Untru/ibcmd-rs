@@ -80,6 +80,13 @@ pub struct ParsedFormBodyBlob {
 struct FormXmlBodyProperties {
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     group: Option<FormXmlGroup>,
+    events: Vec<FormXmlEvent>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlEvent {
+    name: String,
+    handler: String,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3108,10 +3115,14 @@ pub fn pack_form_body_blob_from_form_xml(
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
     if !form_xml.is_empty() {
         let properties = parse_form_xml_body_properties(form_xml)?;
-        if properties.window_opening_mode.is_some() || properties.group.is_some() {
+        if properties.window_opening_mode.is_some()
+            || properties.group.is_some()
+            || !properties.events.is_empty()
+        {
             let container = FormBodyContainer::parse(&plain)?;
             let mut layout = plain[container.layout_range.clone()].trim().to_string();
             patch_form_layout_properties(&mut layout, &properties)?;
+            patch_form_layout_events(&mut layout, &properties.events)?;
             plain.replace_range(container.layout_range, &layout);
         }
     }
@@ -3137,19 +3148,27 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut path = Vec::<String>::new();
     let mut text_value = String::new();
     let mut properties = FormXmlBodyProperties::default();
+    let mut current_event_name = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if matches!(local.as_str(), "WindowOpeningMode" | "Group") {
+                if matches!(local.as_str(), "WindowOpeningMode" | "Group" | "Event") {
                     text_value.clear();
+                }
+                if local == "Event"
+                    && path_ends_with(&path, &["Form", "Events"])
+                    && let Some(name) = xml_attribute_value(&event, "name")?
+                {
+                    current_event_name = Some(name);
                 }
                 path.push(local);
             }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "Events", "Event"])
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3157,6 +3176,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "Events", "Event"])
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3173,10 +3193,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
                     }
+                    "Event" if path_ends_with(&path, &["Form", "Events", "Event"]) => {
+                        if let Some(name) = current_event_name.take() {
+                            let handler = text_value.trim();
+                            if !handler.is_empty() {
+                                properties.events.push(FormXmlEvent {
+                                    name,
+                                    handler: handler.to_string(),
+                                });
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 let _ = path.pop();
-                if matches!(local.as_str(), "WindowOpeningMode" | "Group") {
+                if matches!(local.as_str(), "WindowOpeningMode" | "Group" | "Event") {
                     text_value.clear();
                 }
             }
@@ -3235,6 +3266,57 @@ fn patch_form_layout_properties(
         }
     }
     Ok(())
+}
+
+fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
+    for event in events {
+        let identifiers = form_event_layout_identifiers(&event.name);
+        let _ = patch_form_layout_event(layout, &identifiers, &event.handler)?;
+    }
+    Ok(())
+}
+
+fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &str) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        if form_event_field_matches(&text[window[0].clone()], identifiers)
+            && parse_1c_quoted_string(&text[window[1].clone()]).is_ok()
+        {
+            text.replace_range(window[1].clone(), &format_1c_string(handler));
+            return Ok(true);
+        }
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_event(&mut nested, identifiers, handler)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn form_event_field_matches(field: &str, identifiers: &[&str]) -> bool {
+    let value = parse_1c_quoted_string(field).unwrap_or_else(|_| field.trim().to_string());
+    identifiers
+        .iter()
+        .any(|identifier| value.eq_ignore_ascii_case(identifier))
+}
+
+fn form_event_layout_identifiers(name: &str) -> Vec<&str> {
+    let mut identifiers = vec![name];
+    match name {
+        "OnOpen" => identifiers.push("3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+        "ChoiceProcessing" => identifiers.push("1d632984-de3c-4b4b-ad9f-d69682a10182"),
+        "NotificationProcessing" => identifiers.push("3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
+        "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
+        _ => {}
+    }
+    identifiers
 }
 
 fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static str {
@@ -10032,6 +10114,70 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_events() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="OnOpen">NewOpen</Event>
+		<Event name="ChoiceProcessing">NewChoice</Event>
+		<Event name="BeforeClose">ShouldNotBeAdded</Event>
+	</Events>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"OnOpen\",\"NewOpen\""));
+        assert!(parsed.layout.contains("\"ChoiceProcessing\",\"NewChoice\""));
+        assert!(!parsed.layout.contains("OldOpen"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert!(!parsed.layout.contains("ShouldNotBeAdded"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_uuid_based_events() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"СтарыйВыбор",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"СтароеОповещение",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"СтароеСоздание",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}},"",{0}}"#.as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="ChoiceProcessing">НовыйВыбор</Event>
+		<Event name="NotificationProcessing">НовоеОповещение</Event>
+		<Event name="OnCreateAtServer">НовоеСоздание</Event>
+	</Events>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"НовыйВыбор\""));
+        assert!(parsed.layout.contains("\"НовоеОповещение\""));
+        assert!(parsed.layout.contains("\"НовоеСоздание\""));
+        assert!(!parsed.layout.contains("СтарыйВыбор"));
+        assert!(!parsed.layout.contains("СтароеОповещение"));
+        assert!(!parsed.layout.contains("СтароеСоздание"));
+        assert_eq!(parsed.module_text, "");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }
