@@ -3775,10 +3775,21 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
 fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
+    let properties = extract_form_body_properties(&form_fields);
     let events = extract_form_body_events(&form_fields);
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
 
-    Some(format_form_body_xml(auto_command_bar.as_ref(), &events))
+    Some(format_form_body_xml(
+        &properties,
+        auto_command_bar.as_ref(),
+        &events,
+    ))
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormBodyProperties {
+    window_opening_mode: Option<&'static str>,
+    group: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -3791,6 +3802,34 @@ struct FormBodyEvent {
 struct FormAutoCommandBar {
     id: String,
     name: String,
+}
+
+fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
+    FormBodyProperties {
+        window_opening_mode: extract_form_window_opening_mode(fields),
+        group: extract_form_root_group(fields),
+    }
+}
+
+fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
+    match fields.get(2).map(|field| field.trim())? {
+        "0" => Some("DontBlock"),
+        "1" => Some("LockOwner"),
+        "2" => Some("LockWholeInterface"),
+        _ => None,
+    }
+}
+
+fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
+    match (
+        fields.get(17).map(|field| field.trim())?,
+        fields.get(12).map(|field| field.trim()),
+    ) {
+        ("0" | "1", _) => Some("Vertical"),
+        ("3", Some("2")) => Some("Horizontal"),
+        ("3", Some("0")) => Some("AlwaysHorizontal"),
+        _ => None,
+    }
 }
 
 fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
@@ -4065,6 +4104,7 @@ fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
 }
 
 fn format_form_body_xml(
+    properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
     events: &[FormBodyEvent],
 ) -> String {
@@ -4072,6 +4112,15 @@ fn format_form_body_xml(
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 "
     .to_string();
+    if let Some(window_opening_mode) = properties.window_opening_mode {
+        xml.push_str(&format!(
+            "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
+            escape_xml_text(window_opening_mode)
+        ));
+    }
+    if let Some(group) = properties.group {
+        xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
     if let Some(command_bar) = auto_command_bar {
         xml.push_str(&format!(
             "\t<AutoCommandBar name=\"{}\" id=\"{}\"/>\r\n",
@@ -10164,6 +10213,18 @@ mod tests {
         assert!(
             form_xml.contains(r#"<Event name="OnCreateAtServer">ПриСозданииНаСервере</Event>"#)
         );
+    }
+
+    #[test]
+    fn extracts_form_top_level_properties_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,2,1,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body).unwrap();
+
+        assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
+        assert!(form_xml.contains("<Group>Horizontal</Group>"));
     }
 
     #[test]
