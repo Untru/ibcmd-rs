@@ -76,6 +76,26 @@ pub struct ParsedFormBodyBlob {
     pub trailing_fields: usize,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlBodyProperties {
+    window_opening_mode: Option<FormXmlWindowOpeningMode>,
+    group: Option<FormXmlGroup>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlWindowOpeningMode {
+    DontBlock,
+    LockOwner,
+    LockWholeInterface,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlGroup {
+    Vertical,
+    Horizontal,
+    AlwaysHorizontal,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CommonModuleXmlProperties {
     pub uuid: String,
@@ -3075,14 +3095,33 @@ pub fn pack_form_body_blob_from_module_text(
     base_blob: &[u8],
     module_text: &[u8],
 ) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml(base_blob, &[], Some(module_text))
+}
+
+pub fn pack_form_body_blob_from_form_xml(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+) -> Result<PackedRawDeflatedBlob> {
     let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
     let mut plain =
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
-    let container = FormBodyContainer::parse(&plain)?;
-    let module_text = std::str::from_utf8(module_text)
-        .context("Form module text is not valid UTF-8")?
-        .trim_start_matches('\u{feff}');
-    plain.replace_range(container.module_range, &format_1c_string(module_text));
+    if !form_xml.is_empty() {
+        let properties = parse_form_xml_body_properties(form_xml)?;
+        if properties.window_opening_mode.is_some() || properties.group.is_some() {
+            let container = FormBodyContainer::parse(&plain)?;
+            let mut layout = plain[container.layout_range.clone()].trim().to_string();
+            patch_form_layout_properties(&mut layout, &properties)?;
+            plain.replace_range(container.layout_range, &layout);
+        }
+    }
+    if let Some(module_text) = module_text {
+        let container = FormBodyContainer::parse(&plain)?;
+        let module_text = std::str::from_utf8(module_text)
+            .context("Form module text is not valid UTF-8")?
+            .trim_start_matches('\u{feff}');
+        plain.replace_range(container.module_range, &format_1c_string(module_text));
+    }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -3090,6 +3129,130 @@ pub fn pack_form_body_blob_from_module_text(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text_value = String::new();
+    let mut properties = FormXmlBodyProperties::default();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if matches!(local.as_str(), "WindowOpeningMode" | "Group") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "Group"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "Group"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "WindowOpeningMode"
+                        if path_ends_with(&path, &["Form", "WindowOpeningMode"]) =>
+                    {
+                        properties.window_opening_mode =
+                            Some(parse_form_window_opening_mode_xml(text_value.trim())?);
+                    }
+                    "Group" if path_ends_with(&path, &["Form", "Group"]) => {
+                        properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "WindowOpeningMode" | "Group") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(properties)
+}
+
+fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpeningMode> {
+    match value {
+        "DontBlock" => Ok(FormXmlWindowOpeningMode::DontBlock),
+        "LockOwner" => Ok(FormXmlWindowOpeningMode::LockOwner),
+        "LockWholeInterface" => Ok(FormXmlWindowOpeningMode::LockWholeInterface),
+        other => Err(anyhow!("unsupported Form WindowOpeningMode: {other}")),
+    }
+}
+
+fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
+    match value {
+        "Vertical" => Ok(FormXmlGroup::Vertical),
+        "Horizontal" => Ok(FormXmlGroup::Horizontal),
+        "AlwaysHorizontal" => Ok(FormXmlGroup::AlwaysHorizontal),
+        other => Err(anyhow!("unsupported Form Group: {other}")),
+    }
+}
+
+fn patch_form_layout_properties(
+    layout: &mut String,
+    properties: &FormXmlBodyProperties,
+) -> Result<()> {
+    if let Some(window_opening_mode) = properties.window_opening_mode {
+        replace_braced_field(
+            layout,
+            2,
+            form_window_opening_mode_code(window_opening_mode),
+        )?;
+    }
+    if let Some(group) = properties.group {
+        match group {
+            FormXmlGroup::Vertical => {
+                replace_braced_field(layout, 17, "1")?;
+            }
+            FormXmlGroup::Horizontal => {
+                replace_braced_field(layout, 12, "2")?;
+                replace_braced_field(layout, 17, "3")?;
+            }
+            FormXmlGroup::AlwaysHorizontal => {
+                replace_braced_field(layout, 12, "0")?;
+                replace_braced_field(layout, 17, "3")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static str {
+    match value {
+        FormXmlWindowOpeningMode::DontBlock => "0",
+        FormXmlWindowOpeningMode::LockOwner => "1",
+        FormXmlWindowOpeningMode::LockWholeInterface => "2",
+    }
+}
+
+fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let range = fields
+        .get(index)
+        .ok_or_else(|| anyhow!("Form layout has no field {index}"))?
+        .clone();
+    text.replace_range(range, value);
+    Ok(())
 }
 
 pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
@@ -9841,6 +10004,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             "{4,{7,{\"layout\"}},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{3,{\"picture\"},\"payload\"}}"
         );
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_top_level_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,1,1,0,1,1,1},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
+	<Group>Horizontal</Group>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[2].clone()], "2");
+        assert_eq!(&parsed.layout[fields[12].clone()], "2");
+        assert_eq!(&parsed.layout[fields[17].clone()], "3");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
 
         Ok(())
     }
