@@ -1062,6 +1062,7 @@ struct MoxelCell {
     format_index: usize,
     text: Option<String>,
     parameter: Option<String>,
+    detail_parameter: Option<String>,
     empty_text: bool,
 }
 
@@ -1119,6 +1120,7 @@ struct MoxelFormat {
     text_color: Option<String>,
     text_placement: Option<&'static str>,
     fill_type: Option<&'static str>,
+    hyper_link: Option<bool>,
     protection: Option<bool>,
     indent: Option<usize>,
     auto_indent: Option<usize>,
@@ -1143,6 +1145,7 @@ impl MoxelFormat {
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.hyper_link.is_none()
             && self.protection.is_none()
             && self.indent.is_none()
             && self.auto_indent.is_none()
@@ -1166,6 +1169,7 @@ impl MoxelFormat {
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.hyper_link.is_none()
             && self.protection.is_none()
             && self.indent.is_none()
             && self.auto_indent.is_none()
@@ -1173,6 +1177,13 @@ impl MoxelFormat {
             && self.picture_size_mode.is_none()
             && self.pic_horizontal_alignment.is_none()
             && self.pic_vertical_alignment.is_none()
+    }
+
+    fn uses_line(&self) -> bool {
+        self.left_border.is_some()
+            || self.top_border.is_some()
+            || self.right_border.is_some()
+            || self.bottom_border.is_some()
     }
 }
 
@@ -3783,7 +3794,7 @@ fn parse_moxel_spreadsheet_text(
     }
     let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
-    let lines = parse_moxel_lines(&fields);
+    let parsed_lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
@@ -3797,9 +3808,13 @@ fn parse_moxel_spreadsheet_text(
     } else {
         declared_column_count
     };
+    let format_offset = column_count.saturating_sub(1);
     for row in &mut rows {
+        if row.format_index > 1 {
+            row.format_index += format_offset;
+        }
         for cell in &mut row.cells {
-            cell.format_index += column_count.saturating_sub(1);
+            cell.format_index += format_offset;
         }
     }
     let max_format_index = rows.iter().fold(column_count.max(1), |max_index, row| {
@@ -3809,11 +3824,17 @@ fn parse_moxel_spreadsheet_text(
         max_index.max(row_max)
     });
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
+    let formats = parse_moxel_formats(&fields, column_count, &style_refs);
+    let lines = if formats.iter().any(MoxelFormat::uses_line) {
+        parsed_lines
+    } else {
+        Vec::new()
+    };
     Some(MoxelSpreadsheet {
         column_count,
         column_widths: parse_moxel_column_widths(&fields, column_count),
         default_format_width: parse_moxel_default_format_width(&fields, column_count),
-        formats: parse_moxel_formats(&fields, column_count, &style_refs),
+        formats,
         rows,
         merges,
         areas,
@@ -3910,13 +3931,20 @@ fn parse_moxel_row_shape(
 
 fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
     let fields = split_1c_braced_fields(text, 0)?;
+    let cell_kind = fields.first()?.trim();
     let format_index = fields
         .get(1)
         .and_then(|value| value.trim().parse::<usize>().ok())
         .unwrap_or(0)
         + 1;
+    let detail_parameter = if cell_kind == "24" {
+        fields.get(2).and_then(|value| parse_1c_string(value))
+    } else {
+        None
+    };
+    let localized_index = if cell_kind == "24" { 3 } else { 2 };
     let localized = fields
-        .get(2)
+        .get(localized_index)
         .and_then(|value| parse_moxel_localized_cell_value(value));
     let empty_text = matches!(localized, Some(None));
     let localized = localized.flatten();
@@ -3933,6 +3961,7 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
         format_index,
         text,
         parameter,
+        detail_parameter,
         empty_text,
     })
 }
@@ -4111,6 +4140,7 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        hyper_link: parse_moxel_format_usize(&values, 26).and_then(moxel_hyper_link),
         protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
         indent: parse_moxel_format_usize(&values, 30),
         auto_indent: parse_moxel_format_usize(&values, 31),
@@ -4134,7 +4164,26 @@ fn moxel_format_bits(flags: u64) -> Option<Vec<u8>> {
         }
         if !matches!(
             bit,
-            0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 14 | 15 | 16 | 30 | 31 | 35 | 36 | 37 | 38
+            0 | 1
+                | 2
+                | 3
+                | 4
+                | 5
+                | 6
+                | 7
+                | 8
+                | 9
+                | 10
+                | 14
+                | 15
+                | 16
+                | 26
+                | 30
+                | 31
+                | 35
+                | 36
+                | 37
+                | 38
         ) {
             return None;
         }
@@ -4228,6 +4277,14 @@ fn moxel_protection(value: usize) -> Option<bool> {
     match value {
         0 => Some(true),
         1 => Some(false),
+        _ => None,
+    }
+}
+
+fn moxel_hyper_link(value: usize) -> Option<bool> {
+    match value {
+        1 => Some(true),
+        0 => Some(false),
         _ => None,
     }
 }
@@ -4429,6 +4486,9 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
+    if let Some(hyper_link) = format.hyper_link {
+        xml.push_str(&format!("\t\t<hyperLink>{hyper_link}</hyperLink>\r\n"));
+    }
     if let Some(protection) = format.protection {
         xml.push_str(&format!("\t\t<protection>{protection}</protection>\r\n"));
     }
@@ -4595,6 +4655,12 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
             xml.push_str(&format!(
                 "\t\t\t\t\t<parameter>{}</parameter>\r\n",
                 escape_xml_text(parameter)
+            ));
+        }
+        if let Some(detail_parameter) = &cell.detail_parameter {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<detailParameter>{}</detailParameter>\r\n",
+                escape_xml_text(detail_parameter)
             ));
         }
         xml.push_str("\t\t\t\t</c>\r\n");
@@ -8965,6 +9031,29 @@ mod tests {
         assert!(line_pos < font_pos);
         assert!(font_pos < format_pos);
         assert!(format_pos < picture_pos);
+    }
+
+    #[test]
+    fn formats_moxel_detail_parameters_and_row_format_offsets() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,3,0,0,3,0,{0,1},1,{0,1},2,{0,1},1,0,3,0,{16,1,{1,1,{\"ru\",\"Файл\"}},0},1,{16,1,{1,1,{\"ru\",\"Причина\"}},0},2,{16,1,{1,1,{\"ru\",\"Размещение\"}},0},2,2,3,0,{24,3,\"Версия\",{1,1,{\"\",\"Название\"}},0},1,{16,4,{1,1,{\"\",\"Ошибка\"}},0},2,{16,4,{1,1,{\"\",\"Размещение\"}},0},{2,\"Заголовок\",{1,{1,-1,1,-1,1,00000000-0000-0000-0000-000000000000},0},\"Строка\",{1,{1,-1,2,-1,2,00000000-0000-0000-0000-000000000000},0}},7,{1,0},{64,54},{67158528,0,3,1,1},{49664,0,3,1},{128,318},{128,363},{128,324},1,{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},2,{3,3,{-1}},{3,3,{-3}}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(
+            xml.contains("<index>2</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>5</formatIndex>")
+        );
+        assert!(xml.contains(
+            "<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>\r\n\t\t\t\t\t<detailParameter>Версия</detailParameter>"
+        ));
+        assert!(xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t</format>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<height>54</height>\r\n\t</format>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<fillType>Parameter</fillType>\r\n\t\t<hyperLink>true</hyperLink>\r\n\t</format>"
+        ));
+        assert!(!xml.contains("<line width=\"1\""));
     }
 
     #[test]
