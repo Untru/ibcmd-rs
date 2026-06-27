@@ -40,9 +40,10 @@ use crate::cli::{
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, pack_base64_payload_blob_from_bytes, pack_command_interface_blob_from_xml,
-    pack_common_module_metadata_blob_from_xml, pack_ext_picture_blob_from_bytes,
-    pack_form_body_blob_from_module_text, pack_help_blob_from_parts, pack_module_blob_bytes,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
+    pack_help_blob_from_parts, pack_module_blob_bytes, pack_raw_deflated_blob_from_bytes,
+    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1934,6 +1935,9 @@ fn prepare_metadata_body_rows(
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
         }
+        "ExchangePlan" => prepare_exchange_plan_content_body_row(
+            sqlcmd, server, database, xml_path, properties, source,
+        ),
         "Form" | "CommonForm" => {
             prepare_form_body_row(sqlcmd, server, database, xml_path, properties)
         }
@@ -2125,6 +2129,47 @@ fn prepare_common_picture_body_row(
         .with_context(|| format!("failed to read ExtPicture file {}", picture_path.display()))?;
     let packed = pack_ext_picture_blob_from_bytes(&picture)
         .with_context(|| format!("failed to pack ExtPicture {}", picture_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_exchange_plan_content_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_exchange_plan_content_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let source = source.ok_or_else(|| {
+        anyhow!(
+            "source root is required to stage ExchangePlan Content.xml {}",
+            body_path.display()
+        )
+    })?;
+    let body_id = format!("{}.1", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read ExchangePlan Content {}",
+            body_path.display()
+        )
+    })?;
+    let packed =
+        pack_exchange_plan_content_blob_from_xml(&base_body, &xml, source).with_context(|| {
+            format!(
+                "failed to pack ExchangePlan Content {}",
+                body_path.display()
+            )
+        })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -3952,6 +3997,10 @@ fn infer_command_interface_body_path(xml: &Path) -> PathBuf {
         .join("CommandInterface.xml")
 }
 
+fn infer_exchange_plan_content_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Content.xml")
+}
+
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
     let package_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -4642,6 +4691,14 @@ mod tests {
         );
         assert_eq!(super::command_interface_body_suffix("Subsystem"), Some("1"));
         assert_eq!(super::command_interface_body_suffix("Catalog"), None);
+    }
+
+    #[test]
+    fn infers_exchange_plan_content_body_path() {
+        assert_eq!(
+            super::infer_exchange_plan_content_body_path(r"ExchangePlans\Sync.xml".as_ref()),
+            std::path::PathBuf::from(r"ExchangePlans\Sync\Ext\Content.xml")
+        );
     }
 
     #[test]

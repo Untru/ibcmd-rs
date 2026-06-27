@@ -179,6 +179,12 @@ struct CommandInterfaceXmlEntry {
     common: bool,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ExchangePlanContentXmlItem {
+    metadata: String,
+    auto_record: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
@@ -267,7 +273,6 @@ impl MetadataSourceContext {
         Ok(properties.uuid)
     }
 
-    #[cfg(test)]
     fn resolve_simple_metadata_uuid(
         &self,
         reference: &str,
@@ -315,7 +320,6 @@ impl MetadataSourceContext {
             .with_context(|| format!("failed to resolve TypeId from {}", path.display()))
     }
 
-    #[cfg(test)]
     fn resolve_metadata_reference_uuid(&self, reference: &str) -> Result<String> {
         let reference = reference.trim();
         let (prefix, folder) = metadata_reference_source_folder(reference).ok_or_else(|| {
@@ -1037,6 +1041,50 @@ pub fn pack_command_interface_blob_from_xml(
     })
 }
 
+pub fn pack_exchange_plan_content_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+    source: &MetadataSourceContext,
+) -> Result<PackedRawDeflatedBlob> {
+    let items = parse_exchange_plan_content_xml(xml)?;
+    if !base_blob.is_empty() {
+        let inflated =
+            inflate_raw(base_blob).context("failed to inflate base ExchangePlanContent blob")?;
+        let plain = String::from_utf8(inflated)
+            .context("base ExchangePlanContent blob is not valid UTF-8")?;
+        let body_start = plain
+            .find('{')
+            .ok_or_else(|| anyhow!("base ExchangePlanContent body has no braced payload"))?;
+        let fields = scan_braced_fields(&plain, body_start)?;
+        if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+            return Err(anyhow!(
+                "base ExchangePlanContent body does not start with type marker 2"
+            ));
+        }
+    }
+
+    let mut plain = format!("{{2,{}", items.len());
+    for item in items {
+        let uuid = source
+            .resolve_metadata_reference_uuid(&item.metadata)
+            .with_context(|| format!("failed to resolve ExchangePlanContent {}", item.metadata))?;
+        let auto_record = if item.auto_record { "1" } else { "0" };
+        plain.push(',');
+        plain.push_str(&uuid);
+        plain.push(',');
+        plain.push_str(auto_record);
+    }
+    plain.push('}');
+
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
 fn role_right_value_replacements(
     plain: &str,
     objects_range: Range<usize>,
@@ -1359,6 +1407,94 @@ fn parse_command_interface_xml(xml: &[u8]) -> Result<Vec<CommandInterfaceXmlEntr
     }
 
     Ok(entries)
+}
+
+fn parse_exchange_plan_content_xml(xml: &[u8]) -> Result<Vec<ExchangePlanContentXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut items = Vec::<ExchangePlanContentXmlItem>::new();
+    let mut metadata = None::<String>;
+    let mut auto_record = None::<bool>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["ExchangePlanContent"]) && local == "Item" {
+                    metadata = None;
+                    auto_record = None;
+                }
+                if matches!(local.as_str(), "Metadata" | "AutoRecord") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["ExchangePlanContent", "Item", "Metadata"])
+                    || path_ends_with(&path, &["ExchangePlanContent", "Item", "AutoRecord"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["ExchangePlanContent", "Item", "Metadata"])
+                    || path_ends_with(&path, &["ExchangePlanContent", "Item", "AutoRecord"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "Metadata"
+                        if path_ends_with(&path, &["ExchangePlanContent", "Item", "Metadata"]) =>
+                    {
+                        metadata = Some(text_value.trim().to_string());
+                    }
+                    "AutoRecord"
+                        if path_ends_with(
+                            &path,
+                            &["ExchangePlanContent", "Item", "AutoRecord"],
+                        ) =>
+                    {
+                        auto_record =
+                            Some(parse_exchange_plan_auto_record_text(text_value.trim())?);
+                    }
+                    "Item" if path_ends_with(&path, &["ExchangePlanContent", "Item"]) => {
+                        items.push(ExchangePlanContentXmlItem {
+                            metadata: metadata.take().ok_or_else(|| {
+                                anyhow!("ExchangePlanContent Item has no Metadata")
+                            })?,
+                            auto_record: auto_record.take().ok_or_else(|| {
+                                anyhow!("ExchangePlanContent Item has no AutoRecord")
+                            })?,
+                        });
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "Metadata" | "AutoRecord") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(items)
+}
+
+fn parse_exchange_plan_auto_record_text(value: &str) -> Result<bool> {
+    match value {
+        "Deny" => Ok(false),
+        "Auto" => Ok(true),
+        _ => Err(anyhow!("invalid ExchangePlanContent AutoRecord: {value}")),
+    }
 }
 
 fn parse_xml_bool_text(name: &str, value: &str) -> Result<bool> {
@@ -4113,7 +4249,6 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
     }
 }
 
-#[cfg(test)]
 fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'static str)> {
     let prefix = reference.split_once('.')?.0;
     match prefix {
@@ -6072,6 +6207,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(packed.plain_bytes, text.len());
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_exchange_plan_content_xml_with_metadata_refs() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-module-blob-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::create_dir_all(root.join("InformationRegisters"))?;
+        std::fs::write(
+            root.join("Catalogs/Customers.xml"),
+            br#"<MetaDataObject><Catalog uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"><Properties><Name>Customers</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        std::fs::write(
+            root.join("InformationRegisters/Prices.xml"),
+            br#"<MetaDataObject><InformationRegister uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc"><Properties><Name>Prices</Name></Properties></InformationRegister></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(b"{2,0}")?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<ExchangePlanContent xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Item>
+		<Metadata>Catalog.Customers</Metadata>
+		<AutoRecord>Deny</AutoRecord>
+	</Item>
+	<Item>
+		<Metadata>InformationRegister.Prices</Metadata>
+		<AutoRecord>Auto</AutoRecord>
+	</Item>
+</ExchangePlanContent>
+"#;
+
+        let packed = super::pack_exchange_plan_content_blob_from_xml(&base, xml, &source)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,1}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
