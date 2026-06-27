@@ -3894,7 +3894,10 @@ fn parse_moxel_spreadsheet_text(
         .chain(formats.iter())
         .cloned()
         .collect::<Vec<_>>();
-    let lines = parse_moxel_lines(&fields, &all_formats);
+    let has_sparse_column_sets = column_sets
+        .iter()
+        .any(|column_set| column_set.columns.len() != column_set.size);
+    let lines = parse_moxel_lines(&fields, &all_formats, has_sparse_column_sets);
     let drawing_max_format_index = drawings
         .iter()
         .map(|drawing| drawing.format_index)
@@ -3999,12 +4002,7 @@ fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     }
     let declared_count = fields.first()?.trim().parse::<usize>().ok()?;
     let count = fields.get(3)?.trim().parse::<usize>().ok()?;
-    if count == 0
-        || count > 2048
-        || declared_count == 0
-        || declared_count > count
-        || fields.len() != count * 2 + 4
-    {
+    if count == 0 || count > 2048 || declared_count == 0 || fields.len() != count * 2 + 4 {
         return None;
     }
     let uuid = parse_uuid_field(fields.get(2)?.trim())?;
@@ -4058,7 +4056,6 @@ fn moxel_column_format_slots(column_sets: &[MoxelColumnSet], column_count: usize
         .map(|column| column.format_index)
         .max()
         .unwrap_or(column_count)
-        .max(column_count)
 }
 
 fn moxel_default_format_index(
@@ -4545,7 +4542,11 @@ fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
     }
 }
 
-fn parse_moxel_lines(fields: &[&str], formats: &[MoxelFormat]) -> Vec<MoxelLine> {
+fn parse_moxel_lines(
+    fields: &[&str],
+    formats: &[MoxelFormat],
+    shift_default_line_styles: bool,
+) -> Vec<MoxelLine> {
     let used_indexes = moxel_used_line_indexes(formats);
     if used_indexes.is_empty() {
         return Vec::new();
@@ -4572,6 +4573,25 @@ fn parse_moxel_lines(fields: &[&str], formats: &[MoxelFormat]) -> Vec<MoxelLine>
             MoxelLine {
                 style: "None",
                 line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+            },
+        ];
+    }
+    if lines.len() >= 2
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && shift_default_line_styles
+        && used_indexes.len() == 2
+        && used_indexes.contains(&0)
+        && used_indexes.contains(&1)
+    {
+        return vec![
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+            },
+            MoxelLine {
+                style: "Dotted",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
             },
         ];
     }
@@ -5293,6 +5313,7 @@ fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
     let style = match payload.first()?.trim() {
         "-1" => "None",
         "-3" => "Solid",
+        "-10" => "Dotted",
         _ => return None,
     };
     Some(MoxelLine {
@@ -10404,6 +10425,26 @@ mod tests {
     }
 
     #[test]
+    fn formats_moxel_accepts_sparse_column_sets() {
+        let column_set = parse_moxel_column_set(
+            "{11,0,00000000-0000-0000-0000-000000000000,8,0,7,2,8,3,9,4,10,5,10,7,11,9,12,10,7}",
+        )
+        .unwrap();
+        let mut column_sets = vec![column_set];
+        normalize_moxel_column_set_format_indices(&mut column_sets);
+
+        assert_eq!(column_sets[0].size, 11);
+        assert_eq!(column_sets[0].columns.len(), 8);
+        assert_eq!(column_sets[0].columns[1].index, 2);
+        assert_eq!(column_sets[0].columns[1].format_index, 2);
+        assert_eq!(column_sets[0].columns[5].index, 7);
+        assert_eq!(column_sets[0].columns[5].format_index, 5);
+        assert_eq!(column_sets[0].columns[7].index, 10);
+        assert_eq!(column_sets[0].columns[7].format_index, 1);
+        assert_eq!(moxel_column_format_slots(&column_sets, 11), 6);
+    }
+
+    #[test]
     fn formats_moxel_alignment_and_text_placement_mappings() {
         assert_eq!(moxel_horizontal_alignment(0), Some("Left"));
         assert_eq!(moxel_horizontal_alignment(2), Some("Right"));
@@ -10412,6 +10453,32 @@ mod tests {
         assert_eq!(moxel_text_placement(0), Some("Auto"));
         assert_eq!(moxel_text_placement(2), Some("Block"));
         assert_eq!(moxel_text_placement(3), Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_line_style_mappings() {
+        assert_eq!(parse_moxel_line("{3,3,{-1}}").unwrap().style, "None");
+        assert_eq!(parse_moxel_line("{3,3,{-3}}").unwrap().style, "Solid");
+        assert_eq!(parse_moxel_line("{3,3,{-10}}").unwrap().style, "Dotted");
+    }
+
+    #[test]
+    fn formats_moxel_shifts_default_line_styles_for_two_used_indexes() {
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(1),
+                ..MoxelFormat::default()
+            },
+        ];
+        let lines = parse_moxel_lines(&["{3,3,{-1}}", "{3,3,{-3}}"], &formats, true);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].style, "Solid");
+        assert_eq!(lines[1].style, "Dotted");
     }
 
     #[test]
