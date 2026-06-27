@@ -1134,6 +1134,7 @@ struct MoxelFormat {
     text_color: Option<String>,
     text_placement: Option<&'static str>,
     fill_type: Option<&'static str>,
+    details_use: Option<&'static str>,
     hyper_link: Option<bool>,
     protection: Option<bool>,
     indent: Option<usize>,
@@ -1159,6 +1160,7 @@ impl MoxelFormat {
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.details_use.is_none()
             && self.hyper_link.is_none()
             && self.protection.is_none()
             && self.indent.is_none()
@@ -1183,6 +1185,7 @@ impl MoxelFormat {
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.details_use.is_none()
             && self.hyper_link.is_none()
             && self.protection.is_none()
             && self.indent.is_none()
@@ -4460,6 +4463,7 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
         hyper_link: parse_moxel_format_usize(&values, 26).and_then(moxel_hyper_link),
         protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
         indent: parse_moxel_format_usize(&values, 30),
@@ -4497,6 +4501,7 @@ fn moxel_format_bits(flags: u64) -> Option<Vec<u8>> {
                 | 14
                 | 15
                 | 16
+                | 19
                 | 26
                 | 30
                 | 31
@@ -4545,22 +4550,37 @@ fn parse_moxel_style_ref_slot(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<String>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "3" {
+    if fields.len() != 3 || fields.first()?.trim() != "3" {
         return None;
     }
     let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
-    match payload.first()?.trim() {
-        "-1" | "-3" => Some(None),
-        "0" => {
-            let uuid = parse_uuid_field(payload.get(1)?.trim())?;
-            let style_ref = object_refs
-                .get(&uuid)
-                .and_then(|reference| reference.strip_prefix("StyleItem."))
-                .map(|name| format!("style:{name}"));
-            Some(style_ref)
-        }
+    match fields.get(1)?.trim() {
+        "3" => match payload.first()?.trim() {
+            "-1" | "-3" => Some(None),
+            "0" => {
+                let uuid = parse_uuid_field(payload.get(1)?.trim())?;
+                let style_ref = object_refs
+                    .get(&uuid)
+                    .and_then(|reference| reference.strip_prefix("StyleItem."))
+                    .map(|name| format!("style:{name}"));
+                Some(style_ref)
+            }
+            _ => None,
+        },
+        "0" => payload
+            .first()
+            .and_then(|value| parse_moxel_direct_color(value.trim()))
+            .map(Some),
         _ => None,
     }
+}
+
+fn parse_moxel_direct_color(value: &str) -> Option<String> {
+    let color = value.parse::<u32>().ok()?;
+    let red = color & 0xff;
+    let green = (color >> 8) & 0xff;
+    let blue = (color >> 16) & 0xff;
+    Some(format!("#{red:02X}{green:02X}{blue:02X}"))
 }
 
 fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
@@ -4589,6 +4609,14 @@ fn moxel_fill_type(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Text"),
         1 => Some("Parameter"),
+        2 => Some("Template"),
+        _ => None,
+    }
+}
+
+fn moxel_details_use(value: usize) -> Option<&'static str> {
+    match value {
+        1 => Some("Row"),
         _ => None,
     }
 }
@@ -4820,6 +4848,7 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
+    push_moxel_format_text(xml, "detailsUse", format.details_use);
     if let Some(hyper_link) = format.hyper_link {
         xml.push_str(&format!("\t\t<hyperLink>{hyper_link}</hyperLink>\r\n"));
     }
@@ -9442,6 +9471,15 @@ mod tests {
         ));
         assert!(!xml.contains("<index>6</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
         assert!(!xml.contains("<index>15</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<textColor>#009646</textColor>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<textColor>#009646</textColor>\r\n\t\t<fillType>Template</fillType>\r\n\t\t<detailsUse>Row</detailsUse>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<height>30</height>\r\n\t\t<textColor>#009646</textColor>\r\n\t</format>"
+        ));
     }
 
     #[test]
