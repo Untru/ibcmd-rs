@@ -2388,6 +2388,7 @@ fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static 
         "Task" => &[("6", "ObjectModule.bsl"), ("7", "ManagerModule.bsl")],
         "BusinessProcess" => &[("6", "ObjectModule.bsl"), ("8", "ManagerModule.bsl")],
         "ChartOfCharacteristicTypes" => &[("15", "ObjectModule.bsl"), ("16", "ManagerModule.bsl")],
+        "HTTPService" | "WebService" => &[("0", "Module.bsl")],
         "IntegrationService" => &[("0", "Module.bsl")],
         _ => &[],
     }
@@ -4624,6 +4625,14 @@ mod tests {
         );
         assert_eq!(
             super::object_module_body_suffixes("IntegrationService"),
+            &[("0", "Module.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("HTTPService"),
+            &[("0", "Module.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("WebService"),
             &[("0", "Module.bsl")]
         );
         assert_eq!(
