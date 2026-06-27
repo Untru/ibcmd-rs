@@ -455,6 +455,9 @@ enum SourceAssetKind {
         field_refs: BTreeMap<String, String>,
     },
     Schedule,
+    StyleBody {
+        object_refs: BTreeMap<String, String>,
+    },
 }
 
 struct SourceAsset {
@@ -740,6 +743,12 @@ fn source_assets_from_metadata_blob_inner(
                 primary_path: object_path.join("Ext").join("Package.bin"),
                 kind: SourceAssetKind::InflatedBinary,
             }),
+            "Style" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("Style.xml"),
+                kind: SourceAssetKind::StyleBody {
+                    object_refs: object_refs.clone(),
+                },
+            }),
             "WSReference" => Some(SourceAsset {
                 primary_path: object_path.join("Ext").join("WSDefinition.xml"),
                 kind: SourceAssetKind::InflatedBinary,
@@ -870,6 +879,20 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             let xml = extract_schedule_xml(bytes).with_context(|| {
                 format!(
                     "failed to extract schedule from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::StyleBody { object_refs } => {
+            let xml = extract_style_body_xml(bytes, object_refs).with_context(|| {
+                format!(
+                    "failed to extract style body from source asset {}",
                     asset.primary_path.display()
                 )
             })?;
@@ -6476,6 +6499,12 @@ struct StyleItemProperties {
     value_xml: String,
 }
 
+struct StyleBodyItem {
+    name: String,
+    standard_order: Option<usize>,
+    value_xml: String,
+}
+
 struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
 }
@@ -7253,6 +7282,255 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
     }
 }
 
+fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Result<String> {
+    let inflated = inflate_raw_deflate(bytes)?;
+    let text = String::from_utf8(inflated)?;
+    let mut items = parse_style_body_items(text.trim_start_matches('\u{feff}'), object_refs)
+        .context("failed to parse style body")?;
+    items.sort_by(|left, right| {
+        left.standard_order
+            .unwrap_or(usize::MAX)
+            .cmp(&right.standard_order.unwrap_or(usize::MAX))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(format_style_body_xml(&items))
+}
+
+fn parse_style_body_items(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<StyleBodyItem>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let declared_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut items = Vec::new();
+    for field in fields.iter().skip(2) {
+        if field.trim() == "{0}" {
+            continue;
+        }
+        let entry = split_1c_braced_fields(field, 0)?;
+        let (name, standard_order) = style_body_item_name(entry.first()?, object_refs)?;
+        let value = entry.get(2)?;
+        let value_xml = match entry.get(1)?.trim() {
+            "0" => format!(
+                "<Color>{}</Color>",
+                escape_xml_text(&parse_style_body_color_value(value, object_refs)?)
+            ),
+            "1" => parse_style_body_font_xml(value, object_refs)?,
+            "2" => parse_style_body_border_xml(value, object_refs)?,
+            _ => return None,
+        };
+        items.push(StyleBodyItem {
+            name,
+            standard_order,
+            value_xml,
+        });
+    }
+    if items.len() != declared_count {
+        return None;
+    }
+    Some(items)
+}
+
+fn style_body_item_name(
+    key: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, Option<usize>)> {
+    let fields = split_1c_braced_fields(key, 0)?;
+    if fields.len() == 1 {
+        let code = fields.first()?.trim().parse::<i32>().ok()?;
+        let (order, name) = standard_style_item_for_code(code)?;
+        return Some((name.to_string(), Some(order)));
+    }
+    if fields.first()?.trim() == "0" {
+        let uuid = parse_uuid_field(fields.get(1)?.trim())?;
+        let name = object_refs
+            .get(&uuid)
+            .cloned()
+            .unwrap_or_else(|| format!("StyleItem.{uuid}"));
+        return Some((name, None));
+    }
+    None
+}
+
+fn style_body_ref_name(ref_value: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    let fields = split_1c_braced_fields(ref_value, 0)?;
+    if fields.len() == 1 {
+        let code = fields.first()?.trim().parse::<i32>().ok()?;
+        return standard_style_item_for_code(code).map(|(_, name)| format!("style:{name}"));
+    }
+    if fields.first()?.trim() == "0" {
+        let uuid = parse_uuid_field(fields.get(1)?.trim())?;
+        return object_refs
+            .get(&uuid)
+            .and_then(|reference| reference.strip_prefix("StyleItem."))
+            .map(|name| format!("style:{name}"));
+    }
+    None
+}
+
+fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
+    let name = match code {
+        -1 => "FormBackColor",
+        -11 => "FormTextColor",
+        -3 => "ButtonBackColor",
+        -15 => "ButtonTextColor",
+        -7 => "FieldBackColor",
+        -13 => "FieldTextColor",
+        -21 => "FieldSelectionBackColor",
+        -10 => "FieldSelectedTextColor",
+        -14 => "FieldAlternativeBackColor",
+        -23 => "ToolTipBackColor",
+        -24 => "ToolTipTextColor",
+        -16 => "SpecialTextColor",
+        -17 => "NegativeTextColor",
+        -22 => "BorderColor",
+        -25 => "ReportHeaderBackColor",
+        -26 => "ReportGroup1BackColor",
+        -27 => "ReportGroup2BackColor",
+        -28 => "ReportLineColor",
+        -18 => "ControlBorder",
+        -20 => "TextFont",
+        -30 => "SmallTextFont",
+        -31 => "NormalTextFont",
+        -32 => "LargeTextFont",
+        -33 => "ExtraLargeTextFont",
+        -34 => "ButtonBorderColor",
+        -35 => "TableHeaderBackColor",
+        -36 => "TableHeaderTextColor",
+        -37 => "TableFooterBackColor",
+        -38 => "TableFooterTextColor",
+        _ => return None,
+    };
+    let order = STANDARD_STYLE_ITEM_CODES
+        .iter()
+        .position(|item_code| *item_code == code)?;
+    Some((order, name))
+}
+
+const STANDARD_STYLE_ITEM_CODES: &[i32] = &[
+    -1, -11, -3, -15, -7, -13, -21, -10, -14, -23, -24, -16, -17, -22, -25, -26, -27, -28, -18,
+    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38,
+];
+
+fn parse_style_body_color_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let variant = fields.get(1)?.trim().parse::<i32>().ok()?;
+    let code_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+    let code = code_fields.first()?.trim().parse::<i32>().ok()?;
+    match variant {
+        0 => parse_moxel_direct_color(&code.to_string()),
+        2 => style_web_color_name(code).map(ToOwned::to_owned),
+        3 => style_body_ref_name(fields.get(2)?, object_refs),
+        _ => None,
+    }
+}
+
+fn parse_style_body_font_xml(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "8" {
+        return None;
+    }
+    let kind = fields.get(1).map(|field| field.trim()).unwrap_or("2");
+    let mut attrs = Vec::<(&str, String)>::new();
+    if kind == "2" {
+        let reference = fields
+            .get(3)
+            .and_then(|field| style_body_ref_name(field, object_refs))
+            .unwrap_or_else(|| "style:TextFont".to_string());
+        attrs.push(("ref", reference));
+        attrs.push(("kind", "StyleItem".to_string()));
+    } else {
+        attrs.push(("kind", "Absolute".to_string()));
+    }
+
+    let weight = fields
+        .get(4)
+        .and_then(|field| field.trim().parse::<i32>().ok())
+        .unwrap_or(400);
+    let bold = weight >= 700;
+    let italic = fields
+        .get(5)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    let underline = fields
+        .get(6)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    let strikeout = fields
+        .get(7)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    if bold || italic || underline || strikeout {
+        attrs.push(("bold", xml_bool(bold).to_string()));
+        attrs.push(("italic", xml_bool(italic).to_string()));
+        attrs.push(("underline", xml_bool(underline).to_string()));
+        attrs.push(("strikeout", xml_bool(strikeout).to_string()));
+    }
+    if let Some(scale) = fields.get(9).map(|field| field.trim())
+        && scale != "100"
+    {
+        attrs.push(("scale", scale.to_string()));
+    }
+
+    Some(format_empty_style_body_value("Font", &attrs))
+}
+
+fn parse_style_body_border_xml(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "3" {
+        return None;
+    }
+    let reference = fields
+        .get(2)
+        .and_then(|field| style_body_ref_name(field, object_refs))
+        .unwrap_or_else(|| "style:ControlBorder".to_string());
+    Some(format_empty_style_body_value(
+        "Border",
+        &[("ref", reference)],
+    ))
+}
+
+fn format_empty_style_body_value(element: &str, attrs: &[(&str, String)]) -> String {
+    let mut xml = format!("<{element}");
+    for (name, value) in attrs {
+        xml.push_str(&format!(" {name}=\"{}\"", escape_xml_text(value)));
+    }
+    xml.push_str("/>");
+    xml
+}
+
+fn format_style_body_xml(items: &[StyleBodyItem]) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
+    );
+    for item in items {
+        xml.push_str(&format!(
+            "\t<Item name=\"{}\">\r\n\t\t{}\r\n\t</Item>\r\n",
+            escape_xml_text(&item.name),
+            item.value_xml
+        ));
+    }
+    xml.push_str("</Style>\r\n");
+    xml
+}
+
 fn parse_style_color_value(value: &str) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != r##""#""## {
@@ -7282,17 +7560,23 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
         44 => Some("web:FireBrick"),
+        45 => Some("web:FloralWhite"),
         46 => Some("web:ForestGreen"),
         48 => Some("web:Gainsboro"),
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
         67 => Some("web:LightCyan"),
+        68 => Some("web:LightGoldenRod"),
+        69 => Some("web:LightGoldenRodYellow"),
+        71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
+        97 => Some("web:MintCream"),
         98 => Some("web:MistyRose"),
         119 => Some("web:Red"),
+        120 => Some("web:RosyBrown"),
         128 => Some("web:Silver"),
         130 => Some("web:SlateBlue"),
         134 => Some("web:SteelBlue"),
@@ -7306,8 +7590,29 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
 
 fn style_system_color_name(code: i32) -> Option<&'static str> {
     match code {
-        -3 => Some("style:FormTextColor"),
+        -1 => Some("style:FormBackColor"),
+        -11 => Some("style:FormTextColor"),
+        -3 => Some("style:ButtonBackColor"),
+        -15 => Some("style:ButtonTextColor"),
+        -7 => Some("style:FieldBackColor"),
+        -13 => Some("style:FieldTextColor"),
+        -21 => Some("style:FieldSelectionBackColor"),
+        -10 => Some("style:FieldSelectedTextColor"),
+        -14 => Some("style:FieldAlternativeBackColor"),
+        -23 => Some("style:ToolTipBackColor"),
+        -24 => Some("style:ToolTipTextColor"),
         -16 => Some("style:SpecialTextColor"),
+        -17 => Some("style:NegativeTextColor"),
+        -22 => Some("style:BorderColor"),
+        -25 => Some("style:ReportHeaderBackColor"),
+        -26 => Some("style:ReportGroup1BackColor"),
+        -27 => Some("style:ReportGroup2BackColor"),
+        -28 => Some("style:ReportLineColor"),
+        -34 => Some("style:ButtonBorderColor"),
+        -35 => Some("style:TableHeaderBackColor"),
+        -36 => Some("style:TableHeaderTextColor"),
+        -37 => Some("style:TableFooterBackColor"),
+        -38 => Some("style:TableFooterTextColor"),
         -42 => Some("style:NavigationColor"),
         _ => None,
     }
@@ -12165,6 +12470,98 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
             "<definitions/>"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_style_body_xml_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let style_uuid = "99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let color_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let font_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let style_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{3,\r\n{{3,\r\n{{1,0,{style_uuid}}},\"Main\",{{1,\"en\",\"Main\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let color_metadata = deflate_for_test(
+            format!(
+                "{{1,{{3,0,{{\"#\",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{{3,2,{{37}}}}}},{{3,{{1,0,{color_uuid}}},\"ErrorBackColor\",{{1,\"en\",\"Error back color\"}},\"\"}}}},0}}"
+            )
+            .as_bytes(),
+        );
+        let font_metadata = deflate_for_test(
+            format!(
+                "{{1,{{3,1,{{\"#\",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{{7,2,60,{{-31}},700,0,0,0,1,100}},0}},{{3,{{1,0,{font_uuid}}},\"StrikeFont\",{{1,\"en\",\"Strike font\"}},\"\"}}}},0}}"
+            )
+            .as_bytes(),
+        );
+        let style_body = deflate_for_test(
+            format!(
+                "{{2,5,{{{{-1}},0,{{4,2,{{20}},2}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{8,2,0,{{-20}},1,100}}}},{{{{0,{color_uuid}}},0,{{4,0,{{13158655}},0}}}},{{{{0,{font_uuid}}},1,{{8,2,60,{{-20}},400,0,0,1,1,100}}}},{{0}}}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: style_uuid.to_string(),
+                part_no: 0,
+                data_size: style_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&style_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{style_uuid}.0"),
+                part_no: 0,
+                data_size: style_body.len() as i64,
+                binary_hex: encode_hex_for_test(&style_body),
+            },
+            ConfigRow {
+                file_name: color_uuid.to_string(),
+                part_no: 0,
+                data_size: color_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&color_metadata),
+            },
+            ConfigRow {
+                file_name: font_uuid.to_string(),
+                part_no: 0,
+                data_size: font_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&font_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("Styles/Main/Ext/Style.xml")).unwrap();
+        assert!(xml.contains("<Style "));
+        assert!(xml.contains("<Item name=\"FormBackColor\">"));
+        assert!(xml.contains("<Color>web:Cream</Color>"));
+        assert!(xml.contains("<Item name=\"ControlBorder\">"));
+        assert!(xml.contains("<Border ref=\"style:ControlBorder\"/>"));
+        assert!(xml.contains("<Item name=\"TextFont\">"));
+        assert!(xml.contains("<Font ref=\"style:TextFont\" kind=\"StyleItem\"/>"));
+        assert!(xml.contains("<Item name=\"StyleItem.ErrorBackColor\">"));
+        assert!(xml.contains("<Color>#FFC8C8</Color>"));
+        assert!(xml.contains("<Item name=\"StyleItem.StrikeFont\">"));
+        assert!(xml.contains(
+            "<Font ref=\"style:TextFont\" kind=\"StyleItem\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"true\"/>"
+        ));
+
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{style_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Styles/Main/Ext/Style.xml")
         );
 
         let _ = fs::remove_dir_all(root);
