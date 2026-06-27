@@ -925,6 +925,13 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
 }
 
 pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    pack_moxel_spreadsheet_blob_from_xml_with_source(xml, None)
+}
+
+pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
     let spreadsheet = parse_spreadsheet_document_xml(xml)?;
     let column_count = spreadsheet.column_count.max(
         spreadsheet
@@ -978,7 +985,10 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     ));
     fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
     if !spreadsheet.pictures.is_empty() {
-        fields.push(format_spreadsheet_pictures_for_moxel(&spreadsheet.pictures));
+        fields.push(format_spreadsheet_pictures_for_moxel(
+            &spreadsheet.pictures,
+            source,
+        )?);
     }
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
@@ -2912,13 +2922,39 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
     ))
 }
 
-fn format_spreadsheet_pictures_for_moxel(pictures: &[SpreadsheetDocumentXmlPicture]) -> String {
+fn format_spreadsheet_pictures_for_moxel(
+    pictures: &[SpreadsheetDocumentXmlPicture],
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     let mut fields = Vec::with_capacity(pictures.len() + 1);
     fields.push(pictures.len().to_string());
     for picture in pictures {
-        fields.push(format!("{{4,{}}}", picture.index));
+        fields.push(format_spreadsheet_picture_for_moxel(picture, source)?);
     }
-    format!("{{{}}}", fields.join(","))
+    Ok(format!("{{{}}}", fields.join(",")))
+}
+
+fn format_spreadsheet_picture_for_moxel(
+    picture: &SpreadsheetDocumentXmlPicture,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(ref_name) = picture
+        .ref_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(format!("{{4,{}}}", picture.index));
+    };
+    let reference = if let Some(name) = ref_name.strip_prefix("v8ui:") {
+        format!("CommonPicture.{name}")
+    } else {
+        ref_name.to_string()
+    };
+    let source = source.ok_or_else(|| {
+        anyhow!("SpreadsheetDocument picture {ref_name} requires --source-root to resolve CommonPicture UUID")
+    })?;
+    let uuid = source.resolve_common_picture_uuid(&reference)?;
+    Ok(format!("{{4,{},{{0,{uuid}}}}}", picture.index))
 }
 
 fn format_spreadsheet_fonts_for_moxel(fonts: &[SpreadsheetDocumentXmlFont]) -> Vec<String> {
@@ -9478,6 +9514,55 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,0,1,1,0}"));
         assert!(text.contains("{1,{4,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_picture_refs_with_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-spreadsheet-picture-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonPictures"))?;
+        std::fs::write(
+            root.join("CommonPictures").join("Logo.xml"),
+            br#"
+<MetaDataObject>
+  <CommonPicture uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Logo</Name>
+      <Synonym/>
+      <Comment/>
+    </Properties>
+  </CommonPicture>
+</MetaDataObject>
+"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root);
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<picture>
+		<index>0</index>
+		<picture ref="v8ui:Logo"/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml_with_source(xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{1,{4,0,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

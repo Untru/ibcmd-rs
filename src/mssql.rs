@@ -43,9 +43,9 @@ use crate::module_blob::{
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
-    pack_help_blob_from_parts, pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml,
-    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
-    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1983,7 +1983,7 @@ fn prepare_metadata_body_rows(
             "WSReference definition",
         ),
         "CommonTemplate" | "Template" => {
-            prepare_template_body_row(sqlcmd, server, database, xml_path, xml, properties)
+            prepare_template_body_row(sqlcmd, server, database, xml_path, xml, properties, source)
         }
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
@@ -2110,6 +2110,7 @@ fn prepare_template_body_row(
     xml_path: &Path,
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let Some(template_type) = parse_template_type_from_xml(xml)? else {
         return Ok(Vec::new());
@@ -2135,9 +2136,9 @@ fn prepare_template_body_row(
         "HTMLDocument" => {
             prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties)
         }
-        "SpreadsheetDocument" => {
-            prepare_spreadsheet_template_body_row(sqlcmd, server, database, xml_path, properties)
-        }
+        "SpreadsheetDocument" => prepare_spreadsheet_template_body_row(
+            sqlcmd, server, database, xml_path, properties, source,
+        ),
         "AddIn" | "BinaryData" => {
             prepare_binary_template_body_row(sqlcmd, server, database, xml_path, properties)
         }
@@ -2151,6 +2152,7 @@ fn prepare_spreadsheet_template_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_spreadsheet_template_body_path(xml_path);
     if !body_path.exists() {
@@ -2164,12 +2166,13 @@ fn prepare_spreadsheet_template_body_row(
             body_path.display()
         )
     })?;
-    let packed = pack_moxel_spreadsheet_blob_from_xml(&xml).with_context(|| {
-        format!(
-            "failed to pack SpreadsheetDocument Template body {}",
-            body_path.display()
-        )
-    })?;
+    let packed =
+        pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, source).with_context(|| {
+            format!(
+                "failed to pack SpreadsheetDocument Template body {}",
+                body_path.display()
+            )
+        })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
