@@ -947,7 +947,7 @@ pub fn stage_source_metadata_objects(
     let xmls = manifest
         .files
         .iter()
-        .filter(|file| is_root_metadata_xml(&file.path))
+        .filter(|file| is_stage_metadata_xml(&file.path))
         .map(|file| args.source_root.join(&file.path))
         .collect::<Vec<_>>();
     let stage_args = MssqlStageMetadataObjectsArgs {
@@ -1169,6 +1169,19 @@ fn is_root_metadata_xml(path: &str) -> bool {
     }
     let parts = lower.split('/').collect::<Vec<_>>();
     parts.len() == 2 && parts[0] != "commonmodules"
+}
+
+fn is_template_metadata_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "templates"
+}
+
+fn is_stage_metadata_xml(path: &str) -> bool {
+    is_root_metadata_xml(path) || is_template_metadata_xml(path)
 }
 
 fn is_root_common_module_xml(path: &str) -> bool {
@@ -2318,7 +2331,7 @@ fn source_metadata_xmls(
     manifest
         .files
         .iter()
-        .filter(|file| is_root_metadata_xml(&file.path))
+        .filter(|file| is_stage_metadata_xml(&file.path))
         .map(|file| source_root.join(&file.path))
         .collect()
 }
@@ -3450,9 +3463,9 @@ mod tests {
         PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataBodyStage,
         PreparedMetadataObjectStage, StorageBundleManifest, StorageTableManifest, TableShape,
         compare_shapes, compare_storage_table_manifests, infer_common_module_text_path,
-        is_root_common_module_xml, is_root_metadata_xml, quote_ident, quote_string,
-        require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
-        validate_delta_manifest, validate_storage_manifest,
+        is_root_common_module_xml, is_root_metadata_xml, is_stage_metadata_xml, quote_ident,
+        quote_string, require_non_lab_confirmation, source_common_module_xmls,
+        source_metadata_xmls, validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -3505,6 +3518,22 @@ mod tests {
                     object_hint: Some("CommonModules/Foo".to_string()),
                 },
                 SourceFile {
+                    path: "Reports/Sales/Templates/Main.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("Reports/Sales".to_string()),
+                },
+                SourceFile {
+                    path: "Reports/Sales/Templates/Main/Ext/Template.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("document".to_string()),
+                    object_hint: Some("Reports/Sales".to_string()),
+                },
+                SourceFile {
                     path: "Configuration.xml".to_string(),
                     size_bytes: 1,
                     sha256: "aa".to_string(),
@@ -3529,6 +3558,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(metadata, vec!["Bots/Notify.xml"]);
+        assert!(is_stage_metadata_xml("Reports/Sales/Templates/Main.xml"));
+        assert!(!is_stage_metadata_xml(
+            "Reports/Sales/Templates/Main/Ext/Template.xml"
+        ));
         assert_eq!(modules, vec!["CommonModules/Foo.xml"]);
     }
 
@@ -3586,6 +3619,22 @@ mod tests {
                     xml_root: Some("Style".to_string()),
                     object_hint: Some("Styles/Theme".to_string()),
                 },
+                SourceFile {
+                    path: "DataProcessors/Import/Templates/Schema.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("DataProcessors/Import".to_string()),
+                },
+                SourceFile {
+                    path: "DataProcessors/Import/Templates/Schema/Ext/Template.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("document".to_string()),
+                    object_hint: Some("DataProcessors/Import".to_string()),
+                },
             ],
         };
 
@@ -3598,7 +3647,11 @@ mod tests {
                 .iter()
                 .map(|path| path.to_string_lossy().replace('\\', "/"))
                 .collect::<Vec<_>>(),
-            vec!["C:/sources/Bots/Notify.xml", "C:/sources/Styles/Theme.xml"]
+            vec![
+                "C:/sources/Bots/Notify.xml",
+                "C:/sources/Styles/Theme.xml",
+                "C:/sources/DataProcessors/Import/Templates/Schema.xml"
+            ]
         );
         assert_eq!(
             common_module_xmls
