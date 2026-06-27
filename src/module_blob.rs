@@ -26,6 +26,8 @@ const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
+const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
+const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -2945,8 +2947,8 @@ fn format_spreadsheet_picture_for_moxel(
     else {
         return Ok(format!("{{4,{}}}", picture.index));
     };
-    if let Some(code) = spreadsheet_standard_picture_code(ref_name) {
-        return Ok(format!("{{4,{},{{{code}}}}}", picture.index));
+    if let Some(reference) = spreadsheet_standard_picture_ref(ref_name) {
+        return Ok(format!("{{4,{},{{{reference}}}}}", picture.index));
     }
     let reference = if let Some(name) = ref_name.strip_prefix("v8ui:") {
         format!("CommonPicture.{name}")
@@ -2960,9 +2962,14 @@ fn format_spreadsheet_picture_for_moxel(
     Ok(format!("{{4,{},{{0,{uuid}}}}}", picture.index))
 }
 
-fn spreadsheet_standard_picture_code(ref_name: &str) -> Option<i32> {
+fn spreadsheet_standard_picture_ref(ref_name: &str) -> Option<String> {
     match ref_name {
-        "v8ui:Print" | "StdPicture.Print" => Some(-13),
+        "v8ui:Print" | "StdPicture.Print" => Some("-13".to_string()),
+        "v8ui:InputFieldCalculator" | "StdPicture.InputFieldCalculator" => Some("-6".to_string()),
+        "v8ui:Information" | "StdPicture.Information" => {
+            Some(format!("0,{STD_PICTURE_INFORMATION_UUID}"))
+        }
+        "v8ui:SaveFile" | "StdPicture.SaveFile" => Some(format!("0,{STD_PICTURE_SAVE_FILE_UUID}")),
         _ => None,
     }
 }
@@ -9579,7 +9586,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_spreadsheet_standard_print_picture_ref() -> anyhow::Result<()> {
+    fn packs_spreadsheet_standard_picture_refs() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
 	<columns>
@@ -9595,13 +9602,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<index>0</index>
 		<picture ref="v8ui:Print"/>
 	</picture>
+	<picture>
+		<index>1</index>
+		<picture ref="v8ui:InputFieldCalculator"/>
+	</picture>
+	<picture>
+		<index>2</index>
+		<picture ref="v8ui:Information"/>
+	</picture>
+	<picture>
+		<index>3</index>
+		<picture ref="v8ui:SaveFile"/>
+	</picture>
 </document>
 "#;
 
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{1,{4,0,{-13}}}"));
+        assert!(text.contains("{4,{4,0,{-13}},{4,1,{-6}"));
+        assert!(text.contains(&format!(
+            "{{4,2,{{0,{}}}}}",
+            super::STD_PICTURE_INFORMATION_UUID
+        )));
+        assert!(text.contains(&format!(
+            "{{4,3,{{0,{}}}}}",
+            super::STD_PICTURE_SAVE_FILE_UUID
+        )));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

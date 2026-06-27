@@ -13,6 +13,9 @@ use crate::cli::MssqlDumpConfigArgs;
 use crate::module_blob::unpack_module_blob_text;
 use crate::parallel;
 
+const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
+const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
+
 #[derive(Debug, Serialize)]
 pub struct MssqlDumpConfigReport {
     pub database: String,
@@ -4823,13 +4826,20 @@ fn parse_moxel_picture(text: &str, object_refs: &BTreeMap<String, String>) -> Op
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0))
         .and_then(|picture_ref| {
-            if picture_ref.first().map(|field| field.trim()) == Some("-13") {
-                return Some("v8ui:Print".to_string());
+            match picture_ref.first().map(|field| field.trim()) {
+                Some("-13") => return Some("v8ui:Print".to_string()),
+                Some("-6") => return Some("v8ui:InputFieldCalculator".to_string()),
+                _ => {}
             }
             if picture_ref.first().map(|field| field.trim()) != Some("0") {
                 return None;
             }
             let uuid = parse_uuid_field(picture_ref.get(1)?.trim())?;
+            match uuid.as_str() {
+                STD_PICTURE_INFORMATION_UUID => return Some("v8ui:Information".to_string()),
+                STD_PICTURE_SAVE_FILE_UUID => return Some("v8ui:SaveFile".to_string()),
+                _ => {}
+            }
             object_refs
                 .get(&uuid)
                 .and_then(|reference| reference.strip_prefix("CommonPicture."))
@@ -10935,6 +10945,27 @@ mod tests {
 
         assert_eq!(picture.index, 0);
         assert_eq!(picture.ref_name.as_deref(), Some("v8ui:Print"));
+    }
+
+    #[test]
+    fn formats_moxel_standard_picture_refs() {
+        let cases = [
+            ("{4,0,{-13}}", "v8ui:Print"),
+            ("{4,1,{-6}}", "v8ui:InputFieldCalculator"),
+            (
+                "{4,2,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9}}",
+                "v8ui:Information",
+            ),
+            (
+                "{4,3,{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1}}",
+                "v8ui:SaveFile",
+            ),
+        ];
+
+        for (text, expected_ref) in cases {
+            let picture = parse_moxel_picture(text, &BTreeMap::new()).unwrap();
+            assert_eq!(picture.ref_name.as_deref(), Some(expected_ref));
+        }
     }
 
     #[test]
