@@ -149,6 +149,13 @@ pub struct PackedExtPictureBlob {
 }
 
 #[derive(Debug, Clone)]
+pub struct PackedHelpBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
 }
@@ -952,6 +959,103 @@ pub fn parse_ext_picture_file_name_from_xml(xml: &[u8]) -> Result<String> {
         return Err(anyhow!("unsupported ExtPicture file name: {file_name}"));
     }
     Ok(file_name)
+}
+
+pub fn pack_help_blob_from_parts(
+    pages: &[(String, Vec<u8>)],
+    files: &[(String, Vec<u8>)],
+) -> Result<PackedHelpBlob> {
+    if pages.is_empty() {
+        return Err(anyhow!("at least one Help page is required"));
+    }
+    let mut fields = Vec::with_capacity(2 + pages.len() * 2 + 1 + files.len() * 3);
+    fields.push("5".to_string());
+    fields.push(pages.len().to_string());
+    for (page, content) in pages {
+        fields.push(format_1c_string(page));
+        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+    }
+    fields.push(files.len().to_string());
+    for (file_name, content) in files {
+        fields.push(format_1c_string(file_name));
+        fields.push("1".to_string());
+        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+    }
+    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedHelpBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn parse_help_pages_from_xml(xml: &[u8]) -> Result<Vec<String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut pages = Vec::<String>::new();
+    let mut page_text = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["Help"]) && local == "Page" {
+                    page_text = Some(String::new());
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(event)) => {
+                if path_ends_with(&path, &["Help", "Page"])
+                    && let Some(value) = page_text.as_mut()
+                {
+                    let text = event.xml_content()?;
+                    let text = unescape(text.as_ref())?;
+                    value.push_str(text.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path_ends_with(&path, &["Help", "Page"])
+                    && let Some(value) = page_text.as_mut()
+                {
+                    value.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Help", "Page"])
+                    && let Some(value) = page_text.as_mut()
+                {
+                    let text = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    value.push_str(&text);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Page" && path_ends_with(&path, &["Help", "Page"]) {
+                    let page = page_text.take().unwrap_or_default().trim().to_string();
+                    if !page.is_empty() {
+                        pages.push(page);
+                    }
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(pages)
 }
 
 pub fn parse_template_type_from_xml(xml: &[u8]) -> Result<Option<String>> {
@@ -5365,6 +5469,31 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert_eq!(text, "{#base64:UEsDBA==}");
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_help_blob_from_pages_and_files() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Page>ru</Page>
+</Help>
+"#;
+        let pages = super::parse_help_pages_from_xml(xml)?;
+
+        assert_eq!(pages, vec!["ru"]);
+        let packed = super::pack_help_blob_from_parts(
+            &[("ru".to_string(), b"<html></html>".to_vec())],
+            &[("shot.png".to_string(), b"\x89PNG\r\n\x1a\n".to_vec())],
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,{#base64:iVBORw0KGgo=}}"
+        );
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
