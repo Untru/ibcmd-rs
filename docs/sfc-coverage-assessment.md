@@ -44,6 +44,7 @@
 | XML -> SQL staging | `mssql-stage-source-objects`, `src/mssql.rs` | Частично работает как обновление существующей базы через `ConfigSave`; не как полная загрузка в пустую базу | Массовый dry-run и реальный apply на большом срезе без неподдержанных body-файлов |
 | XML -> пустая SQL-база | пока нет отдельного полноценного режима | Не доказано | Bootstrap всех `_Config`/metadata/body rows без зависимости от base blob-ов |
 | Round-trip | `dump -> load/stage -> apply -> dump -> diff` | Доказан только на малых срезах; для `SpreadsheetDocument` есть сильный dry-run `XML -> blob -> XML -> blob -> XML` | Полный SQL end-to-end, особенно формы, роли, макеты и command interface |
+| Source tree diff | `source-diff`, `src/plan.rs` | Есть прямое сравнение двух деревьев исходников по path/SHA-256 с `--path-prefix`; подходит для `ibcmd export` vs native `mssql-dump-config` | Нужны нормализаторы XML для случаев, где byte diff не равен semantic diff |
 | Wrapper над штатным `ibcmd` | `dump-sources` | Не считается native-возможностью `ibcmd-rs` | Использовать только как эталон/контроль, не как доказательство нашей реализации |
 
 ## Состав эталонной конфигурации
@@ -290,7 +291,7 @@ BSL по именам:
 2. Проверить и покрыть тестом batch accounting в `mssql-stage-source-objects`, особенно второй batch и stable rows.
 3. Расширить `mssql-audit-source-parity` на копии SQL-базы `sfc` по нескольким семействам объектов и разложить failures по типам: missing base blob, unsupported packer, broken source reference, batch/accounting issue.
 4. Начать отдельную ветку по полноценному `Form.xml` round-trip: сначала анализ реальной структуры, затем выгрузка, затем упаковка обратно.
-5. Добавить native structural diff `mssql-dump-config -> source layout -> compare with sfc`.
+5. Использовать `source-diff` для native structural diff: `mssql-dump-config -> source layout -> compare with sfc` по path/SHA-256, затем добавить XML-нормализацию для semantic diff.
 6. Добавить round-trip tests для `BinaryData`, `AddIn`, всех форматов `CommonPictures`, ролей и command interface.
 7. Добавить интеграционный harness `dump -> load -> dump -> diff` на небольшой базе, затем на подмножестве `sfc`.
 8. После этого замерять скорость против `ibcmd`: до закрытия форм и end-to-end load такой замер будет показывать скорость неполного сценария, а не честную замену.

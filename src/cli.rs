@@ -27,6 +27,8 @@ pub enum Commands {
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
+    /// Compare two 1C XML source trees by path and content hash.
+    SourceDiff(SourceDiffArgs),
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
@@ -228,6 +230,20 @@ pub struct PlanArgs {
     /// Baseline manifest JSON. If omitted, all current files are planned as upserts.
     #[arg(short, long)]
     pub baseline: Option<PathBuf>,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct SourceDiffArgs {
+    /// Left/reference source tree.
+    pub left: PathBuf,
+    /// Right/candidate source tree.
+    pub right: PathBuf,
+    /// Optional source path prefix to compare. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
@@ -2737,6 +2753,29 @@ mod tests {
                 assert_eq!(
                     args.output,
                     Some(PathBuf::from(r"C:\audit\load-coverage.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let diff = Cli::parse_from([
+            "ibcmd-rs",
+            "source-diff",
+            r"C:\reference",
+            r"C:\candidate",
+            "--path-prefix",
+            "Catalogs/Products",
+            "-o",
+            r"C:\audit\source-diff.json",
+        ]);
+        match diff.command {
+            Commands::SourceDiff(args) => {
+                assert_eq!(args.left, PathBuf::from(r"C:\reference"));
+                assert_eq!(args.right, PathBuf::from(r"C:\candidate"));
+                assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\source-diff.json"))
                 );
             }
             other => panic!("unexpected command: {other:?}"),

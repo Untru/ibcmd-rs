@@ -67,6 +67,15 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
             }
         }
+        Commands::SourceDiff(args) => {
+            let report =
+                ibcmd_rs::plan::diff_source_trees(&args.left, &args.right, &args.path_prefix)?;
+            if let Some(output) = args.output {
+                ibcmd_rs::plan::write_source_diff(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::Compatibility(args) => {
             let report = ibcmd_rs::compatibility::current_compatibility_report();
             if let Some(output) = args.output {
