@@ -813,6 +813,7 @@ fn source_assets_from_metadata_blob_inner(
         .map(|(body_id, _)| body_id.clone())
         .collect::<BTreeSet<_>>();
     let object_row_prefix = format!("{uuid}.");
+    let preferred_help_body_id = preferred_help_body_id(kind, uuid);
     for (body_id, body_row) in rows_by_file_name {
         if !body_id.starts_with(&object_row_prefix) || mapped_ids.contains(*body_id) {
             continue;
@@ -820,6 +821,11 @@ fn source_assets_from_metadata_blob_inner(
         if let Ok(help_bytes) = decode_hex(&body_row.binary_hex)
             && parse_help_blob_pages(&help_bytes).is_some()
         {
+            if rows_by_file_name.contains_key(preferred_help_body_id.as_str())
+                && *body_id != preferred_help_body_id
+            {
+                continue;
+            }
             assets.push((
                 (*body_id).to_string(),
                 SourceAsset {
@@ -847,6 +853,15 @@ fn source_assets_from_metadata_blob_inner(
     }
 
     Some(assets)
+}
+
+fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
+    let suffix = if matches!(kind, "Form" | "CommonForm") {
+        "1"
+    } else {
+        "5"
+    };
+    format!("{uuid}.{suffix}")
 }
 fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
     match &asset.kind {
@@ -3761,14 +3776,63 @@ fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     let events = extract_form_body_events(&form_fields);
+    let auto_command_bar = extract_form_auto_command_bar(&form_fields);
 
-    Some(format_form_body_xml(&events))
+    Some(format_form_body_xml(auto_command_bar.as_ref(), &events))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct FormBodyEvent {
     name: String,
     handler: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormAutoCommandBar {
+    id: String,
+    name: String,
+}
+
+fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
+    find_form_auto_command_bar(fields)
+}
+
+fn find_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if let Some(command_bar) = parse_form_auto_command_bar_fields(&nested) {
+            return Some(command_bar);
+        }
+        if let Some(command_bar) = find_form_auto_command_bar(&nested) {
+            return Some(command_bar);
+        }
+    }
+    None
+}
+
+fn parse_form_auto_command_bar_fields(fields: &[&str]) -> Option<FormAutoCommandBar> {
+    if fields.first().map(|value| value.trim()) != Some("22") {
+        return None;
+    }
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    if id != "-1" {
+        return None;
+    }
+    let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    Some(FormAutoCommandBar {
+        id: id.to_string(),
+        name,
+    })
 }
 
 fn extract_form_body_events(fields: &[&str]) -> Vec<FormBodyEvent> {
@@ -3791,18 +3855,23 @@ fn collect_form_body_events(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        if let Some(event) = parse_form_body_event_fields(&nested)
-            && seen.insert((event.name.clone(), event.handler.clone()))
-        {
-            events.push(event);
+        for event in parse_form_body_event_fields(&nested) {
+            if seen.insert((event.name.clone(), event.handler.clone())) {
+                events.push(event);
+            }
         }
         collect_form_body_events(&nested, events, seen);
     }
 }
 
-fn parse_form_body_event_fields(fields: &[&str]) -> Option<FormBodyEvent> {
-    parse_form_body_event_pair(fields.first()?, fields.get(1)?)
-        .or_else(|| parse_form_body_event_pair(fields.get(1)?, fields.get(2)?))
+fn parse_form_body_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
+    let mut events = Vec::new();
+    for window in fields.windows(2) {
+        if let Some(event) = parse_form_body_event_pair(window[0], window[1]) {
+            events.push(event);
+        }
+    }
+    events
 }
 
 fn parse_form_body_event_pair(event_field: &str, handler_field: &str) -> Option<FormBodyEvent> {
@@ -3838,6 +3907,10 @@ fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
         "ChoiceProcessing" => Some("ChoiceProcessing"),
         "NotificationProcessing" => Some("NotificationProcessing"),
         "ExternalEvent" => Some("ExternalEvent"),
+        "3ccc650e-f631-4cae-8e33-3eaac610b5f9" => Some("OnOpen"),
+        "1d632984-de3c-4b4b-ad9f-d69682a10182" => Some("ChoiceProcessing"),
+        "3699f6a3-9a2a-4c82-a775-6ff4824a08ca" => Some("NotificationProcessing"),
+        "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b" => Some("OnCreateAtServer"),
         _ => None,
     }
 }
@@ -3991,11 +4064,21 @@ fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
     deduped
 }
 
-fn format_form_body_xml(events: &[FormBodyEvent]) -> String {
+fn format_form_body_xml(
+    auto_command_bar: Option<&FormAutoCommandBar>,
+    events: &[FormBodyEvent],
+) -> String {
     let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 "
     .to_string();
+    if let Some(command_bar) = auto_command_bar {
+        xml.push_str(&format!(
+            "\t<AutoCommandBar name=\"{}\" id=\"{}\"/>\r\n",
+            escape_xml_text(&command_bar.name),
+            escape_xml_text(&command_bar.id)
+        ));
+    }
     if !events.is_empty() {
         xml.push_str("\t<Events>\r\n");
         for event in events {
@@ -10063,6 +10146,25 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_uuid_events_and_auto_command_bar_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1},{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body).unwrap();
+
+        assert!(form_xml.contains(r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#));
+        assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ОбработкаВыбора</Event>"#));
+        assert!(
+            form_xml
+                .contains(r#"<Event name="NotificationProcessing">ОбработкаОповещения</Event>"#)
+        );
+        assert!(
+            form_xml.contains(r#"<Event name="OnCreateAtServer">ПриСозданииНаСервере</Event>"#)
+        );
+    }
+
+    #[test]
     fn writes_form_item_pictures_to_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -10516,6 +10618,73 @@ mod tests {
             .unwrap();
         assert_eq!(
             help_row.source_asset_path.as_deref(),
+            Some("Catalogs/Products/Ext/Help.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prefers_new_object_help_suffix_when_legacy_help_blob_remains() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let legacy_help = deflate_for_test(b"{5,1,\"ru\",{#base64:b2xk}}");
+        let current_help = deflate_for_test(b"{5,1,\"ru\",{#base64:bmV3}}");
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.1"),
+                part_no: 0,
+                data_size: legacy_help.len() as i64,
+                binary_hex: encode_hex_for_test(&legacy_help),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.5"),
+                part_no: 0,
+                data_size: current_help.len() as i64,
+                binary_hex: encode_hex_for_test(&current_help),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("Catalogs/Products/Ext/Help/ru.html")).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            dumped
+                .rows
+                .iter()
+                .find(|row| row.file_name == format!("{uuid}.1"))
+                .unwrap()
+                .source_asset_path,
+            None
+        );
+        assert_eq!(
+            dumped
+                .rows
+                .iter()
+                .find(|row| row.file_name == format!("{uuid}.5"))
+                .unwrap()
+                .source_asset_path
+                .as_deref(),
             Some("Catalogs/Products/Ext/Help.xml")
         );
 
