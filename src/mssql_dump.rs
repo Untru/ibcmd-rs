@@ -3829,6 +3829,7 @@ struct FormBodyProperties {
     title: Vec<(String, String)>,
     window_opening_mode: Option<&'static str>,
     group: Option<&'static str>,
+    command_bar_location: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -3948,6 +3949,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
             .unwrap_or_default(),
         window_opening_mode: extract_form_window_opening_mode(fields),
         group: extract_form_root_group(fields),
+        command_bar_location: extract_form_command_bar_location(fields),
     }
 }
 
@@ -3962,12 +3964,21 @@ fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
 
 fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     match (
-        fields.get(17).map(|field| field.trim())?,
-        fields.get(12).map(|field| field.trim()),
+        fields.get(11).map(|field| field.trim())?,
+        fields.get(13).map(|field| field.trim()),
+        fields.get(14).map(|field| field.trim()),
     ) {
-        ("0" | "1", _) => Some("Vertical"),
-        ("3", Some("2")) => Some("Horizontal"),
-        ("3", Some("0")) => Some("AlwaysHorizontal"),
+        ("0", _, _) => Some("Vertical"),
+        ("1", Some("0"), Some("0")) => Some("Horizontal"),
+        _ => None,
+    }
+}
+
+fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'static str> {
+    match fields.get(17).map(|field| field.trim())? {
+        "0" => Some("None"),
+        "2" => Some("Top"),
+        "3" => Some("Bottom"),
         _ => None,
     }
 }
@@ -5368,6 +5379,12 @@ fn format_form_body_xml(
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if let Some(command_bar_location) = properties.command_bar_location {
+        xml.push_str(&format!(
+            "\t<CommandBarLocation>{}</CommandBarLocation>\r\n",
+            escape_xml_text(command_bar_location)
+        ));
     }
     if let Some(command_bar) = auto_command_bar {
         if command_bar.horizontal_align.is_some() || command_bar.autofill == Some(false) {
@@ -11953,13 +11970,14 @@ mod tests {
     #[test]
     fn extracts_form_top_level_properties_to_body_xml() {
         let form_body = deflate_for_test(
-            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,2,1,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,1,0,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
+        assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
     }
 
     #[test]

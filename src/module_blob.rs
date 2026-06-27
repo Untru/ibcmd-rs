@@ -81,6 +81,7 @@ struct FormXmlBodyProperties {
     title: Vec<LocalizedString>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     group: Option<FormXmlGroup>,
+    command_bar_location: Option<FormXmlCommandBarLocation>,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
     attributes: Vec<FormXmlAttribute>,
@@ -211,6 +212,14 @@ enum FormXmlGroup {
     Vertical,
     Horizontal,
     AlwaysHorizontal,
+    HorizontalIfPossible,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlCommandBarLocation {
+    None,
+    Top,
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3267,6 +3276,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
         if properties.window_opening_mode.is_some()
             || !properties.title.is_empty()
             || properties.group.is_some()
+            || properties.command_bar_location.is_some()
             || !properties.events.is_empty()
             || properties.auto_command_bar.is_some()
             || !properties.child_items.is_empty()
@@ -3368,6 +3378,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     local.as_str(),
                     "WindowOpeningMode"
                         | "Group"
+                        | "CommandBarLocation"
                         | "HorizontalAlign"
                         | "Autofill"
                         | "Event"
@@ -3493,6 +3504,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
@@ -3780,6 +3792,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
@@ -4075,6 +4088,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "CommandBarLocation"
+                        if path_ends_with(&path, &["Form", "CommandBarLocation"]) =>
+                    {
+                        properties.command_bar_location =
+                            Some(parse_form_command_bar_location_xml(text_value.trim())?);
                     }
                     "Autofill"
                         if path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"]) =>
@@ -5155,7 +5174,17 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
         "Vertical" => Ok(FormXmlGroup::Vertical),
         "Horizontal" => Ok(FormXmlGroup::Horizontal),
         "AlwaysHorizontal" => Ok(FormXmlGroup::AlwaysHorizontal),
+        "HorizontalIfPossible" => Ok(FormXmlGroup::HorizontalIfPossible),
         other => Err(anyhow!("unsupported Form Group: {other}")),
+    }
+}
+
+fn parse_form_command_bar_location_xml(value: &str) -> Result<FormXmlCommandBarLocation> {
+    match value {
+        "None" => Ok(FormXmlCommandBarLocation::None),
+        "Top" => Ok(FormXmlCommandBarLocation::Top),
+        "Bottom" => Ok(FormXmlCommandBarLocation::Bottom),
+        other => Err(anyhow!("unsupported Form CommandBarLocation: {other}")),
     }
 }
 
@@ -5186,17 +5215,26 @@ fn patch_form_layout_properties(
     if let Some(group) = properties.group {
         match group {
             FormXmlGroup::Vertical => {
-                replace_braced_field(layout, 17, "1")?;
+                replace_braced_field(layout, 11, "0")?;
             }
             FormXmlGroup::Horizontal => {
-                replace_braced_field(layout, 12, "2")?;
-                replace_braced_field(layout, 17, "3")?;
+                replace_braced_field(layout, 11, "1")?;
+                replace_braced_field(layout, 13, "0")?;
+                replace_braced_field(layout, 14, "0")?;
             }
-            FormXmlGroup::AlwaysHorizontal => {
-                replace_braced_field(layout, 12, "0")?;
-                replace_braced_field(layout, 17, "3")?;
+            FormXmlGroup::AlwaysHorizontal | FormXmlGroup::HorizontalIfPossible => {
+                replace_braced_field(layout, 11, "1")?;
+                replace_braced_field(layout, 13, "1")?;
+                replace_braced_field(layout, 14, "1")?;
             }
         }
+    }
+    if let Some(command_bar_location) = properties.command_bar_location {
+        replace_braced_field(
+            layout,
+            17,
+            form_command_bar_location_code(command_bar_location),
+        )?;
     }
     Ok(())
 }
@@ -5212,6 +5250,14 @@ fn format_form_title_value(title: &[LocalizedString]) -> String {
     }
     output.push('}');
     output
+}
+
+fn form_command_bar_location_code(value: FormXmlCommandBarLocation) -> &'static str {
+    match value {
+        FormXmlCommandBarLocation::None => "0",
+        FormXmlCommandBarLocation::Top => "2",
+        FormXmlCommandBarLocation::Bottom => "3",
+    }
 }
 
 fn patch_form_layout_auto_command_bar(
@@ -13369,6 +13415,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	</Title>
 	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
 	<Group>Horizontal</Group>
+	<CommandBarLocation>Bottom</CommandBarLocation>
 </Form>
 "#
         .as_bytes();
@@ -13382,7 +13429,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             &parsed.layout[fields[10].clone()],
             r#"{1,2,{"ru","Новый заголовок"},{"en","New title"}}"#
         );
-        assert_eq!(&parsed.layout[fields[12].clone()], "2");
+        assert_eq!(&parsed.layout[fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
         assert_eq!(&parsed.layout[fields[17].clone()], "3");
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(
