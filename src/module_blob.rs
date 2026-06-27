@@ -964,6 +964,9 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     if let Some(print_area) = &spreadsheet.print_area {
         fields.push(format_spreadsheet_area_bounds_for_moxel(print_area));
     }
+    if let Some(print_settings) = &spreadsheet.print_settings {
+        fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
+    }
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -986,6 +989,7 @@ struct SpreadsheetDocumentXml {
     merges: Vec<SpreadsheetDocumentXmlMerge>,
     areas: Vec<SpreadsheetDocumentXmlArea>,
     print_area: Option<SpreadsheetDocumentXmlArea>,
+    print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
 }
 
 #[derive(Debug, Default)]
@@ -1047,6 +1051,28 @@ struct SpreadsheetDocumentXmlArea {
     columns_id: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlPrintSettings {
+    page_orientation: Option<String>,
+    scale: Option<usize>,
+    collate: Option<bool>,
+    copies: Option<usize>,
+    per_page: Option<usize>,
+    top_margin: Option<usize>,
+    left_margin: Option<usize>,
+    bottom_margin: Option<usize>,
+    right_margin: Option<usize>,
+    header_size: Option<usize>,
+    footer_size: Option<usize>,
+    fit_to_page: Option<bool>,
+    black_and_white: Option<bool>,
+    printer_name: Option<String>,
+    paper: Option<usize>,
+    paper_source: Option<usize>,
+    page_width: Option<usize>,
+    page_height: Option<usize>,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1059,6 +1085,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
     let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
     let mut current_area = None::<SpreadsheetDocumentXmlArea>;
+    let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1080,6 +1107,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
                 } else if local == "printArea" {
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
+                } else if local == "printSettings" {
+                    current_print_settings = Some(SpreadsheetDocumentXmlPrintSettings::default());
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1154,6 +1183,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_cell.as_mut(),
                     current_merge.as_mut(),
                     current_area.as_mut(),
+                    current_print_settings.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1197,6 +1227,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(area) = current_area.take()
                 {
                     document.print_area = Some(area);
+                } else if local == "printSettings"
+                    && let Some(print_settings) = current_print_settings.take()
+                {
+                    document.print_settings = Some(print_settings);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
@@ -1241,6 +1275,24 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "beginColumn"
             | "endColumn"
             | "columnsID"
+            | "pageOrientation"
+            | "scale"
+            | "collate"
+            | "copies"
+            | "perPage"
+            | "topMargin"
+            | "leftMargin"
+            | "bottomMargin"
+            | "rightMargin"
+            | "headerSize"
+            | "footerSize"
+            | "fitToPage"
+            | "blackAndWhite"
+            | "printerName"
+            | "paper"
+            | "paperSource"
+            | "pageWidth"
+            | "pageHeight"
     )
 }
 
@@ -1255,6 +1307,7 @@ fn apply_spreadsheet_text_value(
     cell: Option<&mut SpreadsheetDocumentXmlCell>,
     merge: Option<&mut SpreadsheetDocumentXmlMerge>,
     area: Option<&mut SpreadsheetDocumentXmlArea>,
+    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
 ) {
     let value = text.trim();
     match local {
@@ -1425,7 +1478,121 @@ fn apply_spreadsheet_text_value(
                 area.columns_id = Some(text.to_string());
             }
         }
+        "pageOrientation" if path_ends_with(path, &["printSettings", "pageOrientation"]) => {
+            if let Some(print_settings) = print_settings
+                && !value.is_empty()
+            {
+                print_settings.page_orientation = Some(text.to_string());
+            }
+        }
+        "scale" if path_ends_with(path, &["printSettings", "scale"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.scale = Some(parsed)
+            });
+        }
+        "collate" if path_ends_with(path, &["printSettings", "collate"]) => {
+            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
+                settings.collate = Some(parsed)
+            });
+        }
+        "copies" if path_ends_with(path, &["printSettings", "copies"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.copies = Some(parsed)
+            });
+        }
+        "perPage" if path_ends_with(path, &["printSettings", "perPage"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.per_page = Some(parsed)
+            });
+        }
+        "topMargin" if path_ends_with(path, &["printSettings", "topMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.top_margin = Some(parsed)
+            });
+        }
+        "leftMargin" if path_ends_with(path, &["printSettings", "leftMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.left_margin = Some(parsed)
+            });
+        }
+        "bottomMargin" if path_ends_with(path, &["printSettings", "bottomMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.bottom_margin = Some(parsed)
+            });
+        }
+        "rightMargin" if path_ends_with(path, &["printSettings", "rightMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.right_margin = Some(parsed)
+            });
+        }
+        "headerSize" if path_ends_with(path, &["printSettings", "headerSize"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.header_size = Some(parsed)
+            });
+        }
+        "footerSize" if path_ends_with(path, &["printSettings", "footerSize"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.footer_size = Some(parsed)
+            });
+        }
+        "fitToPage" if path_ends_with(path, &["printSettings", "fitToPage"]) => {
+            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
+                settings.fit_to_page = Some(parsed)
+            });
+        }
+        "blackAndWhite" if path_ends_with(path, &["printSettings", "blackAndWhite"]) => {
+            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
+                settings.black_and_white = Some(parsed)
+            });
+        }
+        "printerName" if path_ends_with(path, &["printSettings", "printerName"]) => {
+            if let Some(print_settings) = print_settings {
+                print_settings.printer_name = Some(text.to_string());
+            }
+        }
+        "paper" if path_ends_with(path, &["printSettings", "paper"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.paper = Some(parsed)
+            });
+        }
+        "paperSource" if path_ends_with(path, &["printSettings", "paperSource"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.paper_source = Some(parsed)
+            });
+        }
+        "pageWidth" if path_ends_with(path, &["printSettings", "pageWidth"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.page_width = Some(parsed)
+            });
+        }
+        "pageHeight" if path_ends_with(path, &["printSettings", "pageHeight"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.page_height = Some(parsed)
+            });
+        }
         _ => {}
+    }
+}
+
+fn set_spreadsheet_print_settings_usize(
+    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlPrintSettings, usize),
+) {
+    if let Some(print_settings) = print_settings
+        && let Ok(parsed) = value.parse::<usize>()
+    {
+        setter(print_settings, parsed);
+    }
+}
+
+fn set_spreadsheet_print_settings_bool(
+    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlPrintSettings, bool),
+) {
+    if let Some(print_settings) = print_settings {
+        setter(print_settings, value.eq_ignore_ascii_case("true"));
     }
 }
 
@@ -1660,6 +1827,120 @@ fn spreadsheet_area_type_code(area_type: &str) -> &'static str {
         "Columns" => "2",
         _ => "3",
     }
+}
+
+fn format_spreadsheet_print_settings_for_moxel(
+    settings: &SpreadsheetDocumentXmlPrintSettings,
+) -> String {
+    let pairs = [
+        (
+            0,
+            format_spreadsheet_print_number(settings.paper.unwrap_or(0)),
+        ),
+        (
+            1,
+            format_spreadsheet_print_number(
+                settings
+                    .page_orientation
+                    .as_deref()
+                    .map(spreadsheet_page_orientation_code)
+                    .unwrap_or(1),
+            ),
+        ),
+        (
+            2,
+            format_spreadsheet_print_number(settings.scale.unwrap_or(100)),
+        ),
+        (
+            3,
+            format_spreadsheet_print_number(bool_to_usize(settings.collate.unwrap_or(true))),
+        ),
+        (
+            4,
+            format_spreadsheet_print_number(settings.copies.unwrap_or(1)),
+        ),
+        (
+            5,
+            format_spreadsheet_print_number(settings.per_page.unwrap_or(1)),
+        ),
+        (
+            6,
+            format_spreadsheet_print_number(settings.top_margin.unwrap_or(0)),
+        ),
+        (
+            7,
+            format_spreadsheet_print_number(settings.left_margin.unwrap_or(0)),
+        ),
+        (
+            8,
+            format_spreadsheet_print_number(settings.bottom_margin.unwrap_or(0)),
+        ),
+        (
+            9,
+            format_spreadsheet_print_number(settings.right_margin.unwrap_or(0)),
+        ),
+        (
+            10,
+            format_spreadsheet_print_number(settings.header_size.unwrap_or(0)),
+        ),
+        (
+            11,
+            format_spreadsheet_print_number(settings.footer_size.unwrap_or(0)),
+        ),
+        (
+            12,
+            format_spreadsheet_print_number(bool_to_usize(settings.fit_to_page.unwrap_or(false))),
+        ),
+        (
+            13,
+            format_spreadsheet_print_number(bool_to_usize(
+                settings.black_and_white.unwrap_or(false),
+            )),
+        ),
+        (
+            14,
+            format_spreadsheet_print_string(settings.printer_name.as_deref().unwrap_or("")),
+        ),
+        (
+            15,
+            format_spreadsheet_print_number(settings.paper_source.unwrap_or(0)),
+        ),
+        (
+            16,
+            format_spreadsheet_print_number(settings.page_width.unwrap_or(0)),
+        ),
+        (
+            17,
+            format_spreadsheet_print_number(settings.page_height.unwrap_or(0)),
+        ),
+    ];
+    let mut fields = Vec::with_capacity(pairs.len() * 2 + 2);
+    fields.push("0".to_string());
+    fields.push(pairs.len().to_string());
+    for (key, value) in pairs {
+        fields.push(key.to_string());
+        fields.push(value);
+    }
+    format!("{{{{{}}}}}", fields.join(","))
+}
+
+fn format_spreadsheet_print_number(value: usize) -> String {
+    format!(r#"{{"N",{value}}}"#)
+}
+
+fn format_spreadsheet_print_string(value: &str) -> String {
+    format!(r#"{{"S",{}}}"#, format_1c_string(value))
+}
+
+fn spreadsheet_page_orientation_code(value: &str) -> usize {
+    match value {
+        "Landscape" => 2,
+        _ => 1,
+    }
+}
+
+fn bool_to_usize(value: bool) -> usize {
+    if value { 1 } else { 0 }
 }
 
 pub fn pack_form_body_blob_from_module_text(
@@ -7892,6 +8173,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             text.contains(r#"{1,"Header",{1,{3,2,1,4,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0}}"#)
         );
         assert!(text.contains("{1,0,5,4,7,00000000-0000-0000-0000-000000000000}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_print_settings() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<printSettings>
+		<pageOrientation>Landscape</pageOrientation>
+		<scale>80</scale>
+		<collate>true</collate>
+		<copies>2</copies>
+		<perPage>1</perPage>
+		<topMargin>1000</topMargin>
+		<leftMargin>1100</leftMargin>
+		<bottomMargin>1200</bottomMargin>
+		<rightMargin>1300</rightMargin>
+		<headerSize>140</headerSize>
+		<footerSize>150</footerSize>
+		<fitToPage>false</fitToPage>
+		<blackAndWhite>true</blackAndWhite>
+		<printerName>Printer "A"</printerName>
+		<paper>9</paper>
+		<paperSource>7</paperSource>
+		<pageWidth>210</pageWidth>
+		<pageHeight>297</pageHeight>
+	</printSettings>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            r#"{{0,18,0,{"N",9},1,{"N",2},2,{"N",80},3,{"N",1},4,{"N",2},5,{"N",1},6,{"N",1000},7,{"N",1100},8,{"N",1200},9,{"N",1300},10,{"N",140},11,{"N",150},12,{"N",0},13,{"N",1},14,{"S","Printer ""A"""},15,{"N",7},16,{"N",210},17,{"N",297}}}"#
+        ));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
