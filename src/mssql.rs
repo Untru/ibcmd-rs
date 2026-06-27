@@ -43,10 +43,10 @@ use crate::module_blob::{
     VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
-    pack_help_blob_from_parts, pack_module_blob_bytes,
-    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml, pack_help_blob_from_parts,
+    pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source,
+    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
+    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -2771,19 +2771,36 @@ fn prepare_form_body_row(
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let form_path = infer_form_body_path(xml_path);
     let module_path = infer_form_module_body_path(xml_path);
-    if !module_path.exists() {
+    if !form_path.exists() && !module_path.exists() {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
     let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
-    let module_text = fs::read(&module_path)
-        .with_context(|| format!("failed to read Form module {}", module_path.display()))?;
-    let packed = pack_form_body_blob_from_module_text(&base_body, &module_text)
-        .with_context(|| format!("failed to pack Form body {}", module_path.display()))?;
+    let form_xml = if form_path.exists() {
+        fs::read(&form_path)
+            .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
+    } else {
+        Vec::new()
+    };
+    let module_text = if module_path.exists() {
+        Some(
+            fs::read(&module_path)
+                .with_context(|| format!("failed to read Form module {}", module_path.display()))?,
+        )
+    } else {
+        None
+    };
+    let packed = pack_form_body_blob_from_form_xml(&base_body, &form_xml, module_text.as_deref())
+        .with_context(|| format!("failed to pack Form body {}", form_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
-        path: module_path,
+        path: if form_path.exists() {
+            form_path
+        } else {
+            module_path
+        },
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
     }])

@@ -442,7 +442,9 @@ enum SourceAssetKind {
     },
     BusinessProcessFlowchart,
     ExtPicture,
-    Form,
+    Form {
+        object_refs: BTreeMap<String, String>,
+    },
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
@@ -549,7 +551,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
-    paths.extend(form_body_asset_paths(rows, &file_names));
+    paths.extend(form_body_asset_paths(rows, &file_names, &object_refs));
     paths.extend(template_body_asset_paths(
         &template_refs,
         &file_names,
@@ -619,6 +621,7 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
 fn form_body_asset_paths(
     rows: &[ConfigRow],
     file_names: &BTreeSet<&str>,
+    object_refs: &BTreeMap<String, String>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (form_uuid, form_ref) in build_form_source_reference_index(rows) {
@@ -632,7 +635,9 @@ fn form_body_asset_paths(
             body_id,
             SourceAsset {
                 primary_path: form_dir.join("Ext").join("Form.xml"),
-                kind: SourceAssetKind::Form,
+                kind: SourceAssetKind::Form {
+                    object_refs: object_refs.clone(),
+                },
             },
         );
     }
@@ -925,8 +930,8 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::Form => {
-            let xml = extract_form_body_xml(bytes).with_context(|| {
+        SourceAssetKind::Form { object_refs } => {
+            let xml = extract_form_body_xml(bytes, object_refs).with_context(|| {
                 format!(
                     "failed to extract form xml from source asset {}",
                     asset.primary_path.display()
@@ -3772,17 +3777,25 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
     )
 }
 
-fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
+fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     let properties = extract_form_body_properties(&form_fields);
     let events = extract_form_body_events(&form_fields);
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
+    let attributes = extract_form_body_attributes(&body.trailing, object_refs);
+    let commands = extract_form_body_commands(&body.trailing, object_refs);
+    let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
+    let command_interface = extract_form_command_interface(&body.trailing, object_refs);
 
     Some(format_form_body_xml(
         &properties,
         auto_command_bar.as_ref(),
         &events,
+        &child_items,
+        &attributes,
+        &commands,
+        &command_interface,
     ))
 }
 
@@ -3802,6 +3815,63 @@ struct FormBodyEvent {
 struct FormAutoCommandBar {
     id: String,
     name: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormAttribute {
+    id: String,
+    name: String,
+    main_attribute: bool,
+    use_always: Vec<String>,
+    settings: Option<FormDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormDynamicListSettings {
+    manual_query: bool,
+    dynamic_data_read: bool,
+    query_text: Option<String>,
+    main_table: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormCommand {
+    id: String,
+    reference_uuid: String,
+    name: String,
+    title: Vec<(String, String)>,
+    tooltip: Vec<(String, String)>,
+    action: String,
+    functional_options: Vec<String>,
+    current_row_use: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormCommandInterface {
+    navigation_panel: Vec<FormCommandInterfaceItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormCommandInterfaceItem {
+    command: String,
+    item_type: &'static str,
+    command_group: String,
+    index: Option<usize>,
+    default_visible: Option<bool>,
+    visible_common: Option<bool>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormChildItem {
+    tag: &'static str,
+    id: String,
+    name: String,
+    group: Option<&'static str>,
+    item_type: Option<&'static str>,
+    title: Vec<(String, String)>,
+    data_path: Option<String>,
+    command_name: Option<String>,
+    child_items: Vec<FormChildItem>,
 }
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
@@ -4092,6 +4162,600 @@ fn form_item_picture_file_name(item_name: &str, content: &[u8], occurrence: usiz
     format!("{property_name}.{extension}")
 }
 
+fn extract_form_body_attributes(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormAttribute> {
+    let Some(fields) = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return Vec::new();
+    };
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return Vec::new();
+    }
+    fields
+        .iter()
+        .skip(2)
+        .filter_map(|field| parse_form_attribute(field, object_refs))
+        .collect()
+}
+
+fn parse_form_attribute(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormAttribute> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("9") {
+        return None;
+    }
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let name = parse_1c_quoted_string_with_len(fields.get(3)?.trim())?.0;
+    if name.is_empty() {
+        return None;
+    }
+    let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
+    let settings = fields
+        .get(14)
+        .and_then(|field| parse_form_dynamic_list_settings(field, object_refs));
+    let use_always = settings
+        .as_ref()
+        .map(|settings| form_dynamic_list_use_always(&name, settings))
+        .unwrap_or_default();
+    Some(FormAttribute {
+        id: id.to_string(),
+        name,
+        main_attribute,
+        use_always,
+        settings,
+    })
+}
+
+fn parse_form_dynamic_list_settings(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormDynamicListSettings> {
+    let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let mut manual_query = false;
+    let mut dynamic_data_read = false;
+    let mut query_text = None;
+    let mut main_table = None;
+    for window in settings_fields.windows(2) {
+        let key = parse_1c_quoted_string_with_len(window[0].trim())
+            .map(|(value, _)| value)
+            .unwrap_or_default();
+        match key.as_str() {
+            "QueryText" => query_text = parse_form_setting_string(window[1]),
+            "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
+            "ManualQuery" => manual_query = parse_form_setting_bool(window[1]).unwrap_or(false),
+            "DynamicalDataSelection" => {
+                dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
+            }
+            _ => {}
+        }
+    }
+    if query_text.is_none() && main_table.is_none() && !manual_query && !dynamic_data_read {
+        return None;
+    }
+    Some(FormDynamicListSettings {
+        manual_query,
+        dynamic_data_read,
+        query_text,
+        main_table,
+    })
+}
+
+fn form_dynamic_list_use_always(
+    attribute_name: &str,
+    settings: &FormDynamicListSettings,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    if let Some(query_text) = &settings.query_text {
+        for field in ["Наименование", "Ссылка"] {
+            if query_text.contains(field) {
+                fields.push(format!("{attribute_name}.{field}"));
+            }
+        }
+    }
+    fields
+}
+
+fn parse_form_setting_string(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"S\"") {
+        return None;
+    }
+    parse_1c_quoted_string_with_len(fields.get(1)?.trim()).map(|(value, _)| value)
+}
+
+fn parse_form_setting_bool(field: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"B\"") {
+        return None;
+    }
+    match fields.get(1).map(|value| value.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_main_table_ref(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"#\"") {
+        return None;
+    }
+    fields.iter().skip(1).find_map(|value| {
+        parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
+    })
+}
+
+fn extract_form_body_commands(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormCommand> {
+    let Some(fields) = trailing
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .skip(2)
+        .filter_map(|field| parse_form_command(field, object_refs))
+        .collect()
+}
+
+fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Option<FormCommand> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("11") {
+        return None;
+    }
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    let reference_uuid = identity
+        .get(1)
+        .and_then(|value| parse_non_zero_uuid(value.trim()))?;
+    let name = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?.0;
+    let action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
+    if id.is_empty() || name.is_empty() || action.is_empty() {
+        return None;
+    }
+    Some(FormCommand {
+        id: id.to_string(),
+        reference_uuid,
+        name,
+        title: fields
+            .get(3)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default(),
+        tooltip: fields
+            .get(4)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default(),
+        action,
+        functional_options: fields
+            .get(12)
+            .map(|field| parse_form_reference_list(field, object_refs))
+            .unwrap_or_default(),
+        current_row_use: parse_form_current_row_use(fields.get(9).copied()),
+    })
+}
+
+fn parse_form_localized_strings(field: &str) -> Vec<(String, String)> {
+    parse_1c_synonyms(field)
+}
+
+fn parse_form_reference_list(field: &str, object_refs: &BTreeMap<String, String>) -> Vec<String> {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter_map(|value| {
+            parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
+        })
+        .collect()
+}
+
+fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
+    match field.map(str::trim)? {
+        "3" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+fn extract_form_child_items(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormChildItem> {
+    let main_data_path = attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute)
+        .or_else(|| attributes.first())
+        .map(|attribute| attribute.name.as_str());
+    let table_name_by_id = form_table_names_by_id(fields);
+    parse_form_child_item_pairs(
+        fields,
+        main_data_path,
+        None,
+        &table_name_by_id,
+        commands,
+        object_refs,
+    )
+    .unwrap_or_default()
+}
+
+fn parse_form_child_item_pairs(
+    fields: &[&str],
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<FormChildItem>> {
+    let mut best = Vec::new();
+    for index in 0..fields.len() {
+        let Some(count) = parse_form_child_item_count(fields[index]) else {
+            continue;
+        };
+        let mut items = Vec::new();
+        let mut cursor = index + 1;
+        let mut complete = true;
+        for _ in 0..count {
+            let Some(field) = fields.get(cursor + 1) else {
+                complete = false;
+                break;
+            };
+            let Some(item) = parse_form_child_item(
+                field,
+                main_data_path,
+                parent_data_path,
+                table_name_by_id,
+                commands,
+                object_refs,
+            ) else {
+                complete = false;
+                break;
+            };
+            items.push(item);
+            cursor += 2;
+        }
+        if complete && items.len() > best.len() {
+            best = items;
+        }
+    }
+    if best.is_empty() { None } else { Some(best) }
+}
+
+fn parse_form_child_item_count(value: &str) -> Option<usize> {
+    let count = value.trim().parse::<usize>().ok()?;
+    (1..=200).contains(&count).then_some(count)
+}
+
+fn parse_form_child_item(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let wrapper = fields.first()?.trim();
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    if id == "0" {
+        return None;
+    }
+    let tag = form_child_item_tag(wrapper, &fields)?;
+    let name = parse_form_child_item_name(wrapper, &fields)?;
+    let data_path = parse_form_child_item_data_path(
+        tag,
+        &fields,
+        &name,
+        id,
+        main_data_path,
+        parent_data_path,
+        table_name_by_id,
+    );
+    let child_parent_data_path = data_path.as_deref().or(parent_data_path);
+    let child_items = parse_form_child_item_pairs(
+        &fields,
+        main_data_path,
+        child_parent_data_path,
+        table_name_by_id,
+        commands,
+        object_refs,
+    )
+    .unwrap_or_default();
+    Some(FormChildItem {
+        tag,
+        id: id.to_string(),
+        name,
+        group: (tag == "UsualGroup").then_some("Vertical"),
+        item_type: (tag == "Button").then_some("CommandBarButton"),
+        title: parse_form_child_item_title(wrapper, &fields),
+        data_path,
+        command_name: if tag == "Button" {
+            fields
+                .get(8)
+                .and_then(|field| parse_form_button_command_name(field, commands, object_refs))
+        } else {
+            None
+        },
+        child_items,
+    })
+}
+
+fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
+    match wrapper {
+        "22" => match fields.get(5).map(|value| value.trim())? {
+            "0" => Some("CommandBar"),
+            "1" => Some("Popup"),
+            "5" => Some("UsualGroup"),
+            "6" => Some("ButtonGroup"),
+            _ => None,
+        },
+        "34" => Some("Button"),
+        "48" => {
+            if fields.get(4).map(|value| value.trim()) == Some("1") {
+                Some("LabelField")
+            } else {
+                Some("InputField")
+            }
+        }
+        "6" => match fields.get(5).map(|value| value.trim())? {
+            "0" => Some("SearchStringAddition"),
+            "2" => Some("SearchControlAddition"),
+            _ => None,
+        },
+        "73" => Some("Table"),
+        _ => None,
+    }
+}
+
+fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> {
+    let indexes: &[usize] = match wrapper {
+        "73" | "34" => &[5],
+        "48" => &[6, 7],
+        _ => &[6],
+    };
+    indexes.iter().find_map(|index| {
+        parse_1c_quoted_string_with_len(fields.get(*index)?.trim())
+            .map(|(value, _)| value)
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
+    let indexes: &[usize] = match wrapper {
+        "73" => &[9],
+        "34" => &[6],
+        "48" => &[9, 10],
+        _ => &[7],
+    };
+    indexes
+        .iter()
+        .find_map(|index| {
+            let values = fields
+                .get(*index)
+                .map(|field| parse_form_localized_strings(field))
+                .unwrap_or_default();
+            (!values.is_empty()).then_some(values)
+        })
+        .unwrap_or_default()
+}
+
+fn parse_form_child_item_data_path(
+    tag: &str,
+    fields: &[&str],
+    name: &str,
+    id: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    match tag {
+        "Table" => main_data_path.map(ToOwned::to_owned),
+        "InputField" | "LabelField" => parent_data_path.map(|parent| format!("{parent}.{name}")),
+        "Button" => fields
+            .get(9)
+            .and_then(|field| parse_form_button_data_path(field, table_name_by_id)),
+        _ => table_name_by_id.get(id).cloned(),
+    }
+}
+
+fn parse_form_button_command_name(
+    field: &str,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let kind = fields.first()?.trim();
+    let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+    if kind == "0" {
+        return form_standard_command_name(&uuid)
+            .map(ToOwned::to_owned)
+            .or_else(|| object_refs.get(&uuid).cloned());
+    }
+    commands
+        .iter()
+        .find(|command| command.id == kind && command.reference_uuid == uuid)
+        .map(|command| format!("Form.Command.{}", command.name))
+}
+
+fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
+        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
+        _ => None,
+    }
+}
+
+fn form_table_names_by_id(fields: &[&str]) -> BTreeMap<String, String> {
+    let mut tables = BTreeMap::new();
+    collect_form_table_names(fields, &mut tables);
+    tables
+}
+
+fn collect_form_table_names(fields: &[&str], tables: &mut BTreeMap<String, String>) {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if nested.first().map(|value| value.trim()) == Some("73")
+            && let Some(identity) = nested
+                .get(1)
+                .and_then(|field| split_1c_braced_fields(field, 0))
+            && let (Some(id), Some(name)) = (
+                identity.first().map(|value| value.trim()),
+                parse_form_child_item_name("73", &nested),
+            )
+        {
+            tables.insert(id.to_string(), name);
+        }
+        collect_form_table_names(&nested, tables);
+    }
+}
+
+fn parse_form_button_data_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("2") {
+        return None;
+    }
+    let table = fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))?;
+    let table_id = table.first()?.trim();
+    let table_name = table_name_by_id.get(table_id)?;
+    let column = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .and_then(|fields| fields.first().map(|value| value.trim().to_string()))?;
+    let field_name = match column.as_str() {
+        "8" => "Ссылка",
+        _ => return None,
+    };
+    Some(format!("Items.{table_name}.CurrentData.{field_name}"))
+}
+
+fn extract_form_command_interface(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormCommandInterface> {
+    let fields = trailing
+        .get(3)
+        .and_then(|field| split_1c_braced_fields(field, 0))?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let mut navigation_panel = Vec::new();
+    for field in fields.iter().skip(2) {
+        if let Some(item) = parse_form_command_interface_item(field, object_refs) {
+            navigation_panel.push(item);
+        }
+    }
+    if navigation_panel.is_empty() {
+        return None;
+    }
+    Some(FormCommandInterface { navigation_panel })
+}
+
+fn parse_form_command_interface_item(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormCommandInterfaceItem> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("3") {
+        return None;
+    }
+    let command = parse_form_object_reference(fields.get(2)?, object_refs)?;
+    let command_group = fields
+        .get(5)
+        .and_then(|field| parse_form_command_group_reference(field, object_refs))?;
+    let index = fields
+        .get(6)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|index| *index > 0);
+    let default_visible = match fields.get(7).map(|value| value.trim()) {
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        _ => None,
+    };
+    Some(FormCommandInterfaceItem {
+        command,
+        item_type: "Added",
+        command_group,
+        index,
+        default_visible,
+        visible_common: fields
+            .get(8)
+            .and_then(|value| parse_form_nested_common_bool(value)),
+    })
+}
+
+fn parse_form_object_reference(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+    object_refs.get(&uuid).cloned()
+}
+
+fn parse_form_command_group_reference(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+    form_standard_command_group_name(&uuid)
+        .map(ToOwned::to_owned)
+        .or_else(|| object_refs.get(&uuid).cloned())
+}
+
+fn form_standard_command_group_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "eacad741-96b9-4b3a-bf79-dde9ecead1a1" => Some("FormNavigationPanelGoTo"),
+        _ => None,
+    }
+}
+
+fn parse_form_nested_common_bool(field: &str) -> Option<bool> {
+    if field.contains(r#"{"B",1}"#) {
+        Some(true)
+    } else if field.contains(r#"{"B",0}"#) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
     let mut seen = BTreeSet::<(String, String)>::new();
     let mut deduped = Vec::new();
@@ -4107,6 +4771,10 @@ fn format_form_body_xml(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
     events: &[FormBodyEvent],
+    child_items: &[FormChildItem],
+    attributes: &[FormAttribute],
+    commands: &[FormCommand],
+    command_interface: &Option<FormCommandInterface>,
 ) -> String {
     let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
@@ -4139,7 +4807,222 @@ fn format_form_body_xml(
         }
         xml.push_str("\t</Events>\r\n");
     }
+    xml.push_str(&format_form_child_items_xml(child_items, 1));
+    xml.push_str(&format_form_attributes_xml(attributes));
+    if !commands.is_empty() {
+        xml.push_str("\t<Commands>\r\n");
+        for command in commands {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\" id=\"{}\">\r\n",
+                escape_xml_text(&command.name),
+                escape_xml_text(&command.id)
+            ));
+            xml.push_str(&format_form_localized_section("Title", &command.title, 3));
+            xml.push_str(&format_form_localized_section(
+                "ToolTip",
+                &command.tooltip,
+                3,
+            ));
+            xml.push_str(&format!(
+                "\t\t\t<Action>{}</Action>\r\n",
+                escape_xml_text(&command.action)
+            ));
+            if !command.functional_options.is_empty() {
+                xml.push_str("\t\t\t<FunctionalOptions>\r\n");
+                for item in &command.functional_options {
+                    xml.push_str(&format!(
+                        "\t\t\t\t<Item>{}</Item>\r\n",
+                        escape_xml_text(item)
+                    ));
+                }
+                xml.push_str("\t\t\t</FunctionalOptions>\r\n");
+            }
+            if let Some(current_row_use) = command.current_row_use {
+                xml.push_str(&format!(
+                    "\t\t\t<CurrentRowUse>{}</CurrentRowUse>\r\n",
+                    escape_xml_text(current_row_use)
+                ));
+            }
+            xml.push_str("\t\t</Command>\r\n");
+        }
+        xml.push_str("\t</Commands>\r\n");
+    }
+    if let Some(command_interface) = command_interface {
+        xml.push_str(&format_form_command_interface_xml(command_interface));
+    }
     xml.push_str("</Form>\r\n");
+    xml
+}
+
+fn format_form_child_items_xml(items: &[FormChildItem], indent: usize) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<ChildItems>\r\n");
+    for item in items {
+        xml.push_str(&format_form_child_item_xml(item, indent + 1));
+    }
+    xml.push_str(&format!("{tab}</ChildItems>\r\n"));
+    xml
+}
+
+fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
+    let tab = "\t".repeat(indent);
+    let mut xml = format!(
+        "{tab}<{} name=\"{}\" id=\"{}\">\r\n",
+        item.tag,
+        escape_xml_text(&item.name),
+        escape_xml_text(&item.id)
+    );
+    if let Some(item_type) = item.item_type {
+        xml.push_str(&format!(
+            "{tab}\t<Type>{}</Type>\r\n",
+            escape_xml_text(item_type)
+        ));
+    }
+    if let Some(command_name) = &item.command_name {
+        xml.push_str(&format!(
+            "{tab}\t<CommandName>{}</CommandName>\r\n",
+            escape_xml_text(command_name)
+        ));
+    }
+    if let Some(data_path) = &item.data_path {
+        xml.push_str(&format!(
+            "{tab}\t<DataPath>{}</DataPath>\r\n",
+            escape_xml_text(data_path)
+        ));
+    }
+    if let Some(group) = item.group {
+        xml.push_str(&format!(
+            "{tab}\t<Group>{}</Group>\r\n",
+            escape_xml_text(group)
+        ));
+    }
+    xml.push_str(&format_form_localized_section(
+        "Title",
+        &item.title,
+        indent + 1,
+    ));
+    xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
+    xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
+    xml
+}
+
+fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
+    if attributes.is_empty() {
+        return "\t<Attributes/>\r\n".to_string();
+    }
+    let mut xml = "\t<Attributes>\r\n".to_string();
+    for attribute in attributes {
+        xml.push_str(&format!(
+            "\t\t<Attribute name=\"{}\" id=\"{}\">\r\n",
+            escape_xml_text(&attribute.name),
+            escape_xml_text(&attribute.id)
+        ));
+        if attribute.settings.is_some() {
+            xml.push_str("\t\t\t<Type>\r\n");
+            xml.push_str("\t\t\t\t<v8:Type>cfg:DynamicList</v8:Type>\r\n");
+            xml.push_str("\t\t\t</Type>\r\n");
+        }
+        if attribute.main_attribute {
+            xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
+        }
+        if !attribute.use_always.is_empty() {
+            xml.push_str("\t\t\t<UseAlways>\r\n");
+            for field in &attribute.use_always {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Field>{}</Field>\r\n",
+                    escape_xml_text(field)
+                ));
+            }
+            xml.push_str("\t\t\t</UseAlways>\r\n");
+        }
+        if let Some(settings) = &attribute.settings {
+            xml.push_str("\t\t\t<Settings xsi:type=\"DynamicList\">\r\n");
+            if settings.manual_query {
+                xml.push_str("\t\t\t\t<ManualQuery>true</ManualQuery>\r\n");
+            }
+            if settings.dynamic_data_read {
+                xml.push_str("\t\t\t\t<DynamicDataRead>true</DynamicDataRead>\r\n");
+            }
+            if let Some(query_text) = &settings.query_text {
+                xml.push_str(&format!(
+                    "\t\t\t\t<QueryText>{}</QueryText>\r\n",
+                    escape_xml_text(query_text)
+                ));
+            }
+            if let Some(main_table) = &settings.main_table {
+                xml.push_str(&format!(
+                    "\t\t\t\t<MainTable>{}</MainTable>\r\n",
+                    escape_xml_text(main_table)
+                ));
+            }
+            xml.push_str("\t\t\t</Settings>\r\n");
+        }
+        xml.push_str("\t\t</Attribute>\r\n");
+    }
+    xml.push_str("\t</Attributes>\r\n");
+    xml
+}
+
+fn format_form_localized_section(name: &str, values: &[(String, String)], indent: usize) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<{}>\r\n", name);
+    for (lang, content) in values {
+        xml.push_str(&format!(
+            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
+            escape_xml_text(lang),
+            escape_xml_text(content)
+        ));
+    }
+    xml.push_str(&format!("{tab}</{}>\r\n", name));
+    xml
+}
+
+fn format_form_command_interface_xml(command_interface: &FormCommandInterface) -> String {
+    let mut xml = "\t<CommandInterface>\r\n".to_string();
+    if !command_interface.navigation_panel.is_empty() {
+        xml.push_str("\t\t<NavigationPanel>\r\n");
+        for item in &command_interface.navigation_panel {
+            xml.push_str("\t\t\t<Item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<Command>{}</Command>\r\n",
+                escape_xml_text(&item.command)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<Type>{}</Type>\r\n",
+                escape_xml_text(item.item_type)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
+                escape_xml_text(&item.command_group)
+            ));
+            if let Some(index) = item.index {
+                xml.push_str(&format!("\t\t\t\t<Index>{index}</Index>\r\n"));
+            }
+            if let Some(default_visible) = item.default_visible {
+                xml.push_str(&format!(
+                    "\t\t\t\t<DefaultVisible>{}</DefaultVisible>\r\n",
+                    xml_bool(default_visible)
+                ));
+            }
+            if let Some(common) = item.visible_common {
+                xml.push_str("\t\t\t\t<Visible>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
+                    xml_bool(common)
+                ));
+                xml.push_str("\t\t\t\t</Visible>\r\n");
+            }
+            xml.push_str("\t\t\t</Item>\r\n");
+        }
+        xml.push_str("\t\t</NavigationPanel>\r\n");
+    }
+    xml.push_str("\t</CommandInterface>\r\n");
     xml
 }
 
@@ -10187,7 +11070,7 @@ mod tests {
             b"{4,{7,{0,\"OnOpen\",\"PriOtkrytii\"},{1,\"ChoiceProcessing\",\"ObrabotkaVybora\"},{2,\"NotAFormEvent\",\"Ignored\"},{3,\"OnClose\",\"\"}},\"\",{0}}",
         );
 
-        let form_xml = extract_form_body_xml(&form_body).unwrap();
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<Events>"));
         assert!(form_xml.contains(r#"<Event name="OnOpen">PriOtkrytii</Event>"#));
@@ -10202,7 +11085,7 @@ mod tests {
             r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1},{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
-        let form_xml = extract_form_body_xml(&form_body).unwrap();
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains(r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#));
         assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ОбработкаВыбора</Event>"#));
@@ -10221,10 +11104,120 @@ mod tests {
             r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,2,1,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
-        let form_xml = extract_form_body_xml(&form_body).unwrap();
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
+    }
+
+    #[test]
+    fn extracts_form_attributes_and_commands_from_body_tail() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let form_body = deflate_for_test(
+            format!(
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,4,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}}}},{{0,0}}}}}},{{0,0}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (catalog_uuid.to_string(), "Catalog.Товары".to_string()),
+            (
+                option_uuid.to_string(),
+                "FunctionalOption.ИспользоватьФункцию".to_string(),
+            ),
+        ]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains(r#"<Attribute name="Список" id="1">"#));
+        assert!(form_xml.contains("<v8:Type>cfg:DynamicList</v8:Type>"));
+        assert!(form_xml.contains("<MainAttribute>true</MainAttribute>"));
+        assert!(form_xml.contains("<Field>Список.Наименование</Field>"));
+        assert!(form_xml.contains("<Field>Список.Ссылка</Field>"));
+        assert!(form_xml.contains("<ManualQuery>true</ManualQuery>"));
+        assert!(form_xml.contains("<DynamicDataRead>true</DynamicDataRead>"));
+        assert!(form_xml.contains("<MainTable>Catalog.Товары</MainTable>"));
+        assert!(form_xml.contains(r#"<Command name="Выполнить" id="2">"#));
+        assert!(form_xml.contains("<Action>Выполнить</Action>"));
+        assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
+        assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+    }
+
+    #[test]
+    fn extracts_form_child_items_from_layout_pairs() {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let external_command_uuid = "11111111-1111-4111-8111-111111111111";
+        let layout = format!(
+            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{0}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}}}}}}"#
+        );
+        let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
+        let attributes = vec![FormAttribute {
+            id: "1".to_string(),
+            name: "Список".to_string(),
+            main_attribute: true,
+            use_always: Vec::new(),
+            settings: None,
+        }];
+        let object_refs = BTreeMap::from([(
+            external_command_uuid.to_string(),
+            "DataProcessor.Loader.Command.Load".to_string(),
+        )]);
+
+        let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs);
+        let xml = format_form_child_items_xml(&items, 1);
+
+        assert!(xml.contains(r#"<CommandBar name="Панель" id="64">"#));
+        assert!(xml.contains(r#"<Button name="Выполнить" id="44">"#));
+        assert!(xml.contains("<Type>CommandBarButton</Type>"));
+        assert!(xml.contains("<CommandName>DataProcessor.Loader.Command.Load</CommandName>"));
+        assert!(xml.contains(r#"<Table name="СписокТаблица" id="25">"#));
+        assert!(xml.contains("<DataPath>Список</DataPath>"));
+        assert!(xml.contains(r#"<InputField name="Наименование" id="40">"#));
+        assert!(xml.contains("<DataPath>Список.Наименование</DataPath>"));
+    }
+
+    #[test]
+    fn extracts_form_command_interface_navigation_panel() {
+        let first_command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let form_body = deflate_for_test(
+            format!(
+                r#"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}}, "",{{0}},{{0,0}},{{0,0}},{{0,2,{{3,0,{{0,{first_command_uuid}}},{{0}},1,{{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1}},1,0,{{0,{{0,{{"B",0}},0}}}}}},{{3,1,{{0,{second_command_uuid}}},{{0}},1,{{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}},{{0}},0,0}}"#
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (
+                first_command_uuid.to_string(),
+                "DataProcessor.Loader.Command.Load".to_string(),
+            ),
+            (
+                second_command_uuid.to_string(),
+                "InformationRegister.Rates.Command.Import".to_string(),
+            ),
+        ]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains("<CommandInterface>"));
+        assert!(form_xml.contains("<NavigationPanel>"));
+        assert!(form_xml.contains("<Command>DataProcessor.Loader.Command.Load</Command>"));
+        assert!(form_xml.contains("<Command>InformationRegister.Rates.Command.Import</Command>"));
+        assert_eq!(
+            form_xml
+                .matches("<CommandGroup>FormNavigationPanelGoTo</CommandGroup>")
+                .count(),
+            2
+        );
+        assert!(form_xml.contains("<Index>1</Index>"));
+        assert_eq!(
+            form_xml
+                .matches("<DefaultVisible>false</DefaultVisible>")
+                .count(),
+            2
+        );
+        assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
     }
 
     #[test]
