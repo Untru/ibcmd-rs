@@ -41,7 +41,7 @@ use crate::module_blob::{
     pack_raw_deflated_blob_from_bytes, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
-    patch_versions_blob_bytes,
+    parse_template_type_from_xml, patch_versions_blob_bytes,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -1839,6 +1839,7 @@ fn prepare_metadata_object_stage(
         server,
         database,
         &xml_path,
+        &xml,
         &packed_metadata.properties,
         source,
     )?;
@@ -1860,6 +1861,7 @@ fn prepare_metadata_body_rows(
     server: &str,
     database: &str,
     xml_path: &Path,
+    xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -1884,6 +1886,9 @@ fn prepare_metadata_body_rows(
             properties,
             "WSReference definition",
         ),
+        "CommonTemplate" | "Template" => {
+            prepare_template_body_row(sqlcmd, server, database, xml_path, xml, properties)
+        }
         _ => Ok(Vec::new()),
     }
 }
@@ -1968,6 +1973,30 @@ fn prepare_raw_deflated_body_row(
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
     }])
+}
+
+fn prepare_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(template_type) = parse_template_type_from_xml(xml)? else {
+        return Ok(Vec::new());
+    };
+    let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type) else {
+        return Ok(Vec::new());
+    };
+    prepare_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        body_path,
+        properties,
+        "Template body",
+    )
 }
 
 fn prepare_common_module_object_stage(
@@ -3349,6 +3378,15 @@ fn infer_ws_reference_definition_path(xml: &Path) -> PathBuf {
         .join("WSDefinition.xml")
 }
 
+fn infer_raw_deflated_template_body_path(xml: &Path, template_type: &str) -> Option<PathBuf> {
+    let file_name = match template_type {
+        "DataCompositionSchema" => "Template.xml",
+        "TextDocument" => "Template.txt",
+        _ => return None,
+    };
+    Some(xml.with_extension("").join("Ext").join(file_name))
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -3783,6 +3821,35 @@ mod tests {
         assert_eq!(
             super::infer_ws_reference_definition_path(r"WSReferences\UpdateFiles.xml".as_ref()),
             std::path::PathBuf::from(r"WSReferences\UpdateFiles\Ext\WSDefinition.xml")
+        );
+    }
+
+    #[test]
+    fn infers_raw_deflated_template_body_paths() {
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"CommonTemplates\SharedText.xml".as_ref(),
+                "TextDocument"
+            ),
+            Some(std::path::PathBuf::from(
+                r"CommonTemplates\SharedText\Ext\Template.txt"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"DataProcessors\ImportData\Templates\Schema.xml".as_ref(),
+                "DataCompositionSchema"
+            ),
+            Some(std::path::PathBuf::from(
+                r"DataProcessors\ImportData\Templates\Schema\Ext\Template.xml"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"CommonTemplates\Table.xml".as_ref(),
+                "SpreadsheetDocument"
+            ),
+            None
         );
     }
 

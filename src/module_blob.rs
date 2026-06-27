@@ -862,6 +862,57 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
     })
 }
 
+pub fn parse_template_type_from_xml(xml: &[u8]) -> Result<Option<String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(xml_local_name(event.local_name().as_ref()));
+            }
+            Ok(Event::Text(event)) => {
+                if path_ends_with(&path, &["Properties", "TemplateType"]) {
+                    let value = event.xml_content()?;
+                    let value = unescape(value.as_ref())?;
+                    text.get_or_insert_with(String::new)
+                        .push_str(value.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path_ends_with(&path, &["Properties", "TemplateType"]) {
+                    text.get_or_insert_with(String::new)
+                        .push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Properties", "TemplateType"]) {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.get_or_insert_with(String::new).push_str(&value);
+                }
+            }
+            Ok(Event::End(_)) => {
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(text.map(|value| value.trim().to_string()))
+}
+
 #[derive(Debug, Clone)]
 struct ScheduleXmlProperties {
     begin_date: String,
@@ -5189,6 +5240,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
         assert_eq!(packed.plain_bytes, bytes.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_template_type_from_metadata_xml() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+	<CommonTemplate uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+		<Properties>
+			<Name>SharedText</Name>
+			<TemplateType>TextDocument</TemplateType>
+		</Properties>
+	</CommonTemplate>
+</MetaDataObject>
+"#;
+
+        assert_eq!(
+            super::parse_template_type_from_xml(xml)?,
+            Some("TextDocument".to_string())
+        );
 
         Ok(())
     }
