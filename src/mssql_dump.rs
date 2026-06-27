@@ -1024,6 +1024,7 @@ struct MoxelSpreadsheet {
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
     default_format_index: usize,
+    height: usize,
 }
 
 struct MoxelRow {
@@ -3682,13 +3683,30 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
         });
         max_index.max(row_max)
     });
+    let height = moxel_spreadsheet_height(&rows, &merges, &areas);
     Some(MoxelSpreadsheet {
         column_count,
         rows,
         merges,
         areas,
         default_format_index: max_format_index + 1,
+        height,
     })
+}
+
+fn moxel_spreadsheet_height(
+    rows: &[MoxelRow],
+    merges: &[MoxelMerge],
+    areas: &[MoxelArea],
+) -> usize {
+    let row_max = rows.iter().map(|row| row.index as i32).max().unwrap_or(0);
+    let merge_max = merges
+        .iter()
+        .map(|merge| merge.row + merge.height)
+        .max()
+        .unwrap_or(0);
+    let area_max = areas.iter().map(|area| area.end_row).max().unwrap_or(0);
+    row_max.max(merge_max).max(area_max).max(0) as usize + 1
 }
 
 fn parse_moxel_row_at(
@@ -3914,10 +3932,13 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for row in &spreadsheet.rows {
         push_moxel_row_xml(&mut xml, row);
     }
+    xml.push_str("\t<templateMode>true</templateMode>\r\n");
     xml.push_str(&format!(
         "\t<defaultFormatIndex>{}</defaultFormatIndex>\r\n",
         spreadsheet.default_format_index
     ));
+    xml.push_str(&format!("\t<height>{}</height>\r\n", spreadsheet.height));
+    xml.push_str(&format!("\t<vgRows>{}</vgRows>\r\n", spreadsheet.height));
     for merge in &spreadsheet.merges {
         push_moxel_merge_xml(&mut xml, merge);
     }
@@ -8305,13 +8326,18 @@ mod tests {
         assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
         assert!(xml.contains("<parameter>ТекстШтампа</parameter>"));
         assert!(!xml.contains("<v8:content>ТекстШтампа</v8:content>"));
+        assert!(xml.contains("<templateMode>true</templateMode>"));
         assert!(xml.contains("<defaultFormatIndex>9</defaultFormatIndex>"));
+        assert!(xml.contains("<height>7</height>"));
+        assert!(xml.contains("<vgRows>7</vgRows>"));
         assert_eq!(xml.matches("\t<format/>\r\n").count(), 9);
         let default_format_index_pos = xml
             .find("<defaultFormatIndex>9</defaultFormatIndex>")
             .unwrap();
+        let height_pos = xml.find("<height>7</height>").unwrap();
         let merge_pos = xml.find("<merge>").unwrap();
         assert!(default_format_index_pos < merge_pos);
+        assert!(height_pos < merge_pos);
         assert!(
             xml.contains("<merge>\r\n\t\t<r>1</r>\r\n\t\t<c>1</c>\r\n\t\t<h>1</h>\r\n\t</merge>")
         );
