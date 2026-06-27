@@ -2165,7 +2165,11 @@ fn prepare_object_help_body_row(
 }
 
 fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
-    let suffix = if properties.kind == "Form" { "1" } else { "5" };
+    let suffix = if matches!(properties.kind.as_str(), "Form" | "CommonForm") {
+        "1"
+    } else {
+        "5"
+    };
     format!("{}.{}", properties.uuid, suffix)
 }
 
@@ -4173,6 +4177,13 @@ mod tests {
             synonyms: Vec::new(),
             comment: String::new(),
         };
+        let common_form = SimpleMetadataXmlProperties {
+            kind: "CommonForm".to_string(),
+            uuid: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+            name: "SharedForm".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
 
         assert_eq!(
             super::infer_help_body_id(&object),
@@ -4181,6 +4192,10 @@ mod tests {
         assert_eq!(
             super::infer_help_body_id(&form),
             "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.1"
+        );
+        assert_eq!(
+            super::infer_help_body_id(&common_form),
+            "cccccccc-cccc-4ccc-cccc-cccccccccccc.1"
         );
     }
 
