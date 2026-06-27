@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::cli::MssqlDumpConfigArgs;
-use crate::module_blob::unpack_module_blob_text;
+use crate::module_blob::{parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
 
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
@@ -3758,20 +3758,8 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
 }
 
 fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
-    let inflated = inflate_raw_deflate(bytes).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}');
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "4" {
-        return None;
-    }
-    let form_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
-    if !form_fields
-        .first()
-        .is_some_and(|value| value.trim().chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return None;
-    }
+    let body = parse_form_body_blob(bytes).ok()?;
+    let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     let events = extract_form_body_events(&form_fields);
 
     Some(format_form_body_xml(&events))
@@ -6276,13 +6264,7 @@ fn form_module_body_paths(
 }
 
 fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
-    if fields.first()?.trim() != "4" {
-        return None;
-    }
-    let (module_text, _) = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?;
+    let module_text = parse_form_body_blob(blob).ok()?.module_text;
     if module_text.trim().is_empty() {
         return None;
     }

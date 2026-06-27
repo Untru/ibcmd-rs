@@ -68,6 +68,13 @@ pub struct PatchedVersionsBlob {
     pub replacements: Vec<VersionReplacement>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ParsedFormBodyBlob {
+    pub layout: String,
+    pub module_text: String,
+    pub trailing_fields: usize,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CommonModuleXmlProperties {
     pub uuid: String,
@@ -3070,21 +3077,11 @@ pub fn pack_form_body_blob_from_module_text(
     let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
     let mut plain =
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
-    let body_start = plain
-        .find('{')
-        .ok_or_else(|| anyhow!("base Form body has no braced payload"))?;
-    let fields = scan_braced_fields(&plain, body_start)?;
-    if fields.first().map(|range| plain[range.clone()].trim()) != Some("4") {
-        return Err(anyhow!("base Form body does not start with type marker 4"));
-    }
-    let module_range = fields
-        .get(2)
-        .ok_or_else(|| anyhow!("base Form body has no module text field"))?
-        .clone();
+    let container = FormBodyContainer::parse(&plain)?;
     let module_text = std::str::from_utf8(module_text)
         .context("Form module text is not valid UTF-8")?
         .trim_start_matches('\u{feff}');
-    plain.replace_range(module_range, &format_1c_string(module_text));
+    plain.replace_range(container.module_range, &format_1c_string(module_text));
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -3092,6 +3089,73 @@ pub fn pack_form_body_blob_from_module_text(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
+    let inflated = inflate_raw(blob).context("failed to inflate Form body blob")?;
+    let plain = String::from_utf8(inflated).context("Form body blob is not valid UTF-8")?;
+    let container = FormBodyContainer::parse(&plain)?;
+    let layout = plain[container.layout_range.clone()].trim().to_string();
+    let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())
+        .context("Form body module text field is not a quoted string")?;
+    Ok(ParsedFormBodyBlob {
+        layout,
+        module_text,
+        trailing_fields: container.trailing_fields,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct FormBodyContainer {
+    layout_range: Range<usize>,
+    module_range: Range<usize>,
+    trailing_fields: usize,
+}
+
+impl FormBodyContainer {
+    fn parse(plain: &str) -> Result<Self> {
+        let body_start = plain
+            .find('{')
+            .ok_or_else(|| anyhow!("Form body has no braced payload"))?;
+        let fields = scan_braced_fields(plain, body_start)?;
+        if fields.first().map(|range| plain[range.clone()].trim()) != Some("4") {
+            return Err(anyhow!("Form body does not start with type marker 4"));
+        }
+        let layout_range = fields
+            .get(1)
+            .ok_or_else(|| anyhow!("Form body has no layout field"))?
+            .clone();
+        validate_form_body_layout(plain[layout_range.clone()].trim())?;
+        let module_range = fields
+            .get(2)
+            .ok_or_else(|| anyhow!("Form body has no module text field"))?
+            .clone();
+        if parse_1c_quoted_string(plain[module_range.clone()].trim()).is_err() {
+            return Err(anyhow!(
+                "Form body module text field is not a quoted string"
+            ));
+        }
+        Ok(Self {
+            layout_range,
+            module_range,
+            trailing_fields: fields.len().saturating_sub(3),
+        })
+    }
+}
+
+fn validate_form_body_layout(layout: &str) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !fields.first().is_some_and(|range| {
+        layout[range.clone()]
+            .trim()
+            .chars()
+            .all(|ch| ch.is_ascii_digit())
+    }) {
+        return Err(anyhow!(
+            "Form body layout field does not start with a numeric marker"
+        ));
+    }
+    Ok(())
 }
 
 pub fn pack_role_rights_blob_from_xml(
@@ -9679,6 +9743,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let base = super::deflate_raw(
             b"{4,{7,{\"layout\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
         )?;
+        let parsed = super::parse_form_body_blob(&base)?;
+        assert_eq!(parsed.layout, "{7,{\"layout\"}}");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing_fields, 1);
+
         let packed = super::pack_form_body_blob_from_module_text(
             &base,
             b"\xEF\xBB\xBFProcedure Run()\r\n\tMessage(\"Hi\");\r\nEndProcedure\r\n",
@@ -9690,6 +9759,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             "{4,{7,{\"layout\"}},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{3,{\"picture\"},\"payload\"}}"
         );
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_form_body_blob() -> anyhow::Result<()> {
+        let base = super::deflate_raw(b"{5,{\"not a form\"},\"module\"}")?;
+        let error = super::parse_form_body_blob(&base).unwrap_err();
+
+        assert!(error.to_string().contains("type marker 4"));
 
         Ok(())
     }

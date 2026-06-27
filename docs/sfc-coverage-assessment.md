@@ -175,7 +175,7 @@ BSL по именам:
 | BusinessProcess flowchart | Есть | `SourceAssetKind::BusinessProcessFlowchart` |
 | Template bodies | Частично/широко | `template_body_source_asset` |
 | SpreadsheetDocument | Частично | `extract_moxel_spreadsheet_xml` |
-| Forms | Существенно частично | `extract_form_body_xml` возвращает каркас `Form.xml` и распознанные `Events`; часть вложенных item assets выгружается отдельно |
+| Forms | Существенно частично | `extract_form_body_xml` возвращает каркас `Form.xml` и распознанные `Events`; часть вложенных item assets выгружается отдельно. Разбор `{4, layout, module, ...}` вынесен в общий `parse_form_body_blob`, который также используется при загрузочной замене модуля формы. |
 
 Важное ограничение выгрузки: многие metadata XML пока минимальные (`Name`, `Synonym`, `Comment`). Расширенные свойства есть для части типов, но это еще не полная реконструкция исходников `ibcmd`.
 
