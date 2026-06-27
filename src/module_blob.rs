@@ -195,6 +195,16 @@ struct PredefinedDataXmlItem {
     children: Vec<PredefinedDataXmlItem>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FlowchartXmlItem {
+    id: String,
+    name: String,
+    tab_order: String,
+    explanation: Option<String>,
+    task_description: Option<String>,
+    events: BTreeMap<String, Option<String>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
@@ -1148,6 +1158,83 @@ pub fn pack_predefined_data_blob_from_xml(
     })
 }
 
+pub fn pack_business_process_flowchart_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let items = parse_flowchart_xml(xml)?;
+    let by_id = items
+        .into_iter()
+        .map(|item| (item.id.clone(), item))
+        .collect::<BTreeMap<_, _>>();
+    let inflated =
+        inflate_raw(base_blob).context("failed to inflate base BusinessProcess Flowchart blob")?;
+    let mut plain = String::from_utf8(inflated)
+        .context("base BusinessProcess Flowchart blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base BusinessProcess Flowchart body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("5") {
+        return Err(anyhow!(
+            "base BusinessProcess Flowchart body does not start with type marker 5"
+        ));
+    }
+    let item_count = plain[fields
+        .get(2)
+        .ok_or_else(|| anyhow!("base BusinessProcess Flowchart has no item count"))?
+        .clone()]
+    .trim()
+    .parse::<usize>()
+    .context("invalid BusinessProcess Flowchart item count")?;
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    let mut seen = BTreeSet::<String>::new();
+    let mut index = 3usize;
+    for _ in 0..item_count {
+        let code_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("base BusinessProcess Flowchart item has no code"))?
+            .clone();
+        let code = plain[code_range].trim().to_string();
+        let body_range = fields
+            .get(index + 1)
+            .ok_or_else(|| anyhow!("base BusinessProcess Flowchart item has no body"))?
+            .clone();
+        collect_flowchart_item_replacements(
+            &plain,
+            &code,
+            body_range,
+            &by_id,
+            &mut seen,
+            &mut replacements,
+        )?;
+        index += 2;
+    }
+    let missing = by_id
+        .keys()
+        .filter(|id| !seen.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "Flowchart.xml contains items missing in base blob: {}",
+            missing.join(", ")
+        ));
+    }
+
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
 fn role_right_value_replacements(
     plain: &str,
     objects_range: Range<usize>,
@@ -1912,6 +1999,302 @@ fn is_predefined_item_property_path(path: &[String]) -> bool {
         path.last().map(String::as_str),
         Some("Name" | "Code" | "Description" | "IsFolder")
     ) && path.iter().any(|part| part == "Item")
+}
+
+fn collect_flowchart_item_replacements(
+    plain: &str,
+    code: &str,
+    body_range: Range<usize>,
+    by_id: &BTreeMap<String, FlowchartXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let fields = scan_wrapped_braced_fields(plain, body_range)?;
+    let base_range = fields
+        .first()
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no base field"))?
+        .clone();
+    let (id, name_range, tab_order_range) = flowchart_base_ranges(plain, code, base_range)?;
+    let Some(item) = by_id.get(&id) else {
+        return Ok(());
+    };
+    seen.insert(id);
+    push_1c_string_replacement(plain, Some(name_range), &item.name, replacements);
+    replacements.push((tab_order_range, item.tab_order.clone()));
+
+    match code {
+        "2" => patch_flowchart_events(
+            plain,
+            fields.get(3).cloned(),
+            item,
+            &["BeforeStart"],
+            replacements,
+        )?,
+        "3" => patch_flowchart_events(
+            plain,
+            fields.get(3).cloned(),
+            item,
+            &["OnComplete"],
+            replacements,
+        )?,
+        "4" => patch_flowchart_events(
+            plain,
+            fields.get(3).cloned(),
+            item,
+            &["ConditionCheck"],
+            replacements,
+        )?,
+        "5" => {
+            if let Some(explanation) = item.explanation.as_deref() {
+                push_1c_string_replacement(
+                    plain,
+                    fields.get(3).cloned(),
+                    explanation,
+                    replacements,
+                );
+            }
+            patch_flowchart_events(
+                plain,
+                fields.get(5).cloned(),
+                item,
+                &[
+                    "InteractiveActivationProcessing",
+                    "BeforeCreateTasks",
+                    "OnCreateTask",
+                    "OnExecute",
+                    "CheckExecutionProcessing",
+                    "BeforeExecute",
+                    "BeforeExecuteInteractively",
+                ],
+                replacements,
+            )?;
+            if let Some(task_description) = item.task_description.as_deref() {
+                push_1c_string_replacement(
+                    plain,
+                    fields.get(7).cloned(),
+                    task_description,
+                    replacements,
+                );
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn flowchart_base_ranges(
+    plain: &str,
+    code: &str,
+    base_range: Range<usize>,
+) -> Result<(String, Range<usize>, Range<usize>)> {
+    let head_fields = scan_wrapped_braced_fields(plain, base_range)?;
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+        scan_wrapped_braced_fields(
+            plain,
+            head_fields
+                .first()
+                .ok_or_else(|| anyhow!("BusinessProcess Flowchart typed item has no base"))?
+                .clone(),
+        )?
+    } else {
+        head_fields
+    };
+    let id = plain[base_fields
+        .get(1)
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no id"))?
+        .clone()]
+    .trim()
+    .to_string();
+    let name_range = base_fields
+        .get(3)
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no name"))?
+        .clone();
+    let tab_order_range = base_fields
+        .get(4)
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no tab order"))?
+        .clone();
+    Ok((id, name_range, tab_order_range))
+}
+
+fn patch_flowchart_events(
+    plain: &str,
+    events_range: Option<Range<usize>>,
+    item: &FlowchartXmlItem,
+    event_names: &[&str],
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let Some(events_range) = events_range else {
+        return Ok(());
+    };
+    let fields = scan_wrapped_braced_fields(plain, events_range)?;
+    let count = plain[fields
+        .first()
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart events has no count"))?
+        .clone()]
+    .trim()
+    .parse::<usize>()
+    .context("invalid BusinessProcess Flowchart event count")?;
+    for event_range in fields.into_iter().skip(1).take(count) {
+        let event_fields = scan_wrapped_braced_fields(plain, event_range)?;
+        let index = plain[event_fields
+            .first()
+            .ok_or_else(|| anyhow!("BusinessProcess Flowchart event has no index"))?
+            .clone()]
+        .trim()
+        .parse::<usize>()
+        .context("invalid BusinessProcess Flowchart event index")?;
+        let Some(name) = event_names.get(index) else {
+            continue;
+        };
+        let Some(handler) = item.events.get(*name) else {
+            continue;
+        };
+        let handler = handler.as_deref().unwrap_or("");
+        push_1c_string_replacement(plain, event_fields.get(1).cloned(), handler, replacements);
+    }
+    Ok(())
+}
+
+fn push_1c_string_replacement(
+    plain: &str,
+    range: Option<Range<usize>>,
+    value: &str,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) {
+    let Some(range) = range else {
+        return;
+    };
+    if parse_1c_quoted_string(plain[range.clone()].trim()).is_ok() {
+        replacements.push((range, format_1c_string(value)));
+    }
+}
+
+fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut items = Vec::<FlowchartXmlItem>::new();
+    let mut current = None::<FlowchartXmlItem>;
+    let mut current_event = None::<String>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if is_flowchart_item_tag(&local)
+                    && path_ends_with(&path, &["GraphicalSchema", "Items"])
+                {
+                    let id = xml_attr_value(&event, "id")
+                        .ok_or_else(|| anyhow!("Flowchart item has no id attribute"))?;
+                    current = Some(FlowchartXmlItem {
+                        id,
+                        name: String::new(),
+                        tab_order: String::new(),
+                        explanation: None,
+                        task_description: None,
+                        events: BTreeMap::new(),
+                    });
+                }
+                if local == "Event" {
+                    current_event = xml_attr_value(&event, "name");
+                    text_value.clear();
+                } else if is_flowchart_text_property(&local) {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Event"
+                    && let Some(item) = current.as_mut()
+                    && let Some(name) = xml_attr_value(&event, "name")
+                {
+                    item.events.insert(name, None);
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if current.is_some()
+                    && (path
+                        .last()
+                        .is_some_and(|part| is_flowchart_text_property(part))
+                        || path.last().map(String::as_str) == Some("Event"))
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if current.is_some()
+                    && (path
+                        .last()
+                        .is_some_and(|part| is_flowchart_text_property(part))
+                        || path.last().map(String::as_str) == Some("Event"))
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if let Some(item) = current.as_mut() {
+                    match local.as_str() {
+                        "Name" if path_ends_with(&path, &["Properties", "Name"]) => {
+                            item.name = text_value.trim().to_string();
+                        }
+                        "TabOrder" if path_ends_with(&path, &["Properties", "TabOrder"]) => {
+                            item.tab_order = text_value.trim().to_string();
+                        }
+                        "Explanation" if path_ends_with(&path, &["Properties", "Explanation"]) => {
+                            item.explanation = Some(text_value.trim().to_string());
+                        }
+                        "TaskDescription"
+                            if path_ends_with(&path, &["Properties", "TaskDescription"]) =>
+                        {
+                            item.task_description = Some(text_value.trim().to_string());
+                        }
+                        "Event" => {
+                            if let Some(name) = current_event.take() {
+                                let handler = if text_value.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(text_value.trim().to_string())
+                                };
+                                item.events.insert(name, handler);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if is_flowchart_item_tag(&local) {
+                    if let Some(item) = current.take() {
+                        items.push(item);
+                    }
+                }
+                let _ = path.pop();
+                if local == "Event" || is_flowchart_text_property(&local) {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(items)
+}
+
+fn is_flowchart_item_tag(value: &str) -> bool {
+    matches!(
+        value,
+        "Decoration" | "ConnectionLine" | "Start" | "Completion" | "Condition" | "Activity"
+    )
+}
+
+fn is_flowchart_text_property(value: &str) -> bool {
+    matches!(
+        value,
+        "Name" | "TabOrder" | "Explanation" | "TaskDescription"
+    )
 }
 
 fn parse_xml_bool_text(name: &str, value: &str) -> Result<bool> {
@@ -6719,6 +7102,77 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains(r#"{{"S","NewItem"}}"#));
         assert!(text.contains(r#"{{"S","NI"}}"#));
         assert!(text.contains(r#"{{"S","New item description"}}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_flowchart_xml_preserving_base_shape() -> anyhow::Result<()> {
+        let start_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let done_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let style = "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+        let line_style =
+            "{7,{3,0,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,1,0,0,0,0}";
+        let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+        let start_head = format!("{{{{4,1,{{1,0}},\"Start\",1}},4,{start_uuid},0}}");
+        let completion_head = format!("{{{{4,3,{{1,0}},\"Done\",3}},4,{done_uuid},0}}");
+        let line_head = "{4,2,{1,0},\"Line\",2}";
+        let start_geometry = format!("{{{style},5,10,20,50,60}}");
+        let completion_geometry = format!("{{{style},5,70,80,110,120}}");
+        let start_shape = format!("{{{{{start_geometry},1}}}}");
+        let completion_shape = format!("{{{{{completion_geometry},1}}}}");
+        let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
+        let line_shape = format!("{{{line_geometry}}}");
+        let start_item = format!("{{{start_head},2,{start_shape},{{1,{{0,\"BeforeStart\"}}}}}}");
+        let line_item = format!("{{{line_head},3,1,0,3,0,{line_shape}}}");
+        let completion_item =
+            format!("{{{completion_head},2,{completion_shape},{{1,{{0,\"OnDone\"}}}}}}");
+        let base_plain = format!(
+            "{{5,{{{{1,{style},1,20,20}}}},3,2,{start_item},1,{line_item},3,{completion_item},4}}"
+        );
+        let base = super::deflate_raw(base_plain.as_bytes())?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme" version="2.20">
+	<Items>
+		<Start id="1" uuid="{start_uuid}">
+			<Properties>
+				<Name>StartRenamed</Name>
+				<TabOrder>11</TabOrder>
+			</Properties>
+			<Events>
+				<Event name="BeforeStart">BeforeStartRenamed</Event>
+			</Events>
+		</Start>
+		<ConnectionLine id="2">
+			<Properties>
+				<Name>LineRenamed</Name>
+				<TabOrder>12</TabOrder>
+			</Properties>
+		</ConnectionLine>
+		<Completion id="3" uuid="{done_uuid}">
+			<Properties>
+				<Name>DoneRenamed</Name>
+				<TabOrder>13</TabOrder>
+			</Properties>
+			<Events>
+				<Event name="OnComplete">OnDoneRenamed</Event>
+			</Events>
+		</Completion>
+	</Items>
+</GraphicalSchema>
+"#
+        );
+
+        let packed = super::pack_business_process_flowchart_blob_from_xml(&base, xml.as_bytes())?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#""StartRenamed",11"#));
+        assert!(text.contains(r#""BeforeStartRenamed""#));
+        assert!(text.contains(r#""LineRenamed",12"#));
+        assert!(text.contains(r#""DoneRenamed",13"#));
+        assert!(text.contains(r#""OnDoneRenamed""#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

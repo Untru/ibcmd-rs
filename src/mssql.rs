@@ -40,11 +40,11 @@ use crate::cli::{
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
-    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
-    pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_bytes,
-    pack_form_body_blob_from_module_text, pack_help_blob_from_parts, pack_module_blob_bytes,
-    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
-    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
+    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
+    pack_help_blob_from_parts, pack_module_blob_bytes, pack_predefined_data_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1939,6 +1939,9 @@ fn prepare_metadata_body_rows(
         "Configuration" => {
             prepare_configuration_asset_body_rows(sqlcmd, server, database, xml_path, properties)
         }
+        "BusinessProcess" => prepare_business_process_flowchart_body_row(
+            sqlcmd, server, database, xml_path, properties,
+        ),
         "Catalog" | "ChartOfCharacteristicTypes" => {
             prepare_predefined_data_body_row(sqlcmd, server, database, xml_path, properties)
         }
@@ -2314,6 +2317,40 @@ fn prepare_predefined_data_body_row(
         .with_context(|| format!("failed to read PredefinedData {}", body_path.display()))?;
     let packed = pack_predefined_data_blob_from_xml(&base_body, &xml)
         .with_context(|| format!("failed to pack PredefinedData {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_business_process_flowchart_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_business_process_flowchart_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.7", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read BusinessProcess Flowchart {}",
+            body_path.display()
+        )
+    })?;
+    let packed =
+        pack_business_process_flowchart_blob_from_xml(&base_body, &xml).with_context(|| {
+            format!(
+                "failed to pack BusinessProcess Flowchart {}",
+                body_path.display()
+            )
+        })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -4165,6 +4202,10 @@ fn infer_predefined_data_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Predefined.xml")
 }
 
+fn infer_business_process_flowchart_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Flowchart.xml")
+}
+
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
     let package_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -4900,6 +4941,16 @@ mod tests {
             Some("7")
         );
         assert_eq!(super::predefined_data_body_suffix("Document"), None);
+    }
+
+    #[test]
+    fn infers_business_process_flowchart_body_path() {
+        assert_eq!(
+            super::infer_business_process_flowchart_body_path(
+                r"BusinessProcesses\Approval.xml".as_ref()
+            ),
+            std::path::PathBuf::from(r"BusinessProcesses\Approval\Ext\Flowchart.xml")
+        );
     }
 
     #[test]
