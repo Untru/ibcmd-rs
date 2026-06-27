@@ -17,6 +17,8 @@ pub enum Commands {
     Probe(ProbeArgs),
     /// Scan a 1C XML source tree and produce a deterministic manifest.
     Scan(ScanArgs),
+    /// Dry-run pack SpreadsheetDocument templates from a 1C XML source tree.
+    AuditSpreadsheetTemplates(AuditSpreadsheetTemplatesArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Print the current compatibility matrix for implemented operations.
@@ -168,6 +170,15 @@ pub struct ProbeArgs {
 
 #[derive(Debug, Args)]
 pub struct ScanArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditSpreadsheetTemplatesArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
@@ -2599,6 +2610,24 @@ mod tests {
 
     #[test]
     fn parses_source_tree_stage_commands() {
+        let audit = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-spreadsheet-templates",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\spreadsheet.json",
+        ]);
+        match audit.command {
+            Commands::AuditSpreadsheetTemplates(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\spreadsheet.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
         let metadata = Cli::parse_from([
             "ibcmd-rs",
             "mssql-stage-source-metadata-objects",
