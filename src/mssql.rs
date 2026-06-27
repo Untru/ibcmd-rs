@@ -53,8 +53,10 @@ use crate::module_blob::{
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
 };
 use crate::parallel;
-use crate::source::scan_sources;
-use crate::source_audit::{SourceLoadCoverageAuditReport, audit_source_load_coverage};
+use crate::source::{scan_sources, scan_sources_with_prefixes};
+use crate::source_audit::{
+    SourceLoadCoverageAuditReport, audit_source_load_coverage_from_manifest,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
@@ -488,8 +490,8 @@ pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Resul
 pub fn audit_source_parity(
     args: &MssqlAuditSourceParityArgs,
 ) -> Result<MssqlSourceParityAuditReport> {
-    let source_coverage = audit_source_load_coverage(&args.source_root)?;
-    let manifest = scan_sources(&args.source_root)?;
+    let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
+    let source_coverage = audit_source_load_coverage_from_manifest(&manifest)?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
         &args.source_root,
@@ -1279,7 +1281,7 @@ pub fn stage_source_objects(
         ));
     }
 
-    let manifest = scan_sources(&args.source_root)?;
+    let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
         &args.source_root,

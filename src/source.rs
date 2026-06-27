@@ -84,6 +84,92 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
     })
 }
 
+pub fn scan_sources_with_prefixes(root: &Path, prefixes: &[String]) -> Result<SourceManifest> {
+    if prefixes.is_empty() {
+        return scan_sources(root);
+    }
+    if !root.is_dir() {
+        return Err(anyhow!(
+            "source root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let canonical_root = fs::canonicalize(root)
+        .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+    let mut files_by_path = std::collections::BTreeMap::<String, SourceFile>::new();
+
+    for prefix in prefixes {
+        let normalized = normalize_prefix(prefix);
+        if normalized.is_empty() {
+            return scan_sources(&canonical_root);
+        }
+        let prefix_path =
+            canonical_root.join(normalized.replace('/', std::path::MAIN_SEPARATOR_STR));
+        scan_prefix_candidate(&canonical_root, &prefix_path, &mut files_by_path)?;
+
+        if prefix_path.extension().is_none() {
+            let xml_path = prefix_path.with_extension("xml");
+            scan_prefix_candidate(&canonical_root, &xml_path, &mut files_by_path)?;
+        }
+    }
+
+    Ok(SourceManifest {
+        root: canonical_root,
+        generated_at_unix: now_unix(),
+        files: files_by_path.into_values().collect(),
+    })
+}
+
+fn scan_prefix_candidate(
+    canonical_root: &Path,
+    candidate: &Path,
+    files_by_path: &mut std::collections::BTreeMap<String, SourceFile>,
+) -> Result<()> {
+    if candidate.is_file() {
+        let relative = candidate
+            .strip_prefix(canonical_root)
+            .with_context(|| format!("failed to make relative path for {}", candidate.display()))?;
+        let file = scan_file(candidate, relative)?;
+        files_by_path.insert(file.path.clone(), file);
+        return Ok(());
+    }
+    if !candidate.is_dir() {
+        return Ok(());
+    }
+
+    let files = parallel::install(|| {
+        WalkDir::new(candidate)
+            .into_iter()
+            .filter_entry(|entry| !is_ignored(entry.path()))
+            .par_bridge()
+            .filter_map(|entry| match entry {
+                Ok(entry) if entry.file_type().is_file() => {
+                    Some(Ok::<walkdir::DirEntry, anyhow::Error>(entry))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error.into())),
+            })
+            .map(|entry| {
+                let entry = entry?;
+                let path = entry.path();
+                let relative = path.strip_prefix(canonical_root).with_context(|| {
+                    format!("failed to make relative path for {}", path.display())
+                })?;
+                scan_file(path, relative)
+            })
+            .collect::<Result<Vec<_>>>()
+    })??;
+    for file in files {
+        files_by_path.insert(file.path.clone(), file);
+    }
+    Ok(())
+}
+
+fn normalize_prefix(prefix: &str) -> String {
+    prefix.replace('\\', "/").trim_matches('/').to_string()
+}
+
 pub fn write_manifest(manifest: &SourceManifest, output: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(manifest)?;
     fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
@@ -341,7 +427,9 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{SourceKind, classify, infer_object_hint, scan_sources};
+    use super::{
+        SourceKind, classify, infer_object_hint, scan_sources, scan_sources_with_prefixes,
+    };
 
     #[test]
     fn classifies_common_1c_source_files() {
@@ -704,6 +792,53 @@ mod tests {
             ),
             Some("CommandGroups/Органайзер".to_string())
         );
+    }
+
+    #[test]
+    fn scans_only_requested_source_prefixes() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-scan-prefix-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs/Products/Forms/List/Ext")).unwrap();
+        std::fs::create_dir_all(root.join("Catalogs/Other/Ext")).unwrap();
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            r#"<?xml version="1.0"?><MetaDataObject/>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Catalogs/Products/Forms/List.xml"),
+            r#"<?xml version="1.0"?><MetaDataObject/>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Catalogs/Products/Forms/List/Ext/Form.xml"),
+            r#"<?xml version="1.0"?><Form/>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Catalogs/Other.xml"),
+            r#"<?xml version="1.0"?><MetaDataObject/>"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("Catalogs/Other/Ext/ObjectModule.bsl"), "").unwrap();
+
+        let manifest =
+            scan_sources_with_prefixes(&root, &["Catalogs/Products".to_string()]).unwrap();
+        let paths = manifest
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(paths.contains(&"Catalogs/Products.xml"));
+        assert!(paths.contains(&"Catalogs/Products/Forms/List.xml"));
+        assert!(paths.contains(&"Catalogs/Products/Forms/List/Ext/Form.xml"));
+        assert!(!paths.contains(&"Catalogs/Other.xml"));
+        assert!(!paths.contains(&"Catalogs/Other/Ext/ObjectModule.bsl"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

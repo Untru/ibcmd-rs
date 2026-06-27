@@ -15,7 +15,7 @@ use crate::module_blob::{
 };
 use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
-use crate::source::{SourceKind, scan_sources};
+use crate::source::{SourceKind, SourceManifest, scan_sources};
 
 #[derive(Debug, Serialize)]
 pub struct SpreadsheetTemplateAuditReport {
@@ -150,6 +150,12 @@ struct SpreadsheetTemplateRoundTripItemAudit {
 
 pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAuditReport> {
     let manifest = scan_sources(root)?;
+    audit_source_load_coverage_from_manifest(&manifest)
+}
+
+pub fn audit_source_load_coverage_from_manifest(
+    manifest: &SourceManifest,
+) -> Result<SourceLoadCoverageAuditReport> {
     let mut files_by_kind = BTreeMap::<String, (usize, u64)>::new();
     let mut stage_metadata_xml_files = 0usize;
     let mut stage_common_module_xml_files = 0usize;
@@ -231,7 +237,7 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
         unsupported_form_xml_files.saturating_sub(form_xml_stageable_by_module);
 
     Ok(SourceLoadCoverageAuditReport {
-        root: manifest.root,
+        root: manifest.root.clone(),
         total_files: manifest.files.len(),
         total_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
         files_by_kind: sorted_source_kind_counts(files_by_kind),
