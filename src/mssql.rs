@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
+use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -371,6 +373,13 @@ struct PreparedMetadataBodyStage {
     path: PathBuf,
     blob: Vec<u8>,
     blob_sha256: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct NestedCommandModuleSource {
+    command_id: String,
+    command_name: String,
+    body_path: PathBuf,
 }
 
 fn staged_metadata_object_report(
@@ -1924,6 +1933,9 @@ fn prepare_metadata_body_rows(
     rows.extend(prepare_object_module_body_rows(
         sqlcmd, server, database, xml_path, properties,
     )?);
+    rows.extend(prepare_nested_command_module_body_rows(
+        sqlcmd, server, database, xml_path, xml, properties,
+    )?);
     Ok(rows)
 }
 
@@ -2226,6 +2238,198 @@ fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static 
         "IntegrationService" => &[("0", "Module.bsl")],
         _ => &[],
     }
+}
+
+fn prepare_nested_command_module_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let sources = nested_command_module_sources(xml_path, xml, properties)?;
+    let mut rows = Vec::with_capacity(sources.len());
+    for source in sources {
+        let body_id = format!("{}.2", source.command_id);
+        let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+        let text = fs::read(&source.body_path).with_context(|| {
+            format!(
+                "failed to read nested command module body {}",
+                source.body_path.display()
+            )
+        })?;
+        let packed = pack_module_blob_bytes(&text, Some(&base_body), None).with_context(|| {
+            format!(
+                "failed to pack nested command module body {}",
+                source.body_path.display()
+            )
+        })?;
+        rows.push(PreparedMetadataBodyStage {
+            body_id,
+            path: source.body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        });
+    }
+    Ok(rows)
+}
+
+fn nested_command_module_sources(
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<NestedCommandModuleSource>> {
+    if !metadata_kind_can_own_commands(&properties.kind) {
+        return Ok(Vec::new());
+    }
+    let commands_dir = xml_path.with_extension("").join("Commands");
+    if !commands_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let command_ids = parse_nested_command_ids_by_name(xml)?;
+    let mut sources = Vec::new();
+    for entry in fs::read_dir(&commands_dir)
+        .with_context(|| format!("failed to read Commands dir {}", commands_dir.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", commands_dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to stat {}", entry.path().display()))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let command_name = entry.file_name().to_string_lossy().to_string();
+        let body_path = entry.path().join("Ext").join("CommandModule.bsl");
+        if !body_path.exists() {
+            continue;
+        }
+        let command_id = command_ids.get(&command_name).cloned().ok_or_else(|| {
+            anyhow!(
+                "nested command module {} has no matching Command named {} in {}",
+                body_path.display(),
+                command_name,
+                xml_path.display()
+            )
+        })?;
+        sources.push(NestedCommandModuleSource {
+            command_id,
+            command_name,
+            body_path,
+        });
+    }
+    sources.sort_by(|left, right| left.body_path.cmp(&right.body_path));
+    Ok(sources)
+}
+
+fn metadata_kind_can_own_commands(kind: &str) -> bool {
+    matches!(
+        kind,
+        "AccountingRegister"
+            | "AccumulationRegister"
+            | "BusinessProcess"
+            | "CalculationRegister"
+            | "Catalog"
+            | "ChartOfAccounts"
+            | "ChartOfCalculationTypes"
+            | "ChartOfCharacteristicTypes"
+            | "DataProcessor"
+            | "Document"
+            | "DocumentJournal"
+            | "Enum"
+            | "ExchangePlan"
+            | "InformationRegister"
+            | "Report"
+            | "SettingsStorage"
+            | "Task"
+    )
+}
+
+fn parse_nested_command_ids_by_name(xml: &[u8]) -> Result<BTreeMap<String, String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut commands = BTreeMap::<String, String>::new();
+    let mut pending_uuid = None::<String>;
+    let mut pending_name = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name_for_stage(event.local_name().as_ref());
+                if local == "Command" && pending_uuid.is_none() {
+                    pending_uuid = Some(command_xml_uuid(&event)?);
+                    pending_name = None;
+                } else if pending_uuid.is_some()
+                    && path_ends_with_for_stage(&path, &["Command", "Properties"])
+                    && local == "Name"
+                {
+                    pending_name = Some(String::new());
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(_)) => {}
+            Ok(Event::Text(text)) => {
+                if path_ends_with_for_stage(&path, &["Command", "Properties", "Name"]) {
+                    if let Some(name) = pending_name.as_mut() {
+                        name.push_str(text.xml_content()?.as_ref());
+                    }
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with_for_stage(&path, &["Command", "Properties", "Name"]) {
+                    if let Some(name) = pending_name.as_mut() {
+                        name.push_str(text.xml_content()?.as_ref());
+                    }
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name_for_stage(event.local_name().as_ref());
+                if local == "Command" {
+                    if let (Some(uuid), Some(name)) = (pending_uuid.take(), pending_name.take()) {
+                        commands.insert(name, uuid);
+                    }
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(commands)
+}
+
+fn command_xml_uuid(event: &BytesStart<'_>) -> Result<String> {
+    let value = xml_attr_value_for_stage(event, "uuid")
+        .ok_or_else(|| anyhow!("Command XML element has no uuid attribute"))?;
+    Ok(uuid::Uuid::parse_str(&value)
+        .with_context(|| format!("invalid Command uuid {value}"))?
+        .hyphenated()
+        .to_string())
+}
+
+fn xml_attr_value_for_stage(event: &BytesStart<'_>, name: &str) -> Option<String> {
+    event
+        .attributes()
+        .filter_map(Result::ok)
+        .find(|attr| attr.key.as_ref() == name.as_bytes())
+        .map(|attr| String::from_utf8_lossy(attr.value.as_ref()).to_string())
+}
+
+fn xml_local_name_for_stage(name: &[u8]) -> String {
+    String::from_utf8_lossy(name).to_string()
+}
+
+fn path_ends_with_for_stage(path: &[String], suffix: &[&str]) -> bool {
+    path.len() >= suffix.len()
+        && path[path.len() - suffix.len()..]
+            .iter()
+            .zip(suffix)
+            .all(|(left, right)| left == right)
 }
 
 fn prepare_common_module_object_stage(
@@ -4239,6 +4443,83 @@ mod tests {
                 "RecordSetModule.bsl"
             ),
             std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
+        );
+    }
+
+    #[test]
+    fn finds_nested_command_module_sources_from_owner_xml() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-nested-command-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let xml_path = root.join("DataProcessors/Scanning.xml");
+        let module_path =
+            root.join("DataProcessors/Scanning/Commands/ScanSheet/Ext/CommandModule.bsl");
+        std::fs::create_dir_all(module_path.parent().unwrap()).unwrap();
+        std::fs::write(&module_path, "Procedure Run()\nEndProcedure\n").unwrap();
+
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Scanning</Name>
+    </Properties>
+    <ChildObjects>
+      <Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+        <Properties>
+          <Name>ScanSheet</Name>
+        </Properties>
+      </Command>
+    </ChildObjects>
+  </DataProcessor>
+</MetaDataObject>
+"#;
+        std::fs::create_dir_all(xml_path.parent().unwrap()).unwrap();
+        std::fs::write(&xml_path, xml).unwrap();
+        let properties = SimpleMetadataXmlProperties {
+            kind: "DataProcessor".to_string(),
+            uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            name: "Scanning".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+
+        let sources = super::nested_command_module_sources(&xml_path, xml, &properties).unwrap();
+
+        assert_eq!(
+            sources,
+            vec![super::NestedCommandModuleSource {
+                command_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                command_name: "ScanSheet".to_string(),
+                body_path: module_path,
+            }]
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parses_nested_command_ids_by_name() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Task uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <ChildObjects>
+      <Command uuid="BBBBBBBB-BBBB-4BBB-BBBB-BBBBBBBBBBBB">
+        <Properties>
+          <Name>ВсеЗадачи</Name>
+        </Properties>
+      </Command>
+    </ChildObjects>
+  </Task>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let commands = super::parse_nested_command_ids_by_name(xml).unwrap();
+
+        assert_eq!(
+            commands.get("ВсеЗадачи").map(String::as_str),
+            Some("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb")
         );
     }
 
