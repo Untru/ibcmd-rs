@@ -3777,23 +3777,13 @@ fn parse_moxel_spreadsheet_text(
         return None;
     }
     let declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()? + 1;
-    let mut rows = Vec::new();
-    let mut index = 3usize;
-    let mut expected_row_index = 0usize;
-    while index < fields.len() {
-        if let Some((row, next_index)) = parse_moxel_row_at(&fields, index, expected_row_index) {
-            rows.push(row);
-            expected_row_index += 1;
-            index = next_index;
-        } else {
-            index += 1;
-        }
-    }
+    let mut rows = parse_moxel_rows(&fields);
     if rows.is_empty() {
         return None;
     }
     let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
+    trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges);
     let parsed_lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields);
@@ -3851,7 +3841,12 @@ fn moxel_spreadsheet_height(
     merges: &[MoxelMerge],
     areas: &[MoxelArea],
 ) -> usize {
-    let row_max = rows.iter().map(|row| row.index as i32).max().unwrap_or(0);
+    let row_max = rows
+        .iter()
+        .filter(|row| row.format_index > 1 || !row.cells.is_empty())
+        .map(|row| row.index as i32)
+        .max()
+        .unwrap_or(0);
     let merge_max = merges
         .iter()
         .map(|merge| merge.row + merge.height)
@@ -3861,29 +3856,179 @@ fn moxel_spreadsheet_height(
     row_max.max(merge_max).max(area_max).max(0) as usize + 1
 }
 
+fn trim_moxel_trailing_empty_rows(
+    rows: &mut Vec<MoxelRow>,
+    areas: &[MoxelArea],
+    merges: &[MoxelMerge],
+) {
+    let Some(material_limit) = areas
+        .iter()
+        .map(|area| area.end_row.max(0) as usize + 1)
+        .chain(
+            merges
+                .iter()
+                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
+        )
+        .max()
+    else {
+        return;
+    };
+    while rows.last().is_some_and(|row| {
+        row.index > material_limit && row.format_index <= 1 && row.cells.is_empty()
+    }) {
+        rows.pop();
+    }
+}
+
+fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
+    let mut best_rows = Vec::new();
+    for index in 3..fields.len().saturating_sub(3) {
+        if fields.get(index).map(|field| field.trim()) != Some("1")
+            || fields.get(index + 1).map(|field| field.trim()) != Some("2")
+        {
+            continue;
+        }
+        let Some(height) = fields
+            .get(index + 2)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if height == 0 || height > 1_000_000 {
+            continue;
+        }
+        let mut rows = Vec::new();
+        let mut cursor = index + 3;
+        let mut expected_row_index = 0usize;
+        while rows.len() < height {
+            let Some((row, next_cursor)) = parse_moxel_row_at(fields, cursor, expected_row_index)
+            else {
+                break;
+            };
+            if next_cursor <= cursor {
+                break;
+            }
+            rows.push(row);
+            expected_row_index += 1;
+            cursor = next_cursor;
+        }
+        if rows.len() > best_rows.len() {
+            best_rows = rows;
+        }
+    }
+    if best_rows.is_empty() {
+        parse_moxel_rows_by_scanning(fields)
+    } else {
+        best_rows
+    }
+}
+
+fn parse_moxel_rows_by_scanning(fields: &[&str]) -> Vec<MoxelRow> {
+    let mut rows = Vec::new();
+    let mut index = 3usize;
+    let mut expected_row_index = 0usize;
+    while index < fields.len() {
+        if let Some((row, next_index)) =
+            parse_moxel_row_at_for_scanning(fields, index, expected_row_index)
+        {
+            rows.push(row);
+            expected_row_index += 1;
+            index = next_index;
+        } else {
+            index += 1;
+        }
+    }
+    rows
+}
+
 fn parse_moxel_row_at(
     fields: &[&str],
     index: usize,
     expected_row_index: usize,
 ) -> Option<(MoxelRow, usize)> {
-    if let Some(row) = parse_moxel_row_shape(fields, index, expected_row_index, 0, 1, 2, 3, false) {
+    if let Some(row) = parse_moxel_row_shape(
+        fields,
+        index,
+        expected_row_index,
+        MoxelRowShape {
+            row_index_offset: 0,
+            format_offset: 1,
+            cell_count_offset: 2,
+            cells_offset: 3,
+            allow_empty: true,
+            validate_empty_prefix: false,
+        },
+    ) {
         return Some(row);
     }
-    parse_moxel_row_shape(fields, index, expected_row_index, 3, 4, 5, 6, true)
+    parse_moxel_row_shape(
+        fields,
+        index,
+        expected_row_index,
+        MoxelRowShape {
+            row_index_offset: 3,
+            format_offset: 4,
+            cell_count_offset: 5,
+            cells_offset: 6,
+            allow_empty: true,
+            validate_empty_prefix: true,
+        },
+    )
+}
+
+fn parse_moxel_row_at_for_scanning(
+    fields: &[&str],
+    index: usize,
+    expected_row_index: usize,
+) -> Option<(MoxelRow, usize)> {
+    if let Some(row) = parse_moxel_row_shape(
+        fields,
+        index,
+        expected_row_index,
+        MoxelRowShape {
+            row_index_offset: 0,
+            format_offset: 1,
+            cell_count_offset: 2,
+            cells_offset: 3,
+            allow_empty: false,
+            validate_empty_prefix: false,
+        },
+    ) {
+        return Some(row);
+    }
+    parse_moxel_row_shape(
+        fields,
+        index,
+        expected_row_index,
+        MoxelRowShape {
+            row_index_offset: 3,
+            format_offset: 4,
+            cell_count_offset: 5,
+            cells_offset: 6,
+            allow_empty: true,
+            validate_empty_prefix: true,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct MoxelRowShape {
+    row_index_offset: usize,
+    format_offset: usize,
+    cell_count_offset: usize,
+    cells_offset: usize,
+    allow_empty: bool,
+    validate_empty_prefix: bool,
 }
 
 fn parse_moxel_row_shape(
     fields: &[&str],
     index: usize,
     expected_row_index: usize,
-    row_index_offset: usize,
-    format_offset: usize,
-    cell_count_offset: usize,
-    cells_offset: usize,
-    allow_empty: bool,
+    shape: MoxelRowShape,
 ) -> Option<(MoxelRow, usize)> {
     let row_index = fields
-        .get(index + row_index_offset)?
+        .get(index + shape.row_index_offset)?
         .trim()
         .parse::<usize>()
         .ok()?;
@@ -3891,20 +4036,20 @@ fn parse_moxel_row_shape(
         return None;
     }
     let format_index = fields
-        .get(index + format_offset)?
+        .get(index + shape.format_offset)?
         .trim()
         .parse::<usize>()
         .ok()?
         + 1;
     let cell_count = fields
-        .get(index + cell_count_offset)?
+        .get(index + shape.cell_count_offset)?
         .trim()
         .parse::<usize>()
         .ok()?;
-    if (!allow_empty && cell_count == 0) || cell_count > 2048 {
+    if (!shape.allow_empty && cell_count == 0) || cell_count > 2048 {
         return None;
     }
-    if allow_empty && cell_count == 0 {
+    if shape.validate_empty_prefix && cell_count == 0 {
         let prefix_left = fields.get(index)?.trim().parse::<usize>().ok()?;
         let prefix_right = fields.get(index + 1)?.trim().parse::<usize>().ok()?;
         if prefix_left == 0 || prefix_right == 0 {
@@ -3912,7 +4057,7 @@ fn parse_moxel_row_shape(
         }
     }
     let mut cells = Vec::with_capacity(cell_count);
-    let mut cursor = index + cells_offset;
+    let mut cursor = index + shape.cells_offset;
     for _ in 0..cell_count {
         let column_index = fields.get(cursor)?.trim().parse::<usize>().ok()?;
         let cell = parse_moxel_cell(fields.get(cursor + 1)?, column_index)?;
@@ -9031,6 +9176,45 @@ mod tests {
         assert!(line_pos < font_pos);
         assert!(font_pos < format_pos);
         assert!(format_pos < picture_pos);
+    }
+
+    #[test]
+    fn formats_moxel_single_column_empty_row_without_prefix() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,3,0,0,1,0,{16,1,{1,1,{\"\",\"Описание\"}},0},1,0,0,2,0,1,0,{16,2,{1,1,{\"\",\"Название\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,3},3,0,0,0,0,0,0,0,0,{0},{0},{0},{3,\"Заголовок\",{1,{1,-1,0,-1,0,00000000-0000-0000-0000-000000000000},0},\"ПустаяСтрока\",{1,{1,-1,1,-1,1,00000000-0000-0000-0000-000000000000},0},\"СодержаниеОтчета\",{1,{1,-1,2,-1,2,00000000-0000-0000-0000-000000000000},0}},\"\",{{0,6,6,{\"N\",1000},7,{\"N\",1000},8,{\"N\",1000},9,{\"N\",1000},10,{\"N\",1000},11,{\"N\",1000}}},{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,3,{32769,0,1},{32768,1},{128,509},1,{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},0,0,0,2,{3,3,{-1}},{3,3,{-3}},0,0,0,\"\",0,{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},{0},0,0,0,1,0,0,0}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("<size>1</size>"));
+        assert_eq!(xml.matches("<columnsItem>").count(), 1);
+        assert!(xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+        assert!(xml.contains("<f>2</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
+        assert!(xml.contains("<f>3</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
+        assert!(!xml.contains("<i>3</i>"));
+        assert!(xml.contains("<defaultFormatIndex>4</defaultFormatIndex>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>509</width>\r\n\t</format>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"
+        ));
+        assert!(xml.contains("\t<format>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"));
+    }
+
+    #[test]
+    fn formats_moxel_trims_trailing_empty_rows_outside_named_areas() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,16,0,0,0,1,1,1,0,{16,2,{1,1,{\"ru\",\"Движения документа [СсылкаНаДокумент]\"}},0},2,3,0,3,0,0,4,4,0,5,0,0,6,0,0,7,0,0,8,0,0,9,0,0,10,0,0,11,0,0,12,0,0,13,0,0,14,0,0,15,0,0,{1,0,00000000-0000-0000-0000-000000000000,1,0,5},5,0,0,0,0,0,0,0,0,{0},{0},{0},{2,\"ОбластьЗаголовок\",{1,{1,-1,1,-1,1,00000000-0000-0000-0000-000000000000},0},\"ПустаяОбласть\",{1,{1,-1,4,-1,4,00000000-0000-0000-0000-000000000000},0}},\"\",{{0,6,6,{\"N\",1000},7,{\"N\",1000},8,{\"N\",1000},9,{\"N\",1000},10,{\"N\",1000},11,{\"N\",1000}}},{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,5,{1025,0,2},{558081,0,2,2,1},{1089,0,30,2},{64,30},{128,567},1,{7,0,575,180,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},0,0,0,3,{3,3,{-1}},{3,3,{-3}},{3,0,{4625920}},0,0,0,\"\",0,{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},{0},0,0,0,1,0,0,0}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("<height>5</height>"));
+        assert!(xml.contains("<vgRows>5</vgRows>"));
+        assert!(xml.contains("<index>5</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+        assert!(!xml.contains("<index>6</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+        assert!(!xml.contains("<index>15</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
     }
 
     #[test]
