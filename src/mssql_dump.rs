@@ -3841,6 +3841,7 @@ struct FormBodyEvent {
 struct FormAutoCommandBar {
     id: String,
     name: String,
+    horizontal_align: Option<&'static str>,
     autofill: Option<bool>,
 }
 
@@ -4010,10 +4011,23 @@ fn parse_form_auto_command_bar_fields(fields: &[&str]) -> Option<FormAutoCommand
     Some(FormAutoCommandBar {
         id: id.to_string(),
         name,
+        horizontal_align: fields
+            .get(20)
+            .and_then(|field| parse_form_auto_command_bar_horizontal_align(field)),
         autofill: fields
             .get(20)
             .and_then(|field| parse_form_auto_command_bar_autofill(field)),
     })
+}
+
+fn parse_form_auto_command_bar_horizontal_align(field: &str) -> Option<&'static str> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match fields.get(1).map(|value| value.trim())? {
+        "1" => Some("Center"),
+        "2" => Some("Right"),
+        "3" => Some("Auto"),
+        _ => None,
+    }
 }
 
 fn parse_form_auto_command_bar_autofill(field: &str) -> Option<bool> {
@@ -5356,12 +5370,22 @@ fn format_form_body_xml(
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
     }
     if let Some(command_bar) = auto_command_bar {
-        if command_bar.autofill == Some(false) {
+        if command_bar.horizontal_align.is_some() || command_bar.autofill == Some(false) {
             xml.push_str(&format!(
-                "\t<AutoCommandBar name=\"{}\" id=\"{}\">\r\n\t\t<Autofill>false</Autofill>\r\n\t</AutoCommandBar>\r\n",
+                "\t<AutoCommandBar name=\"{}\" id=\"{}\">\r\n",
                 escape_xml_text(&command_bar.name),
                 escape_xml_text(&command_bar.id)
             ));
+            if let Some(horizontal_align) = command_bar.horizontal_align {
+                xml.push_str(&format!(
+                    "\t\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+                    escape_xml_text(horizontal_align)
+                ));
+            }
+            if command_bar.autofill == Some(false) {
+                xml.push_str("\t\t<Autofill>false</Autofill>\r\n");
+            }
+            xml.push_str("\t</AutoCommandBar>\r\n");
         } else {
             xml.push_str(&format!(
                 "\t<AutoCommandBar name=\"{}\" id=\"{}\"/>\r\n",
@@ -11901,12 +11925,13 @@ mod tests {
     #[test]
     fn extracts_form_auto_command_bar_autofill_false() {
         let form_body = deflate_for_test(
-            r#"{4,{59,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,0,0},0,1,0,0,0,3,3,0}},"",{0}}"#.as_bytes(),
+            r#"{4,{59,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,2,0,0},0,1,0,0,0,3,3,0}},"",{0}}"#.as_bytes(),
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains(r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1">"#));
+        assert!(form_xml.contains("<HorizontalAlign>Right</HorizontalAlign>"));
         assert!(form_xml.contains("<Autofill>false</Autofill>"));
     }
 

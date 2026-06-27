@@ -94,6 +94,7 @@ struct FormXmlBodyProperties {
 struct FormXmlAutoCommandBar {
     id: String,
     name: String,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
     autofill: Option<bool>,
 }
 
@@ -210,6 +211,14 @@ enum FormXmlGroup {
     Vertical,
     Horizontal,
     AlwaysHorizontal,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlHorizontalAlign {
+    Left,
+    Center,
+    Right,
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3359,6 +3368,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     local.as_str(),
                     "WindowOpeningMode"
                         | "Group"
+                        | "HorizontalAlign"
                         | "Autofill"
                         | "Event"
                         | "Action"
@@ -3483,6 +3493,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
                     || path_ends_with(&path, &["Form", "Title", "item", "content"])
@@ -3769,6 +3780,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
                     || path_ends_with(&path, &["Form", "Title", "item", "content"])
@@ -4072,6 +4084,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "AutoCommandBar/Autofill",
                                 text_value.trim(),
                             )?);
+                        }
+                    }
+                    "HorizontalAlign"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "AutoCommandBar", "HorizontalAlign"],
+                        ) =>
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.horizontal_align =
+                                Some(parse_form_horizontal_align_xml(text_value.trim())?);
                         }
                     }
                     "Event" if path_ends_with(&path, &["Form", "Events", "Event"]) => {
@@ -4870,6 +4893,7 @@ fn parse_form_auto_command_bar_xml(
     Ok(Some(FormXmlAutoCommandBar {
         id,
         name,
+        horizontal_align: None,
         autofill: None,
     }))
 }
@@ -5135,6 +5159,16 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     }
 }
 
+fn parse_form_horizontal_align_xml(value: &str) -> Result<FormXmlHorizontalAlign> {
+    match value {
+        "Left" => Ok(FormXmlHorizontalAlign::Left),
+        "Center" => Ok(FormXmlHorizontalAlign::Center),
+        "Right" => Ok(FormXmlHorizontalAlign::Right),
+        "Auto" => Ok(FormXmlHorizontalAlign::Auto),
+        other => Err(anyhow!("unsupported Form HorizontalAlign: {other}")),
+    }
+}
+
 fn patch_form_layout_properties(
     layout: &mut String,
     properties: &FormXmlBodyProperties,
@@ -5196,12 +5230,15 @@ fn patch_form_layout_auto_command_bar(
     {
         let mut replacements = Vec::<(Range<usize>, String)>::new();
         replacements.push((name_range.clone(), format_1c_string(&command_bar.name)));
-        if let Some(autofill) = command_bar.autofill
-            && let Some(autofill_range) = fields.get(20)
-            && let Some(autofill_settings) =
-                format_form_auto_command_bar_autofill(&text[autofill_range.clone()], autofill)?
+        if (command_bar.horizontal_align.is_some() || command_bar.autofill.is_some())
+            && let Some(settings_range) = fields.get(20)
+            && let Some(settings) = format_form_auto_command_bar_settings(
+                &text[settings_range.clone()],
+                command_bar.horizontal_align,
+                command_bar.autofill,
+            )?
         {
-            replacements.push((autofill_range.clone(), autofill_settings));
+            replacements.push((settings_range.clone(), settings));
         }
         replacements.sort_by_key(|(range, _)| range.start);
         for (range, replacement) in replacements.into_iter().rev() {
@@ -5223,14 +5260,32 @@ fn patch_form_layout_auto_command_bar(
     Ok(false)
 }
 
-fn format_form_auto_command_bar_autofill(existing: &str, autofill: bool) -> Result<Option<String>> {
+fn format_form_auto_command_bar_settings(
+    existing: &str,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
+) -> Result<Option<String>> {
     let mut text = existing.trim().to_string();
     let fields = scan_braced_fields(&text, 0)?;
-    if fields.len() <= 2 {
+    if fields.len() <= 1 || (autofill.is_some() && fields.len() <= 2) {
         return Ok(None);
     }
-    replace_braced_field(&mut text, 2, if autofill { "1" } else { "0" })?;
+    if let Some(horizontal_align) = horizontal_align {
+        replace_braced_field(&mut text, 1, form_horizontal_align_code(horizontal_align))?;
+    }
+    if let Some(autofill) = autofill {
+        replace_braced_field(&mut text, 2, if autofill { "1" } else { "0" })?;
+    }
     Ok(Some(text))
+}
+
+fn form_horizontal_align_code(value: FormXmlHorizontalAlign) -> &'static str {
+    match value {
+        FormXmlHorizontalAlign::Left => "0",
+        FormXmlHorizontalAlign::Center => "1",
+        FormXmlHorizontalAlign::Right => "2",
+        FormXmlHorizontalAlign::Auto => "3",
+    }
 }
 
 fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
@@ -13425,6 +13480,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
 	<AutoCommandBar name="NewBar" id="-1">
+		<HorizontalAlign>Center</HorizontalAlign>
 		<Autofill>false</Autofill>
 	</AutoCommandBar>
 </Form>
@@ -13434,7 +13490,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let parsed = super::parse_form_body_blob(&packed.blob)?;
 
         assert!(parsed.layout.contains("\"NewBar\""));
-        assert!(parsed.layout.contains("{1,0,0,0}"), "{}", parsed.layout);
+        assert!(parsed.layout.contains("{1,1,0,0}"), "{}", parsed.layout);
         assert!(!parsed.layout.contains("{1,0,1,0}"));
         assert!(!parsed.layout.contains("OldBar"));
         assert_eq!(parsed.module_text, "Old module");
