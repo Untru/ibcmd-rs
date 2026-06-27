@@ -596,6 +596,9 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
     match template_type {
         "AddIn" => Some(("Template.bin", SourceAssetKind::InflatedBase64OrBinary)),
         "BinaryData" => Some(("Template.bin", SourceAssetKind::InflatedBase64OrBinary)),
+        "DataCompositionAppearanceTemplate" => {
+            Some(("Template.xml", SourceAssetKind::InflatedBinary))
+        }
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
@@ -1821,7 +1824,9 @@ fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
         return Some("BinaryData");
     };
     let text = text.trim_start_matches('\u{feff}').trim_start();
-    if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
+    if text.starts_with("<?xml") && text.contains("data-composition-system/appearance-template") {
+        Some("DataCompositionAppearanceTemplate")
+    } else if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
         Some("DataCompositionSchema")
     } else if text.starts_with("<!DOCTYPE")
         || text.starts_with("<html")
@@ -10721,6 +10726,25 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn detects_data_composition_appearance_template_body() {
+        let body = deflate_for_test(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<AppearanceTemplate xmlns="http://v8.1c.ru/8.1/data-composition-system/appearance-template">
+	<dcscor:item xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core"/>
+</AppearanceTemplate>
+"#,
+        );
+
+        assert_eq!(
+            infer_template_type_from_body(&body),
+            Some("DataCompositionAppearanceTemplate")
+        );
+        let (path, kind) = template_body_source_asset("DataCompositionAppearanceTemplate").unwrap();
+        assert_eq!(path, "Template.xml");
+        assert!(matches!(kind, SourceAssetKind::InflatedBinary));
     }
 
     #[test]
