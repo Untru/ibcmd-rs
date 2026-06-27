@@ -3785,12 +3785,14 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
     let attributes = extract_form_body_attributes(&body.trailing, object_refs);
     let commands = extract_form_body_commands(&body.trailing, object_refs);
+    let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
     let command_interface = extract_form_command_interface(&body.trailing, object_refs);
 
     Some(format_form_body_xml(
         &properties,
         auto_command_bar.as_ref(),
         &events,
+        &child_items,
         &attributes,
         &commands,
         &command_interface,
@@ -3835,6 +3837,7 @@ struct FormDynamicListSettings {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormCommand {
     id: String,
+    reference_uuid: String,
     name: String,
     title: Vec<(String, String)>,
     tooltip: Vec<(String, String)>,
@@ -3856,6 +3859,19 @@ struct FormCommandInterfaceItem {
     index: Option<usize>,
     default_visible: Option<bool>,
     visible_common: Option<bool>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormChildItem {
+    tag: &'static str,
+    id: String,
+    name: String,
+    group: Option<&'static str>,
+    item_type: Option<&'static str>,
+    title: Vec<(String, String)>,
+    data_path: Option<String>,
+    command_name: Option<String>,
+    child_items: Vec<FormChildItem>,
 }
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
@@ -4306,6 +4322,9 @@ fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Op
     }
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
+    let reference_uuid = identity
+        .get(1)
+        .and_then(|value| parse_non_zero_uuid(value.trim()))?;
     let name = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?.0;
     let action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
     if id.is_empty() || name.is_empty() || action.is_empty() {
@@ -4313,6 +4332,7 @@ fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Op
     }
     Some(FormCommand {
         id: id.to_string(),
+        reference_uuid,
         name,
         title: fields
             .get(3)
@@ -4352,6 +4372,290 @@ fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
         "3" => Some("DontUse"),
         _ => None,
     }
+}
+
+fn extract_form_child_items(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormChildItem> {
+    let main_data_path = attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute)
+        .or_else(|| attributes.first())
+        .map(|attribute| attribute.name.as_str());
+    let table_name_by_id = form_table_names_by_id(fields);
+    parse_form_child_item_pairs(
+        fields,
+        main_data_path,
+        None,
+        &table_name_by_id,
+        commands,
+        object_refs,
+    )
+    .unwrap_or_default()
+}
+
+fn parse_form_child_item_pairs(
+    fields: &[&str],
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<FormChildItem>> {
+    let mut best = Vec::new();
+    for index in 0..fields.len() {
+        let Some(count) = parse_form_child_item_count(fields[index]) else {
+            continue;
+        };
+        let mut items = Vec::new();
+        let mut cursor = index + 1;
+        let mut complete = true;
+        for _ in 0..count {
+            let Some(field) = fields.get(cursor + 1) else {
+                complete = false;
+                break;
+            };
+            let Some(item) = parse_form_child_item(
+                field,
+                main_data_path,
+                parent_data_path,
+                table_name_by_id,
+                commands,
+                object_refs,
+            ) else {
+                complete = false;
+                break;
+            };
+            items.push(item);
+            cursor += 2;
+        }
+        if complete && items.len() > best.len() {
+            best = items;
+        }
+    }
+    if best.is_empty() { None } else { Some(best) }
+}
+
+fn parse_form_child_item_count(value: &str) -> Option<usize> {
+    let count = value.trim().parse::<usize>().ok()?;
+    (1..=200).contains(&count).then_some(count)
+}
+
+fn parse_form_child_item(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let wrapper = fields.first()?.trim();
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    if id == "0" {
+        return None;
+    }
+    let tag = form_child_item_tag(wrapper, &fields)?;
+    let name = parse_form_child_item_name(wrapper, &fields)?;
+    let data_path = parse_form_child_item_data_path(
+        tag,
+        &fields,
+        &name,
+        id,
+        main_data_path,
+        parent_data_path,
+        table_name_by_id,
+    );
+    let child_parent_data_path = data_path.as_deref().or(parent_data_path);
+    let child_items = parse_form_child_item_pairs(
+        &fields,
+        main_data_path,
+        child_parent_data_path,
+        table_name_by_id,
+        commands,
+        object_refs,
+    )
+    .unwrap_or_default();
+    Some(FormChildItem {
+        tag,
+        id: id.to_string(),
+        name,
+        group: (tag == "UsualGroup").then_some("Vertical"),
+        item_type: (tag == "Button").then_some("CommandBarButton"),
+        title: parse_form_child_item_title(wrapper, &fields),
+        data_path,
+        command_name: if tag == "Button" {
+            fields
+                .get(8)
+                .and_then(|field| parse_form_button_command_name(field, commands, object_refs))
+        } else {
+            None
+        },
+        child_items,
+    })
+}
+
+fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
+    match wrapper {
+        "22" => match fields.get(5).map(|value| value.trim())? {
+            "0" => Some("CommandBar"),
+            "1" => Some("Popup"),
+            "5" => Some("UsualGroup"),
+            "6" => Some("ButtonGroup"),
+            _ => None,
+        },
+        "34" => Some("Button"),
+        "48" => {
+            if fields.get(4).map(|value| value.trim()) == Some("1") {
+                Some("LabelField")
+            } else {
+                Some("InputField")
+            }
+        }
+        "6" => match fields.get(5).map(|value| value.trim())? {
+            "0" => Some("SearchStringAddition"),
+            "2" => Some("SearchControlAddition"),
+            _ => None,
+        },
+        "73" => Some("Table"),
+        _ => None,
+    }
+}
+
+fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> {
+    let indexes: &[usize] = match wrapper {
+        "73" | "34" => &[5],
+        "48" => &[6, 7],
+        _ => &[6],
+    };
+    indexes.iter().find_map(|index| {
+        parse_1c_quoted_string_with_len(fields.get(*index)?.trim())
+            .map(|(value, _)| value)
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
+    let indexes: &[usize] = match wrapper {
+        "73" => &[9],
+        "34" => &[6],
+        "48" => &[9, 10],
+        _ => &[7],
+    };
+    indexes
+        .iter()
+        .find_map(|index| {
+            let values = fields
+                .get(*index)
+                .map(|field| parse_form_localized_strings(field))
+                .unwrap_or_default();
+            (!values.is_empty()).then_some(values)
+        })
+        .unwrap_or_default()
+}
+
+fn parse_form_child_item_data_path(
+    tag: &str,
+    fields: &[&str],
+    name: &str,
+    id: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    match tag {
+        "Table" => main_data_path.map(ToOwned::to_owned),
+        "InputField" | "LabelField" => parent_data_path.map(|parent| format!("{parent}.{name}")),
+        "Button" => fields
+            .get(9)
+            .and_then(|field| parse_form_button_data_path(field, table_name_by_id)),
+        _ => table_name_by_id.get(id).cloned(),
+    }
+}
+
+fn parse_form_button_command_name(
+    field: &str,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let kind = fields.first()?.trim();
+    let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+    if kind == "0" {
+        return form_standard_command_name(&uuid)
+            .map(ToOwned::to_owned)
+            .or_else(|| object_refs.get(&uuid).cloned());
+    }
+    commands
+        .iter()
+        .find(|command| command.id == kind && command.reference_uuid == uuid)
+        .map(|command| format!("Form.Command.{}", command.name))
+}
+
+fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
+        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
+        _ => None,
+    }
+}
+
+fn form_table_names_by_id(fields: &[&str]) -> BTreeMap<String, String> {
+    let mut tables = BTreeMap::new();
+    collect_form_table_names(fields, &mut tables);
+    tables
+}
+
+fn collect_form_table_names(fields: &[&str], tables: &mut BTreeMap<String, String>) {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if nested.first().map(|value| value.trim()) == Some("73")
+            && let Some(identity) = nested
+                .get(1)
+                .and_then(|field| split_1c_braced_fields(field, 0))
+            && let (Some(id), Some(name)) = (
+                identity.first().map(|value| value.trim()),
+                parse_form_child_item_name("73", &nested),
+            )
+        {
+            tables.insert(id.to_string(), name);
+        }
+        collect_form_table_names(&nested, tables);
+    }
+}
+
+fn parse_form_button_data_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("2") {
+        return None;
+    }
+    let table = fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))?;
+    let table_id = table.first()?.trim();
+    let table_name = table_name_by_id.get(table_id)?;
+    let column = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .and_then(|fields| fields.first().map(|value| value.trim().to_string()))?;
+    let field_name = match column.as_str() {
+        "8" => "Ссылка",
+        _ => return None,
+    };
+    Some(format!("Items.{table_name}.CurrentData.{field_name}"))
 }
 
 fn extract_form_command_interface(
@@ -4467,6 +4771,7 @@ fn format_form_body_xml(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
     events: &[FormBodyEvent],
+    child_items: &[FormChildItem],
     attributes: &[FormAttribute],
     commands: &[FormCommand],
     command_interface: &Option<FormCommandInterface>,
@@ -4502,6 +4807,7 @@ fn format_form_body_xml(
         }
         xml.push_str("\t</Events>\r\n");
     }
+    xml.push_str(&format_form_child_items_xml(child_items, 1));
     xml.push_str(&format_form_attributes_xml(attributes));
     if !commands.is_empty() {
         xml.push_str("\t<Commands>\r\n");
@@ -4545,6 +4851,61 @@ fn format_form_body_xml(
         xml.push_str(&format_form_command_interface_xml(command_interface));
     }
     xml.push_str("</Form>\r\n");
+    xml
+}
+
+fn format_form_child_items_xml(items: &[FormChildItem], indent: usize) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<ChildItems>\r\n");
+    for item in items {
+        xml.push_str(&format_form_child_item_xml(item, indent + 1));
+    }
+    xml.push_str(&format!("{tab}</ChildItems>\r\n"));
+    xml
+}
+
+fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
+    let tab = "\t".repeat(indent);
+    let mut xml = format!(
+        "{tab}<{} name=\"{}\" id=\"{}\">\r\n",
+        item.tag,
+        escape_xml_text(&item.name),
+        escape_xml_text(&item.id)
+    );
+    if let Some(item_type) = item.item_type {
+        xml.push_str(&format!(
+            "{tab}\t<Type>{}</Type>\r\n",
+            escape_xml_text(item_type)
+        ));
+    }
+    if let Some(command_name) = &item.command_name {
+        xml.push_str(&format!(
+            "{tab}\t<CommandName>{}</CommandName>\r\n",
+            escape_xml_text(command_name)
+        ));
+    }
+    if let Some(data_path) = &item.data_path {
+        xml.push_str(&format!(
+            "{tab}\t<DataPath>{}</DataPath>\r\n",
+            escape_xml_text(data_path)
+        ));
+    }
+    if let Some(group) = item.group {
+        xml.push_str(&format!(
+            "{tab}\t<Group>{}</Group>\r\n",
+            escape_xml_text(group)
+        ));
+    }
+    xml.push_str(&format_form_localized_section(
+        "Title",
+        &item.title,
+        indent + 1,
+    ));
+    xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
+    xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
 }
 
@@ -10781,6 +11142,39 @@ mod tests {
         assert!(form_xml.contains("<Action>Выполнить</Action>"));
         assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
         assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+    }
+
+    #[test]
+    fn extracts_form_child_items_from_layout_pairs() {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let external_command_uuid = "11111111-1111-4111-8111-111111111111";
+        let layout = format!(
+            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{0}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}}}}}}"#
+        );
+        let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
+        let attributes = vec![FormAttribute {
+            id: "1".to_string(),
+            name: "Список".to_string(),
+            main_attribute: true,
+            use_always: Vec::new(),
+            settings: None,
+        }];
+        let object_refs = BTreeMap::from([(
+            external_command_uuid.to_string(),
+            "DataProcessor.Loader.Command.Load".to_string(),
+        )]);
+
+        let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs);
+        let xml = format_form_child_items_xml(&items, 1);
+
+        assert!(xml.contains(r#"<CommandBar name="Панель" id="64">"#));
+        assert!(xml.contains(r#"<Button name="Выполнить" id="44">"#));
+        assert!(xml.contains("<Type>CommandBarButton</Type>"));
+        assert!(xml.contains("<CommandName>DataProcessor.Loader.Command.Load</CommandName>"));
+        assert!(xml.contains(r#"<Table name="СписокТаблица" id="25">"#));
+        assert!(xml.contains("<DataPath>Список</DataPath>"));
+        assert!(xml.contains(r#"<InputField name="Наименование" id="40">"#));
+        assert!(xml.contains("<DataPath>Список.Наименование</DataPath>"));
     }
 
     #[test]
