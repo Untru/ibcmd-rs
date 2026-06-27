@@ -78,6 +78,7 @@ pub struct ParsedFormBodyBlob {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlBodyProperties {
+    title: Vec<LocalizedString>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     group: Option<FormXmlGroup>,
     events: Vec<FormXmlEvent>,
@@ -3255,6 +3256,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
     if !form_xml.is_empty() {
         let properties = parse_form_xml_body_properties(form_xml)?;
         if properties.window_opening_mode.is_some()
+            || !properties.title.is_empty()
             || properties.group.is_some()
             || !properties.events.is_empty()
             || properties.auto_command_bar.is_some()
@@ -3458,6 +3460,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
                     current_localized_section = Some(local.clone());
+                } else if local == "Title" && path_ends_with(&path, &["Form"]) {
+                    current_localized_section = Some("FormTitle".to_string());
+                } else if local == "item" && path_ends_with(&path, &["Form", "Title"]) {
+                    current_localized_lang = None;
+                    current_localized_content = None;
                 } else if local == "item"
                     && (path_ends_with(&path, &["Form", "Commands", "Command", "Title"])
                         || path_ends_with(&path, &["Form", "Commands", "Command", "ToolTip"]))
@@ -3477,6 +3484,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "lang"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "content"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
@@ -3761,6 +3770,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "lang"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "content"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
@@ -4081,7 +4092,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         ) || path_ends_with(
                             &path,
                             &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
-                        ) =>
+                        ) || path_ends_with(&path, &["Form", "Title", "item", "lang"]) =>
                     {
                         current_localized_lang = Some(text_value.trim().to_string());
                     }
@@ -4092,9 +4103,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         ) || path_ends_with(
                             &path,
                             &["Form", "Commands", "Command", "ToolTip", "item", "content"],
-                        ) =>
+                        ) || path_ends_with(&path, &["Form", "Title", "item", "content"]) =>
                     {
                         current_localized_content = Some(text_value.to_string());
+                    }
+                    "item" if path_ends_with(&path, &["Form", "Title", "item"]) => {
+                        if let (Some(lang), Some(content)) = (
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            properties.title.push(LocalizedString { lang, content });
+                        }
                     }
                     "item"
                         if path_ends_with(
@@ -4125,6 +4144,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             &["Form", "Commands", "Command", local.as_str()],
                         ) =>
                     {
+                        current_localized_section = None;
+                    }
+                    "Title" if path_ends_with(&path, &["Form", "Title"]) => {
                         current_localized_section = None;
                     }
                     "Action"
@@ -5117,6 +5139,9 @@ fn patch_form_layout_properties(
     layout: &mut String,
     properties: &FormXmlBodyProperties,
 ) -> Result<()> {
+    if !properties.title.is_empty() {
+        replace_braced_field(layout, 10, &format_form_title_value(&properties.title))?;
+    }
     if let Some(window_opening_mode) = properties.window_opening_mode {
         replace_braced_field(
             layout,
@@ -5140,6 +5165,19 @@ fn patch_form_layout_properties(
         }
     }
     Ok(())
+}
+
+fn format_form_title_value(title: &[LocalizedString]) -> String {
+    let mut output = format!("{{1,{}", title.len());
+    for value in title {
+        output.push_str(",{");
+        output.push_str(&format_1c_string(&value.lang));
+        output.push(',');
+        output.push_str(&format_1c_string(&value.content));
+        output.push('}');
+    }
+    output.push('}');
+    output
 }
 
 fn patch_form_layout_auto_command_bar(
@@ -13262,18 +13300,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let base = super::deflate_raw(
             b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,1,1,0,1,1,1},\"Old module\",{0}}",
         )?;
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Title>
+		<v8:item>
+			<v8:lang>ru</v8:lang>
+			<v8:content>Новый заголовок</v8:content>
+		</v8:item>
+		<v8:item>
+			<v8:lang>en</v8:lang>
+			<v8:content>New title</v8:content>
+		</v8:item>
+	</Title>
 	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
 	<Group>Horizontal</Group>
 </Form>
-"#;
+"#
+        .as_bytes();
 
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let fields = super::scan_braced_fields(&parsed.layout, 0)?;
 
         assert_eq!(&parsed.layout[fields[2].clone()], "2");
+        assert_eq!(
+            &parsed.layout[fields[10].clone()],
+            r#"{1,2,{"ru","Новый заголовок"},{"en","New title"}}"#
+        );
         assert_eq!(&parsed.layout[fields[12].clone()], "2");
         assert_eq!(&parsed.layout[fields[17].clone()], "3");
         assert_eq!(parsed.module_text, "Old module");

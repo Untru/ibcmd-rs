@@ -3826,6 +3826,7 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormBodyProperties {
+    title: Vec<(String, String)>,
     window_opening_mode: Option<&'static str>,
     group: Option<&'static str>,
 }
@@ -3940,6 +3941,10 @@ struct FormChildItem {
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
     FormBodyProperties {
+        title: fields
+            .get(10)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default(),
         window_opening_mode: extract_form_window_opening_mode(fields),
         group: extract_form_root_group(fields),
     }
@@ -5336,6 +5341,11 @@ fn format_form_body_xml(
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 "
     .to_string();
+    xml.push_str(&format_form_localized_section(
+        "Title",
+        &properties.title,
+        1,
+    ));
     if let Some(window_opening_mode) = properties.window_opening_mode {
         xml.push_str(&format!(
             "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
@@ -11898,6 +11908,21 @@ mod tests {
 
         assert!(form_xml.contains(r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1">"#));
         assert!(form_xml.contains("<Autofill>false</Autofill>"));
+    }
+
+    #[test]
+    fn extracts_form_top_level_title_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,2,{"ru","Сохранение настройки"},{"en","Save settings"}},0,0,1,1,1,0,1,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Title>"));
+        assert!(form_xml.contains("<v8:lang>ru</v8:lang>"));
+        assert!(form_xml.contains("<v8:content>Сохранение настройки</v8:content>"));
+        assert!(form_xml.contains("<v8:lang>en</v8:lang>"));
+        assert!(form_xml.contains("<v8:content>Save settings</v8:content>"));
     }
 
     #[test]
