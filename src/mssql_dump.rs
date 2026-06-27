@@ -1038,6 +1038,7 @@ struct FormItemAsset {
 
 struct MoxelSpreadsheet {
     column_count: usize,
+    column_sets: Vec<MoxelColumnSet>,
     column_widths: Vec<usize>,
     default_format_width: Option<usize>,
     formats: Vec<MoxelFormat>,
@@ -1054,7 +1055,18 @@ struct MoxelSpreadsheet {
 struct MoxelRow {
     index: usize,
     format_index: usize,
+    columns_id: Option<String>,
     cells: Vec<MoxelCell>,
+}
+
+struct MoxelColumnSet {
+    id: Option<String>,
+    columns: Vec<MoxelColumn>,
+}
+
+struct MoxelColumn {
+    index: usize,
+    format_index: usize,
 }
 
 struct MoxelCell {
@@ -1078,6 +1090,7 @@ struct MoxelArea {
     end_row: i32,
     begin_column: i32,
     end_column: i32,
+    columns_id: Option<String>,
 }
 
 struct MoxelMerge {
@@ -3784,6 +3797,7 @@ fn parse_moxel_spreadsheet_text(
     let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
     trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges);
+    let (column_sets, row_column_ids) = parse_moxel_column_sets(&fields);
     let parsed_lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields);
@@ -3798,8 +3812,21 @@ fn parse_moxel_spreadsheet_text(
     } else {
         declared_column_count
     };
-    let format_offset = column_count.saturating_sub(1);
+    let column_sets = if column_sets.is_empty() {
+        default_moxel_column_sets(column_count)
+    } else {
+        column_sets
+    };
+    let column_format_slots = column_sets
+        .iter()
+        .map(|column_set| column_set.columns.len())
+        .sum::<usize>()
+        .max(column_count);
+    let format_offset = column_format_slots.saturating_sub(1);
     for row in &mut rows {
+        if let Some(columns_id) = row_column_ids.get(&row.index) {
+            row.columns_id = Some(columns_id.clone());
+        }
         if row.format_index > 1 {
             row.format_index += format_offset;
         }
@@ -3807,14 +3834,16 @@ fn parse_moxel_spreadsheet_text(
             cell.format_index += format_offset;
         }
     }
-    let max_format_index = rows.iter().fold(column_count.max(1), |max_index, row| {
-        let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
-            cell_max.max(cell.format_index)
+    let max_format_index = rows
+        .iter()
+        .fold(column_format_slots.max(1), |max_index, row| {
+            let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
+                cell_max.max(cell.format_index)
+            });
+            max_index.max(row_max)
         });
-        max_index.max(row_max)
-    });
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
-    let formats = parse_moxel_formats(&fields, column_count, &style_refs);
+    let formats = parse_moxel_formats(&fields, column_format_slots, &style_refs);
     let lines = if formats.iter().any(MoxelFormat::uses_line) {
         parsed_lines
     } else {
@@ -3822,8 +3851,9 @@ fn parse_moxel_spreadsheet_text(
     };
     Some(MoxelSpreadsheet {
         column_count,
-        column_widths: parse_moxel_column_widths(&fields, column_count),
-        default_format_width: parse_moxel_default_format_width(&fields, column_count),
+        column_sets,
+        column_widths: parse_moxel_column_widths(&fields, column_format_slots),
+        default_format_width: parse_moxel_default_format_width(&fields, column_format_slots),
         formats,
         rows,
         merges,
@@ -3834,6 +3864,139 @@ fn parse_moxel_spreadsheet_text(
         default_format_index: max_format_index + 1,
         height,
     })
+}
+
+fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnSet> {
+    vec![MoxelColumnSet {
+        id: None,
+        columns: (0..column_count)
+            .map(|index| MoxelColumn {
+                index,
+                format_index: index + 1,
+            })
+            .collect(),
+    }]
+}
+
+fn parse_moxel_column_sets(fields: &[&str]) -> (Vec<MoxelColumnSet>, BTreeMap<usize, String>) {
+    for index in 0..fields.len() {
+        let Some(default_set) = parse_moxel_column_set(fields[index]) else {
+            continue;
+        };
+        if default_set.id.is_some() || index + 2 >= fields.len() {
+            continue;
+        }
+        let Some(_height) = fields
+            .get(index + 1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let Some(additional_count) = fields
+            .get(index + 2)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if additional_count > 64 || index + 3 + additional_count >= fields.len() {
+            continue;
+        }
+
+        let mut column_sets = vec![default_set];
+        let mut cursor = index + 3;
+        for _ in 0..additional_count {
+            let Some(column_set) = parse_moxel_column_set(fields[cursor]) else {
+                column_sets.clear();
+                break;
+            };
+            if column_set.id.is_none() {
+                column_sets.clear();
+                break;
+            }
+            column_sets.push(column_set);
+            cursor += 1;
+        }
+        if column_sets.is_empty() {
+            continue;
+        }
+        normalize_moxel_column_set_format_indices(&mut column_sets);
+
+        let row_column_ids =
+            parse_moxel_row_column_set_ids(fields, cursor, &column_sets[1..]).unwrap_or_default();
+        return (column_sets, row_column_ids);
+    }
+    (Vec::new(), BTreeMap::new())
+}
+
+fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() < 4 || fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    let declared_count = fields.first()?.trim().parse::<usize>().ok()?;
+    let count = fields.get(3)?.trim().parse::<usize>().ok()?;
+    if count == 0 || count > 2048 || declared_count != count || fields.len() != count * 2 + 4 {
+        return None;
+    }
+    let uuid = parse_uuid_field(fields.get(2)?.trim())?;
+    let id = if uuid == "00000000-0000-0000-0000-000000000000" {
+        None
+    } else {
+        Some(uuid)
+    };
+    let mut columns = Vec::with_capacity(count);
+    for column_index in 0..count {
+        columns.push(MoxelColumn {
+            index: fields
+                .get(column_index * 2 + 4)?
+                .trim()
+                .parse::<usize>()
+                .ok()?,
+            format_index: fields
+                .get(column_index * 2 + 5)?
+                .trim()
+                .parse::<usize>()
+                .ok()?,
+        });
+    }
+    Some(MoxelColumnSet { id, columns })
+}
+
+fn normalize_moxel_column_set_format_indices(column_sets: &mut [MoxelColumnSet]) {
+    let min_format_index = column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .map(|column| column.format_index)
+        .min()
+        .unwrap_or(1);
+    let raw_offset = min_format_index.saturating_sub(1);
+    for column in column_sets
+        .iter_mut()
+        .flat_map(|column_set| column_set.columns.iter_mut())
+    {
+        column.format_index = column.format_index.saturating_sub(raw_offset).max(1);
+    }
+}
+
+fn parse_moxel_row_column_set_ids(
+    fields: &[&str],
+    index: usize,
+    additional_sets: &[MoxelColumnSet],
+) -> Option<BTreeMap<usize, String>> {
+    if additional_sets.is_empty() {
+        return Some(BTreeMap::new());
+    }
+    let count = fields.get(index)?.trim().parse::<usize>().ok()?;
+    if count > 4096 || index + count >= fields.len() {
+        return None;
+    }
+    let first_columns_id = additional_sets.first()?.id.as_ref()?;
+    let mut row_column_ids = BTreeMap::new();
+    for field in &fields[index + 1..=index + count] {
+        let row_index = field.trim().parse::<usize>().ok()?;
+        row_column_ids.insert(row_index, first_columns_id.clone());
+    }
+    Some(row_column_ids)
 }
 
 fn moxel_spreadsheet_height(
@@ -4068,6 +4231,7 @@ fn parse_moxel_row_shape(
         MoxelRow {
             index: row_index,
             format_index,
+            columns_id: None,
             cells,
         },
         cursor,
@@ -4546,6 +4710,9 @@ fn parse_moxel_area(text: &str, name: String) -> Option<MoxelArea> {
         begin_row: bounds.get(2)?.trim().parse::<i32>().ok()?,
         end_column: bounds.get(3)?.trim().parse::<i32>().ok()?,
         end_row: bounds.get(4)?.trim().parse::<i32>().ok()?,
+        columns_id: bounds
+            .get(5)
+            .and_then(|value| parse_non_zero_uuid(value.trim())),
     })
 }
 
@@ -4563,22 +4730,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
 \t\t</languageInfo>\r\n\
 \t</languageSettings>\r\n",
     );
-    xml.push_str(&format!(
-        "\t<columns>\r\n\t\t<size>{}</size>\r\n",
-        spreadsheet.column_count
-    ));
-    for column_index in 0..spreadsheet.column_count {
-        let format_index = column_index + 1;
-        xml.push_str(&format!(
-            "\t\t<columnsItem>\r\n\
-\t\t\t<index>{column_index}</index>\r\n\
-\t\t\t<column>\r\n\
-\t\t\t\t<formatIndex>{format_index}</formatIndex>\r\n\
-\t\t\t</column>\r\n\
-\t\t</columnsItem>\r\n"
-        ));
+    for column_set in &spreadsheet.column_sets {
+        push_moxel_columns_xml(&mut xml, column_set);
     }
-    xml.push_str("\t</columns>\r\n");
     for row in &spreadsheet.rows {
         push_moxel_row_xml(&mut xml, row);
     }
@@ -4609,6 +4763,30 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     }
     xml.push_str("</document>\r\n");
     xml
+}
+
+fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
+    xml.push_str("\t<columns>\r\n");
+    if let Some(id) = &column_set.id {
+        xml.push_str(&format!("\t\t<id>{}</id>\r\n", escape_xml_text(id)));
+    }
+    xml.push_str(&format!(
+        "\t\t<size>{}</size>\r\n",
+        column_set.columns.len()
+    ));
+    for column in &column_set.columns {
+        let column_index = column.index;
+        let format_index = column.format_index;
+        xml.push_str(&format!(
+            "\t\t<columnsItem>\r\n\
+\t\t\t<index>{column_index}</index>\r\n\
+\t\t\t<column>\r\n\
+\t\t\t\t<formatIndex>{format_index}</formatIndex>\r\n\
+\t\t\t</column>\r\n\
+\t\t</columnsItem>\r\n"
+        ));
+    }
+    xml.push_str("\t</columns>\r\n");
 }
 
 fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
@@ -4651,6 +4829,17 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
 }
 
 fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -> MoxelFormat {
+    let column_format_slots = spreadsheet
+        .column_widths
+        .len()
+        .max(
+            spreadsheet
+                .column_sets
+                .iter()
+                .map(|column_set| column_set.columns.len())
+                .sum::<usize>(),
+        )
+        .max(spreadsheet.column_count);
     if let Some(width) = spreadsheet
         .column_widths
         .get(format_index.saturating_sub(1))
@@ -4667,12 +4856,12 @@ fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -
             ..MoxelFormat::default()
         };
     }
-    if format_index <= spreadsheet.column_count {
+    if format_index <= column_format_slots {
         return MoxelFormat::default();
     }
     spreadsheet
         .formats
-        .get(format_index - spreadsheet.column_count - 1)
+        .get(format_index - column_format_slots - 1)
         .cloned()
         .unwrap_or_default()
 }
@@ -4755,6 +4944,12 @@ fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
         "\t\t\t<endColumn>{}</endColumn>\r\n",
         area.end_column
     ));
+    if let Some(columns_id) = &area.columns_id {
+        xml.push_str(&format!(
+            "\t\t\t<columnsID>{}</columnsID>\r\n",
+            escape_xml_text(columns_id)
+        ));
+    }
     xml.push_str("\t\t</area>\r\n");
     xml.push_str("\t</namedItem>\r\n");
 }
@@ -4768,6 +4963,12 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
         xml.push_str(&format!(
             "\t\t\t<formatIndex>{}</formatIndex>\r\n",
             row.format_index
+        ));
+    }
+    if let Some(columns_id) = &row.columns_id {
+        xml.push_str(&format!(
+            "\t\t\t<columnsID>{}</columnsID>\r\n",
+            escape_xml_text(columns_id)
         ));
     }
     if row.cells.is_empty() {
@@ -5459,6 +5660,15 @@ fn parse_uuid_field(value: &str) -> Option<String> {
         Some(value.to_string())
     } else {
         None
+    }
+}
+
+fn parse_non_zero_uuid(value: &str) -> Option<String> {
+    let uuid = parse_uuid_field(value)?;
+    if uuid == "00000000-0000-0000-0000-000000000000" {
+        None
+    } else {
+        Some(uuid)
     }
 }
 
@@ -9215,6 +9425,33 @@ mod tests {
         assert!(xml.contains("<index>5</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
         assert!(!xml.contains("<index>6</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
         assert!(!xml.contains("<index>15</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+    }
+
+    #[test]
+    fn formats_moxel_additional_column_sets_and_columns_id() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,3,0,0,0,1,0,1,0,{16,1,{1,1,{\"\",\"Описание\"}},0},2,2,2,0,{16,3,{1,1,{\"\",\"Название\"}},0},1,{16,4,{1,1,{\"\",\"Ошибка\"}},0},{2,0,00000000-0000-0000-0000-000000000000,2,0,5,1,6},3,1,{1,0,9bb67b5f-5e3e-459e-98c5-618e04892d9b,1,0,7},1,1,0,0,0,0,0,0,0,{0},{0},{0},{2,\"Заголовок\",{1,{1,-1,1,-1,1,9bb67b5f-5e3e-459e-98c5-618e04892d9b},0},\"Строка\",{1,{1,-1,2,-1,2,00000000-0000-0000-0000-000000000000},0}},\"\",{{0,6,6,{\"N\",1000},7,{\"N\",1000},8,{\"N\",1000},9,{\"N\",1000},10,{\"N\",1000},11,{\"N\",1000}}},{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,7,{32769,0,1},{64,96},{32768,1},{49152,3,1},{128,465},{128,491},{128,383},1,{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},0,0,0,2,{3,3,{-1}},{3,3,{-3}},0,0,0,\"\",0,{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},{0},0,0,0,1,0,0,0}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
+        assert!(xml.contains(
+            "\t<columns>\r\n\t\t<id>9bb67b5f-5e3e-459e-98c5-618e04892d9b</id>\r\n\t\t<size>1</size>"
+        ));
+        assert!(xml.contains(
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+        ));
+        assert!(xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<columnsID>9bb67b5f-5e3e-459e-98c5-618e04892d9b</columnsID>"));
+        assert!(xml.contains("<name>Заголовок</name>"));
+        assert!(xml.contains("<columnsID>9bb67b5f-5e3e-459e-98c5-618e04892d9b</columnsID>"));
+        assert!(xml.contains("<defaultFormatIndex>8</defaultFormatIndex>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>465</width>\r\n\t</format>"));
+        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
+        assert!(xml.contains("<formatIndex>5</formatIndex>"));
+        assert!(xml.contains("<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
+        assert!(xml.contains("<f>7</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
     }
 
     #[test]
