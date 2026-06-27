@@ -1039,13 +1039,14 @@ struct FormItemAsset {
 struct MoxelSpreadsheet {
     column_count: usize,
     column_sets: Vec<MoxelColumnSet>,
-    column_widths: Vec<usize>,
+    column_formats: Vec<MoxelFormat>,
     default_format_width: Option<usize>,
     default_format: MoxelFormat,
     formats: Vec<MoxelFormat>,
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
+    print_settings: Option<MoxelPrintSettings>,
     lines: Vec<MoxelLine>,
     fonts: Vec<MoxelFont>,
     pictures: Vec<MoxelPicture>,
@@ -1127,6 +1128,28 @@ struct MoxelPicture {
 }
 
 #[derive(Clone, Default)]
+struct MoxelPrintSettings {
+    page_orientation: Option<&'static str>,
+    scale: Option<usize>,
+    collate: Option<bool>,
+    copies: Option<usize>,
+    per_page: Option<usize>,
+    top_margin: Option<usize>,
+    left_margin: Option<usize>,
+    bottom_margin: Option<usize>,
+    right_margin: Option<usize>,
+    header_size: Option<usize>,
+    footer_size: Option<usize>,
+    fit_to_page: Option<bool>,
+    black_and_white: Option<bool>,
+    printer_name: Option<String>,
+    paper: Option<usize>,
+    paper_source: Option<usize>,
+    page_width: Option<usize>,
+    page_height: Option<usize>,
+}
+
+#[derive(Clone, Default)]
 struct MoxelFormat {
     font: Option<usize>,
     border: Option<usize>,
@@ -1167,35 +1190,6 @@ impl MoxelFormat {
             && self.height.is_none()
             && self.border_color.is_none()
             && self.width.is_none()
-            && self.horizontal_alignment.is_none()
-            && self.vertical_alignment.is_none()
-            && self.back_color.is_none()
-            && self.text_color.is_none()
-            && self.text_placement.is_none()
-            && self.fill_type.is_none()
-            && self.by_selected_columns.is_none()
-            && self.details_use.is_none()
-            && self.hyper_link.is_none()
-            && self.protection.is_none()
-            && self.indent.is_none()
-            && self.auto_indent.is_none()
-            && self.mask.is_none()
-            && self.pic_index.is_none()
-            && self.picture_size_mode.is_none()
-            && self.pic_horizontal_alignment.is_none()
-            && self.pic_vertical_alignment.is_none()
-    }
-
-    fn is_width_only(&self) -> bool {
-        self.width.is_some()
-            && self.font.is_none()
-            && self.border.is_none()
-            && self.left_border.is_none()
-            && self.top_border.is_none()
-            && self.right_border.is_none()
-            && self.bottom_border.is_none()
-            && self.height.is_none()
-            && self.border_color.is_none()
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
             && self.back_color.is_none()
@@ -3819,6 +3813,7 @@ fn parse_moxel_spreadsheet_text(
     let pictures = parse_moxel_pictures(&fields);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let default_format = parse_moxel_default_format(&fields, object_refs);
+    let print_settings = parse_moxel_print_settings(&fields);
     let empty_headers_footers = parse_moxel_empty_headers_footers(&fields);
     let observed_column_count = rows
         .iter()
@@ -3856,24 +3851,32 @@ fn parse_moxel_spreadsheet_text(
             });
             max_index.max(row_max)
         });
+    let default_format_index =
+        moxel_default_format_index(&column_sets, print_settings.as_ref(), max_format_index + 1);
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
-    let formats = parse_moxel_formats(&fields, column_format_slots, &style_refs);
-    let lines = parse_moxel_lines(&fields, &formats);
+    let (column_formats, formats) = parse_moxel_formats(&fields, column_format_slots, &style_refs);
+    let all_formats = column_formats
+        .iter()
+        .chain(formats.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let lines = parse_moxel_lines(&fields, &all_formats);
     Some(MoxelSpreadsheet {
         column_count,
         column_sets,
-        column_widths: parse_moxel_column_widths(&fields, column_format_slots),
+        column_formats,
         default_format_width: parse_moxel_default_format_width(&fields, column_format_slots),
         default_format,
         formats,
         rows,
         merges,
         areas,
+        print_settings,
         lines,
         fonts,
         pictures,
         empty_headers_footers,
-        default_format_index: max_format_index + 1,
+        default_format_index,
         height,
     })
 }
@@ -4010,6 +4013,26 @@ fn moxel_column_format_slots(column_sets: &[MoxelColumnSet], column_count: usize
         .max(column_count)
 }
 
+fn moxel_default_format_index(
+    column_sets: &[MoxelColumnSet],
+    print_settings: Option<&MoxelPrintSettings>,
+    fallback: usize,
+) -> usize {
+    if print_settings.is_some() && column_sets.len() > 1 {
+        return column_sets
+            .get(1)
+            .and_then(|column_set| {
+                column_set
+                    .columns
+                    .iter()
+                    .map(|column| column.format_index)
+                    .max()
+            })
+            .unwrap_or(fallback);
+    }
+    fallback
+}
+
 fn parse_moxel_row_column_set_ids(
     fields: &[&str],
     index: usize,
@@ -4021,6 +4044,43 @@ fn parse_moxel_row_column_set_ids(
     let count = fields.get(index)?.trim().parse::<usize>().ok()?;
     if count > 4096 || index + count >= fields.len() {
         return None;
+    }
+    if index + count * 2 < fields.len() {
+        let mut row_column_ids = BTreeMap::new();
+        let mut pair_mode = true;
+        for pair_index in 0..count {
+            let row_index = fields[index + 1 + pair_index * 2]
+                .trim()
+                .parse::<usize>()
+                .ok();
+            let set_index = fields[index + 2 + pair_index * 2]
+                .trim()
+                .parse::<usize>()
+                .ok();
+            let Some(row_index) = row_index else {
+                pair_mode = false;
+                break;
+            };
+            let Some(set_index) = set_index else {
+                pair_mode = false;
+                break;
+            };
+            let Some(columns_id) = additional_sets
+                .get(set_index)
+                .and_then(|set| set.id.as_ref())
+            else {
+                pair_mode = false;
+                break;
+            };
+            if row_index == 0 {
+                pair_mode = false;
+                break;
+            }
+            row_column_ids.insert(row_index, columns_id.clone());
+        }
+        if pair_mode {
+            return Some(row_column_ids);
+        }
     }
     let first_columns_id = additional_sets.first()?.id.as_ref()?;
     let mut row_column_ids = BTreeMap::new();
@@ -4494,17 +4554,6 @@ fn parse_moxel_picture(text: &str) -> Option<MoxelPicture> {
     })
 }
 
-fn parse_moxel_column_widths(fields: &[&str], column_count: usize) -> Vec<usize> {
-    let widths = fields
-        .iter()
-        .filter_map(|field| parse_moxel_column_width(field))
-        .collect::<Vec<_>>();
-    if widths.len() < column_count {
-        return Vec::new();
-    }
-    widths[widths.len() - column_count..].to_vec()
-}
-
 fn parse_moxel_default_format_width(fields: &[&str], column_count: usize) -> Option<usize> {
     let widths = fields
         .iter()
@@ -4548,11 +4597,109 @@ fn parse_moxel_default_format_field(
     })
 }
 
+fn parse_moxel_print_settings(fields: &[&str]) -> Option<MoxelPrintSettings> {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_print_settings_field(field))
+        .next()
+}
+
+fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings> {
+    let mut fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() == 1 && fields.first()?.trim_start().starts_with('{') {
+        fields = split_1c_braced_fields(fields.first()?, 0)?;
+    }
+    if fields.len() < 4 || fields.first().map(|field| field.trim()) != Some("0") {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count != 18 || fields.len() != count * 2 + 2 {
+        return None;
+    }
+    let mut settings = MoxelPrintSettings::default();
+    for pair in fields[2..].chunks_exact(2) {
+        let key = pair.first()?.trim().parse::<usize>().ok()?;
+        let value = parse_moxel_print_settings_value(pair.get(1)?)?;
+        match key {
+            0 => settings.paper = value.as_usize(),
+            1 => settings.page_orientation = value.as_usize().and_then(moxel_page_orientation),
+            2 => settings.scale = value.as_usize(),
+            3 => settings.collate = value.as_bool(),
+            4 => settings.copies = value.as_usize(),
+            5 => settings.per_page = value.as_usize(),
+            6 => settings.top_margin = value.as_usize(),
+            7 => settings.left_margin = value.as_usize(),
+            8 => settings.bottom_margin = value.as_usize(),
+            9 => settings.right_margin = value.as_usize(),
+            10 => settings.header_size = value.as_usize(),
+            11 => settings.footer_size = value.as_usize(),
+            12 => settings.fit_to_page = value.as_bool(),
+            13 => settings.black_and_white = value.as_bool(),
+            14 => settings.printer_name = value.into_string(),
+            15 => settings.paper_source = value.as_usize(),
+            16 => settings.page_width = value.as_usize(),
+            17 => settings.page_height = value.as_usize(),
+            _ => {}
+        }
+    }
+    Some(settings)
+}
+
+enum MoxelPrintSettingsValue {
+    Number(usize),
+    Text(String),
+}
+
+impl MoxelPrintSettingsValue {
+    fn as_usize(&self) -> Option<usize> {
+        match self {
+            Self::Number(value) => Some(*value),
+            Self::Text(_) => None,
+        }
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        self.as_usize().map(|value| value != 0)
+    }
+
+    fn into_string(self) -> Option<String> {
+        match self {
+            Self::Number(_) => None,
+            Self::Text(value) => Some(value),
+        }
+    }
+}
+
+fn parse_moxel_print_settings_value(text: &str) -> Option<MoxelPrintSettingsValue> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 2 {
+        return None;
+    }
+    match fields.first()?.trim().trim_matches('"') {
+        "N" => fields
+            .get(1)?
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .map(MoxelPrintSettingsValue::Number),
+        "S" => Some(MoxelPrintSettingsValue::Text(
+            unquote_moxel_string(fields.get(1)?.trim()).unwrap_or_else(|| fields[1].to_string()),
+        )),
+        _ => None,
+    }
+}
+
+fn unquote_moxel_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    let inner = value.strip_prefix('"')?.strip_suffix('"')?;
+    Some(inner.replace("\"\"", "\""))
+}
+
 fn parse_moxel_formats(
     fields: &[&str],
     column_count: usize,
     style_refs: &[Option<String>],
-) -> Vec<MoxelFormat> {
+) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
     for index in 0..fields.len() {
         let Some(count) = fields
             .get(index)
@@ -4571,18 +4718,13 @@ fn parse_moxel_formats(
             };
             formats.push(format);
         }
-        if formats.len() == count
-            && formats
-                .iter()
-                .rev()
-                .take(column_count)
-                .all(MoxelFormat::is_width_only)
-        {
-            formats.truncate(count - column_count);
-            return formats;
+        if formats.len() == count {
+            let mut body_formats = formats;
+            let column_formats = body_formats.split_off(count - column_count);
+            return (column_formats, body_formats);
         }
     }
-    Vec::new()
+    (Vec::new(), Vec::new())
 }
 
 fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<MoxelFormat> {
@@ -4815,6 +4957,7 @@ fn parse_moxel_direct_color(value: &str) -> Option<String> {
 
 fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
     match value {
+        0 => Some("Left"),
         6 => Some("Center"),
         _ => None,
     }
@@ -4830,8 +4973,17 @@ fn moxel_vertical_alignment(value: usize) -> Option<&'static str> {
 
 fn moxel_text_placement(value: usize) -> Option<&'static str> {
     match value {
-        0 | 2 => Some("Block"),
+        0 => Some("Auto"),
+        2 => Some("Block"),
         3 => Some("Wrap"),
+        _ => None,
+    }
+}
+
+fn moxel_page_orientation(value: usize) -> Option<&'static str> {
+    match value {
+        1 => Some("Portrait"),
+        2 => Some("Landscape"),
         _ => None,
     }
 }
@@ -5037,13 +5189,20 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for area in &spreadsheet.areas {
         push_moxel_area_xml(&mut xml, area);
     }
+    if let Some(print_settings) = &spreadsheet.print_settings {
+        push_moxel_print_settings_xml(&mut xml, print_settings);
+    }
     for line in &spreadsheet.lines {
         push_moxel_line_xml(&mut xml, line);
     }
     for font in &spreadsheet.fonts {
         push_moxel_font_xml(&mut xml, font);
     }
-    for format_index in 1..=spreadsheet.default_format_index.max(1) {
+    let format_count = spreadsheet
+        .default_format_index
+        .max(spreadsheet.column_formats.len() + spreadsheet.formats.len())
+        .max(1);
+    for format_index in 1..=format_count {
         push_moxel_format_xml(&mut xml, spreadsheet, format_index);
     }
     for picture in &spreadsheet.pictures {
@@ -5087,6 +5246,29 @@ fn push_moxel_empty_headers_footers_xml(xml: &mut String) {
             "\t<{tag}>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</{tag}>\r\n"
         ));
     }
+}
+
+fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPrintSettings) {
+    xml.push_str("\t<printSettings>\r\n");
+    push_moxel_format_text(xml, "pageOrientation", settings.page_orientation);
+    push_moxel_format_usize(xml, "scale", settings.scale);
+    push_moxel_format_bool(xml, "collate", settings.collate);
+    push_moxel_format_usize(xml, "copies", settings.copies);
+    push_moxel_format_usize(xml, "perPage", settings.per_page);
+    push_moxel_format_usize(xml, "topMargin", settings.top_margin);
+    push_moxel_format_usize(xml, "leftMargin", settings.left_margin);
+    push_moxel_format_usize(xml, "bottomMargin", settings.bottom_margin);
+    push_moxel_format_usize(xml, "rightMargin", settings.right_margin);
+    push_moxel_format_usize(xml, "headerSize", settings.header_size);
+    push_moxel_format_usize(xml, "footerSize", settings.footer_size);
+    push_moxel_format_bool(xml, "fitToPage", settings.fit_to_page);
+    push_moxel_format_bool(xml, "blackAndWhite", settings.black_and_white);
+    push_moxel_format_text(xml, "printerName", settings.printer_name.as_deref());
+    push_moxel_format_usize(xml, "paper", settings.paper);
+    push_moxel_format_usize(xml, "paperSource", settings.paper_source);
+    push_moxel_format_usize(xml, "pageWidth", settings.page_width);
+    push_moxel_format_usize(xml, "pageHeight", settings.page_height);
+    xml.push_str("\t</printSettings>\r\n");
 }
 
 fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
@@ -5147,21 +5329,18 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
 
 fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -> MoxelFormat {
     let column_format_slots = spreadsheet
-        .column_widths
+        .column_formats
         .len()
         .max(moxel_column_format_slots(
             &spreadsheet.column_sets,
             spreadsheet.column_count,
         ));
-    if let Some(width) = spreadsheet
-        .column_widths
+    if let Some(format) = spreadsheet
+        .column_formats
         .get(format_index.saturating_sub(1))
-        .copied()
+        .cloned()
     {
-        return MoxelFormat {
-            width: Some(width),
-            ..MoxelFormat::default()
-        };
+        return format;
     }
     if format_index == spreadsheet.default_format_index {
         let mut format = spreadsheet.default_format.clone();
@@ -5189,6 +5368,12 @@ fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -
 fn push_moxel_format_usize(xml: &mut String, tag: &str, value: Option<usize>) {
     if let Some(value) = value {
         xml.push_str(&format!("\t\t<{tag}>{value}</{tag}>\r\n"));
+    }
+}
+
+fn push_moxel_format_bool(xml: &mut String, tag: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        xml.push_str(&format!("\t\t<{tag}>{}</{tag}>\r\n", xml_bool(value)));
     }
 }
 
@@ -9870,6 +10055,94 @@ mod tests {
         assert!(xml.contains("<formatIndex>5</formatIndex>"));
         assert!(xml.contains("<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
         assert!(xml.contains("<f>7</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
+    }
+
+    #[test]
+    fn formats_moxel_row_column_ids_accept_pair_mapping() {
+        let additional_sets = vec![
+            MoxelColumnSet {
+                id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                size: 1,
+                columns: vec![],
+            },
+            MoxelColumnSet {
+                id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
+                size: 1,
+                columns: vec![],
+            },
+        ];
+        let fields = ["2", "11", "0", "12", "1", "0"];
+        let row_column_ids = parse_moxel_row_column_set_ids(&fields, 0, &additional_sets).unwrap();
+
+        assert_eq!(
+            row_column_ids.get(&11).map(String::as_str),
+            Some("5c3926f2-4223-4ca7-a6a7-7160301c991d")
+        );
+        assert_eq!(
+            row_column_ids.get(&12).map(String::as_str),
+            Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9")
+        );
+    }
+
+    #[test]
+    fn formats_moxel_alignment_and_text_placement_mappings() {
+        assert_eq!(moxel_horizontal_alignment(0), Some("Left"));
+        assert_eq!(moxel_horizontal_alignment(6), Some("Center"));
+        assert_eq!(moxel_text_placement(0), Some("Auto"));
+        assert_eq!(moxel_text_placement(2), Some("Block"));
+        assert_eq!(moxel_text_placement(3), Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_print_settings_from_raw_pairs() {
+        let settings = parse_moxel_print_settings_field(
+            r#"{{0,18,0,{"N",9},1,{"N",2},2,{"N",100},3,{"N",1},4,{"N",1},5,{"N",1},6,{"N",1000},7,{"N",1000},8,{"N",1000},9,{"N",1000},10,{"N",1000},11,{"N",1000},12,{"N",0},13,{"N",0},14,{"S","HP LaserJet 5100 PCL 6"},15,{"N",7},16,{"N",0},17,{"N",0}}}"#,
+        )
+        .unwrap();
+        let mut xml = String::new();
+        push_moxel_print_settings_xml(&mut xml, &settings);
+
+        assert!(xml.contains("<pageOrientation>Landscape</pageOrientation>"));
+        assert!(xml.contains("<fitToPage>false</fitToPage>"));
+        assert!(xml.contains("<blackAndWhite>false</blackAndWhite>"));
+        assert!(xml.contains("<printerName>HP LaserJet 5100 PCL 6</printerName>"));
+        assert!(xml.contains("<paper>9</paper>"));
+        assert!(xml.contains("<paperSource>7</paperSource>"));
+    }
+
+    #[test]
+    fn formats_moxel_print_settings_default_format_index_uses_first_extra_columns() {
+        let column_sets = vec![
+            MoxelColumnSet {
+                id: None,
+                size: 1,
+                columns: vec![MoxelColumn {
+                    index: 0,
+                    format_index: 1,
+                }],
+            },
+            MoxelColumnSet {
+                id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                size: 4,
+                columns: vec![
+                    MoxelColumn {
+                        index: 0,
+                        format_index: 2,
+                    },
+                    MoxelColumn {
+                        index: 4,
+                        format_index: 6,
+                    },
+                ],
+            },
+        ];
+        let settings = MoxelPrintSettings::default();
+
+        assert_eq!(
+            moxel_default_format_index(&column_sets, Some(&settings), 21),
+            6
+        );
+        assert_eq!(moxel_default_format_index(&column_sets, None, 21), 21);
     }
 
     #[test]
