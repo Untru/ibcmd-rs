@@ -3,6 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
+use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 use rayon::prelude::*;
 use serde::Serialize;
 use walkdir::WalkDir;
@@ -51,6 +53,43 @@ pub struct SpreadsheetTemplateRoundTripAuditError {
     pub template_xml: String,
     pub phase: String,
     pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FormSourceAuditReport {
+    pub root: PathBuf,
+    pub form_xml_files: usize,
+    pub parsed: usize,
+    pub failed: usize,
+    pub total_xml_bytes: u64,
+    pub max_xml_bytes: u64,
+    pub max_xml_path: Option<String>,
+    pub forms_with_module: usize,
+    pub total_module_bytes: u64,
+    pub forms_with_ext_form_files: usize,
+    pub ext_form_files: usize,
+    pub ext_form_bytes: u64,
+    pub top_level_elements: Vec<FormElementCount>,
+    pub elements: Vec<FormElementCount>,
+    pub errors: Vec<FormSourceAuditError>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct FormElementCount {
+    pub name: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FormSourceAuditError {
+    pub form_xml: String,
+    pub message: String,
+}
+
+#[derive(Debug, Default)]
+struct FormXmlShape {
+    top_level_elements: BTreeMap<String, usize>,
+    elements: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -207,6 +246,176 @@ pub fn audit_spreadsheet_template_roundtrip(
         failed: errors.len(),
         errors,
     })
+}
+
+pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
+    if !root.is_dir() {
+        return Err(anyhow!(
+            "source root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let root = fs::canonicalize(root)
+        .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+    let mut top_level_elements = BTreeMap::new();
+    let mut elements = BTreeMap::new();
+    let mut report = FormSourceAuditReport {
+        root: root.clone(),
+        form_xml_files: 0,
+        parsed: 0,
+        failed: 0,
+        total_xml_bytes: 0,
+        max_xml_bytes: 0,
+        max_xml_path: None,
+        forms_with_module: 0,
+        total_module_bytes: 0,
+        forms_with_ext_form_files: 0,
+        ext_form_files: 0,
+        ext_form_bytes: 0,
+        top_level_elements: Vec::new(),
+        elements: Vec::new(),
+        errors: Vec::new(),
+    };
+
+    for entry in WalkDir::new(&root)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() || entry.file_name() != "Form.xml" {
+            continue;
+        }
+        let form_xml = entry.path();
+        if !is_form_ext_xml(form_xml) {
+            continue;
+        }
+        report.form_xml_files += 1;
+        let metadata = entry.metadata()?;
+        let xml_len = metadata.len();
+        report.total_xml_bytes += xml_len;
+        if xml_len > report.max_xml_bytes {
+            report.max_xml_bytes = xml_len;
+            report.max_xml_path = Some(relative_path_string(&root, form_xml));
+        }
+
+        let form_ext_dir = form_xml.with_extension("");
+        let module_path = form_ext_dir.join("Module.bsl");
+        if let Ok(module_metadata) = fs::metadata(&module_path)
+            && module_metadata.is_file()
+        {
+            report.forms_with_module += 1;
+            report.total_module_bytes += module_metadata.len();
+        }
+        let (ext_files, ext_bytes) = count_form_ext_files(&form_ext_dir)?;
+        if ext_files > 0 {
+            report.forms_with_ext_form_files += 1;
+            report.ext_form_files += ext_files;
+            report.ext_form_bytes += ext_bytes;
+        }
+
+        let xml =
+            fs::read(form_xml).with_context(|| format!("failed to read {}", form_xml.display()))?;
+        match parse_form_xml_shape(&xml) {
+            Ok(shape) => {
+                report.parsed += 1;
+                merge_counts(&mut top_level_elements, shape.top_level_elements);
+                merge_counts(&mut elements, shape.elements);
+            }
+            Err(error) => {
+                report.failed += 1;
+                report.errors.push(FormSourceAuditError {
+                    form_xml: relative_path_string(&root, form_xml),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+
+    report
+        .errors
+        .sort_by(|left, right| left.form_xml.cmp(&right.form_xml));
+    report.top_level_elements = sorted_element_counts(top_level_elements);
+    report.elements = sorted_element_counts(elements);
+    Ok(report)
+}
+
+fn is_form_ext_xml(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("Form.xml")
+        && path.parent().and_then(|parent| parent.file_name()) == Some(std::ffi::OsStr::new("Ext"))
+}
+
+fn count_form_ext_files(form_ext_dir: &Path) -> Result<(usize, u64)> {
+    if !form_ext_dir.is_dir() {
+        return Ok((0, 0));
+    }
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    for entry in WalkDir::new(form_ext_dir)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            files += 1;
+            bytes += entry.metadata()?.len();
+        }
+    }
+    Ok((files, bytes))
+}
+
+fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut depth = 0usize;
+    let mut shape = FormXmlShape::default();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(event)) => {
+                push_form_element(&mut shape, &event, depth)?;
+                depth += 1;
+            }
+            Ok(Event::Empty(event)) => {
+                push_form_element(&mut shape, &event, depth)?;
+            }
+            Ok(Event::End(_)) => {
+                depth = depth.saturating_sub(1);
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(anyhow!("invalid Form.xml: {error}")),
+            _ => {}
+        }
+    }
+    Ok(shape)
+}
+
+fn push_form_element(shape: &mut FormXmlShape, event: &BytesStart<'_>, depth: usize) -> Result<()> {
+    let name = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+    *shape.elements.entry(name.clone()).or_insert(0) += 1;
+    if depth == 1 {
+        *shape.top_level_elements.entry(name).or_insert(0) += 1;
+    }
+    Ok(())
+}
+
+fn merge_counts(target: &mut BTreeMap<String, usize>, source: BTreeMap<String, usize>) {
+    for (key, count) in source {
+        *target.entry(key).or_insert(0) += count;
+    }
+}
+
+fn sorted_element_counts(counts: BTreeMap<String, usize>) -> Vec<FormElementCount> {
+    let mut counts = counts
+        .into_iter()
+        .map(|(name, count)| FormElementCount { name, count })
+        .collect::<Vec<_>>();
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    counts
 }
 
 fn audit_one_spreadsheet_template_roundtrip(
@@ -558,6 +767,71 @@ mod tests {
         assert_eq!(report.failed, 0);
         assert!(report.errors.is_empty());
 
+        Ok(())
+    }
+
+    #[test]
+    fn audits_form_sources_counts_modules_assets_and_xml_shape() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-forms-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
+        fs::create_dir_all(root.join("CommonForms/Broken/Ext"))?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+  <Attributes>
+    <Attribute name="Item"/>
+  </Attributes>
+  <Items>
+    <Item name="List"/>
+  </Items>
+  <Commands/>
+</Form>
+"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl"),
+            b"\xef\xbb\xbf&AtClient\nProcedure Open(Command)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon/Picture.png"),
+            b"\x89PNG\r\n\x1a\n",
+        )?;
+        fs::write(
+            root.join("CommonForms/Broken/Ext/Form.xml"),
+            br#"<Form><Items></Form>"#,
+        )?;
+
+        let report = audit_form_sources(&root)?;
+
+        assert_eq!(report.form_xml_files, 2);
+        assert_eq!(report.parsed, 1);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.forms_with_module, 1);
+        assert_eq!(report.forms_with_ext_form_files, 1);
+        assert_eq!(report.ext_form_files, 2);
+        assert!(report.top_level_elements.contains(&FormElementCount {
+            name: "Attributes".to_string(),
+            count: 1
+        }));
+        assert!(report.top_level_elements.contains(&FormElementCount {
+            name: "Items".to_string(),
+            count: 1
+        }));
+        assert!(report.top_level_elements.contains(&FormElementCount {
+            name: "Commands".to_string(),
+            count: 1
+        }));
+        assert!(report.elements.contains(&FormElementCount {
+            name: "Item".to_string(),
+            count: 1
+        }));
+        assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
+
+        let _ = fs::remove_dir_all(root);
         Ok(())
     }
 
