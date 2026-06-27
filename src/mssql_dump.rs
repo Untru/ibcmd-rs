@@ -3785,6 +3785,7 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
     let attributes = extract_form_body_attributes(&body.trailing, object_refs);
     let commands = extract_form_body_commands(&body.trailing, object_refs);
+    let command_interface = extract_form_command_interface(&body.trailing, object_refs);
 
     Some(format_form_body_xml(
         &properties,
@@ -3792,6 +3793,7 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
         &events,
         &attributes,
         &commands,
+        &command_interface,
     ))
 }
 
@@ -3839,6 +3841,21 @@ struct FormCommand {
     action: String,
     functional_options: Vec<String>,
     current_row_use: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormCommandInterface {
+    navigation_panel: Vec<FormCommandInterfaceItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormCommandInterfaceItem {
+    command: String,
+    item_type: &'static str,
+    command_group: String,
+    index: Option<usize>,
+    default_visible: Option<bool>,
+    visible_common: Option<bool>,
 }
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
@@ -4337,6 +4354,104 @@ fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
     }
 }
 
+fn extract_form_command_interface(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormCommandInterface> {
+    let fields = trailing
+        .get(3)
+        .and_then(|field| split_1c_braced_fields(field, 0))?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let mut navigation_panel = Vec::new();
+    for field in fields.iter().skip(2) {
+        if let Some(item) = parse_form_command_interface_item(field, object_refs) {
+            navigation_panel.push(item);
+        }
+    }
+    if navigation_panel.is_empty() {
+        return None;
+    }
+    Some(FormCommandInterface { navigation_panel })
+}
+
+fn parse_form_command_interface_item(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormCommandInterfaceItem> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("3") {
+        return None;
+    }
+    let command = parse_form_object_reference(fields.get(2)?, object_refs)?;
+    let command_group = fields
+        .get(5)
+        .and_then(|field| parse_form_command_group_reference(field, object_refs))?;
+    let index = fields
+        .get(6)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|index| *index > 0);
+    let default_visible = match fields.get(7).map(|value| value.trim()) {
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        _ => None,
+    };
+    Some(FormCommandInterfaceItem {
+        command,
+        item_type: "Added",
+        command_group,
+        index,
+        default_visible,
+        visible_common: fields
+            .get(8)
+            .and_then(|value| parse_form_nested_common_bool(value)),
+    })
+}
+
+fn parse_form_object_reference(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+    object_refs.get(&uuid).cloned()
+}
+
+fn parse_form_command_group_reference(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+    form_standard_command_group_name(&uuid)
+        .map(ToOwned::to_owned)
+        .or_else(|| object_refs.get(&uuid).cloned())
+}
+
+fn form_standard_command_group_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "eacad741-96b9-4b3a-bf79-dde9ecead1a1" => Some("FormNavigationPanelGoTo"),
+        _ => None,
+    }
+}
+
+fn parse_form_nested_common_bool(field: &str) -> Option<bool> {
+    if field.contains(r#"{"B",1}"#) {
+        Some(true)
+    } else if field.contains(r#"{"B",0}"#) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
     let mut seen = BTreeSet::<(String, String)>::new();
     let mut deduped = Vec::new();
@@ -4354,6 +4469,7 @@ fn format_form_body_xml(
     events: &[FormBodyEvent],
     attributes: &[FormAttribute],
     commands: &[FormCommand],
+    command_interface: &Option<FormCommandInterface>,
 ) -> String {
     let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
@@ -4424,6 +4540,9 @@ fn format_form_body_xml(
             xml.push_str("\t\t</Command>\r\n");
         }
         xml.push_str("\t</Commands>\r\n");
+    }
+    if let Some(command_interface) = command_interface {
+        xml.push_str(&format_form_command_interface_xml(command_interface));
     }
     xml.push_str("</Form>\r\n");
     xml
@@ -4500,6 +4619,49 @@ fn format_form_localized_section(name: &str, values: &[(String, String)], indent
         ));
     }
     xml.push_str(&format!("{tab}</{}>\r\n", name));
+    xml
+}
+
+fn format_form_command_interface_xml(command_interface: &FormCommandInterface) -> String {
+    let mut xml = "\t<CommandInterface>\r\n".to_string();
+    if !command_interface.navigation_panel.is_empty() {
+        xml.push_str("\t\t<NavigationPanel>\r\n");
+        for item in &command_interface.navigation_panel {
+            xml.push_str("\t\t\t<Item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<Command>{}</Command>\r\n",
+                escape_xml_text(&item.command)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<Type>{}</Type>\r\n",
+                escape_xml_text(item.item_type)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
+                escape_xml_text(&item.command_group)
+            ));
+            if let Some(index) = item.index {
+                xml.push_str(&format!("\t\t\t\t<Index>{index}</Index>\r\n"));
+            }
+            if let Some(default_visible) = item.default_visible {
+                xml.push_str(&format!(
+                    "\t\t\t\t<DefaultVisible>{}</DefaultVisible>\r\n",
+                    xml_bool(default_visible)
+                ));
+            }
+            if let Some(common) = item.visible_common {
+                xml.push_str("\t\t\t\t<Visible>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
+                    xml_bool(common)
+                ));
+                xml.push_str("\t\t\t\t</Visible>\r\n");
+            }
+            xml.push_str("\t\t\t</Item>\r\n");
+        }
+        xml.push_str("\t\t</NavigationPanel>\r\n");
+    }
+    xml.push_str("\t</CommandInterface>\r\n");
     xml
 }
 
@@ -10619,6 +10781,49 @@ mod tests {
         assert!(form_xml.contains("<Action>Выполнить</Action>"));
         assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
         assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+    }
+
+    #[test]
+    fn extracts_form_command_interface_navigation_panel() {
+        let first_command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let form_body = deflate_for_test(
+            format!(
+                r#"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}}, "",{{0}},{{0,0}},{{0,0}},{{0,2,{{3,0,{{0,{first_command_uuid}}},{{0}},1,{{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1}},1,0,{{0,{{0,{{"B",0}},0}}}}}},{{3,1,{{0,{second_command_uuid}}},{{0}},1,{{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}},{{0}},0,0}}"#
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (
+                first_command_uuid.to_string(),
+                "DataProcessor.Loader.Command.Load".to_string(),
+            ),
+            (
+                second_command_uuid.to_string(),
+                "InformationRegister.Rates.Command.Import".to_string(),
+            ),
+        ]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains("<CommandInterface>"));
+        assert!(form_xml.contains("<NavigationPanel>"));
+        assert!(form_xml.contains("<Command>DataProcessor.Loader.Command.Load</Command>"));
+        assert!(form_xml.contains("<Command>InformationRegister.Rates.Command.Import</Command>"));
+        assert_eq!(
+            form_xml
+                .matches("<CommandGroup>FormNavigationPanelGoTo</CommandGroup>")
+                .count(),
+            2
+        );
+        assert!(form_xml.contains("<Index>1</Index>"));
+        assert_eq!(
+            form_xml
+                .matches("<DefaultVisible>false</DefaultVisible>")
+                .count(),
+            2
+        );
+        assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
     }
 
     #[test]
