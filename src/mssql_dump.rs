@@ -1023,7 +1023,7 @@ struct MoxelSpreadsheet {
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
-    max_format_index: usize,
+    default_format_index: usize,
 }
 
 struct MoxelRow {
@@ -3687,7 +3687,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
         rows,
         merges,
         areas,
-        max_format_index,
+        default_format_index: max_format_index + 1,
     })
 }
 
@@ -3914,14 +3914,17 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for row in &spreadsheet.rows {
         push_moxel_row_xml(&mut xml, row);
     }
+    xml.push_str(&format!(
+        "\t<defaultFormatIndex>{}</defaultFormatIndex>\r\n",
+        spreadsheet.default_format_index
+    ));
     for merge in &spreadsheet.merges {
         push_moxel_merge_xml(&mut xml, merge);
     }
     for area in &spreadsheet.areas {
         push_moxel_area_xml(&mut xml, area);
     }
-    xml.push_str("\t<defaultFormatIndex>1</defaultFormatIndex>\r\n");
-    for _ in 0..spreadsheet.max_format_index.max(1) {
+    for _ in 0..spreadsheet.default_format_index.max(1) {
         xml.push_str("\t<format/>\r\n");
     }
     xml.push_str("</document>\r\n");
@@ -8302,6 +8305,13 @@ mod tests {
         assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
         assert!(xml.contains("<parameter>ТекстШтампа</parameter>"));
         assert!(!xml.contains("<v8:content>ТекстШтампа</v8:content>"));
+        assert!(xml.contains("<defaultFormatIndex>9</defaultFormatIndex>"));
+        assert_eq!(xml.matches("\t<format/>\r\n").count(), 9);
+        let default_format_index_pos = xml
+            .find("<defaultFormatIndex>9</defaultFormatIndex>")
+            .unwrap();
+        let merge_pos = xml.find("<merge>").unwrap();
+        assert!(default_format_index_pos < merge_pos);
         assert!(
             xml.contains("<merge>\r\n\t\t<r>1</r>\r\n\t\t<c>1</c>\r\n\t\t<h>1</h>\r\n\t</merge>")
         );
