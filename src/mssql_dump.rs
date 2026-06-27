@@ -1038,6 +1038,7 @@ struct MoxelCell {
     format_index: usize,
     text: Option<String>,
     parameter: Option<String>,
+    empty_text: bool,
 }
 
 struct MoxelLocalizedValue {
@@ -3786,7 +3787,9 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
         + 1;
     let localized = fields
         .get(2)
-        .and_then(|value| parse_moxel_localized_value(value));
+        .and_then(|value| parse_moxel_localized_cell_value(value));
+    let empty_text = matches!(localized, Some(None));
+    let localized = localized.flatten();
     let text = localized
         .as_ref()
         .filter(|value| !value.lang.is_empty())
@@ -3800,16 +3803,20 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
         format_index,
         text,
         parameter,
+        empty_text,
     })
 }
 
-fn parse_moxel_localized_value(text: &str) -> Option<MoxelLocalizedValue> {
+fn parse_moxel_localized_cell_value(text: &str) -> Option<Option<MoxelLocalizedValue>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count == 0 {
+        return Some(None);
+    }
     let pair = split_1c_braced_fields(fields.iter().skip(2).take(count).next()?, 0)?;
     let lang = parse_1c_string(pair.first()?)?;
     let content = parse_1c_string(pair.get(1)?)?;
-    Some(MoxelLocalizedValue { lang, content })
+    Some(Some(MoxelLocalizedValue { lang, content }))
 }
 
 fn parse_moxel_areas(fields: &[&str]) -> Vec<MoxelArea> {
@@ -4024,6 +4031,8 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
             ));
             xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
             xml.push_str("\t\t\t\t\t</tl>\r\n");
+        } else if cell.empty_text {
+            xml.push_str("\t\t\t\t\t<tl/>\r\n");
         }
         if let Some(parameter) = &cell.parameter {
             xml.push_str(&format!(
@@ -8323,6 +8332,7 @@ mod tests {
         assert!(xml.contains("<f>4</f>"));
         assert!(xml.contains("<f>5</f>"));
         assert!(xml.contains("<f>6</f>"));
+        assert!(xml.contains("<f>5</f>\r\n\t\t\t\t\t<tl/>"));
         assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
         assert!(xml.contains("<parameter>ТекстШтампа</parameter>"));
         assert!(!xml.contains("<v8:content>ТекстШтампа</v8:content>"));
