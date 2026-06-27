@@ -78,7 +78,9 @@ pub struct MssqlSourceParityAuditReport {
     pub prepared_metadata_body_rows: usize,
     pub prepared_total_config_rows: usize,
     pub prepare_failures: Vec<MssqlSourceParityPrepareFailure>,
+    pub prepare_failure_summary: Vec<MssqlSourceParityFailureSummary>,
     pub versions_blob: Option<GeneratedBlobReport>,
+    pub version_patch_category: Option<String>,
     pub version_patch_error: Option<String>,
     pub version_replacements: Vec<VersionReplacement>,
     pub batches: Vec<MssqlSourceParityBatchReport>,
@@ -88,7 +90,15 @@ pub struct MssqlSourceParityAuditReport {
 pub struct MssqlSourceParityPrepareFailure {
     pub kind: String,
     pub path: String,
+    pub category: String,
+    pub config_file_name: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceParityFailureSummary {
+    pub category: String,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -509,10 +519,12 @@ pub fn audit_source_parity(
                     xml.clone(),
                     Some(&source),
                 )
-                .map_err(|error| MssqlSourceParityPrepareFailure {
-                    kind: "metadata_object".to_string(),
-                    path: source_relative_path(&args.source_root, xml),
-                    message: error.to_string(),
+                .map_err(|error| {
+                    source_parity_prepare_failure(
+                        "metadata_object",
+                        source_relative_path(&args.source_root, xml),
+                        error,
+                    )
                 })
             })
             .collect::<Vec<_>>()
@@ -528,10 +540,12 @@ pub fn audit_source_parity(
                     xml.clone(),
                     None,
                 )
-                .map_err(|error| MssqlSourceParityPrepareFailure {
-                    kind: "common_module".to_string(),
-                    path: source_relative_path(&args.source_root, xml),
-                    message: error.to_string(),
+                .map_err(|error| {
+                    source_parity_prepare_failure(
+                        "common_module",
+                        source_relative_path(&args.source_root, xml),
+                        error,
+                    )
                 })
             })
             .collect::<Vec<_>>()
@@ -557,11 +571,12 @@ pub fn audit_source_parity(
             .cmp(&right.kind)
             .then_with(|| left.path.cmp(&right.path))
     });
+    let prepare_failure_summary = source_parity_failure_summary(&prepare_failures);
 
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
-    let (versions_blob_report, version_replacements, version_patch_error) =
+    let (versions_blob_report, version_replacements, version_patch_category, version_patch_error) =
         match patch_versions_blob_bytes(&versions_blob, &changes, true) {
             Ok(patched_versions) => (
                 GeneratedBlobReport {
@@ -570,6 +585,7 @@ pub fn audit_source_parity(
                 },
                 patched_versions.replacements,
                 None,
+                None,
             ),
             Err(error) => (
                 GeneratedBlobReport {
@@ -577,6 +593,7 @@ pub fn audit_source_parity(
                     sha256: hex_sha256(&versions_blob),
                 },
                 Vec::new(),
+                Some(classify_version_patch_error(&error.to_string())),
                 Some(error.to_string()),
             ),
         };
@@ -604,11 +621,85 @@ pub fn audit_source_parity(
         prepared_metadata_body_rows,
         prepared_total_config_rows,
         prepare_failures,
+        prepare_failure_summary,
         versions_blob: Some(versions_blob_report),
+        version_patch_category,
         version_patch_error,
         version_replacements,
         batches: batch_reports,
     })
+}
+
+fn source_parity_prepare_failure(
+    kind: &str,
+    path: String,
+    error: anyhow::Error,
+) -> MssqlSourceParityPrepareFailure {
+    let message = error.to_string();
+    let (category, config_file_name) = classify_source_parity_error(&message);
+    MssqlSourceParityPrepareFailure {
+        kind: kind.to_string(),
+        path,
+        category,
+        config_file_name,
+        message,
+    }
+}
+
+fn source_parity_failure_summary(
+    failures: &[MssqlSourceParityPrepareFailure],
+) -> Vec<MssqlSourceParityFailureSummary> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for failure in failures {
+        *counts.entry(failure.category.clone()).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(category, count)| MssqlSourceParityFailureSummary { category, count })
+        .collect()
+}
+
+fn classify_source_parity_error(message: &str) -> (String, Option<String>) {
+    if let Some(file_name) = message.strip_prefix("Config row not found: ") {
+        return (
+            "missing_config_row".to_string(),
+            Some(file_name.trim().to_string()),
+        );
+    }
+    if message.starts_with("sqlcmd failed:") {
+        return ("sql_error".to_string(), None);
+    }
+    if message.contains("does not contain JSON array")
+        || message.contains("failed to parse Config blob JSON")
+    {
+        return ("sql_protocol_error".to_string(), None);
+    }
+    if message.starts_with("failed to read") || message.contains(": failed to read") {
+        return ("source_io_error".to_string(), None);
+    }
+    if message.starts_with("failed to parse") || message.contains(": failed to parse") {
+        return ("source_parse_error".to_string(), None);
+    }
+    if message.starts_with("unsupported ") || message.contains(": unsupported ") {
+        return ("unsupported_source".to_string(), None);
+    }
+    if message.starts_with("failed to pack") || message.contains(": failed to pack") {
+        return ("pack_error".to_string(), None);
+    }
+    if message.starts_with("XML metadata uuid ") {
+        return ("metadata_uuid_mismatch".to_string(), None);
+    }
+    ("other".to_string(), None)
+}
+
+fn classify_version_patch_error(message: &str) -> String {
+    if message.starts_with("versions entry not found:") {
+        "unsupported_versions_shape".to_string()
+    } else if message.starts_with("failed to parse") || message.contains(": failed to parse") {
+        "versions_parse_error".to_string()
+    } else {
+        "versions_patch_error".to_string()
+    }
 }
 
 pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
@@ -5441,6 +5532,70 @@ mod tests {
                 "C:/sources/Catalogs/Products.xml",
                 "C:/sources/Catalogs/Products/Forms/ItemForm.xml",
                 "C:/sources/CommonModules/Utils.xml"
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_source_parity_prepare_failures() {
+        let (category, config_file_name) =
+            super::classify_source_parity_error("Config row not found: object-id.5");
+        assert_eq!(category, "missing_config_row");
+        assert_eq!(config_file_name.as_deref(), Some("object-id.5"));
+
+        let (category, config_file_name) = super::classify_source_parity_error(
+            "failed to pack Role rights Roles/Admin/Ext/Rights.xml",
+        );
+        assert_eq!(category, "pack_error");
+        assert_eq!(config_file_name, None);
+
+        let (category, _) =
+            super::classify_source_parity_error("unsupported Help page name: ../bad");
+        assert_eq!(category, "unsupported_source");
+
+        assert_eq!(
+            super::classify_version_patch_error("versions entry not found: root"),
+            "unsupported_versions_shape"
+        );
+    }
+
+    #[test]
+    fn summarizes_source_parity_prepare_failures_by_category() {
+        let failures = vec![
+            super::MssqlSourceParityPrepareFailure {
+                kind: "metadata_object".to_string(),
+                path: "Catalogs/A.xml".to_string(),
+                category: "missing_config_row".to_string(),
+                config_file_name: Some("a.0".to_string()),
+                message: "Config row not found: a.0".to_string(),
+            },
+            super::MssqlSourceParityPrepareFailure {
+                kind: "metadata_object".to_string(),
+                path: "Catalogs/B.xml".to_string(),
+                category: "missing_config_row".to_string(),
+                config_file_name: Some("b.0".to_string()),
+                message: "Config row not found: b.0".to_string(),
+            },
+            super::MssqlSourceParityPrepareFailure {
+                kind: "common_module".to_string(),
+                path: "CommonModules/C.xml".to_string(),
+                category: "pack_error".to_string(),
+                config_file_name: None,
+                message: "failed to pack module".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            super::source_parity_failure_summary(&failures),
+            vec![
+                super::MssqlSourceParityFailureSummary {
+                    category: "missing_config_row".to_string(),
+                    count: 2,
+                },
+                super::MssqlSourceParityFailureSummary {
+                    category: "pack_error".to_string(),
+                    count: 1,
+                },
             ]
         );
     }
