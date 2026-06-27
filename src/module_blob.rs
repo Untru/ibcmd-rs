@@ -93,6 +93,7 @@ struct FormXmlBodyProperties {
 struct FormXmlAutoCommandBar {
     id: String,
     name: String,
+    autofill: Option<bool>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3356,6 +3357,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     local.as_str(),
                     "WindowOpeningMode"
                         | "Group"
+                        | "Autofill"
                         | "Event"
                         | "Action"
                         | "CurrentRowUse"
@@ -3474,6 +3476,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
@@ -3757,6 +3760,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
@@ -4048,6 +4052,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "Autofill"
+                        if path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"]) =>
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.autofill = Some(parse_form_xml_bool(
+                                "AutoCommandBar/Autofill",
+                                text_value.trim(),
+                            )?);
+                        }
                     }
                     "Event" if path_ends_with(&path, &["Form", "Events", "Event"]) => {
                         if let Some(name) = current_event_name.take() {
@@ -4831,7 +4845,11 @@ fn parse_form_auto_command_bar_xml(
     let Some(id) = xml_attribute_value(event, "id")? else {
         return Ok(None);
     };
-    Ok(Some(FormXmlAutoCommandBar { id, name }))
+    Ok(Some(FormXmlAutoCommandBar {
+        id,
+        name,
+        autofill: None,
+    }))
 }
 
 fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlCommand>> {
@@ -5138,7 +5156,19 @@ fn patch_form_layout_auto_command_bar(
         && let Some(name_range) = fields.get(6)
         && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
     {
-        text.replace_range(name_range.clone(), &format_1c_string(&command_bar.name));
+        let mut replacements = Vec::<(Range<usize>, String)>::new();
+        replacements.push((name_range.clone(), format_1c_string(&command_bar.name)));
+        if let Some(autofill) = command_bar.autofill
+            && let Some(autofill_range) = fields.get(20)
+            && let Some(autofill_settings) =
+                format_form_auto_command_bar_autofill(&text[autofill_range.clone()], autofill)?
+        {
+            replacements.push((autofill_range.clone(), autofill_settings));
+        }
+        replacements.sort_by_key(|(range, _)| range.start);
+        for (range, replacement) in replacements.into_iter().rev() {
+            text.replace_range(range, &replacement);
+        }
         return Ok(true);
     }
 
@@ -5153,6 +5183,16 @@ fn patch_form_layout_auto_command_bar(
         }
     }
     Ok(false)
+}
+
+fn format_form_auto_command_bar_autofill(existing: &str, autofill: bool) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.len() <= 2 {
+        return Ok(None);
+    }
+    replace_braced_field(&mut text, 2, if autofill { "1" } else { "0" })?;
+    Ok(Some(text))
 }
 
 fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
@@ -13320,6 +13360,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar_autofill() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,"OldBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,1,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1">
+		<Autofill>false</Autofill>
+	</AutoCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"NewBar\""));
+        assert!(parsed.layout.contains("{1,0,0,0}"), "{}", parsed.layout);
+        assert!(!parsed.layout.contains("{1,0,1,0}"));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }
