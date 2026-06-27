@@ -12113,7 +12113,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0}},"OnGetDataAtServer","OldGetData"}},"Old module",{0}}"##
+            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0},"OnChange","OldChange","StartChoice","OldChoice"},"OnGetDataAtServer","OldGetData"}},"Old module",{0}}"##
                 .as_bytes(),
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -12142,6 +12142,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 						</v8:item>
 					</Title>
 				</Button>
+				<InputField name="Наименование" id="40">
+					<Events>
+						<Event name="OnChange">NewChange</Event>
+						<Event name="StartChoice">NewChoice</Event>
+					</Events>
+				</InputField>
 			</ChildItems>
 		</CommandBar>
 		<Table name="Rows" id="25">
@@ -12177,7 +12183,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(r#""OnGetDataAtServer","NewGetData""#)
         );
+        assert!(parsed.layout.contains(r#""OnChange","NewChange""#));
+        assert!(parsed.layout.contains(r#""StartChoice","NewChoice""#));
         assert!(!parsed.layout.contains("OldGetData"));
+        assert!(!parsed.layout.contains("OldChange"));
+        assert!(!parsed.layout.contains("OldChoice"));
         assert!(!parsed.layout.contains("OldBar"));
         assert!(!parsed.layout.contains("Old bar"));
         assert!(!parsed.layout.contains("OldButton"));

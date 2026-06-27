@@ -4621,6 +4621,22 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
         .unwrap_or_else(|| field.to_string());
     match identifier.trim() {
         "OnGetDataAtServer" => Some("OnGetDataAtServer".to_string()),
+        "OnChange" => Some("OnChange".to_string()),
+        "StartChoice" => Some("StartChoice".to_string()),
+        "Click" => Some("Click".to_string()),
+        "Clearing" => Some("Clearing".to_string()),
+        "URLProcessing" => Some("URLProcessing".to_string()),
+        "TextEditEnd" => Some("TextEditEnd".to_string()),
+        "OnActivateCell" => Some("OnActivateCell".to_string()),
+        "BeforeAddRow" => Some("BeforeAddRow".to_string()),
+        "Creating" => Some("Creating".to_string()),
+        "OnCurrentPageChange" => Some("OnCurrentPageChange".to_string()),
+        "OnEditEnd" => Some("OnEditEnd".to_string()),
+        "BeforeDeleteRow" => Some("BeforeDeleteRow".to_string()),
+        "OnStartEdit" => Some("OnStartEdit".to_string()),
+        "Selection" => Some("Selection".to_string()),
+        "BeforeRowChange" => Some("BeforeRowChange".to_string()),
+        "AfterDeleteRow" => Some("AfterDeleteRow".to_string()),
         _ => parse_form_event_identifier(identifier.trim()),
     }
 }
@@ -11342,7 +11358,7 @@ mod tests {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let external_command_uuid = "11111111-1111-4111-8111-111111111111";
         let layout = format!(
-            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}},"OnGetDataAtServer","RowsGetData"}}}}"#
+            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}},"OnChange","NameChanged","StartChoice","NameChoice"}},"OnGetDataAtServer","RowsGetData"}}}}"#
         );
         let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
         let attributes = vec![FormAttribute {
@@ -11371,6 +11387,16 @@ mod tests {
         assert!(xml.contains("<DataPath>Список.Наименование</DataPath>"));
         assert_eq!(
             xml.matches(r#"<Event name="OnGetDataAtServer">RowsGetData</Event>"#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            xml.matches(r#"<Event name="OnChange">NameChanged</Event>"#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            xml.matches(r#"<Event name="StartChoice">NameChoice</Event>"#)
                 .count(),
             1
         );
