@@ -50,7 +50,7 @@ use crate::module_blob::{
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
-    patch_versions_blob_bytes,
+    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -577,7 +577,7 @@ pub fn audit_source_parity(
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
     let (versions_blob_report, version_replacements, version_patch_category, version_patch_error) =
-        match patch_versions_blob_bytes(&versions_blob, &changes, true) {
+        match patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true) {
             Ok(patched_versions) => (
                 GeneratedBlobReport {
                     bytes: patched_versions.blob.len(),
@@ -1184,7 +1184,8 @@ pub fn stage_metadata_objects(
                 .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
         })
         .collect::<Vec<_>>();
-    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+    let patched_versions =
+        patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
     let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let script = args.script_output.clone().unwrap_or_else(|| {
@@ -1323,7 +1324,8 @@ pub fn stage_source_objects(
 
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
-    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+    let patched_versions =
+        patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
     let batches =
@@ -2830,14 +2832,13 @@ fn prepare_object_help_body_row(
 }
 
 fn prepare_help_blob_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     body_id: String,
     body_path: PathBuf,
     label: &str,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read {label} XML {}", body_path.display()))?;
     let page_names = parse_help_pages_from_xml(&xml)
@@ -4237,19 +4238,8 @@ fn build_stage_metadata_objects_sql(
             error_number = error_number,
         ));
         for (body_index, body) in object.body_rows.iter().enumerate() {
-            let body_blob_hex = encode_hex(&body.blob);
             let body_error_number = 54501 + index * 10 + body_index;
-            sql.push_str(&format!(
-                "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-                 SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
-                 FROM Config\n\
-                 WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
-                 IF @@ROWCOUNT <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
-                body_id = quote_string(&body.body_id),
-                body_blob_len = body.blob.len(),
-                body_blob_hex = body_blob_hex,
-                body_error_number = body_error_number,
-            ));
+            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number);
         }
     }
 
@@ -4267,6 +4257,32 @@ fn build_stage_metadata_objects_sql(
     ));
 
     sql
+}
+
+fn push_insert_metadata_body_row_sql(
+    sql: &mut String,
+    body: &PreparedMetadataBodyStage,
+    body_error_number: usize,
+) {
+    let body_blob_hex = encode_hex(&body.blob);
+    sql.push_str(&format!(
+        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
+         DECLARE @metadata_body_rows_{body_error_number} int = @@ROWCOUNT;\n\
+         IF @metadata_body_rows_{body_error_number} = 0\n\
+         BEGIN\n\
+             INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             VALUES (N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, {body_blob_len}, 0x{body_blob_hex}, 0);\n\
+             SET @metadata_body_rows_{body_error_number} = @@ROWCOUNT;\n\
+         END;\n\
+         IF @metadata_body_rows_{body_error_number} <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
+        body_id = quote_string(&body.body_id),
+        body_blob_len = body.blob.len(),
+        body_blob_hex = body_blob_hex,
+        body_error_number = body_error_number,
+    ));
 }
 
 fn build_stage_source_objects_sql(
@@ -4318,19 +4334,8 @@ fn build_stage_source_objects_sql(
             error_number = error_number,
         ));
         for (body_index, body) in object.body_rows.iter().enumerate() {
-            let body_blob_hex = encode_hex(&body.blob);
             let body_error_number = 55501 + index * 10 + body_index;
-            sql.push_str(&format!(
-                "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-                 SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
-                 FROM Config\n\
-                 WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
-                 IF @@ROWCOUNT <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
-                body_id = quote_string(&body.body_id),
-                body_blob_len = body.blob.len(),
-                body_blob_hex = body_blob_hex,
-                body_error_number = body_error_number,
-            ));
+            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number);
         }
     }
 
@@ -5883,7 +5888,9 @@ mod tests {
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xAABBCC"));
-        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54501"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_54501 int = @@ROWCOUNT"));
+        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, 0xAABBCC, 0);"));
+        assert!(sql.contains("IF @metadata_body_rows_54501 <> 1 THROW 54501"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
@@ -5923,7 +5930,9 @@ mod tests {
 
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
         assert!(sql.contains("0xAABBCC"));
-        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 55501"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_55501 int = @@ROWCOUNT"));
+        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, 0xAABBCC, 0);"));
+        assert!(sql.contains("IF @metadata_body_rows_55501 <> 1 THROW 55501"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
@@ -5964,7 +5973,8 @@ mod tests {
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
         assert!(sql.contains("0x102030"));
-        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 55501"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_55501 int = @@ROWCOUNT"));
+        assert!(sql.contains("IF @metadata_body_rows_55501 <> 1 THROW 55501"));
     }
 
     #[test]

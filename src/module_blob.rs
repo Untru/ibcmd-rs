@@ -5832,6 +5832,23 @@ pub fn patch_versions_blob_bytes(
     changes: &[String],
     include_standard_entries: bool,
 ) -> Result<PatchedVersionsBlob> {
+    patch_versions_blob_bytes_inner(input, changes, include_standard_entries, false)
+}
+
+pub fn patch_versions_blob_bytes_allowing_additions(
+    input: &[u8],
+    changes: &[String],
+    include_standard_entries: bool,
+) -> Result<PatchedVersionsBlob> {
+    patch_versions_blob_bytes_inner(input, changes, include_standard_entries, true)
+}
+
+fn patch_versions_blob_bytes_inner(
+    input: &[u8],
+    changes: &[String],
+    include_standard_entries: bool,
+    allow_missing_changes: bool,
+) -> Result<PatchedVersionsBlob> {
     let plain = inflate_raw(input).context("failed to inflate versions blob")?;
     let mut text = String::from_utf8(plain).context("versions blob is not valid UTF-8")?;
 
@@ -5851,7 +5868,13 @@ pub fn patch_versions_blob_bytes(
     names.dedup();
 
     for name in names {
-        replacements.push(replace_named_uuid(&mut text, &name)?);
+        match replace_named_uuid_optional(&mut text, &name)? {
+            Some(replacement) => replacements.push(replacement),
+            None if allow_missing_changes => {
+                replacements.push(append_named_uuid(&mut text, &name)?)
+            }
+            None => return Err(anyhow!("versions entry not found: {name}")),
+        }
     }
 
     let plain = text.into_bytes();
@@ -7653,6 +7676,7 @@ fn replace_header_uuid(text: &mut String) -> Result<VersionReplacement> {
     replace_uuid_at(text, uuid_start, "<generation>")
 }
 
+#[cfg(test)]
 fn replace_named_uuid(text: &mut String, name: &str) -> Result<VersionReplacement> {
     let marker = format!("\"{name}\",");
     let marker_start = text
@@ -7672,6 +7696,44 @@ fn replace_named_uuid_optional(
     };
     let uuid_start = marker_start + marker.len();
     replace_uuid_at(text, uuid_start, name).map(Some)
+}
+
+fn append_named_uuid(text: &mut String, name: &str) -> Result<VersionReplacement> {
+    if name.contains('"') || name.contains('\r') || name.contains('\n') {
+        return Err(anyhow!("unsupported versions entry name: {name}"));
+    }
+    increment_versions_entry_count(text)?;
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("versions list closing brace not found"))?;
+    let new_uuid = Uuid::new_v4().hyphenated().to_string();
+    text.insert_str(insert_at, &format!(",\"{name}\",{new_uuid}"));
+    Ok(VersionReplacement {
+        name: name.to_string(),
+        old_uuid: String::new(),
+        new_uuid,
+    })
+}
+
+fn increment_versions_entry_count(text: &mut String) -> Result<()> {
+    let header_start = text
+        .find("{1,")
+        .ok_or_else(|| anyhow!("versions header count marker not found"))?;
+    let count_start = header_start + "{1,".len();
+    let count_end = text[count_start..]
+        .find(',')
+        .map(|offset| count_start + offset)
+        .ok_or_else(|| anyhow!("versions header count end not found"))?;
+    let count = text[count_start..count_end]
+        .parse::<usize>()
+        .with_context(|| {
+            format!(
+                "invalid versions entry count: {}",
+                &text[count_start..count_end]
+            )
+        })?;
+    text.replace_range(count_start..count_end, &(count + 1).to_string());
+    Ok(())
 }
 
 fn replace_uuid_at(text: &mut String, uuid_start: usize, name: &str) -> Result<VersionReplacement> {
@@ -12026,6 +12088,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::patch_versions_blob_bytes(&input, &["missing.0".to_string()], true).unwrap_err();
 
         assert_eq!(error.to_string(), "versions entry not found: missing.0");
+
+        Ok(())
+    }
+
+    #[test]
+    fn versions_blob_patch_can_add_missing_changed_entries() -> anyhow::Result<()> {
+        let text = "\u{feff}{1,1,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"file.0\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}";
+        let input = super::deflate_raw(text.as_bytes())?;
+
+        let patched = super::patch_versions_blob_bytes_allowing_additions(
+            &input,
+            &["file.5".to_string()],
+            true,
+        )?;
+        let plain = super::inflate_raw(&patched.blob)?;
+        let output = String::from_utf8(plain)?;
+        let addition = patched
+            .replacements
+            .iter()
+            .find(|replacement| replacement.name == "file.5")
+            .expect("missing added version replacement");
+
+        assert!(output.starts_with("\u{feff}{1,2,"));
+        assert_eq!(addition.old_uuid, "");
+        assert!(super::is_uuid_text(&addition.new_uuid));
+        assert!(output.contains(&format!("\"file.5\",{}", addition.new_uuid)));
 
         Ok(())
     }
