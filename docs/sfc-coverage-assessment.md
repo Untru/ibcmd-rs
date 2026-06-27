@@ -97,7 +97,7 @@ BSL по именам:
 
 | TemplateType | Количество | Текущее покрытие |
 |---|---:|---|
-| `SpreadsheetDocument` | 14 051 объектов, из них 14 046 с `Template.xml` | Pack-покрытие на `sfc` закрыто: `audit-spreadsheet-templates` упаковал 14 046 из 14 046. Semantic round-trip `XML -> blob -> XML -> blob -> XML` стабилен для 12 972 из 14 046 после исправления обратного преобразования format indexes, сохранения значимых пробелов в тексте, row `columnsID` и ложных пустых строк fallback-сканера. Все compare-расхождения закрыты; блок еще нельзя считать полноценно совместимым из-за 1 074 extract/extract-repacked отказов. |
+| `SpreadsheetDocument` | 14 051 объектов, из них 14 046 с `Template.xml` | Pack-покрытие на `sfc` закрыто: `audit-spreadsheet-templates` упаковал 14 046 из 14 046. Semantic round-trip `XML -> blob -> XML -> blob -> XML` стабилен для 14 046 из 14 046 после исправления обратного преобразования format indexes, сохранения значимых пробелов в тексте, row `columnsID`, ложных пустых строк fallback-сканера и пустых листов. Для текущего dry-run аудита этот блок закрыт; остается подтвердить его в полном SQL `dump -> load -> dump` сценарии. |
 | `DataCompositionSchema` | 1 541 | Поддержан как raw deflated XML body. Семантической проверки СКД нет. |
 | `TextDocument` | 1 022 | Поддержан как raw deflated text body. |
 | `BinaryData` | 723 объекта, из них 719 с `Template.bin` | Поддержан как binary/base64 payload, но нужна проверка round-trip. |
@@ -121,7 +121,8 @@ BSL по именам:
 | `audit-spreadsheet-roundtrip D:\УХА\sfc` после сохранения пробелов вокруг XML entities в тексте | 14 046 packed, 13 105 extracted, 13 105 repacked, 5 903 matched, 7 069 different, 1 074 extract failures; 80.179 секунды release-прогона вместе с компиляцией | Закрыта потеря значимых пробелов в HTML/text content. Первые оставшиеся `compare` теперь связаны с потерей `columnsID` у строк. |
 | `audit-spreadsheet-roundtrip D:\УХА\sfc` после сохранения row `columnsID` pair-mapping с нулевой строкой | 14 046 packed, 13 105 extracted, 13 105 repacked, 12 734 matched, 238 different, 1 074 extract/extract-repacked failures; 80.578 секунды release-прогона вместе с компиляцией | Закрыт массовый класс потери `columnsID`. Первые оставшиеся `compare` связаны с появлением/потерей пустых строк перед `templateMode`; отдельно остаются 941 первичный отказ `extract` и 133 отказа `extract-repacked`. |
 | `audit-spreadsheet-roundtrip D:\УХА\sfc` после ограничения fallback-сканера пустых строк | 14 046 packed, 13 105 extracted, 13 105 repacked, 12 972 matched, 0 different, 1 074 extract/extract-repacked failures; 77.736 секунды release-прогона вместе с компиляцией | Закрыты все оставшиеся compare-расхождения SpreadsheetDocument. Следующий фронт - 941 первичный отказ `extract` и 133 отказа `extract-repacked`. |
-| `cargo test` | 296 passed | Unit-покрытие текущего кода стабильно после изменений. |
+| `audit-spreadsheet-roundtrip D:\УХА\sfc` после поддержки пустых листов в fallback-сканере | 14 046 packed, 14 046 extracted, 14 046 repacked, 14 046 matched, 0 different, 0 failed; 83.434 секунды release-прогона вместе с компиляцией | Текущий semantic round-trip всех табличных макетов `sfc` проходит полностью. Следующий фронт - SQL end-to-end проверка макетов и остальные крупные блоки, прежде всего формы. |
+| `cargo test` | 297 passed | Unit-покрытие текущего кода стабильно после изменений. |
 
 ## Загрузка XML -> SQL
 
@@ -205,7 +206,7 @@ BSL по именам:
 | Роли | Средняя, нужен stress-test |
 | Командный интерфейс | Средняя |
 | Макеты не SpreadsheetDocument | Средняя/высокая |
-| SpreadsheetDocument | Высокая для pack-аудита, средняя/высокая для semantic round-trip, но еще не полная |
+| SpreadsheetDocument | Высокая для pack-аудита и dry-run semantic round-trip; нужна SQL end-to-end проверка |
 | Формы | Низкая для полного round-trip |
 | Загрузка в новую пустую SQL-базу | Низкая/не доказана |
 
@@ -215,7 +216,7 @@ BSL по именам:
 |---|---|---|
 | Агент загрузки XML -> SQL | `src/mssql.rs`, stage/load CLI, batch-и, dry-run prepare | Есть отчет по всем объектам `sfc`: сколько root XML выбрано, сколько body rows подготовлено, сколько файлов проигнорировано; batch row count покрыт тестом. |
 | Агент выгрузки SQL -> XML | `src/mssql_dump.rs`, native `mssql-dump-config`, source layout writer | Есть structural diff между native dump и эталонным layout: missing/extra/different по типам файлов. |
-| Агент макетов и assets | `src/module_blob.rs`, `src/source_audit.rs`, MOXCEL, CommonPictures, Template.bin | `audit-spreadsheet-templates` дает 14 046 / 14 046 packed; `audit-spreadsheet-roundtrip` вырос до 12 972 / 14 046 matched, compare-расхождений больше нет. Следующий критерий - разобрать 941 первичный `extract` failure и 133 `extract-repacked`, плюс stress-test `BinaryData`/`AddIn`. |
+| Агент макетов и assets | `src/module_blob.rs`, `src/source_audit.rs`, MOXCEL, CommonPictures, Template.bin | `audit-spreadsheet-templates` дает 14 046 / 14 046 packed; `audit-spreadsheet-roundtrip` дает 14 046 / 14 046 matched без отказов и compare-расхождений. Следующий критерий - SQL end-to-end проверка SpreadsheetDocument и stress-test `BinaryData`/`AddIn`. |
 | Агент форм | compile/decompile `Ext/Form.xml`, form item assets | Вместо каркаса формы выгружается и загружается реальная структура хотя бы для малого набора форм, затем расширение на `sfc`. |
 | Агент интеграции | test harness, SQL clone, сравнение с `ibcmd` | Есть сценарий `ibcmd load` vs `ibcmd-rs stage/load` на копии базы и post-compare по `_Config`/`ConfigSave`/source dump. |
 

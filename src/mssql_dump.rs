@@ -4390,12 +4390,21 @@ fn parse_moxel_rows_by_scanning(fields: &[&str]) -> Vec<MoxelRow> {
     let mut rows = Vec::new();
     let mut index = 3usize;
     let mut expected_row_index = 0usize;
+    let mut next_contiguous_index = None;
     while index < fields.len() {
         if let Some((row, next_index)) =
             parse_moxel_row_at_for_scanning(fields, index, expected_row_index)
         {
+            if expected_row_index > 0
+                && is_moxel_compactable_empty_row(&row)
+                && next_contiguous_index != Some(index)
+            {
+                index += 1;
+                continue;
+            }
             rows.push(row);
             expected_row_index += 1;
+            next_contiguous_index = Some(next_index);
             index = next_index;
         } else {
             index += 1;
@@ -4453,7 +4462,7 @@ fn parse_moxel_row_at_for_scanning(
             format_offset: 1,
             cell_count_offset: 2,
             cells_offset: 3,
-            allow_empty: false,
+            allow_empty: true,
             validate_empty_prefix: false,
         },
     ) {
@@ -11080,6 +11089,39 @@ mod tests {
         assert!(
             extracted.contains("CatalogRef &quot;ReportsKinds&quot; -&amp;nbsp;the report type")
         );
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_empty_sheet() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>0</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<templateMode>true</templateMode>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<vgRows>0</vgRows>
+	<format>
+		<width>72</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<empty>true</empty>"));
     }
 
     #[test]
