@@ -2,7 +2,21 @@
 
 Дата оценки: 2026-06-27.
 
-`D:\УХА\sfc` используется как крупный эталонный набор исходников 1С, а не как единственная целевая конфигурация. Цель оценки - понять, насколько `ibcmd-rs` сейчас способен полноценно выгружать конфигурацию из SQL в XML-исходники и загружать XML-исходники обратно в SQL.
+`D:\УХА\sfc` используется как крупный эталонный набор исходников 1С, а не как единственная целевая конфигурация. Цель оценки - понять, насколько `ibcmd-rs` сейчас способен полноценно выгружать конфигурацию из SQL в XML-исходники и загружать XML-исходники обратно в SQL для произвольных конфигураций такого класса сложности.
+
+## Как читать эту оценку
+
+Эта оценка не означает, что инструмент должен быть завязан на ERP/УХА или на конкретный путь `D:\УХА\sfc`. Эта папка нужна как мерная линейка: в ней есть почти все массовые типы метаданных, формы, макеты, роли, картинки, справка, командный интерфейс и большие бинарные assets. Если `ibcmd-rs` проходит такую конфигурацию, он ближе к универсальному инструменту для любых конфигураций 1С.
+
+Ключевые режимы оценки:
+
+| Направление | Команда/код | Текущий статус | Что еще надо доказать |
+|---|---|---|---|
+| Native SQL -> XML | `mssql-dump-config`, `src/mssql_dump.rs` | Частично работает: модули, многие `Ext`-тела, макеты, справка, роли, картинки; формы пока только каркас | Structural diff с эталонной выгрузкой по всей конфигурации или большому срезу |
+| XML -> SQL staging | `mssql-stage-source-objects`, `src/mssql.rs` | Частично работает как обновление существующей базы через `ConfigSave`; не как полная загрузка в пустую базу | Массовый dry-run и реальный apply на большом срезе без неподдержанных body-файлов |
+| XML -> пустая SQL-база | пока нет отдельного полноценного режима | Не доказано | Bootstrap всех `_Config`/metadata/body rows без зависимости от base blob-ов |
+| Round-trip | `dump -> load/stage -> apply -> dump -> diff` | Доказан только на малых срезах; для `SpreadsheetDocument` есть сильный dry-run `XML -> blob -> XML -> blob -> XML` | Полный SQL end-to-end, особенно формы, роли, макеты и command interface |
+| Wrapper над штатным `ibcmd` | `dump-sources` | Не считается native-возможностью `ibcmd-rs` | Использовать только как эталон/контроль, не как доказательство нашей реализации |
 
 ## Состав эталонной конфигурации
 
@@ -131,7 +145,7 @@ BSL по именам:
 | Повторный `mssql-dump-config --database ibcmd_rs_sfc_stage_valyuty_20260627 --file-name 7aadbb67-f93e-43bb-9f53-f14d2c2a347a --file-name 5f91b00f-d8fc-4d63-8486-66339357ab22 --extract-metadata-xml` после исправления form metadata shape `14` | Dump selected-набора проходит: 7 rows, 25 489 binary bytes, 3 module text rows, 2 metadata XML rows, 2 source asset rows. `5f91b00f-d8fc-4d63-8486-66339357ab22` теперь выгружается в `Catalogs/Валюты/Forms/ФормаСписка.xml`, body `.0` - в `Catalogs/Валюты/Forms/ФормаСписка/Ext/Form.xml`, module - в `Catalogs/Валюты/Forms/ФормаСписка/Ext/Form/Module.bsl`; ошибочные пути `IntegrationServices/ФормаСписка.xml` и `CommonForms/Валюты/Ext/Help.xml` отсутствуют | Закрыт path resolver дефект для реальной SFC формы с wrapped form metadata code `14`. Это улучшает точечную native SQL -> XML выгрузку до layout, ожидаемого `ibcmd export`; содержимое `Ext/Form.xml` всё еще частичное. |
 | Повторный `mssql-dump-config --database ibcmd_rs_sfc_stage_valyuty_20260627 --file-name 7aadbb67-f93e-43bb-9f53-f14d2c2a347a --file-name 5f91b00f-d8fc-4d63-8486-66339357ab22 --extract-metadata-xml` после извлечения верхних свойств формы | `Catalogs/Валюты/Forms/ФормаСписка/Ext/Form.xml` теперь содержит `WindowOpeningMode=DontBlock`, `Group=Vertical`, `AutoCommandBar`, события `ChoiceProcessing`, `NotificationProcessing`, `OnCreateAtServer`; тесты добавлены для `WindowOpeningMode` codes `0/1/2` и подтвержденных `Group` mappings `Vertical`/`Horizontal`/`AlwaysHorizontal` | Еще один шаг к native decompile формы. `Attributes`, `ChildItems`, команды и полное дерево элементов пока не реконструируются, поэтому это не полная совместимость с `ibcmd export`. |
 | `mssql-audit-source-parity --database ibcmd_rs_sfc_20260626_v85 --source-root D:\УХА\sfc --path-prefix CommonModules/CRMЛокализация --path-prefix Roles/АдминистраторПроцесса --path-prefix Enums/ВариантыЗагрузкиРабочихЦентров --path-prefix CommonPictures/AppStore` | 3 metadata XML и 1 common module XML выбрано; 3 metadata objects и 1 common module подготовлены; 2 body rows, 7 total Config rows; prepare failures 0; `version_patch_error`: empty; 8 `version_replacements`; 1 batch, expected_total_rows 10 | Смешанный smoke-аудит по разным семействам показал, что текущий loader может подготовить простой срез metadata/common module/body rows против SQL baseline и собрать staged `versions` blob. |
-| `cargo test` | 310 passed | Unit-покрытие текущего кода стабильно после изменений. |
+| `cargo test` | 311 passed | Unit-покрытие текущего кода стабильно после изменений. |
 
 ## Загрузка XML -> SQL
 
@@ -205,19 +219,20 @@ BSL по именам:
 
 Ориентировочная готовность:
 
-| Направление | Оценка |
-|---|---|
-| Выгрузка XML-карточек объектов | Высокая, но требует mass diff |
-| Загрузка XML-карточек объектов | Средняя/высокая, но зависит от base blob |
-| Модули BSL | Высокая |
-| Общие картинки | Высокая |
-| Справка | Средняя/высокая |
-| Роли | Средняя, нужен stress-test |
-| Командный интерфейс | Средняя |
-| Макеты не SpreadsheetDocument | Средняя/высокая |
-| SpreadsheetDocument | Высокая для pack-аудита и dry-run semantic round-trip; нужна SQL end-to-end проверка |
-| Формы | Низкая для полного round-trip; есть source audit baseline по всем 13 044 формам, но текущая загрузка stageable только для 12 216 модулей форм и не компилирует полную XML-структуру формы |
-| Загрузка в новую пустую SQL-базу | Низкая/не доказана |
+| Область | Объем в `sfc` | Native SQL -> XML | XML -> SQL | Главный остаток |
+|---|---:|---|---|---|
+| XML-карточки объектов | 25 977 объектов в `Configuration.xml`; 51 085 metadata XML в source coverage | Средняя/высокая: многие типы распознаются, но часть XML минимальная | Средняя/высокая: stage metadata работает, но зависит от base blob | Mass diff и расширение свойств metadata XML до уровня `ibcmd export` |
+| Модули BSL | 29 818 `.bsl` | Высокая | Высокая для поддержанного whitelist; 29 814 файлов отмечены поддержанными source-side | Добить редкие неподдержанные `.bsl` и проверить большой apply |
+| Управляемые формы | 13 044 `Ext/Form.xml`, 590 МБ XML; 12 216 form modules | Низкая для полной формы: есть `WindowOpeningMode`, `Group`, `AutoCommandBar`, часть `Events`, module/assets | Низкая для полной формы: грузится только `Ext/Form/Module.bsl`, полный `Ext/Form.xml` не компилируется | Полный compiler/decompiler `Attributes`, `Commands`, `ChildItems`, `Parameters`, events и вложенных form assets |
+| Табличные макеты `SpreadsheetDocument` | 14 046 `Template.xml` | Высокая в dry-run: semantic round-trip 14 046/14 046 | Высокая для pack-аудита, но SQL e2e не доказан | SQL `dump -> load -> dump -> diff` на реальной базе |
+| Прочие макеты | 1 541 DCS, 1 022 Text, 831 bin, 113 HTML, 64 GraphicalSchema, 5 appearance | Средняя/высокая | Средняя/высокая по маршрутам packer-ов | Round-trip/stress-test по каждому TemplateType |
+| Общие картинки | 3 248 объектов, 3 247 `Picture.xml` | Высокая, но JPEG/BMP требуют отдельной проверки детектора | Высокая для `CommonPictures` и части configuration pictures | Проверка всех форматов `zip/png/svg/bmp/gif/jpg/ico` в SQL e2e |
+| Справка | 6 333 `Help.xml` | Средняя/высокая | Средняя/высокая | Массовая сверка HTML/help assets после round-trip |
+| Роли | 2 114 `Rights.xml`, 496 МБ | Средняя | Средняя | Stress-test всех прав, RLS и шаблонов ограничений |
+| CommandInterface | 331 `CommandInterface.xml` | Средняя | Средняя | Полная сверка ссылок и порядка команд |
+| Прочие Ext bodies | `Schedule`, `Predefined`, `Content`, `Flowchart`, `Style`, raw XML bodies | Средняя/высокая | Средняя/высокая | Массовая проверка всех типов с diff |
+| Корневые assets конфигурации | несколько известных файлов `Ext/*` | Частично | Частично | Закрыть `AdditionalIndexes.xml`, `MobileClientSignature.bin`, `StandaloneConfigurationContent.bin`, `MainSectionCommandInterface.xml`, `ClientApplicationInterface.xml`, `HomePageWorkArea.xml` |
+| Загрузка в новую пустую SQL-базу | вся конфигурация | Не применимо | Низкая/не доказана | Bootstrap без существующих base blob-ов |
 
 ## Разбиение работ по агентам
 
