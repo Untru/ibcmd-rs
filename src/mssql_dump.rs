@@ -6,10 +6,12 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
+use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::cli::MssqlDumpConfigArgs;
 use crate::module_blob::unpack_module_blob_text;
+use crate::parallel;
 
 #[derive(Debug, Serialize)]
 pub struct MssqlDumpConfigReport {
@@ -153,6 +155,30 @@ struct DumpedTable {
     source_asset_rows: usize,
 }
 
+struct DumpedRow {
+    manifest: MssqlDumpRowManifest,
+    binary_bytes: usize,
+    inflated_rows: usize,
+    module_text_rows: usize,
+    metadata_xml_rows: usize,
+    source_asset_rows: usize,
+}
+
+struct DumpRowContext<'a> {
+    output_dir: &'a Path,
+    table: &'a str,
+    inflate: bool,
+    extract_module_text: bool,
+    extract_metadata_xml: bool,
+    module_text_paths: &'a BTreeMap<String, PathBuf>,
+    source_assets: &'a BTreeMap<String, SourceAsset>,
+    type_index: &'a BTreeMap<String, String>,
+    object_refs: &'a BTreeMap<String, String>,
+    form_refs: &'a BTreeMap<String, FormSourceReference>,
+    template_refs: &'a BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &'a BTreeMap<String, SubsystemSourceReference>,
+}
+
 fn dump_table_rows(
     output_dir: &Path,
     table: &str,
@@ -205,134 +231,42 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    ensure_unique_source_asset_paths(&source_assets)?;
 
-    let mut manifests = Vec::new();
+    let context = DumpRowContext {
+        output_dir,
+        table,
+        inflate,
+        extract_module_text,
+        extract_metadata_xml,
+        module_text_paths: &module_text_paths,
+        source_assets: &source_assets,
+        type_index: &type_index,
+        object_refs: &object_refs,
+        form_refs: &form_refs,
+        template_refs: &template_refs,
+        subsystem_refs: &subsystem_refs,
+    };
+    let dumped_rows = parallel::install(|| {
+        rows.par_iter()
+            .map(|row| dump_table_row(&context, row))
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut manifests = Vec::with_capacity(dumped_rows.len());
     let mut binary_bytes = 0;
     let mut inflated_rows = 0;
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
-    for row in rows {
-        let bytes = decode_hex(&row.binary_hex)
-            .with_context(|| format!("failed to decode {} row {}", table, row.file_name))?;
-        if bytes.len() != row.data_size as usize {
-            bail!(
-                "{} row {} DataSize {} does not match BinaryData length {}",
-                table,
-                row.file_name,
-                row.data_size,
-                bytes.len()
-            );
-        }
-        binary_bytes += bytes.len();
-
-        let safe_name = safe_storage_file_name(&row.file_name, row.part_no);
-        let binary_relative = PathBuf::from(table).join(format!("{safe_name}.bin"));
-        let binary_path = output_dir.join(&binary_relative);
-        fs::write(&binary_path, &bytes)
-            .with_context(|| format!("failed to write {}", binary_path.display()))?;
-
-        let inflated_relative = if inflate {
-            match inflate_raw_deflate(&bytes) {
-                Ok(inflated) => {
-                    let relative =
-                        PathBuf::from(format!("{table}_inflated")).join(format!("{safe_name}.txt"));
-                    let path = output_dir.join(&relative);
-                    fs::write(&path, inflated)
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                    inflated_rows += 1;
-                    Some(relative.to_string_lossy().replace('\\', "/"))
-                }
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
-
-        let module_text_relative = if extract_module_text {
-            let module_text = match unpack_module_blob_text(&bytes) {
-                Ok(text) => Some(text),
-                Err(_) if module_text_paths.contains_key(&row.file_name) => {
-                    unpack_form_body_module_text(&bytes)
-                }
-                Err(_) => None,
-            };
-            match module_text {
-                Some(text) => {
-                    let relative = module_text_paths
-                        .get(&row.file_name)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            PathBuf::from(format!("{table}_module_text"))
-                                .join(format!("{safe_name}.bsl"))
-                        });
-                    let path = output_dir.join(&relative);
-                    if let Some(parent) = path.parent() {
-                        fs::create_dir_all(parent)
-                            .with_context(|| format!("failed to create {}", parent.display()))?;
-                    }
-                    fs::write(&path, text)
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                    module_text_rows += 1;
-                    Some(relative.to_string_lossy().replace('\\', "/"))
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
-
-        let metadata_xml_relative = if extract_metadata_xml {
-            match extract_metadata_source_xml_with_refs(
-                &bytes,
-                &row.file_name,
-                &type_index,
-                &object_refs,
-                &form_refs,
-                &template_refs,
-                &subsystem_refs,
-            ) {
-                Some(extracted) => {
-                    let path = output_dir.join(&extracted.relative_path);
-                    if let Some(parent) = path.parent() {
-                        fs::create_dir_all(parent)
-                            .with_context(|| format!("failed to create {}", parent.display()))?;
-                    }
-                    fs::write(&path, extracted.xml)
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                    metadata_xml_rows += 1;
-                    Some(extracted.relative_path.to_string_lossy().replace('\\', "/"))
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
-
-        let source_asset_relative = if metadata_xml_relative.is_none() {
-            match source_assets.get(&row.file_name) {
-                Some(asset) => {
-                    let relative = write_source_asset(output_dir, asset, &bytes)?;
-                    source_asset_rows += 1;
-                    Some(relative.to_string_lossy().replace('\\', "/"))
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
-
-        manifests.push(MssqlDumpRowManifest {
-            file_name: row.file_name,
-            part_no: row.part_no,
-            data_size: row.data_size,
-            binary_bytes: bytes.len(),
-            binary_path: binary_relative.to_string_lossy().replace('\\', "/"),
-            inflated_path: inflated_relative,
-            module_text_path: module_text_relative,
-            metadata_xml_path: metadata_xml_relative,
-            source_asset_path: source_asset_relative,
-        });
+    for dumped in dumped_rows {
+        let dumped = dumped?;
+        binary_bytes += dumped.binary_bytes;
+        inflated_rows += dumped.inflated_rows;
+        module_text_rows += dumped.module_text_rows;
+        metadata_xml_rows += dumped.metadata_xml_rows;
+        source_asset_rows += dumped.source_asset_rows;
+        manifests.push(dumped.manifest);
     }
 
     Ok(DumpedTable {
@@ -343,6 +277,153 @@ fn dump_table_rows(
         metadata_xml_rows,
         source_asset_rows,
     })
+}
+
+fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<DumpedRow> {
+    let bytes = decode_hex(&row.binary_hex)
+        .with_context(|| format!("failed to decode {} row {}", context.table, row.file_name))?;
+    if bytes.len() != row.data_size as usize {
+        bail!(
+            "{} row {} DataSize {} does not match BinaryData length {}",
+            context.table,
+            row.file_name,
+            row.data_size,
+            bytes.len()
+        );
+    }
+
+    let safe_name = safe_storage_file_name(&row.file_name, row.part_no);
+    let binary_relative = PathBuf::from(context.table).join(format!("{safe_name}.bin"));
+    let binary_path = context.output_dir.join(&binary_relative);
+    fs::write(&binary_path, &bytes)
+        .with_context(|| format!("failed to write {}", binary_path.display()))?;
+
+    let mut inflated_rows = 0;
+    let inflated_relative = if context.inflate {
+        match inflate_raw_deflate(&bytes) {
+            Ok(inflated) => {
+                let relative = PathBuf::from(format!("{}_inflated", context.table))
+                    .join(format!("{safe_name}.txt"));
+                let path = context.output_dir.join(&relative);
+                fs::write(&path, inflated)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+                inflated_rows = 1;
+                Some(relative.to_string_lossy().replace('\\', "/"))
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let mut module_text_rows = 0;
+    let module_text_relative = if context.extract_module_text {
+        let module_text = match unpack_module_blob_text(&bytes) {
+            Ok(text) => Some(text),
+            Err(_) if context.module_text_paths.contains_key(&row.file_name) => {
+                unpack_form_body_module_text(&bytes)
+            }
+            Err(_) => None,
+        };
+        match module_text {
+            Some(text) => {
+                let relative = context
+                    .module_text_paths
+                    .get(&row.file_name)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        PathBuf::from(format!("{}_module_text", context.table))
+                            .join(format!("{safe_name}.bsl"))
+                    });
+                let path = context.output_dir.join(&relative);
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("failed to create {}", parent.display()))?;
+                }
+                fs::write(&path, text)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+                module_text_rows = 1;
+                Some(relative.to_string_lossy().replace('\\', "/"))
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    let mut metadata_xml_rows = 0;
+    let metadata_xml_relative = if context.extract_metadata_xml {
+        match extract_metadata_source_xml_with_refs(
+            &bytes,
+            &row.file_name,
+            context.type_index,
+            context.object_refs,
+            context.form_refs,
+            context.template_refs,
+            context.subsystem_refs,
+        ) {
+            Some(extracted) => {
+                let path = context.output_dir.join(&extracted.relative_path);
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("failed to create {}", parent.display()))?;
+                }
+                fs::write(&path, extracted.xml)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+                metadata_xml_rows = 1;
+                Some(extracted.relative_path.to_string_lossy().replace('\\', "/"))
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    let mut source_asset_rows = 0;
+    let source_asset_relative = if metadata_xml_relative.is_none() {
+        match context.source_assets.get(&row.file_name) {
+            Some(asset) => {
+                let relative = write_source_asset(context.output_dir, asset, &bytes)?;
+                source_asset_rows = 1;
+                Some(relative.to_string_lossy().replace('\\', "/"))
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(DumpedRow {
+        manifest: MssqlDumpRowManifest {
+            file_name: row.file_name.clone(),
+            part_no: row.part_no,
+            data_size: row.data_size,
+            binary_bytes: bytes.len(),
+            binary_path: binary_relative.to_string_lossy().replace('\\', "/"),
+            inflated_path: inflated_relative,
+            module_text_path: module_text_relative,
+            metadata_xml_path: metadata_xml_relative,
+            source_asset_path: source_asset_relative,
+        },
+        binary_bytes: bytes.len(),
+        inflated_rows,
+        module_text_rows,
+        metadata_xml_rows,
+        source_asset_rows,
+    })
+}
+
+fn ensure_unique_source_asset_paths(source_assets: &BTreeMap<String, SourceAsset>) -> Result<()> {
+    let mut paths = BTreeMap::<String, &str>::new();
+    for (file_name, asset) in source_assets {
+        let path = asset.primary_path.to_string_lossy().replace('\\', "/");
+        if let Some(previous_file_name) = paths.insert(path.clone(), file_name.as_str()) {
+            bail!(
+                "source asset output path {path} is produced by both {previous_file_name} and {file_name}"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -8713,6 +8794,74 @@ mod tests {
         assert_eq!(written, text);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dumps_table_rows_preserve_input_order() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let rows = vec![
+            ConfigRow {
+                file_name: "third".to_string(),
+                part_no: 0,
+                data_size: 3,
+                binary_hex: "010203".to_string(),
+            },
+            ConfigRow {
+                file_name: "first".to_string(),
+                part_no: 0,
+                data_size: 1,
+                binary_hex: "04".to_string(),
+            },
+            ConfigRow {
+                file_name: "second".to_string(),
+                part_no: 0,
+                data_size: 2,
+                binary_hex: "0506".to_string(),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, false).unwrap();
+
+        assert_eq!(
+            dumped
+                .rows
+                .iter()
+                .map(|row| row.file_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["third", "first", "second"]
+        );
+        assert_eq!(dumped.binary_bytes, 6);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_duplicate_source_asset_primary_paths() {
+        let source_assets = BTreeMap::from([
+            (
+                "first".to_string(),
+                SourceAsset {
+                    primary_path: PathBuf::from("Shared/Ext/Template.xml"),
+                    kind: SourceAssetKind::Binary,
+                },
+            ),
+            (
+                "second".to_string(),
+                SourceAsset {
+                    primary_path: PathBuf::from("Shared/Ext/Template.xml"),
+                    kind: SourceAssetKind::Binary,
+                },
+            ),
+        ]);
+
+        let error = ensure_unique_source_asset_paths(&source_assets)
+            .expect_err("duplicate source asset paths must be rejected");
+
+        assert!(error.to_string().contains("produced by both"));
     }
 
     #[test]
