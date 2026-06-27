@@ -38,9 +38,9 @@ use crate::cli::{
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, pack_common_module_metadata_blob_from_xml, pack_module_blob_bytes,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
-    parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
-    patch_versions_blob_bytes,
+    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
+    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
+    parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -1862,32 +1862,67 @@ fn prepare_metadata_body_rows(
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if properties.kind != "Style" {
-        return Ok(Vec::new());
+    match properties.kind.as_str() {
+        "Style" => prepare_style_body_row(sqlcmd, server, database, xml_path, properties, source),
+        "ScheduledJob" => {
+            prepare_scheduled_job_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        _ => Ok(Vec::new()),
     }
-    let style_body_path = infer_style_body_path(xml_path);
-    if !style_body_path.exists() {
+}
+
+fn prepare_style_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_style_body_path(xml_path);
+    if !body_path.exists() {
         return Ok(Vec::new());
     }
     let source = source.ok_or_else(|| {
         anyhow!(
             "source root is required to stage Style body {}",
-            style_body_path.display()
+            body_path.display()
         )
     })?;
     let body_id = format!("{}.0", properties.uuid);
     let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
-    let xml = fs::read(&style_body_path).with_context(|| {
-        format!(
-            "failed to read Style body XML {}",
-            style_body_path.display()
-        )
-    })?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read Style body XML {}", body_path.display()))?;
     let packed = pack_style_body_blob_from_xml(&xml, Some(source))
-        .with_context(|| format!("failed to pack Style body {}", style_body_path.display()))?;
+        .with_context(|| format!("failed to pack Style body {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
-        path: style_body_path,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_scheduled_job_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_scheduled_job_schedule_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read JobSchedule XML {}", body_path.display()))?;
+    let packed = pack_schedule_blob_from_xml(&xml)
+        .with_context(|| format!("failed to pack JobSchedule {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
     }])
@@ -3245,6 +3280,15 @@ fn infer_style_body_path(xml: &Path) -> PathBuf {
         .join("Style.xml")
 }
 
+fn infer_scheduled_job_schedule_path(xml: &Path) -> PathBuf {
+    let job_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(job_name)
+        .join("Ext")
+        .join("Schedule.xml")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -3815,6 +3859,46 @@ mod tests {
         assert!(sql.contains("0xAABBCC"));
         assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 55501"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+    }
+
+    #[test]
+    fn builds_source_tree_stage_sql_with_scheduled_job_schedule_body_row() {
+        let metadata = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "ScheduledJob".to_string(),
+            xml: PathBuf::from("ScheduledJobs/LoadRates.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "ScheduledJob".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "LoadRates".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: vec![PreparedMetadataBodyStage {
+                body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                path: PathBuf::from("ScheduledJobs/LoadRates/Ext/Schedule.xml"),
+                blob: vec![0x10, 0x20, 0x30],
+                blob_sha256: "feedface".to_string(),
+            }],
+        }];
+
+        let sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &metadata,
+            &[],
+            &[0xDD, 0xEE],
+            true,
+            true,
+            5,
+        );
+
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
+        assert!(sql.contains("0x102030"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 55501"));
     }
 
     #[test]

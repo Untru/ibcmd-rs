@@ -128,6 +128,13 @@ pub struct PackedStyleBodyBlob {
 }
 
 #[derive(Debug, Clone)]
+pub struct PackedScheduleBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
 }
@@ -805,6 +812,226 @@ fn style_body_web_color_code(name: &str) -> Option<i32> {
         "Yellow" => Some(145),
         _ => None,
     }
+}
+
+pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
+    let schedule = parse_schedule_xml(xml)?;
+    let mut fields = Vec::with_capacity(16 + schedule.week_days.len() + schedule.months.len());
+    fields.push(format_schedule_date(&schedule.begin_date)?);
+    fields.push(format_schedule_date(&schedule.end_date)?);
+    fields.push(format_schedule_time(&schedule.begin_time)?);
+    fields.push(format_schedule_time(&schedule.end_time)?);
+    fields.push(format_schedule_time(&schedule.completion_time)?);
+    fields.push(schedule.completion_interval);
+    fields.push(schedule.repeat_period_in_day);
+    fields.push(schedule.repeat_pause);
+    fields.push(schedule.week_days.len().to_string());
+    fields.extend(schedule.week_days);
+    fields.push(schedule.week_day_in_month);
+    fields.push(schedule.day_in_month);
+    fields.push(schedule.months.len().to_string());
+    fields.extend(schedule.months);
+    fields.push(schedule.weeks_period);
+    fields.push(schedule.days_repeat_period);
+
+    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+
+    Ok(PackedScheduleBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ScheduleXmlProperties {
+    begin_date: String,
+    end_date: String,
+    begin_time: String,
+    end_time: String,
+    completion_time: String,
+    completion_interval: String,
+    repeat_period_in_day: String,
+    repeat_pause: String,
+    week_day_in_month: String,
+    day_in_month: String,
+    week_days: Vec<String>,
+    months: Vec<String>,
+    weeks_period: String,
+    days_repeat_period: String,
+}
+
+fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut attrs = None::<BTreeMap<String, String>>;
+    let mut text_target = None::<String>;
+    let mut text_value = String::new();
+    let mut week_days = None::<Vec<String>>;
+    let mut months = None::<Vec<String>>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["JobSchedule"]) && local == "Schedule" {
+                    attrs = Some(xml_attrs_map(&event));
+                } else if path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    && (local == "WeekDays" || local == "Months")
+                {
+                    text_target = Some(local.clone());
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if text_target.is_some() {
+                    let text = text.xml_content()?;
+                    let text = unescape(text.as_ref())?;
+                    text_value.push_str(text.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if text_target.is_some() {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if text_target.is_some() {
+                    let text = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text_value.push_str(&text);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if text_target.as_deref() == Some(local.as_str()) {
+                    let values = parse_schedule_number_text_list(&text_value)?;
+                    if local == "WeekDays" {
+                        week_days = Some(values);
+                    } else if local == "Months" {
+                        months = Some(values);
+                    }
+                    text_target = None;
+                    text_value.clear();
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    let attrs = attrs.ok_or_else(|| anyhow!("JobSchedule/Schedule element is missing"))?;
+    Ok(ScheduleXmlProperties {
+        begin_date: required_schedule_attr(&attrs, "BeginDate")?,
+        end_date: required_schedule_attr(&attrs, "EndDate")?,
+        begin_time: required_schedule_attr(&attrs, "BeginTime")?,
+        end_time: required_schedule_attr(&attrs, "EndTime")?,
+        completion_time: required_schedule_attr(&attrs, "CompletionTime")?,
+        completion_interval: required_schedule_number_attr(&attrs, "CompletionInterval")?,
+        repeat_period_in_day: required_schedule_number_attr(&attrs, "RepeatPeriodInDay")?,
+        repeat_pause: required_schedule_number_attr(&attrs, "RepeatPause")?,
+        week_day_in_month: required_schedule_number_attr(&attrs, "WeekDayInMonth")?,
+        day_in_month: required_schedule_number_attr(&attrs, "DayInMonth")?,
+        week_days: week_days.unwrap_or_default(),
+        months: months.unwrap_or_default(),
+        weeks_period: required_schedule_number_attr(&attrs, "WeeksPeriod")?,
+        days_repeat_period: required_schedule_number_attr(&attrs, "DaysRepeatPeriod")?,
+    })
+}
+
+fn required_schedule_attr(attrs: &BTreeMap<String, String>, name: &str) -> Result<String> {
+    attrs
+        .get(name)
+        .cloned()
+        .ok_or_else(|| anyhow!("JobSchedule/Schedule @{name} is missing"))
+}
+
+fn required_schedule_number_attr(attrs: &BTreeMap<String, String>, name: &str) -> Result<String> {
+    let value = required_schedule_attr(attrs, name)?;
+    validate_schedule_number(&value)?;
+    Ok(value)
+}
+
+fn parse_schedule_number_text_list(text: &str) -> Result<Vec<String>> {
+    text.split_whitespace()
+        .map(|value| {
+            validate_schedule_number(value)?;
+            Ok(value.to_string())
+        })
+        .collect()
+}
+
+fn validate_schedule_number(value: &str) -> Result<()> {
+    if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err(anyhow!("invalid schedule number: {value}"))
+    }
+}
+
+fn format_schedule_date(value: &str) -> Result<String> {
+    let mut parts = value.split('-');
+    let year = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule date: {value}"))?;
+    let month = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule date: {value}"))?;
+    let day = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule date: {value}"))?;
+    if parts.next().is_some()
+        || year.len() != 4
+        || month.len() != 2
+        || day.len() != 2
+        || !year
+            .chars()
+            .chain(month.chars())
+            .chain(day.chars())
+            .all(|ch| ch.is_ascii_digit())
+    {
+        return Err(anyhow!("invalid schedule date: {value}"));
+    }
+    Ok(format!("{year}{month}{day}000000"))
+}
+
+fn format_schedule_time(value: &str) -> Result<String> {
+    let mut parts = value.split(':');
+    let hour = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule time: {value}"))?;
+    let minute = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule time: {value}"))?;
+    let second = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule time: {value}"))?;
+    if parts.next().is_some()
+        || hour.len() != 2
+        || minute.len() != 2
+        || second.len() != 2
+        || !hour
+            .chars()
+            .chain(minute.chars())
+            .chain(second.chars())
+            .all(|ch| ch.is_ascii_digit())
+    {
+        return Err(anyhow!("invalid schedule time: {value}"));
+    }
+    Ok(format!("00010101{hour}{minute}{second}"))
 }
 
 #[derive(Debug, Clone)]
@@ -4911,6 +5138,29 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.ends_with(",{0}}"));
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_scheduled_job_schedule_xml() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<JobSchedule xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" version="2.17">
+	<Schedule BeginDate="0001-01-01" EndDate="0001-01-01" BeginTime="08:00:00" EndTime="17:00:00" CompletionTime="00:00:00" CompletionInterval="0" RepeatPeriodInDay="60" RepeatPause="0" WeekDayInMonth="0" DayInMonth="1" WeeksPeriod="1" DaysRepeatPeriod="0">
+		<ent:WeekDays>6 7</ent:WeekDays>
+		<ent:Months>1 2 3 4 5 6 7 8 9 10 11 12</ent:Months>
+	</Schedule>
+</JobSchedule>
+"#;
+
+        let packed = super::pack_schedule_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
         Ok(())
     }
 
