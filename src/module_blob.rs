@@ -970,12 +970,16 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
     }
+    fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
     fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
     fields.extend(format_spreadsheet_formats_for_moxel(
         &spreadsheet,
         column_count,
     ));
     fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
+    if !spreadsheet.pictures.is_empty() {
+        fields.push(format_spreadsheet_pictures_for_moxel(&spreadsheet.pictures));
+    }
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -1004,6 +1008,8 @@ struct SpreadsheetDocumentXml {
     fonts: Vec<SpreadsheetDocumentXmlFont>,
     lines: Vec<SpreadsheetDocumentXmlLine>,
     empty_header_footer_tags: BTreeSet<String>,
+    pictures: Vec<SpreadsheetDocumentXmlPicture>,
+    drawings: Vec<SpreadsheetDocumentXmlDrawing>,
 }
 
 #[derive(Debug, Default)]
@@ -1155,6 +1161,29 @@ struct SpreadsheetDocumentXmlHeaderFooter {
     tfl_empty: bool,
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlPicture {
+    index: usize,
+    ref_name: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlDrawing {
+    format_index: usize,
+    begin_row: i32,
+    begin_row_offset: i32,
+    end_row: i32,
+    end_row_offset: i32,
+    begin_column: i32,
+    begin_column_offset: i32,
+    end_column: i32,
+    end_column_offset: i32,
+    auto_size: bool,
+    picture_size: String,
+    z_order: usize,
+    picture_index: usize,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1171,6 +1200,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
     let mut current_line = None::<SpreadsheetDocumentXmlLine>;
     let mut current_header_footer = None::<SpreadsheetDocumentXmlHeaderFooter>;
+    let mut current_picture = None::<SpreadsheetDocumentXmlPicture>;
+    let mut current_drawing = None::<SpreadsheetDocumentXmlDrawing>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1213,6 +1244,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                         tag: local.clone(),
                         ..Default::default()
                     });
+                } else if local == "picture" && current_picture.is_none() {
+                    current_picture = Some(SpreadsheetDocumentXmlPicture::default());
+                } else if local == "drawing" {
+                    current_drawing = Some(SpreadsheetDocumentXmlDrawing::default());
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1241,6 +1276,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(header_footer) = current_header_footer.as_mut()
                 {
                     header_footer.tfl_empty = true;
+                } else if local == "picture" && current_picture.is_some() {
+                    if let Some(picture) = current_picture.as_mut() {
+                        picture.ref_name = xml_attribute_value(&event, "ref")?;
+                    }
                 } else if current_cell.is_some()
                     && local == "tl"
                     && let Some(cell) = current_cell.as_mut()
@@ -1299,6 +1338,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_format.as_mut(),
                     current_line.as_mut(),
                     current_header_footer.as_mut(),
+                    current_picture.as_mut(),
+                    current_drawing.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1360,6 +1401,14 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && header_footer.tfl_empty
                 {
                     document.empty_header_footer_tags.insert(header_footer.tag);
+                } else if local == "picture"
+                    && let Some(picture) = current_picture.take()
+                {
+                    document.pictures.push(picture);
+                } else if local == "drawing"
+                    && let Some(drawing) = current_drawing.take()
+                {
+                    document.drawings.push(drawing);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
@@ -1541,6 +1590,15 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "picHorizontalAlignment"
             | "picVerticalAlignment"
             | "style"
+            | "drawingType"
+            | "beginRowOffset"
+            | "endRowOffset"
+            | "beginColumnOffset"
+            | "endColumnOffset"
+            | "autoSize"
+            | "pictureSize"
+            | "zOrder"
+            | "pictureIndex"
     )
 }
 
@@ -1559,6 +1617,8 @@ fn apply_spreadsheet_text_value(
     format: Option<&mut SpreadsheetDocumentXmlFormat>,
     line: Option<&mut SpreadsheetDocumentXmlLine>,
     header_footer: Option<&mut SpreadsheetDocumentXmlHeaderFooter>,
+    picture: Option<&mut SpreadsheetDocumentXmlPicture>,
+    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
 ) {
     let value = text.trim();
     match local {
@@ -1591,6 +1651,13 @@ fn apply_spreadsheet_text_value(
                 row.index = index;
             }
         }
+        "index" if path_ends_with(path, &["picture", "index"]) => {
+            if let Some(picture) = picture
+                && let Ok(index) = value.parse::<usize>()
+            {
+                picture.index = index;
+            }
+        }
         "indexTo" if path_ends_with(path, &["rowsItem", "indexTo"]) => {
             if let Some(row) = row
                 && let Ok(index_to) = value.parse::<usize>()
@@ -1603,6 +1670,13 @@ fn apply_spreadsheet_text_value(
                 && let Ok(format_index) = value.parse::<usize>()
             {
                 row.format_index = format_index;
+            }
+        }
+        "formatIndex" if path_ends_with(path, &["drawing", "formatIndex"]) => {
+            if let Some(drawing) = drawing
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                drawing.format_index = format_index;
             }
         }
         "formatIndex"
@@ -1966,6 +2040,64 @@ fn apply_spreadsheet_text_value(
                 format.pic_vertical_alignment = Some(parsed)
             });
         }
+        "beginRow" if path_ends_with(path, &["drawing", "beginRow"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_row = parsed
+            });
+        }
+        "beginRowOffset" if path_ends_with(path, &["drawing", "beginRowOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_row_offset = parsed
+            });
+        }
+        "endRow" if path_ends_with(path, &["drawing", "endRow"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| drawing.end_row = parsed);
+        }
+        "endRowOffset" if path_ends_with(path, &["drawing", "endRowOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.end_row_offset = parsed
+            });
+        }
+        "beginColumn" if path_ends_with(path, &["drawing", "beginColumn"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_column = parsed
+            });
+        }
+        "beginColumnOffset" if path_ends_with(path, &["drawing", "beginColumnOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_column_offset = parsed
+            });
+        }
+        "endColumn" if path_ends_with(path, &["drawing", "endColumn"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.end_column = parsed
+            });
+        }
+        "endColumnOffset" if path_ends_with(path, &["drawing", "endColumnOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.end_column_offset = parsed
+            });
+        }
+        "autoSize" if path_ends_with(path, &["drawing", "autoSize"]) => {
+            if let Some(drawing) = drawing {
+                drawing.auto_size = value.eq_ignore_ascii_case("true");
+            }
+        }
+        "pictureSize" if path_ends_with(path, &["drawing", "pictureSize"]) => {
+            if let Some(drawing) = drawing {
+                drawing.picture_size = text.to_string();
+            }
+        }
+        "zOrder" if path_ends_with(path, &["drawing", "zOrder"]) => {
+            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| {
+                drawing.z_order = parsed
+            });
+        }
+        "pictureIndex" if path_ends_with(path, &["drawing", "pictureIndex"]) => {
+            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| {
+                drawing.picture_index = parsed
+            });
+        }
         "style" if path_ends_with(path, &["line", "style"]) => {
             if let Some(line) = line {
                 line.style = text.to_string();
@@ -2026,6 +2158,30 @@ fn set_spreadsheet_format_string(
 ) {
     if let Some(format) = format {
         setter(format, value.to_string());
+    }
+}
+
+fn set_spreadsheet_drawing_i32(
+    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlDrawing, i32),
+) {
+    if let Some(drawing) = drawing
+        && let Ok(parsed) = value.parse::<i32>()
+    {
+        setter(drawing, parsed);
+    }
+}
+
+fn set_spreadsheet_drawing_usize(
+    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlDrawing, usize),
+) {
+    if let Some(drawing) = drawing
+        && let Ok(parsed) = value.parse::<usize>()
+    {
+        setter(drawing, parsed);
     }
 }
 
@@ -2724,6 +2880,45 @@ fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
         "Dotted" => Some(-10),
         _ => None,
     }
+}
+
+fn format_spreadsheet_drawings_for_moxel(
+    drawings: &[SpreadsheetDocumentXmlDrawing],
+) -> Vec<String> {
+    drawings
+        .iter()
+        .filter_map(format_spreadsheet_drawing_for_moxel)
+        .collect()
+}
+
+fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing) -> Option<String> {
+    if drawing.picture_size != "Stretch" {
+        return None;
+    }
+    let auto_size = if drawing.auto_size { 0 } else { 1 };
+    Some(format!(
+        "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
+        drawing.format_index,
+        drawing.begin_column.max(0),
+        drawing.begin_row.max(0),
+        drawing.begin_column_offset.max(0),
+        drawing.begin_row_offset.max(0),
+        drawing.end_column.max(drawing.begin_column).max(0),
+        drawing.end_row.max(drawing.begin_row).max(0),
+        drawing.end_column_offset.max(0),
+        drawing.end_row_offset.max(0),
+        drawing.z_order,
+        drawing.picture_index
+    ))
+}
+
+fn format_spreadsheet_pictures_for_moxel(pictures: &[SpreadsheetDocumentXmlPicture]) -> String {
+    let mut fields = Vec::with_capacity(pictures.len() + 1);
+    fields.push(pictures.len().to_string());
+    for picture in pictures {
+        fields.push(format!("{{4,{}}}", picture.index));
+    }
+    format!("{{{}}}", fields.join(","))
 }
 
 fn format_spreadsheet_fonts_for_moxel(fonts: &[SpreadsheetDocumentXmlFont]) -> Vec<String> {
@@ -9236,6 +9431,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert_eq!(text.matches("{16,0,{1,0},1,{1,{1,0},1}}").count(), 6);
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_picture_drawings() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<drawing>
+		<drawingType>Picture</drawingType>
+		<id>1</id>
+		<formatIndex>31</formatIndex>
+		<beginRow>1</beginRow>
+		<beginRowOffset>20</beginRowOffset>
+		<endRow>6</endRow>
+		<endRowOffset>88</endRowOffset>
+		<beginColumn>1</beginColumn>
+		<beginColumnOffset>24</beginColumnOffset>
+		<endColumn>20</endColumn>
+		<endColumnOffset>70</endColumnOffset>
+		<autoSize>true</autoSize>
+		<pictureSize>Stretch</pictureSize>
+		<zOrder>1</zOrder>
+		<pictureIndex>0</pictureIndex>
+	</drawing>
+	<picture>
+		<index>0</index>
+		<picture/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,0,1,1,0}"));
+        assert!(text.contains("{1,{4,0}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
