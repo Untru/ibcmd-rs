@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,8 +8,9 @@ use walkdir::WalkDir;
 
 use crate::module_blob::{
     MetadataSourceContext, pack_moxel_spreadsheet_blob_from_xml_with_source,
-    parse_template_type_from_xml,
+    parse_simple_metadata_xml_properties, parse_template_type_from_xml,
 };
+use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 
 #[derive(Debug, Serialize)]
 pub struct SpreadsheetTemplateAuditReport {
@@ -24,6 +26,28 @@ pub struct SpreadsheetTemplateAuditReport {
 pub struct SpreadsheetTemplateAuditError {
     pub metadata_xml: String,
     pub template_xml: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpreadsheetTemplateRoundTripAuditReport {
+    pub root: PathBuf,
+    pub template_xml_files: usize,
+    pub spreadsheet_templates: usize,
+    pub packed: usize,
+    pub extracted: usize,
+    pub repacked: usize,
+    pub matched: usize,
+    pub different: usize,
+    pub failed: usize,
+    pub errors: Vec<SpreadsheetTemplateRoundTripAuditError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpreadsheetTemplateRoundTripAuditError {
+    pub metadata_xml: String,
+    pub template_xml: String,
+    pub phase: String,
     pub message: String,
 }
 
@@ -86,6 +110,149 @@ pub fn audit_spreadsheet_templates(root: &Path) -> Result<SpreadsheetTemplateAud
     })
 }
 
+pub fn audit_spreadsheet_template_roundtrip(
+    root: &Path,
+) -> Result<SpreadsheetTemplateRoundTripAuditReport> {
+    if !root.is_dir() {
+        return Err(anyhow!(
+            "source root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let root = fs::canonicalize(root)
+        .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+    let source = MetadataSourceContext::new(root.clone());
+    let object_refs = common_picture_object_refs(&root)?;
+    let mut template_xml_files = 0usize;
+    let mut spreadsheet_templates = 0usize;
+    let mut packed = 0usize;
+    let mut extracted = 0usize;
+    let mut repacked = 0usize;
+    let mut matched = 0usize;
+    let mut different = 0usize;
+    let mut errors = Vec::new();
+
+    for entry in WalkDir::new(&root)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() || entry.file_name() != "Template.xml" {
+            continue;
+        }
+        let template_xml = entry.path();
+        let Some(metadata_xml) = template_metadata_xml_path(template_xml) else {
+            continue;
+        };
+        template_xml_files += 1;
+        let metadata = fs::read(&metadata_xml)
+            .with_context(|| format!("failed to read {}", metadata_xml.display()))?;
+        if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
+            continue;
+        }
+        spreadsheet_templates += 1;
+
+        let xml = fs::read(template_xml)
+            .with_context(|| format!("failed to read {}", template_xml.display()))?;
+        let first = match pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(&source)) {
+            Ok(blob) => {
+                packed += 1;
+                blob
+            }
+            Err(error) => {
+                push_roundtrip_error(
+                    &root,
+                    &metadata_xml,
+                    template_xml,
+                    "pack",
+                    error,
+                    &mut errors,
+                );
+                continue;
+            }
+        };
+        let extracted_xml = match extract_moxel_spreadsheet_xml(&first.blob, &object_refs) {
+            Some(xml) => {
+                extracted += 1;
+                xml
+            }
+            None => {
+                errors.push(SpreadsheetTemplateRoundTripAuditError {
+                    metadata_xml: relative_path_string(&root, &metadata_xml),
+                    template_xml: relative_path_string(&root, template_xml),
+                    phase: "extract".to_string(),
+                    message: "failed to extract SpreadsheetDocument XML from packed MOXCEL blob"
+                        .to_string(),
+                });
+                continue;
+            }
+        };
+        let second = match pack_moxel_spreadsheet_blob_from_xml_with_source(
+            extracted_xml.as_bytes(),
+            Some(&source),
+        ) {
+            Ok(blob) => {
+                repacked += 1;
+                blob
+            }
+            Err(error) => {
+                push_roundtrip_error(
+                    &root,
+                    &metadata_xml,
+                    template_xml,
+                    "repack",
+                    error,
+                    &mut errors,
+                );
+                continue;
+            }
+        };
+        let second_extracted_xml = match extract_moxel_spreadsheet_xml(&second.blob, &object_refs) {
+            Some(xml) => xml,
+            None => {
+                errors.push(SpreadsheetTemplateRoundTripAuditError {
+                    metadata_xml: relative_path_string(&root, &metadata_xml),
+                    template_xml: relative_path_string(&root, template_xml),
+                    phase: "extract-repacked".to_string(),
+                    message: "failed to extract SpreadsheetDocument XML from repacked MOXCEL blob"
+                        .to_string(),
+                });
+                continue;
+            }
+        };
+        if extracted_xml == second_extracted_xml {
+            matched += 1;
+        } else {
+            different += 1;
+            errors.push(SpreadsheetTemplateRoundTripAuditError {
+                metadata_xml: relative_path_string(&root, &metadata_xml),
+                template_xml: relative_path_string(&root, template_xml),
+                phase: "compare".to_string(),
+                message: roundtrip_difference_message(&extracted_xml, &second_extracted_xml),
+            });
+        }
+    }
+
+    errors.sort_by(|left, right| {
+        left.template_xml
+            .cmp(&right.template_xml)
+            .then(left.phase.cmp(&right.phase))
+    });
+    Ok(SpreadsheetTemplateRoundTripAuditReport {
+        root,
+        template_xml_files,
+        spreadsheet_templates,
+        packed,
+        extracted,
+        repacked,
+        matched,
+        different,
+        failed: errors.len(),
+        errors,
+    })
+}
+
 fn template_metadata_xml_path(template_xml: &Path) -> Option<PathBuf> {
     if template_xml.file_name()? != "Template.xml" {
         return None;
@@ -109,6 +276,62 @@ fn is_ignored(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name == ".git" || name == ".vscode" || name == "target")
+}
+
+fn common_picture_object_refs(root: &Path) -> Result<BTreeMap<String, String>> {
+    let mut refs = BTreeMap::new();
+    let common_pictures = root.join("CommonPictures");
+    if !common_pictures.is_dir() {
+        return Ok(refs);
+    }
+    for entry in fs::read_dir(&common_pictures)
+        .with_context(|| format!("failed to read {}", common_pictures.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+            continue;
+        }
+        let xml = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        if properties.kind == "CommonPicture" {
+            refs.insert(
+                properties.uuid,
+                format!("CommonPicture.{}", properties.name),
+            );
+        }
+    }
+    Ok(refs)
+}
+
+fn roundtrip_difference_message(first: &str, second: &str) -> String {
+    let first_diff = first
+        .bytes()
+        .zip(second.bytes())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| first.len().min(second.len()));
+    format!(
+        "round-trip SpreadsheetDocument XML differs: first_bytes={}, second_bytes={}, first_diff_offset={first_diff}",
+        first.len(),
+        second.len()
+    )
+}
+
+fn push_roundtrip_error(
+    root: &Path,
+    metadata_xml: &Path,
+    template_xml: &Path,
+    phase: &str,
+    error: impl std::fmt::Display,
+    errors: &mut Vec<SpreadsheetTemplateRoundTripAuditError>,
+) {
+    errors.push(SpreadsheetTemplateRoundTripAuditError {
+        metadata_xml: relative_path_string(root, metadata_xml),
+        template_xml: relative_path_string(root, template_xml),
+        phase: phase.to_string(),
+        message: error.to_string(),
+    });
 }
 
 #[cfg(test)]
@@ -141,7 +364,7 @@ mod tests {
         fs::write(
             root.join("CommonTemplates/Good/Ext/Template.xml"),
             br#"
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
   <columns><size>1</size></columns>
   <rowsItem>
     <index>0</index>
@@ -185,6 +408,68 @@ mod tests {
                 .message
                 .contains("SpreadsheetDocument XML has no rowsItem entries")
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn audits_spreadsheet_template_roundtrip_matches_stable_moxel() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-spreadsheet-roundtrip-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(root.join("CommonTemplates/Good/Ext"))?;
+        fs::write(
+            root.join("CommonTemplates/Good.xml"),
+            br#"
+<MetaDataObject>
+  <CommonTemplate uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Good</Name>
+      <Synonym/>
+      <Comment/>
+      <TemplateType>SpreadsheetDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>
+"#,
+        )?;
+        fs::write(
+            root.join("CommonTemplates/Good/Ext/Template.xml"),
+            br#"
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+  <columns><size>1</size></columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#,
+        )?;
+
+        let report = audit_spreadsheet_template_roundtrip(&root)?;
+
+        assert_eq!(report.template_xml_files, 1);
+        assert_eq!(report.spreadsheet_templates, 1);
+        assert_eq!(report.packed, 1);
+        assert_eq!(report.extracted, 1);
+        assert_eq!(report.repacked, 1);
+        assert_eq!(report.matched, 1);
+        assert_eq!(report.different, 0);
+        assert_eq!(report.failed, 0);
+        assert!(report.errors.is_empty());
 
         Ok(())
     }

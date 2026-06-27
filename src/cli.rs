@@ -19,6 +19,8 @@ pub enum Commands {
     Scan(ScanArgs),
     /// Dry-run pack SpreadsheetDocument templates from a 1C XML source tree.
     AuditSpreadsheetTemplates(AuditSpreadsheetTemplatesArgs),
+    /// Dry-run SpreadsheetDocument pack/extract/repack round-trip from a 1C XML source tree.
+    AuditSpreadsheetRoundtrip(AuditSpreadsheetRoundtripArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Print the current compatibility matrix for implemented operations.
@@ -179,6 +181,15 @@ pub struct ScanArgs {
 
 #[derive(Debug, Args)]
 pub struct AuditSpreadsheetTemplatesArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditSpreadsheetRoundtripArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
@@ -2623,6 +2634,24 @@ mod tests {
                 assert_eq!(
                     args.output,
                     Some(PathBuf::from(r"C:\audit\spreadsheet.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let roundtrip = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-spreadsheet-roundtrip",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\spreadsheet-roundtrip.json",
+        ]);
+        match roundtrip.command {
+            Commands::AuditSpreadsheetRoundtrip(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\spreadsheet-roundtrip.json"))
                 );
             }
             other => panic!("unexpected command: {other:?}"),

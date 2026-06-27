@@ -3923,7 +3923,7 @@ fn format_form_body_xml() -> String {
         .to_string()
 }
 
-fn extract_moxel_spreadsheet_xml(
+pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
