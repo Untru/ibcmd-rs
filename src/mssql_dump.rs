@@ -1021,6 +1021,7 @@ struct FormItemAsset {
 struct MoxelSpreadsheet {
     column_count: usize,
     rows: Vec<MoxelRow>,
+    merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
     max_format_index: usize,
 }
@@ -1050,6 +1051,13 @@ struct MoxelArea {
     end_row: i32,
     begin_column: i32,
     end_column: i32,
+}
+
+struct MoxelMerge {
+    row: i32,
+    column: i32,
+    height: i32,
+    width: i32,
 }
 
 struct CommandInterfaceEntry {
@@ -3651,6 +3659,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     if rows.is_empty() {
         return None;
     }
+    let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
     let observed_column_count = rows
         .iter()
@@ -3676,6 +3685,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     Some(MoxelSpreadsheet {
         column_count,
         rows,
+        merges,
         areas,
         max_format_index,
     })
@@ -3792,6 +3802,48 @@ fn parse_moxel_areas(fields: &[&str]) -> Vec<MoxelArea> {
         .unwrap_or_default()
 }
 
+fn parse_moxel_merges(fields: &[&str]) -> Vec<MoxelMerge> {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_merge_list(field))
+        .next()
+        .unwrap_or_default()
+}
+
+fn parse_moxel_merge_list(text: &str) -> Option<Vec<MoxelMerge>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if count == 0 || count > 4096 || fields.len() != count + 1 {
+        return None;
+    }
+    let mut merges = Vec::with_capacity(count);
+    for field in fields.iter().skip(1) {
+        let merge = parse_moxel_merge(field)?;
+        merges.push(merge);
+    }
+    Some(merges)
+}
+
+fn parse_moxel_merge(text: &str) -> Option<MoxelMerge> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() < 4 {
+        return None;
+    }
+    let begin_column = fields.first()?.trim().parse::<i32>().ok()?;
+    let begin_row = fields.get(1)?.trim().parse::<i32>().ok()?;
+    let end_column = fields.get(2)?.trim().parse::<i32>().ok()?;
+    let end_row = fields.get(3)?.trim().parse::<i32>().ok()?;
+    if begin_row < 0 || begin_column < 0 || end_row < begin_row || end_column < begin_column {
+        return None;
+    }
+    Some(MoxelMerge {
+        row: begin_row,
+        column: begin_column,
+        height: end_row - begin_row,
+        width: end_column - begin_column,
+    })
+}
+
 fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
@@ -3862,6 +3914,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for row in &spreadsheet.rows {
         push_moxel_row_xml(&mut xml, row);
     }
+    for merge in &spreadsheet.merges {
+        push_moxel_merge_xml(&mut xml, merge);
+    }
     for area in &spreadsheet.areas {
         push_moxel_area_xml(&mut xml, area);
     }
@@ -3871,6 +3926,19 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     }
     xml.push_str("</document>\r\n");
     xml
+}
+
+fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
+    xml.push_str("\t<merge>\r\n");
+    xml.push_str(&format!("\t\t<r>{}</r>\r\n", merge.row));
+    xml.push_str(&format!("\t\t<c>{}</c>\r\n", merge.column));
+    if merge.height > 0 {
+        xml.push_str(&format!("\t\t<h>{}</h>\r\n", merge.height));
+    }
+    if merge.width > 0 {
+        xml.push_str(&format!("\t\t<w>{}</w>\r\n", merge.width));
+    }
+    xml.push_str("\t</merge>\r\n");
 }
 
 fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
