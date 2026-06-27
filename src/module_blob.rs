@@ -971,6 +971,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
         &spreadsheet,
         column_count,
     ));
+    fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -996,6 +997,7 @@ struct SpreadsheetDocumentXml {
     print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
     default_format_index: Option<usize>,
     formats: Vec<SpreadsheetDocumentXmlFormat>,
+    fonts: Vec<SpreadsheetDocumentXmlFont>,
 }
 
 #[derive(Debug, Default)]
@@ -1110,6 +1112,19 @@ struct SpreadsheetDocumentXmlFormat {
     pic_vertical_alignment: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlFont {
+    ref_name: Option<String>,
+    face_name: Option<String>,
+    height: Option<usize>,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strikeout: bool,
+    kind: String,
+    scale: Option<usize>,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1149,6 +1164,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_print_settings = Some(SpreadsheetDocumentXmlPrintSettings::default());
                 } else if local == "format" {
                     current_format = Some(SpreadsheetDocumentXmlFormat::default());
+                } else if local == "font"
+                    && let Some(font) = parse_spreadsheet_font_xml_attributes(&event)?
+                {
+                    document.fonts.push(font);
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1169,7 +1188,11 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if current_cell.is_some()
+                if local == "font" {
+                    if let Some(font) = parse_spreadsheet_font_xml_attributes(&event)? {
+                        document.fonts.push(font);
+                    }
+                } else if current_cell.is_some()
                     && local == "tl"
                     && let Some(cell) = current_cell.as_mut()
                 {
@@ -1293,6 +1316,62 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     }
     document.rows.sort_by_key(|row| row.index);
     Ok(document)
+}
+
+fn parse_spreadsheet_font_xml_attributes(
+    event: &BytesStart<'_>,
+) -> Result<Option<SpreadsheetDocumentXmlFont>> {
+    let mut font = SpreadsheetDocumentXmlFont::default();
+    let mut seen = false;
+    for attr in event.attributes() {
+        let attr = attr?;
+        let key = xml_local_name(attr.key.local_name().as_ref());
+        let value = attr.unescape_value()?.into_owned();
+        match key.as_str() {
+            "ref" => {
+                font.ref_name = Some(value);
+                seen = true;
+            }
+            "faceName" => {
+                font.face_name = Some(value);
+                seen = true;
+            }
+            "height" => {
+                if let Ok(height) = value.parse::<usize>() {
+                    font.height = Some(height);
+                    seen = true;
+                }
+            }
+            "bold" => {
+                font.bold = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "italic" => {
+                font.italic = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "underline" => {
+                font.underline = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "strikeout" => {
+                font.strikeout = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "kind" => {
+                font.kind = value;
+                seen = true;
+            }
+            "scale" => {
+                if let Ok(scale) = value.parse::<usize>() {
+                    font.scale = Some(scale);
+                    seen = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(seen.then_some(font))
 }
 
 fn spreadsheet_text_element(local: &str) -> bool {
@@ -2497,6 +2576,55 @@ fn spreadsheet_picture_size_mode_code(value: &str) -> Option<usize> {
 fn spreadsheet_picture_alignment_code(value: &str) -> Option<usize> {
     match value {
         "Center" => Some(2),
+        _ => None,
+    }
+}
+
+fn format_spreadsheet_fonts_for_moxel(fonts: &[SpreadsheetDocumentXmlFont]) -> Vec<String> {
+    fonts
+        .iter()
+        .filter_map(format_spreadsheet_font_for_moxel)
+        .collect()
+}
+
+fn format_spreadsheet_font_for_moxel(font: &SpreadsheetDocumentXmlFont) -> Option<String> {
+    match font.kind.as_str() {
+        "Absolute" => {
+            let face_name = font.face_name.as_deref().unwrap_or("Arial");
+            let height = font.height.unwrap_or(8) * 10;
+            let weight = spreadsheet_font_weight(font.bold);
+            let scale = font.scale.unwrap_or(100);
+            Some(format!(
+                "{{7,0,575,{height},{},{},{},{weight},0,0,0,0,0,0,0,0,{},1,{scale}}}",
+                bool_to_usize(font.italic),
+                bool_to_usize(font.underline),
+                bool_to_usize(font.strikeout),
+                format_1c_string(face_name)
+            ))
+        }
+        "StyleItem" => {
+            let ref_code = spreadsheet_font_ref_code(font.ref_name.as_deref()?)?;
+            let weight = spreadsheet_font_weight(font.bold);
+            Some(format!(
+                "{{7,2,60,{{{ref_code}}},{weight},{},{},{},1,100}}",
+                bool_to_usize(font.italic),
+                bool_to_usize(font.underline),
+                bool_to_usize(font.strikeout)
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn spreadsheet_font_weight(bold: bool) -> usize {
+    if bold { 700 } else { 400 }
+}
+
+fn spreadsheet_font_ref_code(ref_name: &str) -> Option<i32> {
+    match ref_name {
+        "style:TextFont" => Some(-20),
+        "style:NormalTextFont" => Some(-31),
+        "style:LargeTextFont" => Some(-32),
         _ => None,
     }
 }
@@ -8847,6 +8975,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{3,0,{4625920}},{3,3,{-7}},{2,{3200,72,0,1},{1,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_fonts() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<font faceName="Arial" height="8" bold="true" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/>
+	<font ref="style:NormalTextFont" bold="true" italic="false" underline="true" strikeout="false" kind="StyleItem"/>
+	<format>
+		<font>1</font>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{2,{1,1},{1,0}}"));
+        assert!(text.contains(r#"{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,"Arial",1,100}"#));
+        assert!(text.contains("{7,2,60,{-31},700,0,1,0,1,100}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
