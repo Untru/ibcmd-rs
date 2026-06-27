@@ -1180,8 +1180,17 @@ fn is_template_metadata_xml(path: &str) -> bool {
     parts.len() >= 4 && parts[parts.len() - 2] == "templates"
 }
 
+fn is_form_metadata_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "forms"
+}
+
 fn is_stage_metadata_xml(path: &str) -> bool {
-    is_root_metadata_xml(path) || is_template_metadata_xml(path)
+    is_root_metadata_xml(path) || is_template_metadata_xml(path) || is_form_metadata_xml(path)
 }
 
 fn is_root_common_module_xml(path: &str) -> bool {
@@ -3534,6 +3543,22 @@ mod tests {
                     object_hint: Some("Reports/Sales".to_string()),
                 },
                 SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm/Ext/Form.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("Form".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
                     path: "Configuration.xml".to_string(),
                     size_bytes: 1,
                     sha256: "aa".to_string(),
@@ -3561,6 +3586,12 @@ mod tests {
         assert!(is_stage_metadata_xml("Reports/Sales/Templates/Main.xml"));
         assert!(!is_stage_metadata_xml(
             "Reports/Sales/Templates/Main/Ext/Template.xml"
+        ));
+        assert!(is_stage_metadata_xml(
+            "Catalogs/Products/Forms/ItemForm.xml"
+        ));
+        assert!(!is_stage_metadata_xml(
+            "Catalogs/Products/Forms/ItemForm/Ext/Form.xml"
         ));
         assert_eq!(modules, vec!["CommonModules/Foo.xml"]);
     }
@@ -3635,6 +3666,22 @@ mod tests {
                     xml_root: Some("document".to_string()),
                     object_hint: Some("DataProcessors/Import".to_string()),
                 },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm/Ext/Form.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("Form".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
             ],
         };
 
@@ -3650,7 +3697,8 @@ mod tests {
             vec![
                 "C:/sources/Bots/Notify.xml",
                 "C:/sources/Styles/Theme.xml",
-                "C:/sources/DataProcessors/Import/Templates/Schema.xml"
+                "C:/sources/DataProcessors/Import/Templates/Schema.xml",
+                "C:/sources/Catalogs/Products/Forms/ItemForm.xml"
             ]
         );
         assert_eq!(
