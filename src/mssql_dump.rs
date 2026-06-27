@@ -1046,9 +1046,11 @@ struct MoxelSpreadsheet {
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
+    print_area: Option<MoxelArea>,
     print_settings: Option<MoxelPrintSettings>,
     lines: Vec<MoxelLine>,
     fonts: Vec<MoxelFont>,
+    drawings: Vec<MoxelDrawing>,
     pictures: Vec<MoxelPicture>,
     empty_headers_footers: bool,
     default_format_index: Option<usize>,
@@ -1121,10 +1123,28 @@ struct MoxelFont {
 
 struct MoxelLine {
     style: &'static str,
+    line_type: &'static str,
+}
+
+struct MoxelDrawing {
+    format_index: usize,
+    begin_row: i32,
+    begin_row_offset: i32,
+    end_row: i32,
+    end_row_offset: i32,
+    begin_column: i32,
+    begin_column_offset: i32,
+    end_column: i32,
+    end_column_offset: i32,
+    auto_size: bool,
+    picture_size: &'static str,
+    z_order: usize,
+    picture_index: usize,
 }
 
 struct MoxelPicture {
     index: usize,
+    ref_name: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -1166,6 +1186,7 @@ struct MoxelFormat {
     text_color: Option<String>,
     text_placement: Option<&'static str>,
     fill_type: Option<&'static str>,
+    drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
     details_use: Option<&'static str>,
     hyper_link: Option<bool>,
@@ -1196,6 +1217,7 @@ impl MoxelFormat {
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.drawing_border.is_none()
             && self.by_selected_columns.is_none()
             && self.details_use.is_none()
             && self.hyper_link.is_none()
@@ -3806,11 +3828,12 @@ fn parse_moxel_spreadsheet_text(
     }
     let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
+    let print_area = parse_moxel_print_area(&fields);
     trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges);
     compact_moxel_empty_row_ranges(&mut rows);
     let (column_sets, row_column_ids) = parse_moxel_column_sets(&fields);
     let fonts = parse_moxel_fonts(&fields);
-    let pictures = parse_moxel_pictures(&fields);
+    let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let default_format = parse_moxel_default_format(&fields, object_refs);
     let print_settings = parse_moxel_print_settings(&fields);
@@ -3854,20 +3877,36 @@ fn parse_moxel_spreadsheet_text(
             max_index.max(row_max)
         });
     let default_format_width = parse_moxel_default_format_width(&fields, column_format_slots);
-    let default_format_index = moxel_default_format_index(
-        &column_sets,
-        print_settings.as_ref(),
-        !default_format.is_empty() || default_format_width.is_some(),
-        max_format_index + 1,
-    );
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
-    let (column_formats, formats) = parse_moxel_formats(&fields, column_format_slots, &style_refs);
+    let drawings = parse_moxel_drawings(&fields);
+    let drawing_format_indices = drawings
+        .iter()
+        .map(|drawing| drawing.format_index)
+        .collect::<BTreeSet<_>>();
+    let (column_formats, formats) = parse_moxel_formats(
+        &fields,
+        column_format_slots,
+        &style_refs,
+        &drawing_format_indices,
+    );
     let all_formats = column_formats
         .iter()
         .chain(formats.iter())
         .cloned()
         .collect::<Vec<_>>();
     let lines = parse_moxel_lines(&fields, &all_formats);
+    let drawing_max_format_index = drawings
+        .iter()
+        .map(|drawing| drawing.format_index)
+        .max()
+        .unwrap_or(0);
+    let max_format_index = max_format_index.max(drawing_max_format_index);
+    let default_format_index = moxel_default_format_index(
+        &column_sets,
+        print_settings.as_ref(),
+        !default_format.is_empty() || default_format_width.is_some(),
+        max_format_index + 1,
+    );
     Some(MoxelSpreadsheet {
         column_count,
         column_sets,
@@ -3878,9 +3917,11 @@ fn parse_moxel_spreadsheet_text(
         rows,
         merges,
         areas,
+        print_area,
         print_settings,
         lines,
         fonts,
+        drawings,
         pictures,
         empty_headers_footers,
         default_format_index,
@@ -4026,6 +4067,9 @@ fn moxel_default_format_index(
     has_default_format: bool,
     fallback: usize,
 ) -> Option<usize> {
+    if has_default_format {
+        return Some(fallback);
+    }
     if print_settings.is_some() && column_sets.len() > 1 {
         return Some(
             column_sets
@@ -4039,9 +4083,6 @@ fn moxel_default_format_index(
                 })
                 .unwrap_or(fallback),
         );
-    }
-    if has_default_format {
-        return Some(fallback);
     }
     None
 }
@@ -4438,6 +4479,16 @@ fn parse_moxel_areas(fields: &[&str]) -> Vec<MoxelArea> {
         .unwrap_or_default()
 }
 
+fn parse_moxel_print_area(fields: &[&str]) -> Option<MoxelArea> {
+    fields.iter().find_map(|field| {
+        let bounds = split_1c_braced_fields(field, 0)?;
+        if bounds.len() != 6 {
+            return None;
+        }
+        parse_moxel_bounds_area(&bounds, String::new())
+    })
+}
+
 fn parse_moxel_fonts(fields: &[&str]) -> Vec<MoxelFont> {
     fields
         .iter()
@@ -4468,15 +4519,19 @@ fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
         }
         "2" if fields.len() >= 10 => {
             let raw_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
-            let ref_name = match raw_fields.first()?.trim() {
-                "-31" => "style:NormalTextFont",
-                "-32" => "style:LargeTextFont",
+            let (ref_name, face_name) = match raw_fields.first()?.trim() {
+                "-20" => (
+                    "style:TextFont",
+                    fields.get(8).and_then(|field| parse_1c_string(field)),
+                ),
+                "-31" => ("style:NormalTextFont", None),
+                "-32" => ("style:LargeTextFont", None),
                 _ => return None,
             };
             let weight = fields.get(4)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
                 ref_name: Some(ref_name.to_string()),
-                face_name: None,
+                face_name,
                 height: None,
                 bold: weight >= 700,
                 italic: fields.get(5)?.trim() != "0",
@@ -4499,18 +4554,45 @@ fn parse_moxel_lines(fields: &[&str], formats: &[MoxelFormat]) -> Vec<MoxelLine>
         .iter()
         .filter_map(|field| parse_moxel_line(field))
         .collect::<Vec<_>>();
+    let uses_drawing_line = formats.iter().any(|format| format.drawing_border.is_some());
+    if uses_drawing_line
+        && lines.len() >= 2
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+    {
+        return vec![
+            MoxelLine {
+                style: "None",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+            },
+            MoxelLine {
+                style: "None",
+                line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+            },
+        ];
+    }
     if lines.len() >= 2
         && lines.first().is_some_and(|line| line.style == "None")
         && lines.get(1).is_some_and(|line| line.style == "Solid")
         && used_indexes.len() == 1
         && used_indexes.contains(&0)
     {
-        return vec![MoxelLine { style: "Solid" }];
+        return vec![MoxelLine {
+            style: "Solid",
+            line_type: "v8ui:SpreadsheetDocumentCellLineType",
+        }];
     }
     if !lines.is_empty() {
         return lines;
     }
-    vec![MoxelLine { style: "Solid" }]
+    vec![MoxelLine {
+        style: "Solid",
+        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+    }]
 }
 
 fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize> {
@@ -4522,6 +4604,7 @@ fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize> {
             format.top_border,
             format.right_border,
             format.bottom_border,
+            format.drawing_border,
         ] {
             if let Some(index) = value {
                 indexes.insert(index);
@@ -4531,7 +4614,10 @@ fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize> {
     indexes
 }
 
-fn parse_moxel_pictures(fields: &[&str]) -> Vec<MoxelPicture> {
+fn parse_moxel_pictures(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<MoxelPicture> {
     for index in 0..fields.len() {
         let Some(count) = fields
             .get(index)
@@ -4543,11 +4629,12 @@ fn parse_moxel_pictures(fields: &[&str]) -> Vec<MoxelPicture> {
             continue;
         }
         let mut pictures = Vec::with_capacity(count);
-        for field in &fields[index + 1..=index + count] {
-            let Some(picture) = parse_moxel_picture(field) else {
+        for (picture_index, field) in fields[index + 1..=index + count].iter().enumerate() {
+            let Some(mut picture) = parse_moxel_picture(field, object_refs) else {
                 pictures.clear();
                 break;
             };
+            picture.index = picture_index;
             pictures.push(picture);
         }
         if pictures.len() == count {
@@ -4557,13 +4644,84 @@ fn parse_moxel_pictures(fields: &[&str]) -> Vec<MoxelPicture> {
     Vec::new()
 }
 
-fn parse_moxel_picture(text: &str) -> Option<MoxelPicture> {
+fn parse_moxel_picture(text: &str, object_refs: &BTreeMap<String, String>) -> Option<MoxelPicture> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "4" {
         return None;
     }
+    let ref_name = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .and_then(|picture_ref| {
+            if picture_ref.first().map(|field| field.trim()) != Some("0") {
+                return None;
+            }
+            let uuid = parse_uuid_field(picture_ref.get(1)?.trim())?;
+            object_refs
+                .get(&uuid)
+                .and_then(|reference| reference.strip_prefix("CommonPicture."))
+                .map(|name| format!("v8ui:{name}"))
+        });
     Some(MoxelPicture {
         index: fields.get(1)?.trim().parse::<usize>().ok()?,
+        ref_name,
+    })
+}
+
+fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_drawing(field))
+        .collect()
+}
+
+fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 14 || fields.get(1)?.trim() != "5" {
+        return None;
+    }
+    let format_fields = split_1c_braced_fields(fields.first()?, 0)?;
+    if format_fields.len() != 2 || format_fields.first()?.trim() != "0" {
+        return None;
+    }
+    let begin_column = fields.get(2)?.trim().parse::<i32>().ok()?;
+    let begin_row = fields.get(3)?.trim().parse::<i32>().ok()?;
+    let begin_column_offset = fields.get(4)?.trim().parse::<i32>().ok()?;
+    let begin_row_offset = fields.get(5)?.trim().parse::<i32>().ok()?;
+    let end_column = fields.get(6)?.trim().parse::<i32>().ok()?;
+    let end_row = fields.get(7)?.trim().parse::<i32>().ok()?;
+    let end_column_offset = fields.get(8)?.trim().parse::<i32>().ok()?;
+    let end_row_offset = fields.get(9)?.trim().parse::<i32>().ok()?;
+    if begin_column < 0
+        || begin_row < 0
+        || end_column < begin_column
+        || end_row < begin_row
+        || begin_column_offset < 0
+        || begin_row_offset < 0
+        || end_column_offset < 0
+        || end_row_offset < 0
+    {
+        return None;
+    }
+    let picture_size = match fields.get(11)?.trim().parse::<usize>().ok()? {
+        1 => "Stretch",
+        _ => return None,
+    };
+    let z_order = fields.get(12)?.trim().parse::<usize>().ok()?;
+    Some(MoxelDrawing {
+        format_index: format_fields.get(1)?.trim().parse::<usize>().ok()?,
+        begin_row,
+        begin_row_offset,
+        end_row,
+        end_row_offset,
+        begin_column,
+        begin_column_offset,
+        end_column,
+        end_column_offset,
+        auto_size: fields.get(10)?.trim() == "0",
+        picture_size,
+        z_order,
+        picture_index: z_order,
     })
 }
 
@@ -4712,6 +4870,7 @@ fn parse_moxel_formats(
     fields: &[&str],
     column_count: usize,
     style_refs: &[Option<String>],
+    drawing_format_indices: &BTreeSet<usize>,
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
     for index in 0..fields.len() {
         let Some(count) = fields
@@ -4724,16 +4883,28 @@ fn parse_moxel_formats(
             continue;
         }
         let mut formats = Vec::with_capacity(count);
-        for field in &fields[index + 1..=index + count] {
-            let Some(format) = parse_moxel_format(field, style_refs) else {
+        for (format_offset, field) in fields[index + 1..=index + count].iter().enumerate() {
+            let Some(mut format) = parse_moxel_format(field, style_refs) else {
                 formats.clear();
                 break;
             };
+            if drawing_format_indices.contains(&(format_offset + 1)) {
+                format.drawing_border = format.left_border;
+                format.left_border = None;
+            }
             formats.push(format);
         }
         if formats.len() == count {
+            let trailing_drawing_count = (1..=count)
+                .rev()
+                .take_while(|format_index| drawing_format_indices.contains(format_index))
+                .count();
+            let column_start = count.saturating_sub(trailing_drawing_count + column_count);
+            let column_end = count.saturating_sub(trailing_drawing_count);
             let mut body_formats = formats;
-            let column_formats = body_formats.split_off(count - column_count);
+            let trailing_formats = body_formats.split_off(column_end);
+            let column_formats = body_formats.split_off(column_start);
+            body_formats.extend(trailing_formats);
             return (column_formats, body_formats);
         }
     }
@@ -4785,6 +4956,7 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        drawing_border: None,
         by_selected_columns: parse_moxel_format_usize(&values, 20)
             .and_then(moxel_by_selected_columns),
         details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
@@ -4867,10 +5039,15 @@ fn parse_moxel_style_refs(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<Option<String>> {
-    fields
-        .iter()
-        .filter_map(|field| parse_moxel_style_ref_slot(field, object_refs))
-        .collect()
+    let mut style_refs = Vec::new();
+    for field in fields {
+        if let Some(style_ref) = parse_moxel_style_ref_slot(field, object_refs) {
+            style_refs.push(style_ref);
+            continue;
+        }
+        style_refs.extend(parse_moxel_embedded_style_refs(field, object_refs));
+    }
+    style_refs
 }
 
 fn parse_moxel_empty_headers_footers(fields: &[&str]) -> bool {
@@ -4937,11 +5114,7 @@ fn parse_moxel_style_ref_slot(
             "-28" => Some(Some("style:ReportLineColor".to_string())),
             "0" => {
                 let uuid = parse_uuid_field(payload.get(1)?.trim())?;
-                let style_ref = object_refs
-                    .get(&uuid)
-                    .and_then(|reference| reference.strip_prefix("StyleItem."))
-                    .map(|name| format!("style:{name}"));
-                Some(style_ref)
+                Some(moxel_style_ref_for_uuid(&uuid, object_refs))
             }
             _ => None,
         },
@@ -4950,6 +5123,45 @@ fn parse_moxel_style_ref_slot(
             .and_then(|value| parse_moxel_style_color(value.trim()))
             .map(Some),
         _ => None,
+    }
+}
+
+fn parse_moxel_embedded_style_refs(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<Option<String>> {
+    let Some(fields) = split_1c_braced_fields(text, 0) else {
+        return Vec::new();
+    };
+    if fields.len() < 3 || fields.first().map(|field| field.trim()) != Some("3") {
+        return Vec::new();
+    }
+    fields
+        .iter()
+        .skip(2)
+        .filter_map(|field| parse_moxel_embedded_style_ref(field, object_refs))
+        .collect()
+}
+
+fn parse_moxel_embedded_style_ref(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() < 8 || fields.first()?.trim() != "4" || fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    let uuid = parse_uuid_field(fields.get(6)?.trim())?;
+    Some(moxel_style_ref_for_uuid(&uuid, object_refs))
+}
+
+fn moxel_style_ref_for_uuid(uuid: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    match uuid {
+        "f527dc88-1d39-40b3-bcbb-d98b690ead68" => Some("style:FormBackColor".to_string()),
+        _ => object_refs
+            .get(uuid)
+            .and_then(|reference| reference.strip_prefix("StyleItem."))
+            .map(|name| format!("style:{name}")),
     }
 }
 
@@ -5083,7 +5295,10 @@ fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
         "-3" => "Solid",
         _ => return None,
     };
-    Some(MoxelLine { style })
+    Some(MoxelLine {
+        style,
+        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+    })
 }
 
 fn parse_moxel_merges(fields: &[&str]) -> Vec<MoxelMerge> {
@@ -5149,6 +5364,10 @@ fn parse_moxel_area(text: &str, name: String) -> Option<MoxelArea> {
         return None;
     }
     let bounds = split_1c_braced_fields(fields.get(1)?, 0)?;
+    parse_moxel_bounds_area(&bounds, name)
+}
+
+fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<MoxelArea> {
     let area_type = match bounds.first()?.trim() {
         "1" => "Rows",
         "2" => "Columns",
@@ -5192,6 +5411,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
         push_moxel_empty_headers_footers_xml(&mut xml);
     }
     xml.push_str("\t<templateMode>true</templateMode>\r\n");
+    for drawing in &spreadsheet.drawings {
+        push_moxel_drawing_xml(&mut xml, drawing);
+    }
     if let Some(default_format_index) = spreadsheet.default_format_index {
         xml.push_str(&format!(
             "\t<defaultFormatIndex>{default_format_index}</defaultFormatIndex>\r\n"
@@ -5204,6 +5426,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     }
     for area in &spreadsheet.areas {
         push_moxel_area_xml(&mut xml, area);
+    }
+    if let Some(print_area) = &spreadsheet.print_area {
+        push_moxel_print_area_xml(&mut xml, print_area);
     }
     if let Some(print_settings) = &spreadsheet.print_settings {
         push_moxel_print_settings_xml(&mut xml, print_settings);
@@ -5312,6 +5537,7 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
+    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     if let Some(by_selected_columns) = format.by_selected_columns {
         xml.push_str(&format!(
             "\t\t<bySelectedColumns>{by_selected_columns}</bySelectedColumns>\r\n"
@@ -5406,8 +5632,68 @@ fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<&str>) {
 fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     xml.push_str("\t<picture>\r\n");
     xml.push_str(&format!("\t\t<index>{}</index>\r\n", picture.index));
-    xml.push_str("\t\t<picture/>\r\n");
+    if let Some(ref_name) = &picture.ref_name {
+        xml.push_str(&format!(
+            "\t\t<picture t=\"false\" ref=\"{}\"/>\r\n",
+            escape_xml_text(ref_name)
+        ));
+    } else {
+        xml.push_str("\t\t<picture/>\r\n");
+    }
     xml.push_str("\t</picture>\r\n");
+}
+
+fn push_moxel_drawing_xml(xml: &mut String, drawing: &MoxelDrawing) {
+    xml.push_str("\t<drawing>\r\n");
+    xml.push_str("\t\t<drawingType>Picture</drawingType>\r\n");
+    xml.push_str(&format!("\t\t<id>{}</id>\r\n", drawing.z_order));
+    xml.push_str(&format!(
+        "\t\t<formatIndex>{}</formatIndex>\r\n",
+        drawing.format_index
+    ));
+    xml.push_str(&format!(
+        "\t\t<beginRow>{}</beginRow>\r\n",
+        drawing.begin_row
+    ));
+    xml.push_str(&format!(
+        "\t\t<beginRowOffset>{}</beginRowOffset>\r\n",
+        drawing.begin_row_offset
+    ));
+    xml.push_str(&format!("\t\t<endRow>{}</endRow>\r\n", drawing.end_row));
+    xml.push_str(&format!(
+        "\t\t<endRowOffset>{}</endRowOffset>\r\n",
+        drawing.end_row_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t<beginColumn>{}</beginColumn>\r\n",
+        drawing.begin_column
+    ));
+    xml.push_str(&format!(
+        "\t\t<beginColumnOffset>{}</beginColumnOffset>\r\n",
+        drawing.begin_column_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t<endColumn>{}</endColumn>\r\n",
+        drawing.end_column
+    ));
+    xml.push_str(&format!(
+        "\t\t<endColumnOffset>{}</endColumnOffset>\r\n",
+        drawing.end_column_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t<autoSize>{}</autoSize>\r\n",
+        xml_bool(drawing.auto_size)
+    ));
+    xml.push_str(&format!(
+        "\t\t<pictureSize>{}</pictureSize>\r\n",
+        drawing.picture_size
+    ));
+    xml.push_str(&format!("\t\t<zOrder>{}</zOrder>\r\n", drawing.z_order));
+    xml.push_str(&format!(
+        "\t\t<pictureIndex>{}</pictureIndex>\r\n",
+        drawing.picture_index
+    ));
+    xml.push_str("\t</drawing>\r\n");
 }
 
 fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -5426,8 +5712,8 @@ fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
 fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
     xml.push_str("\t<line width=\"1\" gap=\"false\">\r\n");
     xml.push_str(&format!(
-        "\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">{}</v8ui:style>\r\n",
-        line.style
+        "\t\t<v8ui:style xsi:type=\"{}\">{}</v8ui:style>\r\n",
+        line.line_type, line.style
     ));
     xml.push_str("\t</line>\r\n");
 }
@@ -5482,6 +5768,22 @@ fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
     }
     xml.push_str("\t\t</area>\r\n");
     xml.push_str("\t</namedItem>\r\n");
+}
+
+fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
+    xml.push_str("\t<printArea>\r\n");
+    xml.push_str(&format!("\t\t<type>{}</type>\r\n", area.area_type));
+    xml.push_str(&format!("\t\t<beginRow>{}</beginRow>\r\n", area.begin_row));
+    xml.push_str(&format!("\t\t<endRow>{}</endRow>\r\n", area.end_row));
+    xml.push_str(&format!(
+        "\t\t<beginColumn>{}</beginColumn>\r\n",
+        area.begin_column
+    ));
+    xml.push_str(&format!(
+        "\t\t<endColumn>{}</endColumn>\r\n",
+        area.end_column
+    ));
+    xml.push_str("\t</printArea>\r\n");
 }
 
 fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
@@ -10169,12 +10471,63 @@ mod tests {
             Some(6)
         );
         assert_eq!(
-            moxel_default_format_index(&column_sets, None, true, 21),
+            moxel_default_format_index(&column_sets, Some(&settings), true, 21),
             Some(21)
         );
         assert_eq!(
             moxel_default_format_index(&column_sets, None, false, 21),
             None
+        );
+    }
+
+    #[test]
+    fn formats_moxel_picture_drawing_and_normalized_picture_index() {
+        let drawing = parse_moxel_drawing("{{0,31},5,1,20,24,6,1,20,88,70,1,1,1,0}").unwrap();
+
+        assert_eq!(drawing.format_index, 31);
+        assert_eq!(drawing.begin_row, 20);
+        assert_eq!(drawing.begin_row_offset, 6);
+        assert_eq!(drawing.end_row, 20);
+        assert_eq!(drawing.end_row_offset, 70);
+        assert_eq!(drawing.begin_column, 1);
+        assert_eq!(drawing.begin_column_offset, 24);
+        assert_eq!(drawing.end_column, 1);
+        assert_eq!(drawing.end_column_offset, 88);
+        assert!(!drawing.auto_size);
+        assert_eq!(drawing.picture_size, "Stretch");
+        assert_eq!(drawing.z_order, 1);
+        assert_eq!(drawing.picture_index, 1);
+
+        let mut xml = String::new();
+        push_moxel_drawing_xml(&mut xml, &drawing);
+        assert!(xml.contains("<drawingType>Picture</drawingType>"));
+        assert!(xml.contains("<formatIndex>31</formatIndex>"));
+        assert!(xml.contains("<beginRow>20</beginRow>"));
+        assert!(xml.contains("<beginRowOffset>6</beginRowOffset>"));
+        assert!(xml.contains("<endRowOffset>70</endRowOffset>"));
+        assert!(xml.contains("<beginColumn>1</beginColumn>"));
+        assert!(xml.contains("<beginColumnOffset>24</beginColumnOffset>"));
+        assert!(xml.contains("<endColumnOffset>88</endColumnOffset>"));
+        assert!(xml.contains("<autoSize>false</autoSize>"));
+        assert!(xml.contains("<pictureSize>Stretch</pictureSize>"));
+        assert!(xml.contains("<zOrder>1</zOrder>"));
+        assert!(xml.contains("<pictureIndex>1</pictureIndex>"));
+
+        let pictures = parse_moxel_pictures(
+            &[
+                "1",
+                "{4,1,{0,b5e73fbe-499c-4666-a482-0ef399c97c1e},\"\",-1,-1,0,0,\"\"}",
+            ],
+            &BTreeMap::from([(
+                "b5e73fbe-499c-4666-a482-0ef399c97c1e".to_string(),
+                "CommonPicture.Предупреждение32".to_string(),
+            )]),
+        );
+        assert_eq!(pictures.len(), 1);
+        assert_eq!(pictures[0].index, 0);
+        assert_eq!(
+            pictures[0].ref_name.as_deref(),
+            Some("v8ui:Предупреждение32")
         );
     }
 
