@@ -79,6 +79,8 @@ pub struct ParsedFormBodyBlob {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlBodyProperties {
     title: Vec<LocalizedString>,
+    width: Option<String>,
+    height: Option<String>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     auto_title: Option<bool>,
     group: Option<FormXmlGroup>,
@@ -3276,6 +3278,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
         let properties = parse_form_xml_body_properties(form_xml)?;
         if properties.window_opening_mode.is_some()
             || !properties.title.is_empty()
+            || properties.width.is_some()
+            || properties.height.is_some()
             || properties.auto_title.is_some()
             || properties.group.is_some()
             || properties.command_bar_location.is_some()
@@ -3379,6 +3383,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if matches!(
                     local.as_str(),
                     "WindowOpeningMode"
+                        | "Width"
+                        | "Height"
                         | "AutoTitle"
                         | "Group"
                         | "CommandBarLocation"
@@ -3506,6 +3512,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "Width"])
+                    || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
@@ -3795,6 +3803,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "Width"])
+                    || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
@@ -4090,6 +4100,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         properties.window_opening_mode =
                             Some(parse_form_window_opening_mode_xml(text_value.trim())?);
+                    }
+                    "Width" if path_ends_with(&path, &["Form", "Width"]) => {
+                        properties.width =
+                            Some(parse_form_dimension_xml("Width", text_value.trim())?);
+                    }
+                    "Height" if path_ends_with(&path, &["Form", "Height"]) => {
+                        properties.height =
+                            Some(parse_form_dimension_xml("Height", text_value.trim())?);
                     }
                     "AutoTitle" if path_ends_with(&path, &["Form", "AutoTitle"]) => {
                         properties.auto_title =
@@ -5162,6 +5180,13 @@ fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
     }
 }
 
+fn parse_form_dimension_xml(name: &str, value: &str) -> Result<String> {
+    let parsed = value
+        .parse::<u32>()
+        .with_context(|| format!("unsupported Form {name} dimension value: {value}"))?;
+    Ok(parsed.to_string())
+}
+
 fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandCurrentRowUse> {
     match value {
         "DontUse" => Ok(FormXmlCommandCurrentRowUse::DontUse),
@@ -5213,6 +5238,12 @@ fn patch_form_layout_properties(
 ) -> Result<()> {
     if !properties.title.is_empty() {
         replace_braced_field(layout, 10, &format_form_title_value(&properties.title))?;
+    }
+    if let Some(width) = &properties.width {
+        replace_braced_field(layout, 3, width)?;
+    }
+    if let Some(height) = &properties.height {
+        replace_braced_field(layout, 4, height)?;
     }
     if let Some(window_opening_mode) = properties.window_opening_mode {
         replace_braced_field(
@@ -13425,6 +13456,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<v8:content>New title</v8:content>
 		</v8:item>
 	</Title>
+	<Width>80</Width>
+	<Height>30</Height>
 	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
 	<AutoTitle>false</AutoTitle>
 	<Group>Horizontal</Group>
@@ -13438,6 +13471,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let fields = super::scan_braced_fields(&parsed.layout, 0)?;
 
         assert_eq!(&parsed.layout[fields[2].clone()], "2");
+        assert_eq!(&parsed.layout[fields[3].clone()], "80");
+        assert_eq!(&parsed.layout[fields[4].clone()], "30");
         assert_eq!(&parsed.layout[fields[9].clone()], "0");
         assert_eq!(
             &parsed.layout[fields[10].clone()],

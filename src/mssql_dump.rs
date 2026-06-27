@@ -3827,6 +3827,8 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormBodyProperties {
     title: Vec<(String, String)>,
+    width: Option<String>,
+    height: Option<String>,
     window_opening_mode: Option<&'static str>,
     auto_title: Option<bool>,
     group: Option<&'static str>,
@@ -3948,11 +3950,21 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
             .get(10)
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default(),
+        width: extract_form_dimension(fields, 3),
+        height: extract_form_dimension(fields, 4),
         window_opening_mode: extract_form_window_opening_mode(fields),
         auto_title: extract_form_auto_title(fields),
         group: extract_form_root_group(fields),
         command_bar_location: extract_form_command_bar_location(fields),
     }
+}
+
+fn extract_form_dimension(fields: &[&str], index: usize) -> Option<String> {
+    let value = fields.get(index)?.trim();
+    if value == "0" || value.parse::<u32>().is_err() {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
@@ -5380,6 +5392,15 @@ fn format_form_body_xml(
         &properties.title,
         1,
     ));
+    if let Some(width) = &properties.width {
+        xml.push_str(&format!("\t<Width>{}</Width>\r\n", escape_xml_text(width)));
+    }
+    if let Some(height) = &properties.height {
+        xml.push_str(&format!(
+            "\t<Height>{}</Height>\r\n",
+            escape_xml_text(height)
+        ));
+    }
     if let Some(window_opening_mode) = properties.window_opening_mode {
         xml.push_str(&format!(
             "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
@@ -11982,11 +12003,13 @@ mod tests {
     #[test]
     fn extracts_form_top_level_properties_to_body_xml() {
         let form_body = deflate_for_test(
-            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},1,1,0,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+            r#"{4,{59,0,2,80,30,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},1,1,0,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
+        assert!(form_xml.contains("<Width>80</Width>"));
+        assert!(form_xml.contains("<Height>30</Height>"));
         assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
         assert!(form_xml.contains("<AutoTitle>false</AutoTitle>"));
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
