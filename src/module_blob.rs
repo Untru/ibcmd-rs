@@ -967,6 +967,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
     }
+    fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
     fields.extend(format_spreadsheet_formats_for_moxel(
         &spreadsheet,
         column_count,
@@ -998,6 +999,7 @@ struct SpreadsheetDocumentXml {
     default_format_index: Option<usize>,
     formats: Vec<SpreadsheetDocumentXmlFormat>,
     fonts: Vec<SpreadsheetDocumentXmlFont>,
+    lines: Vec<SpreadsheetDocumentXmlLine>,
 }
 
 #[derive(Debug, Default)]
@@ -1125,6 +1127,23 @@ struct SpreadsheetDocumentXmlFont {
     scale: Option<usize>,
 }
 
+#[derive(Debug)]
+struct SpreadsheetDocumentXmlLine {
+    style: String,
+    line_type: String,
+    width: usize,
+}
+
+impl Default for SpreadsheetDocumentXmlLine {
+    fn default() -> Self {
+        Self {
+            style: String::new(),
+            line_type: "v8ui:SpreadsheetDocumentCellLineType".to_string(),
+            width: 1,
+        }
+    }
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1139,6 +1158,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_area = None::<SpreadsheetDocumentXmlArea>;
     let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
     let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
+    let mut current_line = None::<SpreadsheetDocumentXmlLine>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1168,6 +1188,14 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(font) = parse_spreadsheet_font_xml_attributes(&event)?
                 {
                     document.fonts.push(font);
+                } else if local == "line" {
+                    current_line = Some(parse_spreadsheet_line_xml_attributes(&event)?);
+                } else if local == "style"
+                    && let Some(line) = current_line.as_mut()
+                {
+                    if let Some(line_type) = xml_attribute_value(&event, "type")? {
+                        line.line_type = line_type;
+                    }
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1248,6 +1276,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_area.as_mut(),
                     current_print_settings.as_mut(),
                     current_format.as_mut(),
+                    current_line.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1299,6 +1328,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(format) = current_format.take()
                 {
                     document.formats.push(format);
+                } else if local == "line"
+                    && let Some(line) = current_line.take()
+                {
+                    document.lines.push(line);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
@@ -1374,6 +1407,28 @@ fn parse_spreadsheet_font_xml_attributes(
     Ok(seen.then_some(font))
 }
 
+fn parse_spreadsheet_line_xml_attributes(
+    event: &BytesStart<'_>,
+) -> Result<SpreadsheetDocumentXmlLine> {
+    let mut line = SpreadsheetDocumentXmlLine::default();
+    if let Some(width) = xml_attribute_value(event, "width")?
+        && let Ok(width) = width.parse::<usize>()
+    {
+        line.width = width;
+    }
+    Ok(line)
+}
+
+fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Option<String>> {
+    for attr in event.attributes() {
+        let attr = attr?;
+        if xml_local_name(attr.key.local_name().as_ref()) == local_name {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
 fn spreadsheet_text_element(local: &str) -> bool {
     matches!(
         local,
@@ -1445,6 +1500,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "pictureSizeMode"
             | "picHorizontalAlignment"
             | "picVerticalAlignment"
+            | "style"
     )
 }
 
@@ -1461,6 +1517,7 @@ fn apply_spreadsheet_text_value(
     area: Option<&mut SpreadsheetDocumentXmlArea>,
     print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
     format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    line: Option<&mut SpreadsheetDocumentXmlLine>,
 ) {
     let value = text.trim();
     match local {
@@ -1862,6 +1919,11 @@ fn apply_spreadsheet_text_value(
             set_spreadsheet_format_string(format, text, |format, parsed| {
                 format.pic_vertical_alignment = Some(parsed)
             });
+        }
+        "style" if path_ends_with(path, &["line", "style"]) => {
+            if let Some(line) = line {
+                line.style = text.to_string();
+            }
         }
         _ => {}
     }
@@ -2576,6 +2638,24 @@ fn spreadsheet_picture_size_mode_code(value: &str) -> Option<usize> {
 fn spreadsheet_picture_alignment_code(value: &str) -> Option<usize> {
     match value {
         "Center" => Some(2),
+        _ => None,
+    }
+}
+
+fn format_spreadsheet_lines_for_moxel(lines: &[SpreadsheetDocumentXmlLine]) -> Vec<String> {
+    lines
+        .iter()
+        .filter(|line| line.line_type.ends_with("SpreadsheetDocumentCellLineType"))
+        .filter_map(|line| spreadsheet_line_style_code(&line.style))
+        .map(|code| format!("{{3,3,{{{code}}}}}"))
+        .collect()
+}
+
+fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
+    match value {
+        "None" => Some(-1),
+        "Solid" => Some(-3),
+        "Dotted" => Some(-10),
         _ => None,
     }
 }
@@ -9007,6 +9087,40 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("{2,{1,1},{1,0}}"));
         assert!(text.contains(r#"{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,"Arial",1,100}"#));
         assert!(text.contains("{7,2,60,{-31},700,0,1,0,1,100}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_lines() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<line width="1" gap="false">
+		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style>
+	</line>
+	<line width="1" gap="false">
+		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style>
+	</line>
+	<format>
+		<border>0</border>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{2,{30,0,0,0,0},{1,0}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
