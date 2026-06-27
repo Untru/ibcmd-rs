@@ -127,6 +127,7 @@ struct FormXmlDynamicListSettings {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlCommandInterfaceItem {
+    command: Option<String>,
     command_group: Option<String>,
     index: Option<usize>,
     default_visible: Option<bool>,
@@ -442,6 +443,28 @@ impl MetadataSourceContext {
             anyhow!("unsupported metadata reference for source resolution: {reference}")
         })?;
         self.resolve_simple_metadata_uuid(reference, prefix, folder, &format!("{prefix}."))
+    }
+
+    fn resolve_command_reference_uuid(&self, reference: &str) -> Result<String> {
+        let reference = reference.trim();
+        let Some((owner_reference, command_name)) = reference.split_once(".Command.") else {
+            return self.resolve_metadata_reference_uuid(reference);
+        };
+        let (prefix, folder) =
+            metadata_reference_source_folder(owner_reference).ok_or_else(|| {
+                anyhow!("unsupported command owner reference for source resolution: {reference}")
+            })?;
+        let owner_name = owner_reference
+            .strip_prefix(&format!("{prefix}."))
+            .ok_or_else(|| anyhow!("invalid command owner reference: {reference}"))?;
+        let path = self
+            .source_root
+            .join(folder)
+            .join(format!("{owner_name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read command owner XML {}", path.display()))?;
+        parse_nested_command_uuid_from_xml(&xml, command_name)
+            .with_context(|| format!("failed to resolve command {reference}"))
     }
 }
 
@@ -3169,6 +3192,15 @@ pub fn pack_form_body_blob_from_form_xml(
     form_xml: &[u8],
     module_text: Option<&[u8]>,
 ) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml_with_source(base_blob, form_xml, module_text, None)
+}
+
+pub fn pack_form_body_blob_from_form_xml_with_source(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
     let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
     let mut plain =
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
@@ -3191,6 +3223,7 @@ pub fn pack_form_body_blob_from_form_xml(
                 &mut layout,
                 &properties.child_items,
                 &properties.commands,
+                source,
             )?;
             plain.replace_range(container.layout_range, &layout);
         }
@@ -3218,6 +3251,7 @@ pub fn pack_form_body_blob_from_form_xml(
                 patch_form_command_interface(
                     &mut command_interface,
                     &properties.command_interface_items,
+                    source,
                 )?;
                 plain.replace_range(command_interface_range, &command_interface);
             }
@@ -3271,6 +3305,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ManualQuery"
                         | "DynamicDataRead"
                         | "QueryText"
+                        | "Command"
                         | "CommandGroup"
                         | "Index"
                         | "DefaultVisible"
@@ -3374,6 +3409,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "CommandInterface",
                             "NavigationPanel",
                             "Item",
+                            "Command",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
                             "CommandGroup",
                         ],
                     )
@@ -3456,6 +3501,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Command",
+                        ],
                     )
                     || path_ends_with(
                         &path,
@@ -3690,6 +3745,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             properties.attributes.push(attribute);
                         }
                     }
+                    "Command"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Command",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.command = Some(text_value.trim().to_string());
+                        }
+                    }
                     "CommandGroup"
                         if path_ends_with(
                             &path,
@@ -3832,6 +3903,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ManualQuery"
                         | "DynamicDataRead"
                         | "QueryText"
+                        | "Command"
                         | "CommandGroup"
                         | "Index"
                         | "DefaultVisible"
@@ -3916,6 +3988,74 @@ fn parse_form_child_item_xml(
         command_name: None,
         data_path: None,
     }))
+}
+
+fn parse_nested_command_uuid_from_xml(xml: &[u8], command_name: &str) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_uuid = None::<String>;
+    let mut current_name = None::<String>;
+    let mut text_value = String::new();
+    let mut collecting_name = false;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command" {
+                    current_uuid = xml_attr_value(&event, "uuid")
+                        .map(|value| normalize_uuid_text(&value))
+                        .transpose()?;
+                    current_name = None;
+                } else if current_uuid.is_some()
+                    && local == "Name"
+                    && path_ends_with(&path, &["Command", "Properties"])
+                {
+                    text_value.clear();
+                    collecting_name = true;
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command" {
+                    current_uuid = None;
+                    current_name = None;
+                }
+            }
+            Ok(Event::Text(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if collecting_name && local == "Name" {
+                    current_name = Some(text_value.trim().to_string());
+                    collecting_name = false;
+                    text_value.clear();
+                }
+                if local == "Command" {
+                    if current_name.as_deref() == Some(command_name)
+                        && let Some(uuid) = current_uuid.take()
+                    {
+                        return Ok(uuid);
+                    }
+                    current_uuid = None;
+                    current_name = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Err(anyhow!("command {command_name} not found in owner XML"))
 }
 
 fn is_form_child_item_xml_tag(tag: &str) -> bool {
@@ -4081,10 +4221,11 @@ fn patch_form_layout_child_items(
     layout: &mut String,
     items: &[FormXmlChildItem],
     commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
     for item in items {
-        let _ = patch_form_layout_child_item(layout, item, commands, &table_ids_by_name)?;
+        let _ = patch_form_layout_child_item(layout, item, commands, &table_ids_by_name, source)?;
     }
     Ok(())
 }
@@ -4094,10 +4235,18 @@ fn patch_form_layout_child_item(
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if form_layout_child_item_matches(text, &fields, item) {
-        patch_form_layout_child_item_entry(text, &fields, item, commands, table_ids_by_name)?;
+        patch_form_layout_child_item_entry(
+            text,
+            &fields,
+            item,
+            commands,
+            table_ids_by_name,
+            source,
+        )?;
         return Ok(true);
     }
 
@@ -4106,7 +4255,7 @@ fn patch_form_layout_child_item(
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_layout_child_item(&mut nested, item, commands, table_ids_by_name)? {
+        if patch_form_layout_child_item(&mut nested, item, commands, table_ids_by_name, source)? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -4144,6 +4293,7 @@ fn patch_form_layout_child_item_entry(
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
         return Ok(());
@@ -4166,6 +4316,7 @@ fn patch_form_layout_child_item_entry(
             &text[command_range.clone()],
             command_name,
             commands,
+            source,
         )?
     {
         replacements.push((command_range.clone(), command_ref));
@@ -4235,21 +4386,26 @@ fn format_form_button_command_reference(
     existing: &str,
     command_name: &str,
     commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Option<String>> {
     if let Some(uuid) = form_standard_command_uuid(command_name) {
         return Ok(Some(format!("{{0,{uuid}}}")));
     }
-    let Some(name) = command_name.strip_prefix("Form.Command.") else {
+    if let Some(name) = command_name.strip_prefix("Form.Command.") {
+        let Some(command) = commands.iter().find(|command| command.name == name) else {
+            return Ok(None);
+        };
+        let fields = scan_braced_fields(existing.trim(), 0)?;
+        let Some(uuid) = fields.get(1).map(|range| existing[range.clone()].trim()) else {
+            return Ok(None);
+        };
+        return Ok(Some(format!("{{{},{uuid}}}", command.id)));
+    }
+    let Some(source) = source else {
         return Ok(None);
     };
-    let Some(command) = commands.iter().find(|command| command.name == name) else {
-        return Ok(None);
-    };
-    let fields = scan_braced_fields(existing.trim(), 0)?;
-    let Some(uuid) = fields.get(1).map(|range| existing[range.clone()].trim()) else {
-        return Ok(None);
-    };
-    Ok(Some(format!("{{{},{uuid}}}", command.id)))
+    let uuid = source.resolve_command_reference_uuid(command_name)?;
+    Ok(Some(format!("{{0,{uuid}}}")))
 }
 
 fn form_standard_command_uuid(command_name: &str) -> Option<&'static str> {
@@ -4397,6 +4553,7 @@ fn patch_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> R
 fn patch_form_command_interface(
     text: &mut String,
     items: &[FormXmlCommandInterfaceItem],
+    source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let fields = scan_braced_fields(text, 0)?;
     let item_ranges = fields
@@ -4415,7 +4572,7 @@ fn patch_form_command_interface(
     let mut replacements = Vec::<(Range<usize>, String)>::new();
     for (range, item) in item_ranges.into_iter().zip(items) {
         let mut item_text = text[range.clone()].to_string();
-        patch_form_command_interface_item(&mut item_text, item)?;
+        patch_form_command_interface_item(&mut item_text, item, source)?;
         replacements.push((range, item_text));
     }
 
@@ -4429,9 +4586,17 @@ fn patch_form_command_interface(
 fn patch_form_command_interface_item(
     text: &mut String,
     item: &FormXmlCommandInterfaceItem,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let fields = scan_braced_fields(text, 0)?;
     let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(command) = &item.command
+        && let Some(range) = fields.get(2)
+        && let Some(source) = source
+    {
+        let uuid = source.resolve_command_reference_uuid(command)?;
+        replacements.push((range.clone(), format!("{{0,{uuid}}}")));
+    }
     if let Some(command_group) = &item.command_group
         && let Some(range) = fields.get(5)
     {
@@ -11746,6 +11911,97 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_external_button_command_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{59,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,0},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="OldButton" id="44">
+			<CommandName>DataProcessor.Loader.Command.Load</CommandName>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{0,99999999-9999-4999-8999-999999999999}")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_command_interface_external_command_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-interface-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelGoTo</CommandGroup>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[3].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(!parsed.trailing[3].contains("eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee"));
+        assert!(parsed.trailing[3].contains("},0,0,{0,{0,{\"B\",0},0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
