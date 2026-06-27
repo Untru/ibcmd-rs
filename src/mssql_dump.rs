@@ -1052,6 +1052,7 @@ struct MoxelSpreadsheet {
     height: usize,
 }
 
+#[derive(Clone)]
 struct MoxelRow {
     index: usize,
     index_to: Option<usize>,
@@ -1070,6 +1071,7 @@ struct MoxelColumn {
     format_index: usize,
 }
 
+#[derive(Clone)]
 struct MoxelCell {
     column_index: usize,
     format_index: usize,
@@ -1102,13 +1104,15 @@ struct MoxelMerge {
 }
 
 struct MoxelFont {
-    face_name: String,
-    height: usize,
+    ref_name: Option<String>,
+    face_name: Option<String>,
+    height: Option<usize>,
     bold: bool,
     italic: bool,
     underline: bool,
     strikeout: bool,
-    scale: usize,
+    kind: &'static str,
+    scale: Option<usize>,
 }
 
 struct MoxelLine {
@@ -1122,6 +1126,7 @@ struct MoxelPicture {
 #[derive(Clone, Default)]
 struct MoxelFormat {
     font: Option<usize>,
+    border: Option<usize>,
     left_border: Option<usize>,
     top_border: Option<usize>,
     right_border: Option<usize>,
@@ -1131,14 +1136,17 @@ struct MoxelFormat {
     width: Option<usize>,
     horizontal_alignment: Option<&'static str>,
     vertical_alignment: Option<&'static str>,
+    back_color: Option<String>,
     text_color: Option<String>,
     text_placement: Option<&'static str>,
     fill_type: Option<&'static str>,
+    by_selected_columns: Option<bool>,
     details_use: Option<&'static str>,
     hyper_link: Option<bool>,
     protection: Option<bool>,
     indent: Option<usize>,
     auto_indent: Option<usize>,
+    mask: Option<&'static str>,
     pic_index: Option<usize>,
     picture_size_mode: Option<&'static str>,
     pic_horizontal_alignment: Option<&'static str>,
@@ -1148,6 +1156,7 @@ struct MoxelFormat {
 impl MoxelFormat {
     fn is_empty(&self) -> bool {
         self.font.is_none()
+            && self.border.is_none()
             && self.left_border.is_none()
             && self.top_border.is_none()
             && self.right_border.is_none()
@@ -1157,14 +1166,17 @@ impl MoxelFormat {
             && self.width.is_none()
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
+            && self.back_color.is_none()
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.by_selected_columns.is_none()
             && self.details_use.is_none()
             && self.hyper_link.is_none()
             && self.protection.is_none()
             && self.indent.is_none()
             && self.auto_indent.is_none()
+            && self.mask.is_none()
             && self.pic_index.is_none()
             && self.picture_size_mode.is_none()
             && self.pic_horizontal_alignment.is_none()
@@ -1174,6 +1186,7 @@ impl MoxelFormat {
     fn is_width_only(&self) -> bool {
         self.width.is_some()
             && self.font.is_none()
+            && self.border.is_none()
             && self.left_border.is_none()
             && self.top_border.is_none()
             && self.right_border.is_none()
@@ -1182,14 +1195,17 @@ impl MoxelFormat {
             && self.border_color.is_none()
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
+            && self.back_color.is_none()
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
+            && self.by_selected_columns.is_none()
             && self.details_use.is_none()
             && self.hyper_link.is_none()
             && self.protection.is_none()
             && self.indent.is_none()
             && self.auto_indent.is_none()
+            && self.mask.is_none()
             && self.pic_index.is_none()
             && self.picture_size_mode.is_none()
             && self.pic_horizontal_alignment.is_none()
@@ -1201,6 +1217,7 @@ impl MoxelFormat {
             || self.top_border.is_some()
             || self.right_border.is_some()
             || self.bottom_border.is_some()
+            || self.border.is_some()
     }
 }
 
@@ -3801,6 +3818,7 @@ fn parse_moxel_spreadsheet_text(
     let merges = parse_moxel_merges(&fields);
     let areas = parse_moxel_areas(&fields);
     trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges);
+    compact_moxel_empty_row_ranges(&mut rows);
     let (column_sets, row_column_ids) = parse_moxel_column_sets(&fields);
     let parsed_lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
@@ -4054,6 +4072,34 @@ fn trim_moxel_trailing_empty_rows(
             row.index_to = Some(index_to);
         }
     }
+}
+
+fn compact_moxel_empty_row_ranges(rows: &mut Vec<MoxelRow>) {
+    let mut compacted = Vec::with_capacity(rows.len());
+    let mut index = 0usize;
+    while index < rows.len() {
+        let mut row = rows[index].clone();
+        if is_moxel_compactable_empty_row(&row) {
+            let mut cursor = index + 1;
+            while cursor < rows.len()
+                && rows[cursor].index == rows[cursor - 1].index + 1
+                && is_moxel_compactable_empty_row(&rows[cursor])
+            {
+                row.index_to = Some(rows[cursor].index);
+                cursor += 1;
+            }
+            compacted.push(row);
+            index = cursor;
+        } else {
+            compacted.push(row);
+            index += 1;
+        }
+    }
+    *rows = compacted;
+}
+
+fn is_moxel_compactable_empty_row(row: &MoxelRow) -> bool {
+    row.format_index <= 1 && row.columns_id.is_none() && row.cells.is_empty()
 }
 
 fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
@@ -4318,20 +4364,45 @@ fn parse_moxel_fonts(fields: &[&str]) -> Vec<MoxelFont> {
 
 fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "7" || fields.len() < 19 {
+    if fields.first()?.trim() != "7" {
         return None;
     }
-    let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
-    let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
-    Some(MoxelFont {
-        face_name: parse_1c_string(fields.get(16)?)?,
-        height: height_raw / 10,
-        bold: weight >= 700,
-        italic: fields.get(4)?.trim() != "0",
-        underline: fields.get(5)?.trim() != "0",
-        strikeout: fields.get(6)?.trim() != "0",
-        scale: fields.get(18)?.trim().parse::<usize>().ok()?,
-    })
+    match fields.get(1)?.trim() {
+        "0" if fields.len() >= 19 => {
+            let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
+            let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
+            Some(MoxelFont {
+                ref_name: None,
+                face_name: Some(parse_1c_string(fields.get(16)?)?),
+                height: Some(height_raw / 10),
+                bold: weight >= 700,
+                italic: fields.get(4)?.trim() != "0",
+                underline: fields.get(5)?.trim() != "0",
+                strikeout: fields.get(6)?.trim() != "0",
+                kind: "Absolute",
+                scale: Some(fields.get(18)?.trim().parse::<usize>().ok()?),
+            })
+        }
+        "2" if fields.len() >= 10 => {
+            let raw_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
+            if raw_fields.first()?.trim() != "-31" {
+                return None;
+            }
+            let weight = fields.get(4)?.trim().parse::<usize>().ok()?;
+            Some(MoxelFont {
+                ref_name: Some("style:NormalTextFont".to_string()),
+                face_name: None,
+                height: None,
+                bold: weight >= 700,
+                italic: fields.get(5)?.trim() != "0",
+                underline: fields.get(6)?.trim() != "0",
+                strikeout: fields.get(7)?.trim() != "0",
+                kind: "StyleItem",
+                scale: None,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn parse_moxel_lines(fields: &[&str]) -> Vec<MoxelLine> {
@@ -4448,26 +4519,43 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         .copied()
         .zip(fields.iter().skip(1).copied())
         .collect::<Vec<_>>();
+    let left_border = parse_moxel_format_usize(&values, 1);
+    let top_border = parse_moxel_format_usize(&values, 2);
+    let right_border = parse_moxel_format_usize(&values, 3);
+    let bottom_border = parse_moxel_format_usize(&values, 4);
+    let border = match (left_border, top_border, right_border, bottom_border) {
+        (Some(left), Some(top), Some(right), Some(bottom))
+            if left == top && top == right && right == bottom =>
+        {
+            Some(left)
+        }
+        _ => None,
+    };
     Some(MoxelFormat {
         font: parse_moxel_format_usize(&values, 0),
-        left_border: parse_moxel_format_usize(&values, 1),
-        top_border: parse_moxel_format_usize(&values, 2),
-        right_border: parse_moxel_format_usize(&values, 3),
-        bottom_border: parse_moxel_format_usize(&values, 4),
+        border,
+        left_border: border.or(left_border).and(None).or(left_border),
+        top_border: border.or(top_border).and(None).or(top_border),
+        right_border: border.or(right_border).and(None).or(right_border),
+        bottom_border: border.or(bottom_border).and(None).or(bottom_border),
         height: parse_moxel_format_usize(&values, 6),
         border_color: parse_moxel_format_style_ref(&values, 5, style_refs),
         width: parse_moxel_format_usize(&values, 7),
         horizontal_alignment: parse_moxel_format_usize(&values, 8)
             .and_then(moxel_horizontal_alignment),
         vertical_alignment: parse_moxel_format_usize(&values, 9).and_then(moxel_vertical_alignment),
+        back_color: parse_moxel_format_style_ref(&values, 11, style_refs),
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        by_selected_columns: parse_moxel_format_usize(&values, 20)
+            .and_then(moxel_by_selected_columns),
         details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
         hyper_link: parse_moxel_format_usize(&values, 26).and_then(moxel_hyper_link),
         protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
         indent: parse_moxel_format_usize(&values, 30),
         auto_indent: parse_moxel_format_usize(&values, 31),
+        mask: parse_moxel_format_usize(&values, 34).and_then(moxel_mask),
         pic_index: parse_moxel_format_usize(&values, 35),
         picture_size_mode: parse_moxel_format_usize(&values, 36).and_then(moxel_picture_size_mode),
         pic_horizontal_alignment: parse_moxel_format_usize(&values, 37)
@@ -4498,13 +4586,16 @@ fn moxel_format_bits(flags: u64) -> Option<Vec<u8>> {
                 | 8
                 | 9
                 | 10
+                | 11
                 | 14
                 | 15
                 | 16
                 | 19
+                | 20
                 | 26
                 | 30
                 | 31
+                | 34
                 | 35
                 | 36
                 | 37
@@ -4557,6 +4648,7 @@ fn parse_moxel_style_ref_slot(
     match fields.get(1)?.trim() {
         "3" => match payload.first()?.trim() {
             "-1" | "-3" => Some(None),
+            "-7" => Some(Some("style:ButtonBackColor".to_string())),
             "0" => {
                 let uuid = parse_uuid_field(payload.get(1)?.trim())?;
                 let style_ref = object_refs
@@ -4593,6 +4685,7 @@ fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
 fn moxel_vertical_alignment(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Top"),
+        24 => Some("Center"),
         _ => None,
     }
 }
@@ -4617,6 +4710,21 @@ fn moxel_fill_type(value: usize) -> Option<&'static str> {
 fn moxel_details_use(value: usize) -> Option<&'static str> {
     match value {
         1 => Some("Row"),
+        _ => None,
+    }
+}
+
+fn moxel_by_selected_columns(value: usize) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+fn moxel_mask(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some(""),
         _ => None,
     }
 }
@@ -4836,18 +4944,27 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     };
     xml.push_str("\t<format>\r\n");
     push_moxel_format_usize(xml, "font", format.font);
-    push_moxel_format_usize(xml, "leftBorder", format.left_border);
-    push_moxel_format_usize(xml, "topBorder", format.top_border);
-    push_moxel_format_usize(xml, "rightBorder", format.right_border);
-    push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
+    push_moxel_format_usize(xml, "border", format.border);
+    if format.border.is_none() {
+        push_moxel_format_usize(xml, "leftBorder", format.left_border);
+        push_moxel_format_usize(xml, "topBorder", format.top_border);
+        push_moxel_format_usize(xml, "rightBorder", format.right_border);
+        push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
+    }
     push_moxel_format_usize(xml, "height", format.height);
     push_moxel_format_text(xml, "borderColor", format.border_color.as_deref());
     push_moxel_format_usize(xml, "width", format.width);
     push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
     push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
+    push_moxel_format_text(xml, "backColor", format.back_color.as_deref());
     push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
+    if let Some(by_selected_columns) = format.by_selected_columns {
+        xml.push_str(&format!(
+            "\t\t<bySelectedColumns>{by_selected_columns}</bySelectedColumns>\r\n"
+        ));
+    }
     push_moxel_format_text(xml, "detailsUse", format.details_use);
     if let Some(hyper_link) = format.hyper_link {
         xml.push_str(&format!("\t\t<hyperLink>{hyper_link}</hyperLink>\r\n"));
@@ -4857,6 +4974,13 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     }
     push_moxel_format_usize(xml, "indent", format.indent);
     push_moxel_format_usize(xml, "autoIndent", format.auto_indent);
+    if let Some(mask) = format.mask {
+        if mask.is_empty() {
+            xml.push_str("\t\t<mask/>\r\n");
+        } else {
+            xml.push_str(&format!("\t\t<mask>{}</mask>\r\n", escape_xml_text(mask)));
+        }
+    }
     push_moxel_format_usize(xml, "picIndex", format.pic_index);
     push_moxel_format_text(xml, "pictureSizeMode", format.picture_size_mode);
     push_moxel_format_text(
@@ -4951,16 +5075,24 @@ fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
 }
 
 fn push_moxel_font_xml(xml: &mut String, font: &MoxelFont) {
+    xml.push_str("\t<font");
+    if let Some(ref_name) = &font.ref_name {
+        xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(ref_name)));
+    }
+    if let Some(face_name) = &font.face_name {
+        xml.push_str(&format!(" faceName=\"{}\"", escape_xml_text(face_name)));
+    }
+    if let Some(height) = font.height {
+        xml.push_str(&format!(" height=\"{height}\""));
+    }
     xml.push_str(&format!(
-        "\t<font faceName=\"{}\" height=\"{}\" bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\" kind=\"Absolute\" scale=\"{}\"/>\r\n",
-        escape_xml_text(&font.face_name),
-        font.height,
-        font.bold,
-        font.italic,
-        font.underline,
-        font.strikeout,
-        font.scale
+        " bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\" kind=\"{}\"",
+        font.bold, font.italic, font.underline, font.strikeout, font.kind
     ));
+    if let Some(scale) = font.scale {
+        xml.push_str(&format!(" scale=\"{scale}\""));
+    }
+    xml.push_str("/>\r\n");
 }
 
 fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
