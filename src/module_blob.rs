@@ -155,6 +155,24 @@ pub struct PackedHelpBlob {
     pub output_sha256: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleRightsXml {
+    set_for_new_objects: bool,
+    objects: Vec<RoleObjectRightsXml>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleObjectRightsXml {
+    name: String,
+    rights: Vec<RoleRightXml>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleRightXml {
+    name: String,
+    value: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
@@ -905,6 +923,275 @@ pub fn pack_form_body_blob_from_module_text(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+pub fn pack_role_rights_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let rights = parse_role_rights_xml(xml)?;
+    let inflated = inflate_raw(base_blob).context("failed to inflate base Role rights blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base Role rights blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base Role rights body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("10") {
+        return Err(anyhow!(
+            "base Role rights body does not start with type marker 10"
+        ));
+    }
+    let objects_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("base Role rights body has no object rights field"))?
+        .clone();
+    let set_for_new_objects_range = fields
+        .get(4)
+        .ok_or_else(|| anyhow!("base Role rights body has no setForNewObjects field"))?
+        .clone();
+    let mut replacements = role_right_value_replacements(&plain, objects_range, &rights.objects)?;
+    replacements.push((
+        set_for_new_objects_range,
+        if rights.set_for_new_objects { "1" } else { "0" }.to_string(),
+    ));
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+fn role_right_value_replacements(
+    plain: &str,
+    objects_range: Range<usize>,
+    objects: &[RoleObjectRightsXml],
+) -> Result<Vec<(Range<usize>, String)>> {
+    let object_fields = scan_braced_fields(plain, objects_range.start)?;
+    let base_count_range = object_fields
+        .first()
+        .ok_or_else(|| anyhow!("base Role object rights field is empty"))?
+        .clone();
+    let base_count = plain[base_count_range]
+        .trim()
+        .parse::<usize>()
+        .context("invalid base Role object rights count")?;
+    if base_count != objects.len() {
+        return Err(anyhow!(
+            "Role Rights.xml object count {} does not match base blob object count {}",
+            objects.len(),
+            base_count
+        ));
+    }
+    if object_fields.len() != base_count + 1 {
+        return Err(anyhow!(
+            "base Role object rights field count {} does not match declared count {}",
+            object_fields.len().saturating_sub(1),
+            base_count
+        ));
+    }
+
+    let mut replacements = Vec::new();
+    for (object_index, object) in objects.iter().enumerate() {
+        let entry_range = object_fields[object_index + 1].clone();
+        let entry_fields = scan_braced_fields(plain, entry_range.start)?;
+        let rights_range = entry_fields.get(1).ok_or_else(|| {
+            anyhow!("base Role object rights entry {object_index} has no rights payload")
+        })?;
+        replacements.extend(role_object_right_value_replacements(
+            plain,
+            rights_range.clone(),
+            object,
+        )?);
+    }
+    Ok(replacements)
+}
+
+fn role_object_right_value_replacements(
+    plain: &str,
+    rights_range: Range<usize>,
+    object: &RoleObjectRightsXml,
+) -> Result<Vec<(Range<usize>, String)>> {
+    let fields = scan_braced_fields(plain, rights_range.start)?;
+    let marker = fields
+        .first()
+        .map(|range| plain[range.clone()].trim())
+        .ok_or_else(|| anyhow!("base Role rights payload is empty"))?;
+    let (start, count) = match marker {
+        "0" => (1usize, (fields.len().saturating_sub(1)) / 2),
+        "1" => {
+            let count_range = fields
+                .get(1)
+                .ok_or_else(|| anyhow!("base Role restricted rights payload has no count"))?;
+            let count = plain[count_range.clone()]
+                .trim()
+                .parse::<usize>()
+                .context("invalid base Role restricted rights count")?;
+            (2usize, count)
+        }
+        _ => return Err(anyhow!("unsupported base Role rights marker {marker}")),
+    };
+    if object.rights.len() != count {
+        return Err(anyhow!(
+            "Role Rights.xml object {} right count {} does not match base blob right count {}",
+            object.name,
+            object.rights.len(),
+            count
+        ));
+    }
+    let required_fields = start + count * 2;
+    if fields.len() < required_fields {
+        return Err(anyhow!(
+            "base Role rights payload has {} fields, expected at least {}",
+            fields.len(),
+            required_fields
+        ));
+    }
+    let mut replacements = Vec::with_capacity(count);
+    for (right_index, right) in object.rights.iter().enumerate() {
+        let value_range = fields[start + right_index * 2 + 1].clone();
+        replacements.push((
+            value_range,
+            if right.value { "1" } else { "-1" }.to_string(),
+        ));
+    }
+    Ok(replacements)
+}
+
+fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut set_for_new_objects = None::<bool>;
+    let mut objects = Vec::<RoleObjectRightsXml>::new();
+    let mut current_object = None::<RoleObjectRightsXml>;
+    let mut current_right = None::<RoleRightXml>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "object" && path_ends_with(&path, &["Rights"]) {
+                    current_object = Some(RoleObjectRightsXml {
+                        name: String::new(),
+                        rights: Vec::new(),
+                    });
+                } else if local == "right" && path_ends_with(&path, &["Rights", "object"]) {
+                    current_right = Some(RoleRightXml {
+                        name: String::new(),
+                        value: false,
+                    });
+                }
+                if matches!(local.as_str(), "setForNewObjects" | "name" | "value") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "setForNewObjects" {
+                    set_for_new_objects = Some(false);
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["Rights", "setForNewObjects"])
+                    || path_ends_with(&path, &["Rights", "object", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "value"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["Rights", "setForNewObjects"])
+                    || path_ends_with(&path, &["Rights", "object", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "value"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "setForNewObjects"
+                        if path_ends_with(&path, &["Rights", "setForNewObjects"]) =>
+                    {
+                        set_for_new_objects = Some(parse_xml_bool_text(
+                            "Role/setForNewObjects",
+                            text_value.trim(),
+                        )?);
+                    }
+                    "name" if path_ends_with(&path, &["Rights", "object", "name"]) => {
+                        if let Some(object) = current_object.as_mut() {
+                            object.name = text_value.clone();
+                        }
+                    }
+                    "name" if path_ends_with(&path, &["Rights", "object", "right", "name"]) => {
+                        if let Some(right) = current_right.as_mut() {
+                            right.name = text_value.clone();
+                        }
+                    }
+                    "value" if path_ends_with(&path, &["Rights", "object", "right", "value"]) => {
+                        if let Some(right) = current_right.as_mut() {
+                            right.value =
+                                parse_xml_bool_text("Role/right/value", text_value.trim())?;
+                        }
+                    }
+                    "right" if path_ends_with(&path, &["Rights", "object", "right"]) => {
+                        let right = current_right.take().ok_or_else(|| {
+                            anyhow!("Rights.xml ended right without active right")
+                        })?;
+                        if right.name.is_empty() {
+                            return Err(anyhow!("Rights.xml contains right without name"));
+                        }
+                        if let Some(object) = current_object.as_mut() {
+                            object.rights.push(right);
+                        }
+                    }
+                    "object" if path_ends_with(&path, &["Rights", "object"]) => {
+                        let object = current_object.take().ok_or_else(|| {
+                            anyhow!("Rights.xml ended object without active object")
+                        })?;
+                        if object.name.is_empty() {
+                            return Err(anyhow!("Rights.xml contains object without name"));
+                        }
+                        objects.push(object);
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "setForNewObjects" | "name" | "value") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(RoleRightsXml {
+        set_for_new_objects: set_for_new_objects
+            .ok_or_else(|| anyhow!("Rights.xml has no setForNewObjects"))?,
+        objects,
+    })
+}
+
+fn parse_xml_bool_text(name: &str, value: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(anyhow!("{name} must be true or false, got {value}")),
+    }
 }
 
 pub fn pack_base64_payload_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
@@ -5509,6 +5796,43 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             text,
             "{4,{7,{\"layout\"}},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{3,{\"picture\"},\"payload\"}}"
         );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_xml_preserving_base_identifiers() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,11111111-1111-4111-8111-111111111111,1,22222222-2222-4222-8222-222222222222,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,33333333-3333-4333-8333-333333333333,-1,0}}},{0},4294967295,0,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>true</setForNewObjects>
+	<object>
+		<name>Catalog.Products</name>
+		<right><name>Read</name><value>false</value></right>
+		<right><name>Update</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices</name>
+		<right>
+			<name>Read</name>
+			<value>true</value>
+			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
+		</right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(text.contains("11111111-1111-4111-8111-111111111111,-1"));
+        assert!(text.contains("22222222-2222-4222-8222-222222222222,1"));
+        assert!(text.contains("33333333-3333-4333-8333-333333333333,1"));
+        assert!(text.ends_with(",4294967295,1,0,4294967295}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

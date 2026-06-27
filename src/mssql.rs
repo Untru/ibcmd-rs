@@ -42,7 +42,7 @@ use crate::module_blob::{
     VersionReplacement, pack_base64_payload_blob_from_bytes,
     pack_common_module_metadata_blob_from_xml, pack_ext_picture_blob_from_bytes,
     pack_form_body_blob_from_module_text, pack_help_blob_from_parts, pack_module_blob_bytes,
-    pack_raw_deflated_blob_from_bytes, pack_schedule_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1929,6 +1929,7 @@ fn prepare_metadata_body_rows(
         "Form" | "CommonForm" => {
             prepare_form_body_row(sqlcmd, server, database, xml_path, properties)
         }
+        "Role" => prepare_role_rights_body_row(sqlcmd, server, database, xml_path, properties),
         _ => Ok(Vec::new()),
     }?;
     rows.extend(prepare_object_help_body_row(
@@ -2141,6 +2142,31 @@ fn prepare_form_body_row(
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: module_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_role_rights_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_role_rights_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
+    let packed = pack_role_rights_blob_from_xml(&base_body, &xml)
+        .with_context(|| format!("failed to pack Role rights {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
     }])
@@ -3849,6 +3875,10 @@ fn infer_form_module_body_path(xml: &Path) -> PathBuf {
         .join("Module.bsl")
 }
 
+fn infer_role_rights_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Rights.xml")
+}
+
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
     let package_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -4494,6 +4524,14 @@ mod tests {
         assert_eq!(
             super::infer_form_module_body_path(r"CommonForms\SharedForm.xml".as_ref()),
             std::path::PathBuf::from(r"CommonForms\SharedForm\Ext\Form\Module.bsl")
+        );
+    }
+
+    #[test]
+    fn infers_role_rights_body_path() {
+        assert_eq!(
+            super::infer_role_rights_body_path(r"Roles\Editor.xml".as_ref()),
+            std::path::PathBuf::from(r"Roles\Editor\Ext\Rights.xml")
         );
     }
 
