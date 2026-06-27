@@ -362,7 +362,9 @@ enum SourceAssetKind {
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
-    MoxelSpreadsheet,
+    MoxelSpreadsheet {
+        object_refs: BTreeMap<String, String>,
+    },
     PredefinedData {
         xsi_type: &'static str,
         type_index: BTreeMap<String, String>,
@@ -461,7 +463,11 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
     paths.extend(form_body_asset_paths(rows, &file_names));
-    paths.extend(template_body_asset_paths(&template_refs, &file_names));
+    paths.extend(template_body_asset_paths(
+        &template_refs,
+        &file_names,
+        &object_refs,
+    ));
 
     paths
 }
@@ -469,6 +475,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
 fn template_body_asset_paths(
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     file_names: &BTreeSet<&str>,
+    object_refs: &BTreeMap<String, String>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (uuid, template_ref) in template_refs {
@@ -476,9 +483,15 @@ fn template_body_asset_paths(
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
-        let Some((file_name, kind)) = template_body_source_asset(template_ref.template_type) else {
+        let Some((file_name, mut kind)) = template_body_source_asset(template_ref.template_type)
+        else {
             continue;
         };
+        if matches!(kind, SourceAssetKind::MoxelSpreadsheet { .. }) {
+            kind = SourceAssetKind::MoxelSpreadsheet {
+                object_refs: object_refs.clone(),
+            };
+        }
         paths.insert(
             body_id,
             SourceAsset {
@@ -502,7 +515,12 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
-        "SpreadsheetDocument" => Some(("Template.xml", SourceAssetKind::MoxelSpreadsheet)),
+        "SpreadsheetDocument" => Some((
+            "Template.xml",
+            SourceAssetKind::MoxelSpreadsheet {
+                object_refs: BTreeMap::new(),
+            },
+        )),
         _ => None,
     }
 }
@@ -977,8 +995,8 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_business_process_flowchart_xml(&flowchart))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::MoxelSpreadsheet => {
-            let xml = extract_moxel_spreadsheet_xml(bytes).with_context(|| {
+        SourceAssetKind::MoxelSpreadsheet { object_refs } => {
+            let xml = extract_moxel_spreadsheet_xml(bytes, object_refs).with_context(|| {
                 format!(
                     "failed to extract spreadsheet template from source asset {}",
                     asset.primary_path.display()
@@ -1089,9 +1107,11 @@ struct MoxelFormat {
     right_border: Option<usize>,
     bottom_border: Option<usize>,
     height: Option<usize>,
+    border_color: Option<String>,
     width: Option<usize>,
     horizontal_alignment: Option<&'static str>,
     vertical_alignment: Option<&'static str>,
+    text_color: Option<String>,
     text_placement: Option<&'static str>,
     fill_type: Option<&'static str>,
     protection: Option<bool>,
@@ -1111,9 +1131,11 @@ impl MoxelFormat {
             && self.right_border.is_none()
             && self.bottom_border.is_none()
             && self.height.is_none()
+            && self.border_color.is_none()
             && self.width.is_none()
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
+            && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
             && self.protection.is_none()
@@ -1133,8 +1155,10 @@ impl MoxelFormat {
             && self.right_border.is_none()
             && self.bottom_border.is_none()
             && self.height.is_none()
+            && self.border_color.is_none()
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
+            && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.fill_type.is_none()
             && self.protection.is_none()
@@ -3714,18 +3738,24 @@ fn format_form_body_xml() -> String {
         .to_string()
 }
 
-fn extract_moxel_spreadsheet_xml(bytes: &[u8]) -> Option<String> {
+fn extract_moxel_spreadsheet_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     if !inflated.starts_with(b"MOXCEL") {
         return None;
     }
     let text = String::from_utf8(inflated).ok()?;
     let body_start = text.find("{8,")?;
-    let spreadsheet = parse_moxel_spreadsheet_text(&text[body_start..])?;
+    let spreadsheet = parse_moxel_spreadsheet_text(&text[body_start..], object_refs)?;
     Some(format_moxel_spreadsheet_xml(&spreadsheet))
 }
 
-fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
+fn parse_moxel_spreadsheet_text(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelSpreadsheet> {
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
     if fields.first()?.trim() != "8" {
         return None;
@@ -3750,6 +3780,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     let areas = parse_moxel_areas(&fields);
     let lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
+    let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
@@ -3776,7 +3807,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
         column_count,
         column_widths: parse_moxel_column_widths(&fields, column_count),
         default_format_width: parse_moxel_default_format_width(&fields, column_count),
-        formats: parse_moxel_formats(&fields, column_count),
+        formats: parse_moxel_formats(&fields, column_count, &style_refs),
         rows,
         merges,
         areas,
@@ -3973,7 +4004,11 @@ fn parse_moxel_default_format_width(fields: &[&str], column_count: usize) -> Opt
     widths.first().copied()
 }
 
-fn parse_moxel_formats(fields: &[&str], column_count: usize) -> Vec<MoxelFormat> {
+fn parse_moxel_formats(
+    fields: &[&str],
+    column_count: usize,
+    style_refs: &[Option<String>],
+) -> Vec<MoxelFormat> {
     for index in 0..fields.len() {
         let Some(count) = fields
             .get(index)
@@ -3986,7 +4021,7 @@ fn parse_moxel_formats(fields: &[&str], column_count: usize) -> Vec<MoxelFormat>
         }
         let mut formats = Vec::with_capacity(count);
         for field in &fields[index + 1..=index + count] {
-            let Some(format) = parse_moxel_format(field) else {
+            let Some(format) = parse_moxel_format(field, style_refs) else {
                 formats.clear();
                 break;
             };
@@ -4006,7 +4041,7 @@ fn parse_moxel_formats(fields: &[&str], column_count: usize) -> Vec<MoxelFormat>
     Vec::new()
 }
 
-fn parse_moxel_format(text: &str) -> Option<MoxelFormat> {
+fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<MoxelFormat> {
     let fields = split_1c_braced_fields(text, 0)?;
     let flags = fields.first()?.trim().parse::<u64>().ok()?;
     let bits = moxel_format_bits(flags)?;
@@ -4025,10 +4060,12 @@ fn parse_moxel_format(text: &str) -> Option<MoxelFormat> {
         right_border: parse_moxel_format_usize(&values, 3),
         bottom_border: parse_moxel_format_usize(&values, 4),
         height: parse_moxel_format_usize(&values, 6),
+        border_color: parse_moxel_format_style_ref(&values, 5, style_refs),
         width: parse_moxel_format_usize(&values, 7),
         horizontal_alignment: parse_moxel_format_usize(&values, 8)
             .and_then(moxel_horizontal_alignment),
         vertical_alignment: parse_moxel_format_usize(&values, 9).and_then(moxel_vertical_alignment),
+        text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
         protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
@@ -4068,6 +4105,50 @@ fn parse_moxel_format_usize(values: &[(u8, &str)], bit: u8) -> Option<usize> {
         .iter()
         .find(|(value_bit, _)| *value_bit == bit)
         .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+}
+
+fn parse_moxel_format_style_ref(
+    values: &[(u8, &str)],
+    bit: u8,
+    style_refs: &[Option<String>],
+) -> Option<String> {
+    parse_moxel_format_usize(values, bit)
+        .and_then(|index| style_refs.get(index))
+        .cloned()
+        .flatten()
+}
+
+fn parse_moxel_style_refs(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<Option<String>> {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_style_ref_slot(field, object_refs))
+        .collect()
+}
+
+fn parse_moxel_style_ref_slot(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "3" {
+        return None;
+    }
+    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+    match payload.first()?.trim() {
+        "-1" | "-3" => Some(None),
+        "0" => {
+            let uuid = parse_uuid_field(payload.get(1)?.trim())?;
+            let style_ref = object_refs
+                .get(&uuid)
+                .and_then(|reference| reference.strip_prefix("StyleItem."))
+                .map(|name| format!("style:{name}"));
+            Some(style_ref)
+        }
+        _ => None,
+    }
 }
 
 fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
@@ -4295,9 +4376,11 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     push_moxel_format_usize(xml, "rightBorder", format.right_border);
     push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
     push_moxel_format_usize(xml, "height", format.height);
+    push_moxel_format_text(xml, "borderColor", format.border_color.as_deref());
     push_moxel_format_usize(xml, "width", format.width);
     push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
     push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
+    push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
     if let Some(protection) = format.protection {
@@ -8738,8 +8821,13 @@ mod tests {
 
     #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
+        let object_refs = BTreeMap::from([(
+            "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
+            "StyleItem.ЦветШтампаЭП".to_string(),
+        )]);
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},6,{719,0,0,0,0,45,72,0},{138,0,0,72},{16769,0,90,6,3},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},6,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
+            &object_refs,
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -8773,7 +8861,7 @@ mod tests {
             "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<leftBorder>0</leftBorder>\r\n\t\t<topBorder>0</topBorder>\r\n\t\t<rightBorder>0</rightBorder>\r\n\t\t<height>45</height>\r\n\t\t<width>72</width>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t</format>"
         ));
         assert!(xml.contains(
-            "\t<format>\r\n\t\t<leftBorder>0</leftBorder>\r\n\t\t<rightBorder>0</rightBorder>\r\n\t\t<width>72</width>\r\n\t</format>"
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>219</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<protection>true</protection>\r\n\t</format>"
         ));
         assert!(xml.contains(
             "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>90</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t</format>"
