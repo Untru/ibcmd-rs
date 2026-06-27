@@ -3929,6 +3929,7 @@ struct FormChildItem {
     name: String,
     group: Option<&'static str>,
     item_type: Option<&'static str>,
+    addition_source_item: Option<String>,
     title: Vec<(String, String)>,
     events: Vec<FormBodyEvent>,
     data_path: Option<String>,
@@ -4836,6 +4837,13 @@ fn parse_form_child_item(
         } else {
             None
         },
+        addition_source_item: if tag.ends_with("Addition") {
+            fields
+                .get(19)
+                .and_then(|field| parse_form_search_addition_source_item(field, table_name_by_id))
+        } else {
+            None
+        },
         title: parse_form_child_item_title(wrapper, &fields),
         events: parse_form_child_item_event_fields(&fields),
         data_path,
@@ -4866,6 +4874,15 @@ fn parse_form_search_addition_type(field: &str) -> Option<&'static str> {
         "2" => Some("SearchControl"),
         _ => None,
     }
+}
+
+fn parse_form_search_addition_source_item(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let table_id = fields.first()?.trim();
+    table_name_by_id.get(table_id).cloned()
 }
 
 fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
@@ -5403,11 +5420,21 @@ fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
         escape_xml_text(&item.id)
     );
     if item.tag.ends_with("Addition") {
-        if let Some(item_type) = item.item_type {
-            xml.push_str(&format!(
-                "{tab}\t<AdditionSource>\r\n{tab}\t\t<Type>{}</Type>\r\n{tab}\t</AdditionSource>\r\n",
-                escape_xml_text(item_type)
-            ));
+        if item.addition_source_item.is_some() || item.item_type.is_some() {
+            xml.push_str(&format!("{tab}\t<AdditionSource>\r\n"));
+            if let Some(source_item) = &item.addition_source_item {
+                xml.push_str(&format!(
+                    "{tab}\t\t<Item>{}</Item>\r\n",
+                    escape_xml_text(source_item)
+                ));
+            }
+            if let Some(item_type) = item.item_type {
+                xml.push_str(&format!(
+                    "{tab}\t\t<Type>{}</Type>\r\n",
+                    escape_xml_text(item_type)
+                ));
+            }
+            xml.push_str(&format!("{tab}\t</AdditionSource>\r\n"));
         }
     } else if let Some(item_type) = item.item_type {
         xml.push_str(&format!(
@@ -12002,6 +12029,7 @@ mod tests {
     #[test]
     fn extracts_form_search_addition_type_from_layout_code() {
         let mut items = Vec::new();
+        let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
         for (code, expected_tag, expected_type) in [
             ("0", "SearchStringAddition", "SearchStringRepresentation"),
             ("1", "ViewStatusAddition", "ViewStatusRepresentation"),
@@ -12009,11 +12037,11 @@ mod tests {
         ] {
             let item = parse_form_child_item(
                 &format!(
-                    r#"{{6,{{44,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,{code},"SearchAddition",{{1,0}}}}"#
+                    r#"{{6,{{44,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,{code},"SearchAddition",{{1,0}},{{1,0}},1,1,0,1,{{1,0}},0,0,0,0,0,{{25,{code}}}}}"#
                 ),
                 None,
                 None,
-                &BTreeMap::new(),
+                &table_name_by_id,
                 &BTreeMap::new(),
                 &[],
                 &BTreeMap::new(),
@@ -12022,12 +12050,14 @@ mod tests {
 
             assert_eq!(item.tag, expected_tag);
             assert_eq!(item.item_type, Some(expected_type));
+            assert_eq!(item.addition_source_item.as_deref(), Some("Rows"));
             items.push(item);
         }
 
         let xml = format_form_child_items_xml(&items, 1);
 
         assert!(xml.contains("<SearchStringAddition"));
+        assert_eq!(xml.matches("<Item>Rows</Item>").count(), 3);
         assert!(xml.contains("<Type>SearchStringRepresentation</Type>"));
         assert!(xml.contains("<ViewStatusAddition"));
         assert!(xml.contains("<Type>ViewStatusRepresentation</Type>"));

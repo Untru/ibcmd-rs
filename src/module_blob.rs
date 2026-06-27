@@ -184,6 +184,7 @@ struct FormXmlChildItem {
     id: String,
     name: String,
     item_type: Option<String>,
+    addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
@@ -3694,6 +3695,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
@@ -3976,6 +3978,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
@@ -4735,6 +4738,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.item_type = Some(text_value.trim().to_string());
                         }
                     }
+                    "Item"
+                        if path_ends_with_for_child_addition_source_item(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                item.addition_source_item = Some(value.to_string());
+                            }
+                        }
+                    }
                     "CommandName"
                         if path_ends_with_for_child_command_name(&path, &current_child_items) =>
                     {
@@ -4879,6 +4895,7 @@ fn parse_form_child_item_xml(
         id,
         name,
         item_type: None,
+        addition_source_item: None,
         title: Vec::new(),
         events: Vec::new(),
         command_name: None,
@@ -5019,6 +5036,16 @@ fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) ->
     };
     path_ends_with(path, &[item.tag.as_str(), "Type"])
         || path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Type"])
+}
+
+fn path_ends_with_for_child_addition_source_item(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Item"])
 }
 
 fn path_ends_with_for_child_command_name(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -5259,6 +5286,18 @@ fn patch_form_layout_child_item_entry(
         && let Some(type_range) = fields.get(5)
     {
         replacements.push((type_range.clone(), type_code.to_string()));
+    }
+    if item.tag.ends_with("Addition")
+        && let Some(source_item) = &item.addition_source_item
+        && let Some(source_item_id) = table_ids_by_name.get(source_item)
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_search_addition_type_code(item_type)
+        && let Some(source_range) = fields.get(19)
+    {
+        replacements.push((
+            source_range.clone(),
+            format!("{{{source_item_id},{type_code}}}"),
+        ));
     }
     if item.tag == "Button"
         && let Some(command_name) = &item.command_name
@@ -13714,6 +13753,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             "{}",
             parsed.layout
         );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_search_addition_source_item() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{6,{134,33333333-3333-4333-8333-333333333333},0,0,0,0,"OldSearch",{1,0},{1,0},1,1,0,1,{1,0},0,0,0,0,0,{26,0}}},{73,{26,44444444-4444-4444-8444-444444444444},0,1,0,"OldRows"}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<SearchStringAddition name="NewSearch" id="134">
+			<AdditionSource>
+				<Item>Rows</Item>
+				<Type>SearchStringRepresentation</Type>
+			</AdditionSource>
+		</SearchStringAddition>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewSearch""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains("{25,0}"), "{}", parsed.layout);
+        assert!(!parsed.layout.contains("{26,0}"));
+        assert!(!parsed.layout.contains("OldSearch"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
 
