@@ -1008,6 +1008,7 @@ struct SpreadsheetDocumentXmlCell {
     format_index: usize,
     text: Option<String>,
     parameter: Option<String>,
+    detail_parameter: Option<String>,
     empty_text: bool,
 }
 
@@ -1192,6 +1193,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "f"
             | "content"
             | "parameter"
+            | "detailParameter"
             | "empty"
             | "r"
             | "c"
@@ -1273,6 +1275,11 @@ fn apply_spreadsheet_text_value(
         "parameter" => {
             if let Some(cell) = cell {
                 cell.parameter = Some(text.to_string());
+            }
+        }
+        "detailParameter" => {
+            if let Some(cell) = cell {
+                cell.detail_parameter = Some(text.to_string());
             }
         }
         "r" if path_ends_with(path, &["merge", "r"]) => {
@@ -1395,6 +1402,12 @@ fn format_spreadsheet_cell_for_moxel(cell: &SpreadsheetDocumentXmlCell) -> Strin
     } else {
         return format!("{{0,{format_index}}}");
     };
+    if let Some(detail_parameter) = &cell.detail_parameter {
+        return format!(
+            "{{24,{format_index},{},{localized},0}}",
+            format_1c_string(detail_parameter)
+        );
+    }
     format!("{{16,{format_index},{localized},0}}")
 }
 
@@ -7496,6 +7509,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains(r#"{16,0,{1,1,{"ru","Hello"}},0}"#));
         assert!(text.contains(r#"{16,0,{1,1,{"","Name"}},0}"#));
         assert!(text.contains(r#"2,{16,0,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_detail_parameter_cells() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>3</f>
+					<parameter>Name</parameter>
+					<detailParameter>Version</detailParameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{24,2,"Version",{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
