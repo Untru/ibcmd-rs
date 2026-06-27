@@ -954,6 +954,9 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
             }
         }
     }
+    if !spreadsheet.merges.is_empty() {
+        fields.push(format_spreadsheet_merges_for_moxel(&spreadsheet.merges));
+    }
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -972,6 +975,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
 struct SpreadsheetDocumentXml {
     column_count: usize,
     rows: Vec<SpreadsheetDocumentXmlRow>,
+    merges: Vec<SpreadsheetDocumentXmlMerge>,
 }
 
 #[derive(Debug, Default)]
@@ -999,6 +1003,14 @@ struct SpreadsheetDocumentXmlCell {
     empty_text: bool,
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlMerge {
+    row: i32,
+    column: i32,
+    height: i32,
+    width: i32,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1007,6 +1019,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut document = SpreadsheetDocumentXml::default();
     let mut current_row = None::<SpreadsheetDocumentXmlRow>;
     let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
+    let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1018,6 +1031,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                 if local == "rowsItem" {
                     current_row = Some(SpreadsheetDocumentXmlRow::default());
                     next_column_index = 0;
+                } else if local == "merge" {
+                    current_merge = Some(SpreadsheetDocumentXmlMerge::default());
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1088,6 +1103,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     &mut document,
                     current_row.as_mut(),
                     current_cell.as_mut(),
+                    current_merge.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1109,6 +1125,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                         row.cells.sort_by_key(|cell| cell.column_index);
                     }
                     document.rows.push(row);
+                } else if local == "merge"
+                    && let Some(merge) = current_merge.take()
+                {
+                    document.merges.push(merge);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
@@ -1140,6 +1160,10 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "content"
             | "parameter"
             | "empty"
+            | "r"
+            | "c"
+            | "h"
+            | "w"
     )
 }
 
@@ -1150,6 +1174,7 @@ fn apply_spreadsheet_text_value(
     document: &mut SpreadsheetDocumentXml,
     row: Option<&mut SpreadsheetDocumentXmlRow>,
     cell: Option<&mut SpreadsheetDocumentXmlCell>,
+    merge: Option<&mut SpreadsheetDocumentXmlMerge>,
 ) {
     let value = text.trim();
     match local {
@@ -1209,6 +1234,34 @@ fn apply_spreadsheet_text_value(
                 cell.parameter = Some(text.to_string());
             }
         }
+        "r" if path_ends_with(path, &["merge", "r"]) => {
+            if let Some(merge) = merge
+                && let Ok(row) = value.parse::<i32>()
+            {
+                merge.row = row;
+            }
+        }
+        "c" if path_ends_with(path, &["merge", "c"]) => {
+            if let Some(merge) = merge
+                && let Ok(column) = value.parse::<i32>()
+            {
+                merge.column = column;
+            }
+        }
+        "h" if path_ends_with(path, &["merge", "h"]) => {
+            if let Some(merge) = merge
+                && let Ok(height) = value.parse::<i32>()
+            {
+                merge.height = height.max(0);
+            }
+        }
+        "w" if path_ends_with(path, &["merge", "w"]) => {
+            if let Some(merge) = merge
+                && let Ok(width) = value.parse::<i32>()
+            {
+                merge.width = width.max(0);
+            }
+        }
         _ => {}
     }
 }
@@ -1252,6 +1305,21 @@ fn format_spreadsheet_cell_for_moxel(cell: &SpreadsheetDocumentXmlCell) -> Strin
         return format!("{{0,{format_index}}}");
     };
     format!("{{16,{format_index},{localized},0}}")
+}
+
+fn format_spreadsheet_merges_for_moxel(merges: &[SpreadsheetDocumentXmlMerge]) -> String {
+    let mut fields = Vec::with_capacity(merges.len() + 1);
+    fields.push(merges.len().to_string());
+    for merge in merges {
+        let begin_column = merge.column.max(0);
+        let begin_row = merge.row.max(0);
+        let end_column = begin_column + merge.width.max(0);
+        let end_row = begin_row + merge.height.max(0);
+        fields.push(format!(
+            "{{{begin_column},{begin_row},{end_column},{end_row}}}"
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
 }
 
 pub fn pack_form_body_blob_from_module_text(
@@ -7326,6 +7394,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains(",1,0,0,2,0,0,3,0,0,"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_merges() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>4</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<merge>
+		<r>1</r>
+		<c>2</c>
+		<h>3</h>
+		<w>1</w>
+	</merge>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{1,{2,1,3,4}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
