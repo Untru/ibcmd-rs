@@ -954,6 +954,9 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
             }
         }
     }
+    fields.extend(format_spreadsheet_empty_headers_footers_for_moxel(
+        &spreadsheet,
+    ));
     fields.extend(format_spreadsheet_column_sets_for_moxel(&spreadsheet));
     if !spreadsheet.merges.is_empty() {
         fields.push(format_spreadsheet_merges_for_moxel(&spreadsheet.merges));
@@ -1000,6 +1003,7 @@ struct SpreadsheetDocumentXml {
     formats: Vec<SpreadsheetDocumentXmlFormat>,
     fonts: Vec<SpreadsheetDocumentXmlFont>,
     lines: Vec<SpreadsheetDocumentXmlLine>,
+    empty_header_footer_tags: BTreeSet<String>,
 }
 
 #[derive(Debug, Default)]
@@ -1144,6 +1148,13 @@ impl Default for SpreadsheetDocumentXmlLine {
     }
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlHeaderFooter {
+    tag: String,
+    f_zero: bool,
+    tfl_empty: bool,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1159,6 +1170,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
     let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
     let mut current_line = None::<SpreadsheetDocumentXmlLine>;
+    let mut current_header_footer = None::<SpreadsheetDocumentXmlHeaderFooter>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1196,6 +1208,11 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     if let Some(line_type) = xml_attribute_value(&event, "type")? {
                         line.line_type = line_type;
                     }
+                } else if spreadsheet_header_footer_tag(&local) {
+                    current_header_footer = Some(SpreadsheetDocumentXmlHeaderFooter {
+                        tag: local.clone(),
+                        ..Default::default()
+                    });
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1220,6 +1237,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     if let Some(font) = parse_spreadsheet_font_xml_attributes(&event)? {
                         document.fonts.push(font);
                     }
+                } else if local == "tfl"
+                    && let Some(header_footer) = current_header_footer.as_mut()
+                {
+                    header_footer.tfl_empty = true;
                 } else if current_cell.is_some()
                     && local == "tl"
                     && let Some(cell) = current_cell.as_mut()
@@ -1277,6 +1298,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_print_settings.as_mut(),
                     current_format.as_mut(),
                     current_line.as_mut(),
+                    current_header_footer.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1332,6 +1354,12 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(line) = current_line.take()
                 {
                     document.lines.push(line);
+                } else if spreadsheet_header_footer_tag(&local)
+                    && let Some(header_footer) = current_header_footer.take()
+                    && header_footer.f_zero
+                    && header_footer.tfl_empty
+                {
+                    document.empty_header_footer_tags.insert(header_footer.tag);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
@@ -1429,6 +1457,18 @@ fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Optio
     Ok(None)
 }
 
+fn spreadsheet_header_footer_tag(local: &str) -> bool {
+    matches!(
+        local,
+        "leftHeader"
+            | "centerHeader"
+            | "rightHeader"
+            | "leftFooter"
+            | "centerFooter"
+            | "rightFooter"
+    )
+}
+
 fn spreadsheet_text_element(local: &str) -> bool {
     matches!(
         local,
@@ -1518,6 +1558,7 @@ fn apply_spreadsheet_text_value(
     print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
     format: Option<&mut SpreadsheetDocumentXmlFormat>,
     line: Option<&mut SpreadsheetDocumentXmlLine>,
+    header_footer: Option<&mut SpreadsheetDocumentXmlHeaderFooter>,
 ) {
     let value = text.trim();
     match local {
@@ -1597,6 +1638,11 @@ fn apply_spreadsheet_text_value(
                 && let Ok(format_index) = value.parse::<usize>()
             {
                 cell.format_index = format_index;
+            }
+            if let Some(header_footer) = header_footer
+                && value == "0"
+            {
+                header_footer.f_zero = true;
             }
         }
         "content" => {
@@ -2033,6 +2079,26 @@ fn format_spreadsheet_cell_for_moxel(cell: &SpreadsheetDocumentXmlCell) -> Strin
         );
     }
     format!("{{16,{format_index},{localized},0}}")
+}
+
+fn format_spreadsheet_empty_headers_footers_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+) -> Vec<String> {
+    let tags = [
+        "leftHeader",
+        "centerHeader",
+        "rightHeader",
+        "leftFooter",
+        "centerFooter",
+        "rightFooter",
+    ];
+    if !tags
+        .iter()
+        .all(|tag| spreadsheet.empty_header_footer_tags.contains(*tag))
+    {
+        return Vec::new();
+    }
+    vec!["{16,0,{1,0},1,{1,{1,0},1}}".to_string(); tags.len()]
 }
 
 fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml) -> Vec<String> {
@@ -9121,6 +9187,55 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{2,{30,0,0,0,0},{1,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_empty_headers_and_footers() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<leftHeader>
+		<f>0</f>
+		<tfl/>
+	</leftHeader>
+	<centerHeader>
+		<f>0</f>
+		<tfl/>
+	</centerHeader>
+	<rightHeader>
+		<f>0</f>
+		<tfl/>
+	</rightHeader>
+	<leftFooter>
+		<f>0</f>
+		<tfl/>
+	</leftFooter>
+	<centerFooter>
+		<f>0</f>
+		<tfl/>
+	</centerFooter>
+	<rightFooter>
+		<f>0</f>
+		<tfl/>
+	</rightFooter>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text.matches("{16,0,{1,0},1,{1,{1,0},1}}").count(), 6);
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
