@@ -1280,8 +1280,16 @@ pub fn stage_source_objects(
     }
 
     let manifest = scan_sources(&args.source_root)?;
-    let metadata_xmls = source_metadata_xmls(&manifest, &args.source_root);
-    let common_module_xmls = source_common_module_xmls(&manifest, &args.source_root);
+    let metadata_xmls = filter_source_paths_by_prefix(
+        source_metadata_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
+    let common_module_xmls = filter_source_paths_by_prefix(
+        source_common_module_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
     if metadata_xmls.is_empty() && common_module_xmls.is_empty() {
         return Err(anyhow!(
             "no supported root XML objects or common modules found under {}",

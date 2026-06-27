@@ -782,6 +782,9 @@ pub struct MssqlStageSourceObjectsArgs {
     /// Optional maximum number of staged XML objects per SQL batch.
     #[arg(long)]
     pub batch_size: Option<usize>,
+    /// Optional source path prefix to stage. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -2786,6 +2789,8 @@ mod tests {
             "TestDb",
             "--source-root",
             r"C:\sources",
+            "--path-prefix",
+            "Catalogs/Products",
             "--replace-config-save",
             "--allow-non-lab",
         ]);
@@ -2793,6 +2798,7 @@ mod tests {
             Commands::MssqlStageSourceObjects(args) => {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
+                assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
