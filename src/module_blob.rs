@@ -123,6 +123,7 @@ struct FormXmlDynamicListSettings {
     manual_query: Option<bool>,
     dynamic_data_read: Option<bool>,
     query_text: Option<String>,
+    main_table: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -3239,7 +3240,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
                 let mut attributes = plain[attributes_range.clone()].trim().to_string();
-                patch_form_body_attributes(&mut attributes, &properties.attributes)?;
+                patch_form_body_attributes(&mut attributes, &properties.attributes, source)?;
                 plain.replace_range(attributes_range, &attributes);
             }
         }
@@ -3305,6 +3306,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ManualQuery"
                         | "DynamicDataRead"
                         | "QueryText"
+                        | "MainTable"
                         | "Command"
                         | "CommandGroup"
                         | "Index"
@@ -3401,6 +3403,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
                     )
                     || path_ends_with(
                         &path,
@@ -3501,6 +3507,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
                     )
                     || path_ends_with(
                         &path,
@@ -3740,6 +3750,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             settings.query_text = Some(text_value.to_string());
                         }
                     }
+                    "MainTable"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.main_table = Some(text_value.trim().to_string());
+                        }
+                    }
                     "Attribute" if path_ends_with(&path, &["Form", "Attributes", "Attribute"]) => {
                         if let Some(attribute) = current_attribute.take() {
                             properties.attributes.push(attribute);
@@ -3903,6 +3926,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ManualQuery"
                         | "DynamicDataRead"
                         | "QueryText"
+                        | "MainTable"
                         | "Command"
                         | "CommandGroup"
                         | "Index"
@@ -4718,25 +4742,33 @@ fn format_form_nested_common_bool(value: bool) -> String {
     format!("{{0,{{0,{},0}}}}", format_form_setting_bool(value))
 }
 
-fn patch_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute]) -> Result<()> {
+fn patch_form_body_attributes(
+    text: &mut String,
+    attributes: &[FormXmlAttribute],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
     for attribute in attributes {
-        let _ = patch_form_body_attribute(text, attribute)?;
+        let _ = patch_form_body_attribute(text, attribute, source)?;
     }
     Ok(())
 }
 
-fn patch_form_body_attribute(text: &mut String, attribute: &FormXmlAttribute) -> Result<bool> {
+fn patch_form_body_attribute(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     for range in fields {
         if !text[range.clone()].trim_start().starts_with('{') {
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_body_attribute_entry(&mut nested, attribute)? {
+        if patch_form_body_attribute_entry(&mut nested, attribute, source)? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
-        if patch_form_body_attribute(&mut nested, attribute)? {
+        if patch_form_body_attribute(&mut nested, attribute, source)? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -4747,6 +4779,7 @@ fn patch_form_body_attribute(text: &mut String, attribute: &FormXmlAttribute) ->
 fn patch_form_body_attribute_entry(
     text: &mut String,
     attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if fields.first().map(|range| text[range.clone()].trim()) != Some("9") {
@@ -4787,7 +4820,7 @@ fn patch_form_body_attribute_entry(
         && let Some(settings_range) = fields.get(14)
     {
         let mut settings_text = text[settings_range.clone()].to_string();
-        patch_form_dynamic_list_settings(&mut settings_text, settings)?;
+        patch_form_dynamic_list_settings(&mut settings_text, settings, source)?;
         replacements.push((settings_range.clone(), settings_text));
     }
 
@@ -4801,6 +4834,7 @@ fn patch_form_body_attribute_entry(
 fn patch_form_dynamic_list_settings(
     text: &mut String,
     settings: &FormXmlDynamicListSettings,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     if let Some(query_text) = &settings.query_text {
         let _ =
@@ -4816,6 +4850,15 @@ fn patch_form_dynamic_list_settings(
             text,
             "DynamicalDataSelection",
             &format_form_setting_bool(data_selection),
+        )?;
+    }
+    if let Some(main_table) = &settings.main_table
+        && let Some(source) = source
+    {
+        let _ = patch_form_setting_value(
+            text,
+            "MainTable",
+            &format_form_setting_metadata_ref(source, main_table)?,
         )?;
     }
     Ok(())
@@ -4841,6 +4884,14 @@ fn format_form_setting_string(value: &str) -> String {
 
 fn format_form_setting_bool(value: bool) -> String {
     format!("{{\"B\",{}}}", if value { "1" } else { "0" })
+}
+
+fn format_form_setting_metadata_ref(
+    source: &MetadataSourceContext,
+    reference: &str,
+) -> Result<String> {
+    let uuid = source.resolve_metadata_reference_uuid(reference)?;
+    Ok(format!("{{\"#\",{uuid}}}"))
 }
 
 fn patch_form_body_command(text: &mut String, command: &FormXmlCommand) -> Result<bool> {
@@ -11782,8 +11833,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
     #[test]
     fn packs_form_body_xml_existing_attributes() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-main-table-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
         let base = super::deflate_raw(
-            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,3,"QueryText",{"S","Old query"},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0}},{0,0}}},{0,0},{0,0},{0}}"##,
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,4,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0}},{0,0}}},{0,0},{0,0},{0}}"##,
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
@@ -11797,6 +11858,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<ManualQuery>true</ManualQuery>
 				<DynamicDataRead>true</DynamicDataRead>
 				<QueryText>ВЫБРАТЬ Ссылка ИЗ Справочник.Товары</QueryText>
+				<MainTable>Catalog.Products</MainTable>
 			</Settings>
 		</Attribute>
 	</Attributes>
@@ -11804,19 +11866,23 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 "#
         .as_bytes();
 
-        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
 
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[0].contains(r#""Список""#));
-        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,3,"#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,4,"#));
         assert!(
             parsed.trailing[0]
                 .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
         );
         assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
+        assert!(parsed.trailing[0].contains("\"MainTable\",{\"#\","));
+        assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(!parsed.trailing[0].contains("88888888-8888-4888-8888-888888888888"));
         assert!(!parsed.trailing[0].contains("OldList"));
         assert!(!parsed.trailing[0].contains("Old query"));
         assert_eq!(parsed.trailing[1], "{0,0}");
@@ -11827,6 +11893,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
 
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
