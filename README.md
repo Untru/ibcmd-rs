@@ -45,6 +45,24 @@ cargo run -- mssql-stage-source-common-module-objects --database target_db --sou
 cargo run -- mssql-stage-source-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
 ```
 
+### bcp client compatibility
+
+The `mssql-storage-*` and `mssql-delta-*` commands shell out to `bcp`. By
+default they invoke it with `-T -n` (trusted connection, native format), which
+works across `bcp` versions including `bcp 13` (Microsoft ODBC Driver 13 for SQL
+Server).
+
+`bcp 18+` (ODBC Driver 18) defaults to encrypted connections and may need the
+server certificate to be trusted. Pass `--bcp-trust-cert` to add `bcp -u` (trust
+server certificate) in that case. Do **not** set it with `bcp 13` or earlier:
+those builds do not recognize `-u` and will fail with an "unknown argument"
+usage error.
+
+```powershell
+# bcp 18+ over an encrypted connection to a self-signed server:
+cargo run -- mssql-storage-export --database import_only_db -o storage-bundle --overwrite --bcp-trust-cert
+```
+
 ## First ERP Experiment
 
 1. Prepare a disposable ERP infobase on SQL Server.

@@ -456,7 +456,14 @@ pub fn export_storage_bundle(args: &MssqlStorageExportArgs) -> Result<StorageBun
                 target.display()
             ));
         }
-        run_bcp_out(&args.bcp, &args.server, &args.database, table, &target)?;
+        run_bcp_out(
+            &args.bcp,
+            &args.server,
+            &args.database,
+            table,
+            &target,
+            args.bcp_trust_cert,
+        )?;
         let stats = storage_table_stats(&args.sqlcmd, &args.server, &args.database, table)?;
         tables.push(StorageTableManifest {
             table_name: table.to_string(),
@@ -512,7 +519,14 @@ pub fn import_storage_bundle(args: &MssqlStorageImportArgs) -> Result<StorageBun
         if !file.is_file() {
             return Err(anyhow!("bundle file not found: {}", file.display()));
         }
-        run_bcp_in(&args.bcp, &args.server, &args.database, table, &file)?;
+        run_bcp_in(
+            &args.bcp,
+            &args.server,
+            &args.database,
+            table,
+            &file,
+            args.bcp_trust_cert,
+        )?;
     }
 
     let after = storage_tables()
@@ -547,6 +561,7 @@ pub fn export_delta_bundle(args: &MssqlDeltaExportArgs) -> Result<DeltaBundleExp
         &args.database,
         "ConfigSave",
         &target,
+        args.bcp_trust_cert,
     )?;
     let table = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let rows = configsave_row_digests(&args.sqlcmd, &args.server, &args.database)?;
@@ -594,7 +609,14 @@ pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImp
     if !file.is_file() {
         return Err(anyhow!("bundle file not found: {}", file.display()));
     }
-    run_bcp_in(&args.bcp, &args.server, &args.database, "ConfigSave", &file)?;
+    run_bcp_in(
+        &args.bcp,
+        &args.server,
+        &args.database,
+        "ConfigSave",
+        &file,
+        args.bcp_trust_cert,
+    )?;
 
     let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     compare_storage_table_manifests(&manifest.table, &after)?;
@@ -2356,21 +2378,28 @@ fn by_table_name(tables: &[TableShape]) -> BTreeMap<String, &TableShape> {
 }
 
 fn run_sql(sqlcmd: &Path, server: &str, sql: &str) -> Result<()> {
-    let output = sqlcmd_command(sqlcmd, server, sql).output()?;
+    let output = sqlcmd_command(sqlcmd, server, sql)
+        .output()
+        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if output.status.success() {
         return Ok(());
     }
+    // sqlcmd writes error text to stdout as well as stderr, so surface both.
     Err(anyhow!(
-        "sqlcmd failed: {}",
+        "sqlcmd failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     ))
 }
 
 fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
-    let output = sqlcmd_command(sqlcmd, server, sql).output()?;
+    let output = sqlcmd_command(sqlcmd, server, sql)
+        .output()
+        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if !output.status.success() {
         return Err(anyhow!(
-            "sqlcmd failed: {}",
+            "sqlcmd failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -2378,7 +2407,9 @@ fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
 }
 
 fn run_sql_file(sqlcmd: &Path, server: &str, script: &Path) -> Result<()> {
-    let output = sqlcmd_file_command(sqlcmd, server, script).output()?;
+    let output = sqlcmd_file_command(sqlcmd, server, script)
+        .output()
+        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if output.status.success() {
         return Ok(());
     }
@@ -2389,15 +2420,29 @@ fn run_sql_file(sqlcmd: &Path, server: &str, script: &Path) -> Result<()> {
     ))
 }
 
-fn run_bcp_out(bcp: &Path, server: &str, database: &str, table: &str, output: &Path) -> Result<()> {
+fn run_bcp_out(
+    bcp: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+    output: &Path,
+    trust_cert: bool,
+) -> Result<()> {
     let table_name = qualified_table(database, table);
-    let command = bcp_command(bcp, &table_name, "out", output, server);
+    let command = bcp_command(bcp, &table_name, "out", output, server, trust_cert);
     run_bcp(command)
 }
 
-fn run_bcp_in(bcp: &Path, server: &str, database: &str, table: &str, input: &Path) -> Result<()> {
+fn run_bcp_in(
+    bcp: &Path,
+    server: &str,
+    database: &str,
+    table: &str,
+    input: &Path,
+    trust_cert: bool,
+) -> Result<()> {
     let table_name = qualified_table(database, table);
-    let command = bcp_command(bcp, &table_name, "in", input, server);
+    let command = bcp_command(bcp, &table_name, "in", input, server, trust_cert);
     run_bcp(command)
 }
 
@@ -2407,6 +2452,7 @@ fn bcp_command(
     direction: &str,
     file: &Path,
     server: &str,
+    trust_cert: bool,
 ) -> Command {
     let mut command = Command::new(bcp);
     command
@@ -2416,15 +2462,21 @@ fn bcp_command(
         .arg("-S")
         .arg(server)
         .arg("-T")
-        .arg("-n")
-        .arg("-u")
-        .arg("-b")
-        .arg("1000");
+        .arg("-n");
+    // bcp 18+ needs -u (trust server certificate) for encrypted connections to
+    // a self-signed server; bcp 13 and earlier reject -u, so it stays opt-in.
+    if trust_cert {
+        command.arg("-u");
+    }
+    command.arg("-b").arg("1000");
     command
 }
 
 fn run_bcp(mut command: Command) -> Result<()> {
-    let output = command.output()?;
+    let program = command.get_program().to_string_lossy().to_string();
+    let output = command
+        .output()
+        .with_context(|| format!("failed to launch bcp at {program}"))?;
     if output.status.success() {
         return Ok(());
     }
@@ -3181,6 +3233,38 @@ mod tests {
     fn quotes_sql_identifier_and_string() {
         assert_eq!(quote_ident("a]b"), "[a]]b]");
         assert_eq!(quote_string("a'b"), "a''b");
+    }
+
+    #[test]
+    fn bcp_command_adds_trust_cert_only_when_requested() {
+        use std::path::Path;
+        let collect_args = |trust: bool| -> Vec<String> {
+            super::bcp_command(
+                Path::new("bcp"),
+                "db.dbo.ConfigSave",
+                "out",
+                Path::new("out.bcp"),
+                "localhost",
+                trust,
+            )
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect()
+        };
+
+        let without = collect_args(false);
+        assert!(without.contains(&"-T".to_string()));
+        assert!(without.contains(&"-n".to_string()));
+        assert!(
+            !without.contains(&"-u".to_string()),
+            "default invocation must not pass -u (rejected by bcp 13)"
+        );
+
+        let with = collect_args(true);
+        assert!(
+            with.contains(&"-u".to_string()),
+            "--bcp-trust-cert must add -u for bcp 18+"
+        );
     }
 
     #[test]
