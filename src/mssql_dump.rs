@@ -1020,6 +1020,7 @@ struct FormItemAsset {
 
 struct MoxelSpreadsheet {
     column_count: usize,
+    column_widths: Vec<usize>,
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
@@ -3705,6 +3706,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
     Some(MoxelSpreadsheet {
         column_count,
+        column_widths: parse_moxel_column_widths(&fields, column_count),
         rows,
         merges,
         areas,
@@ -3879,6 +3881,25 @@ fn parse_moxel_lines(fields: &[&str]) -> Vec<MoxelLine> {
         .collect()
 }
 
+fn parse_moxel_column_widths(fields: &[&str], column_count: usize) -> Vec<usize> {
+    let widths = fields
+        .iter()
+        .filter_map(|field| parse_moxel_column_width(field))
+        .collect::<Vec<_>>();
+    if widths.len() < column_count {
+        return Vec::new();
+    }
+    widths[widths.len() - column_count..].to_vec()
+}
+
+fn parse_moxel_column_width(text: &str) -> Option<usize> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 2 || fields.first()?.trim() != "128" {
+        return None;
+    }
+    fields.get(1)?.trim().parse::<usize>().ok()
+}
+
 fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 3 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "3" {
@@ -4024,11 +4045,24 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for font in &spreadsheet.fonts {
         push_moxel_font_xml(&mut xml, font);
     }
-    for _ in 0..spreadsheet.default_format_index.max(1) {
-        xml.push_str("\t<format/>\r\n");
+    for format_index in 1..=spreadsheet.default_format_index.max(1) {
+        push_moxel_format_xml(&mut xml, spreadsheet, format_index);
     }
     xml.push_str("</document>\r\n");
     xml
+}
+
+fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
+    let Some(width) = spreadsheet
+        .column_widths
+        .get(format_index.saturating_sub(1))
+    else {
+        xml.push_str("\t<format/>\r\n");
+        return;
+    };
+    xml.push_str("\t<format>\r\n");
+    xml.push_str(&format!("\t\t<width>{width}</width>\r\n"));
+    xml.push_str("\t</format>\r\n");
 }
 
 fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -8412,7 +8446,7 @@ mod tests {
     #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -8434,7 +8468,14 @@ mod tests {
         assert!(xml.contains("<defaultFormatIndex>9</defaultFormatIndex>"));
         assert!(xml.contains("<height>7</height>"));
         assert!(xml.contains("<vgRows>7</vgRows>"));
-        assert_eq!(xml.matches("\t<format/>\r\n").count(), 9);
+        assert_eq!(
+            xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
+            9
+        );
+        assert_eq!(xml.matches("\t<format/>\r\n").count(), 6);
+        assert!(xml.contains("\t<format>\r\n\t\t<width>25</width>\r\n\t</format>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>85</width>\r\n\t</format>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>226</width>\r\n\t</format>"));
         let default_format_index_pos = xml
             .find("<defaultFormatIndex>9</defaultFormatIndex>")
             .unwrap();
@@ -8469,7 +8510,7 @@ mod tests {
         ));
         let line_pos = xml.find("<line width=\"1\"").unwrap();
         let font_pos = xml.find("<font faceName=\"Arial\"").unwrap();
-        let format_pos = xml.find("<format/>").unwrap();
+        let format_pos = xml.find("<format>").unwrap();
         assert!(line_pos < font_pos);
         assert!(font_pos < format_pos);
     }
