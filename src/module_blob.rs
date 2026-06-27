@@ -944,12 +944,14 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
         "{0}".to_string(),
     ];
     for row in spreadsheet.rows {
-        fields.push(row.index.to_string());
-        fields.push(row_format_index_for_moxel(row.format_index).to_string());
-        fields.push(row.cells.len().to_string());
-        for cell in row.cells {
-            fields.push(cell.column_index.to_string());
-            fields.push(format_spreadsheet_cell_for_moxel(&cell));
+        for row_index in row.expanded_indexes() {
+            fields.push(row_index.to_string());
+            fields.push(row_format_index_for_moxel(row.format_index).to_string());
+            fields.push(row.cells.len().to_string());
+            for cell in &row.cells {
+                fields.push(cell.column_index.to_string());
+                fields.push(format_spreadsheet_cell_for_moxel(cell));
+            }
         }
     }
     fields.push("2".to_string());
@@ -975,8 +977,17 @@ struct SpreadsheetDocumentXml {
 #[derive(Debug, Default)]
 struct SpreadsheetDocumentXmlRow {
     index: usize,
+    index_to: Option<usize>,
     format_index: usize,
+    empty: bool,
     cells: Vec<SpreadsheetDocumentXmlCell>,
+}
+
+impl SpreadsheetDocumentXmlRow {
+    fn expanded_indexes(&self) -> std::ops::RangeInclusive<usize> {
+        let end = self.index_to.unwrap_or(self.index).max(self.index);
+        self.index..=end
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1092,7 +1103,11 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                 } else if local == "rowsItem"
                     && let Some(mut row) = current_row.take()
                 {
-                    row.cells.sort_by_key(|cell| cell.column_index);
+                    if row.empty {
+                        row.cells.clear();
+                    } else {
+                        row.cells.sort_by_key(|cell| cell.column_index);
+                    }
                     document.rows.push(row);
                 }
                 if spreadsheet_text_element(&local) {
@@ -1116,7 +1131,15 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
 fn spreadsheet_text_element(local: &str) -> bool {
     matches!(
         local,
-        "size" | "index" | "formatIndex" | "i" | "f" | "content" | "parameter"
+        "size"
+            | "index"
+            | "indexTo"
+            | "formatIndex"
+            | "i"
+            | "f"
+            | "content"
+            | "parameter"
+            | "empty"
     )
 }
 
@@ -1142,11 +1165,23 @@ fn apply_spreadsheet_text_value(
                 row.index = index;
             }
         }
+        "indexTo" if path_ends_with(path, &["rowsItem", "indexTo"]) => {
+            if let Some(row) = row
+                && let Ok(index_to) = value.parse::<usize>()
+            {
+                row.index_to = Some(index_to);
+            }
+        }
         "formatIndex" if path_ends_with(path, &["rowsItem", "row", "formatIndex"]) => {
             if let Some(row) = row
                 && let Ok(format_index) = value.parse::<usize>()
             {
                 row.format_index = format_index;
+            }
+        }
+        "empty" if path_ends_with(path, &["rowsItem", "row", "empty"]) => {
+            if let Some(row) = row {
+                row.empty = value.eq_ignore_ascii_case("true");
             }
         }
         "i" => {
@@ -7265,6 +7300,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains(r#"{16,0,{1,1,{"ru","Hello"}},0}"#));
         assert!(text.contains(r#"{16,0,{1,1,{"","Name"}},0}"#));
         assert!(text.contains(r#"2,{16,0,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_empty_row_ranges() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>1</index>
+		<indexTo>3</indexTo>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(",1,0,0,2,0,0,3,0,0,"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
