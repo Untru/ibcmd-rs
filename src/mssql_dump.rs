@@ -362,6 +362,7 @@ enum SourceAssetKind {
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
+    MoxelSpreadsheet,
     PredefinedData {
         xsi_type: &'static str,
         type_index: BTreeMap<String, String>,
@@ -501,8 +502,7 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
-        // SpreadsheetDocument bodies are stored as MOXCEL and need a separate MXL->XML converter.
-        "SpreadsheetDocument" => None,
+        "SpreadsheetDocument" => Some(("Template.xml", SourceAssetKind::MoxelSpreadsheet)),
         _ => None,
     }
 }
@@ -977,6 +977,20 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_business_process_flowchart_xml(&flowchart))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
+        SourceAssetKind::MoxelSpreadsheet => {
+            let xml = extract_moxel_spreadsheet_xml(bytes).with_context(|| {
+                format!(
+                    "failed to extract spreadsheet template from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+        }
     }
 
     Ok(asset.primary_path.clone())
@@ -1002,6 +1016,24 @@ struct FormItemAsset {
     item_name: String,
     file_name: String,
     content: Vec<u8>,
+}
+
+struct MoxelSpreadsheet {
+    column_count: usize,
+    rows: Vec<MoxelRow>,
+    max_format_index: usize,
+}
+
+struct MoxelRow {
+    index: usize,
+    format_index: usize,
+    cells: Vec<MoxelCell>,
+}
+
+struct MoxelCell {
+    column_index: usize,
+    format_index: usize,
+    text: Option<String>,
 }
 
 struct CommandInterfaceEntry {
@@ -3569,6 +3601,224 @@ fn format_form_body_xml() -> String {
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 </Form>\r\n"
         .to_string()
+}
+
+fn extract_moxel_spreadsheet_xml(bytes: &[u8]) -> Option<String> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    if !inflated.starts_with(b"MOXCEL") {
+        return None;
+    }
+    let text = String::from_utf8(inflated).ok()?;
+    let body_start = text.find("{8,")?;
+    let spreadsheet = parse_moxel_spreadsheet_text(&text[body_start..])?;
+    Some(format_moxel_spreadsheet_xml(&spreadsheet))
+}
+
+fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "8" {
+        return None;
+    }
+    let column_count = fields.get(2)?.trim().parse::<usize>().ok()? + 1;
+    let mut rows = Vec::new();
+    let mut max_format_index = 1usize;
+    let mut index = 3usize;
+    let mut expected_row_index = 0usize;
+    while index < fields.len() {
+        if let Some((row, next_index)) = parse_moxel_row_at(&fields, index, expected_row_index) {
+            max_format_index = max_format_index.max(row.format_index);
+            for cell in &row.cells {
+                max_format_index = max_format_index.max(cell.format_index);
+            }
+            rows.push(row);
+            expected_row_index += 1;
+            index = next_index;
+        } else {
+            index += 1;
+        }
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    Some(MoxelSpreadsheet {
+        column_count,
+        rows,
+        max_format_index,
+    })
+}
+
+fn parse_moxel_row_at(
+    fields: &[&str],
+    index: usize,
+    expected_row_index: usize,
+) -> Option<(MoxelRow, usize)> {
+    if let Some(row) = parse_moxel_row_shape(fields, index, expected_row_index, 0, 1, 2, 3, false) {
+        return Some(row);
+    }
+    parse_moxel_row_shape(fields, index, expected_row_index, 3, 4, 5, 6, true)
+}
+
+fn parse_moxel_row_shape(
+    fields: &[&str],
+    index: usize,
+    expected_row_index: usize,
+    row_index_offset: usize,
+    format_offset: usize,
+    cell_count_offset: usize,
+    cells_offset: usize,
+    allow_empty: bool,
+) -> Option<(MoxelRow, usize)> {
+    let row_index = fields
+        .get(index + row_index_offset)?
+        .trim()
+        .parse::<usize>()
+        .ok()?;
+    if row_index != expected_row_index {
+        return None;
+    }
+    let format_index = fields
+        .get(index + format_offset)?
+        .trim()
+        .parse::<usize>()
+        .ok()?
+        + 1;
+    let cell_count = fields
+        .get(index + cell_count_offset)?
+        .trim()
+        .parse::<usize>()
+        .ok()?;
+    if (!allow_empty && cell_count == 0) || cell_count > 2048 {
+        return None;
+    }
+    if allow_empty && cell_count == 0 {
+        let prefix_left = fields.get(index)?.trim().parse::<usize>().ok()?;
+        let prefix_right = fields.get(index + 1)?.trim().parse::<usize>().ok()?;
+        if prefix_left == 0 || prefix_right == 0 {
+            return None;
+        }
+    }
+    let mut cells = Vec::with_capacity(cell_count);
+    let mut cursor = index + cells_offset;
+    for _ in 0..cell_count {
+        let column_index = fields.get(cursor)?.trim().parse::<usize>().ok()?;
+        let cell = parse_moxel_cell(fields.get(cursor + 1)?, column_index)?;
+        cells.push(cell);
+        cursor += 2;
+    }
+    Some((
+        MoxelRow {
+            index: row_index,
+            format_index,
+            cells,
+        },
+        cursor,
+    ))
+}
+
+fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let format_index = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0)
+        + 1;
+    let text = fields
+        .get(2)
+        .and_then(|value| parse_moxel_localized_text(value));
+    Some(MoxelCell {
+        column_index,
+        format_index,
+        text,
+    })
+}
+
+fn parse_moxel_localized_text(text: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let pair = split_1c_braced_fields(fields.iter().skip(2).take(count).next()?, 0)?;
+    parse_1c_string(pair.get(1)?)
+}
+
+fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<languageSettings>\r\n\
+\t\t<currentLanguage>ru</currentLanguage>\r\n\
+\t\t<defaultLanguage>ru</defaultLanguage>\r\n\
+\t\t<languageInfo>\r\n\
+\t\t\t<id>ru</id>\r\n\
+\t\t\t<code>Русский</code>\r\n\
+\t\t\t<description>Русский</description>\r\n\
+\t\t</languageInfo>\r\n\
+\t</languageSettings>\r\n",
+    );
+    xml.push_str(&format!(
+        "\t<columns>\r\n\t\t<size>{}</size>\r\n",
+        spreadsheet.column_count
+    ));
+    for column_index in 0..spreadsheet.column_count.saturating_sub(1) {
+        xml.push_str(&format!(
+            "\t\t<columnsItem>\r\n\
+\t\t\t<index>{column_index}</index>\r\n\
+\t\t\t<column>\r\n\
+\t\t\t\t<formatIndex>1</formatIndex>\r\n\
+\t\t\t</column>\r\n\
+\t\t</columnsItem>\r\n"
+        ));
+    }
+    xml.push_str("\t</columns>\r\n");
+    for row in &spreadsheet.rows {
+        push_moxel_row_xml(&mut xml, row);
+    }
+    xml.push_str("\t<defaultFormatIndex>1</defaultFormatIndex>\r\n");
+    for _ in 0..spreadsheet.max_format_index.max(1) {
+        xml.push_str("\t<format/>\r\n");
+    }
+    xml.push_str("</document>\r\n");
+    xml
+}
+
+fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
+    xml.push_str(&format!(
+        "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n\t\t<row>\r\n",
+        row.index
+    ));
+    if row.format_index > 0 {
+        xml.push_str(&format!(
+            "\t\t\t<formatIndex>{}</formatIndex>\r\n",
+            row.format_index
+        ));
+    }
+    if row.cells.is_empty() {
+        xml.push_str("\t\t\t<empty>true</empty>\r\n");
+        xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
+        return;
+    }
+    let mut expected_column = 0usize;
+    for cell in &row.cells {
+        xml.push_str("\t\t\t<c>\r\n");
+        if cell.column_index != expected_column {
+            xml.push_str(&format!("\t\t\t\t<i>{}</i>\r\n", cell.column_index));
+        }
+        xml.push_str("\t\t\t\t<c>\r\n");
+        xml.push_str(&format!("\t\t\t\t\t<f>{}</f>\r\n", cell.format_index));
+        if let Some(text) = &cell.text {
+            xml.push_str("\t\t\t\t\t<tl>\r\n");
+            xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
+            xml.push_str("\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(text)
+            ));
+            xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+            xml.push_str("\t\t\t\t\t</tl>\r\n");
+        }
+        xml.push_str("\t\t\t\t</c>\r\n");
+        xml.push_str("\t\t\t</c>\r\n");
+        expected_column = cell.column_index + 1;
+    }
+    xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
 }
 
 fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
@@ -7742,7 +7992,10 @@ mod tests {
             )
             .as_bytes(),
         );
-        let owned_template_body = deflate_for_test(b"MOXCEL\0\x08\0\x01\0\x0c\0{}");
+        let owned_template_body = deflate_for_test(
+            "MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{8,1,2,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{0},{0},0,0,0,2,0,{16,0,{1,1,{\"ru\",\"Hello [Name]\"}},0},2,{0,1}}"
+                .as_bytes(),
+        );
         let common_template_metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{common_template_uuid}}},\"SharedText\",{{1,\"en\",\"Shared text\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},4}},0}}"
@@ -7786,14 +8039,20 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 3);
-        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 2);
         let owned_xml =
             fs::read_to_string(root.join("Catalogs/Products/Templates/Print.xml")).unwrap();
         let common_xml = fs::read_to_string(root.join("CommonTemplates/SharedText.xml")).unwrap();
         let common_body =
             fs::read(root.join("CommonTemplates/SharedText/Ext/Template.txt")).unwrap();
+        let template_body =
+            fs::read_to_string(root.join("Catalogs/Products/Templates/Print/Ext/Template.xml"))
+                .unwrap();
         assert!(owned_xml.contains("<Template uuid=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
         assert!(owned_xml.contains("<TemplateType>SpreadsheetDocument</TemplateType>"));
+        assert!(template_body.contains("<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\""));
+        assert!(template_body.contains("<v8:content>Hello [Name]</v8:content>"));
+        assert!(template_body.contains("<i>2</i>"));
         assert!(
             common_xml.contains("<CommonTemplate uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">")
         );
@@ -7816,6 +8075,15 @@ mod tests {
         assert_eq!(
             body_row.source_asset_path.as_deref(),
             Some("CommonTemplates/SharedText/Ext/Template.txt")
+        );
+        let spreadsheet_body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{owned_template_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            spreadsheet_body_row.source_asset_path.as_deref(),
+            Some("Catalogs/Products/Templates/Print/Ext/Template.xml")
         );
 
         let _ = fs::remove_dir_all(root);
