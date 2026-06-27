@@ -1211,14 +1211,6 @@ impl MoxelFormat {
             && self.pic_horizontal_alignment.is_none()
             && self.pic_vertical_alignment.is_none()
     }
-
-    fn uses_line(&self) -> bool {
-        self.left_border.is_some()
-            || self.top_border.is_some()
-            || self.right_border.is_some()
-            || self.bottom_border.is_some()
-            || self.border.is_some()
-    }
 }
 
 struct CommandInterfaceEntry {
@@ -3820,7 +3812,6 @@ fn parse_moxel_spreadsheet_text(
     trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges);
     compact_moxel_empty_row_ranges(&mut rows);
     let (column_sets, row_column_ids) = parse_moxel_column_sets(&fields);
-    let parsed_lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
@@ -3866,11 +3857,7 @@ fn parse_moxel_spreadsheet_text(
         });
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
     let formats = parse_moxel_formats(&fields, column_format_slots, &style_refs);
-    let lines = if formats.iter().any(MoxelFormat::uses_line) {
-        parsed_lines
-    } else {
-        Vec::new()
-    };
+    let lines = parse_moxel_lines(&fields, &formats);
     Some(MoxelSpreadsheet {
         column_count,
         column_sets,
@@ -4405,11 +4392,45 @@ fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
     }
 }
 
-fn parse_moxel_lines(fields: &[&str]) -> Vec<MoxelLine> {
-    fields
+fn parse_moxel_lines(fields: &[&str], formats: &[MoxelFormat]) -> Vec<MoxelLine> {
+    let used_indexes = moxel_used_line_indexes(formats);
+    if used_indexes.is_empty() {
+        return Vec::new();
+    }
+    let lines = fields
         .iter()
         .filter_map(|field| parse_moxel_line(field))
-        .collect()
+        .collect::<Vec<_>>();
+    if lines.len() >= 2
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && used_indexes.len() == 1
+        && used_indexes.contains(&0)
+    {
+        return vec![MoxelLine { style: "Solid" }];
+    }
+    if !lines.is_empty() {
+        return lines;
+    }
+    vec![MoxelLine { style: "Solid" }]
+}
+
+fn moxel_used_line_indexes(formats: &[MoxelFormat]) -> BTreeSet<usize> {
+    let mut indexes = BTreeSet::new();
+    for format in formats {
+        for value in [
+            format.border,
+            format.left_border,
+            format.top_border,
+            format.right_border,
+            format.bottom_border,
+        ] {
+            if let Some(index) = value {
+                indexes.insert(index);
+            }
+        }
+    }
+    indexes
 }
 
 fn parse_moxel_pictures(fields: &[&str]) -> Vec<MoxelPicture> {
@@ -4537,7 +4558,11 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         left_border: if border.is_some() { None } else { left_border },
         top_border: if border.is_some() { None } else { top_border },
         right_border: if border.is_some() { None } else { right_border },
-        bottom_border: if border.is_some() { None } else { bottom_border },
+        bottom_border: if border.is_some() {
+            None
+        } else {
+            bottom_border
+        },
         height: parse_moxel_format_usize(&values, 6),
         border_color: parse_moxel_format_style_ref(&values, 5, style_refs),
         width: parse_moxel_format_usize(&values, 7),
@@ -9585,6 +9610,41 @@ mod tests {
             "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"
         ));
         assert!(xml.contains("\t<format>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"));
+    }
+
+    #[test]
+    fn formats_moxel_simple_template_empty_row_range_and_style_formats() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{1,1,{4,0,{0},1,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,6,0,0,1,0,{24,1,\"Наименование\",{1,1,{\"\",\"Заголовок\"}},0},1,0,0,2,0,0,3,0,0,4,0,1,0,{16,2,{1,1,{\"\",\"Группа\"}},0},5,0,1,0,{16,3,{1,1,{\"\",\"Заголовок\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,4},6,0,0,0,0,0,0,0,0,{0},{0},{0},{2,\"Заголовок\",{1,{3,0,0,0,0,00000000-0000-0000-0000-000000000000},0},\"Шапка2Строки\",{1,{3,0,4,0,5,00000000-0000-0000-0000-000000000000},0}},\"\",{{0,6,6,{\"N\",1000},7,{\"N\",1000},8,{\"N\",1000},9,{\"N\",1000},10,{\"N\",1000},11,{\"N\",1000}}},{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,4,{20402178753,0,66,319,24,2,1,0,1,0,0},{32799,1,0,0,0,0,1},{32798,0,0,0,0,1},{128,135},2,{7,2,60,{-31},700,0,0,0,1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},0,0,0,3,{3,3,{-1}},{3,3,{-3}},{3,3,{-7}},0,0,0,\"\",0,{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},{0},1,{1,0},0,0,1,0,0,0}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains(
+            "<index>1</index>\r\n\t\t<indexTo>3</indexTo>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"
+        ));
+        assert!(!xml.contains("<index>2</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+        assert!(!xml.contains(
+            "<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">None</v8ui:style>"
+        ));
+        assert!(xml.contains(
+            "<font ref=\"style:NormalTextFont\" bold=\"true\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"StyleItem\"/>"
+        ));
+        assert!(xml.contains(
+            "<font faceName=\"Arial\" height=\"8\" bold=\"true\" italic=\"false\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<height>66</height>\r\n\t\t<width>319</width>\r\n\t\t<verticalAlignment>Center</verticalAlignment>\r\n\t\t<backColor>style:ButtonBackColor</backColor>\r\n\t\t<fillType>Parameter</fillType>\r\n\t\t<bySelectedColumns>false</bySelectedColumns>\r\n\t\t<indent>1</indent>\r\n\t\t<autoIndent>0</autoIndent>\r\n\t\t<mask/>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>1</font>\r\n\t\t<border>0</border>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<border>0</border>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"
+        ));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>135</width>\r\n\t</format>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
     }
 
     #[test]
