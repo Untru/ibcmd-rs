@@ -1034,6 +1034,12 @@ struct MoxelCell {
     column_index: usize,
     format_index: usize,
     text: Option<String>,
+    parameter: Option<String>,
+}
+
+struct MoxelLocalizedValue {
+    lang: String,
+    content: String,
 }
 
 struct CommandInterfaceEntry {
@@ -3738,21 +3744,32 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
         .and_then(|value| value.trim().parse::<usize>().ok())
         .unwrap_or(0)
         + 1;
-    let text = fields
+    let localized = fields
         .get(2)
-        .and_then(|value| parse_moxel_localized_text(value));
+        .and_then(|value| parse_moxel_localized_value(value));
+    let text = localized
+        .as_ref()
+        .filter(|value| !value.lang.is_empty())
+        .map(|value| value.content.clone());
+    let parameter = localized
+        .as_ref()
+        .filter(|value| value.lang.is_empty())
+        .map(|value| value.content.clone());
     Some(MoxelCell {
         column_index,
         format_index,
         text,
+        parameter,
     })
 }
 
-fn parse_moxel_localized_text(text: &str) -> Option<String> {
+fn parse_moxel_localized_value(text: &str) -> Option<MoxelLocalizedValue> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
     let pair = split_1c_braced_fields(fields.iter().skip(2).take(count).next()?, 0)?;
-    parse_1c_string(pair.get(1)?)
+    let lang = parse_1c_string(pair.first()?)?;
+    let content = parse_1c_string(pair.get(1)?)?;
+    Some(MoxelLocalizedValue { lang, content })
 }
 
 fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
@@ -3830,6 +3847,12 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
             ));
             xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
             xml.push_str("\t\t\t\t\t</tl>\r\n");
+        }
+        if let Some(parameter) = &cell.parameter {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<parameter>{}</parameter>\r\n",
+                escape_xml_text(parameter)
+            ));
         }
         xml.push_str("\t\t\t\t</c>\r\n");
         xml.push_str("\t\t\t</c>\r\n");
@@ -8109,7 +8132,7 @@ mod tests {
     #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0}}",
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -8124,6 +8147,8 @@ mod tests {
         assert!(xml.contains("<f>5</f>"));
         assert!(xml.contains("<f>6</f>"));
         assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
+        assert!(xml.contains("<parameter>ТекстШтампа</parameter>"));
+        assert!(!xml.contains("<v8:content>ТекстШтампа</v8:content>"));
     }
 
     #[test]
