@@ -43,8 +43,9 @@ use crate::module_blob::{
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
-    pack_help_blob_from_parts, pack_module_blob_bytes, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_help_blob_from_parts, pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml,
+    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
+    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -2134,11 +2135,47 @@ fn prepare_template_body_row(
         "HTMLDocument" => {
             prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties)
         }
+        "SpreadsheetDocument" => {
+            prepare_spreadsheet_template_body_row(sqlcmd, server, database, xml_path, properties)
+        }
         "AddIn" | "BinaryData" => {
             prepare_binary_template_body_row(sqlcmd, server, database, xml_path, properties)
         }
         _ => Ok(Vec::new()),
     }
+}
+
+fn prepare_spreadsheet_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_spreadsheet_template_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read SpreadsheetDocument Template body {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_moxel_spreadsheet_blob_from_xml(&xml).with_context(|| {
+        format!(
+            "failed to pack SpreadsheetDocument Template body {}",
+            body_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
 }
 
 fn prepare_html_template_body_row(
@@ -4334,6 +4371,10 @@ fn infer_html_template_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Template.xml")
 }
 
+fn infer_spreadsheet_template_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Template.xml")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -5180,6 +5221,10 @@ mod tests {
                 "SpreadsheetDocument"
             ),
             None
+        );
+        assert_eq!(
+            super::infer_spreadsheet_template_body_path(r"CommonTemplates\Table.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonTemplates\Table\Ext\Template.xml")
         );
         assert_eq!(
             super::infer_binary_template_body_path(r"CommonTemplates\Archive.xml".as_ref()),

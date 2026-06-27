@@ -924,6 +924,301 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
     })
 }
 
+pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    let spreadsheet = parse_spreadsheet_document_xml(xml)?;
+    let column_count = spreadsheet.column_count.max(
+        spreadsheet
+            .rows
+            .iter()
+            .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
+            .max()
+            .unwrap_or(1),
+    );
+    let declared_columns = column_count.saturating_sub(1);
+    let mut fields = vec![
+        "8".to_string(),
+        "1".to_string(),
+        declared_columns.to_string(),
+        r#"{"ru","ru",0,1,"ru","Русский","Русский",0}"#.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+    ];
+    for row in spreadsheet.rows {
+        fields.push(row.index.to_string());
+        fields.push(row_format_index_for_moxel(row.format_index).to_string());
+        fields.push(row.cells.len().to_string());
+        for cell in row.cells {
+            fields.push(cell.column_index.to_string());
+            fields.push(format_spreadsheet_cell_for_moxel(&cell));
+        }
+    }
+    fields.push("2".to_string());
+    fields.push("{0,1}".to_string());
+
+    let plain_body = format!("{{{}}}", fields.join(","));
+    let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{plain_body}");
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXml {
+    column_count: usize,
+    rows: Vec<SpreadsheetDocumentXmlRow>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlRow {
+    index: usize,
+    format_index: usize,
+    cells: Vec<SpreadsheetDocumentXmlCell>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlCell {
+    column_index: usize,
+    format_index: usize,
+    text: Option<String>,
+    parameter: Option<String>,
+    empty_text: bool,
+}
+
+fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut document = SpreadsheetDocumentXml::default();
+    let mut current_row = None::<SpreadsheetDocumentXmlRow>;
+    let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
+    let mut c_depth = 0usize;
+    let mut next_column_index = 0usize;
+    let mut text = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "rowsItem" {
+                    current_row = Some(SpreadsheetDocumentXmlRow::default());
+                    next_column_index = 0;
+                } else if current_row.is_some() && local == "c" {
+                    c_depth += 1;
+                    if c_depth == 1 {
+                        current_cell = Some(SpreadsheetDocumentXmlCell {
+                            column_index: next_column_index,
+                            ..Default::default()
+                        });
+                    }
+                } else if current_cell.is_some() && local == "tl" {
+                    if let Some(cell) = current_cell.as_mut() {
+                        cell.empty_text = true;
+                    }
+                }
+                if spreadsheet_text_element(&local) {
+                    text.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if current_cell.is_some()
+                    && local == "tl"
+                    && let Some(cell) = current_cell.as_mut()
+                {
+                    cell.empty_text = true;
+                }
+            }
+            Ok(Event::Text(event)) => {
+                if path
+                    .last()
+                    .is_some_and(|part| spreadsheet_text_element(part))
+                {
+                    let value = event.xml_content()?;
+                    let value = unescape(value.as_ref())?;
+                    text.push_str(value.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path
+                    .last()
+                    .is_some_and(|part| spreadsheet_text_element(part))
+                {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path
+                    .last()
+                    .is_some_and(|part| spreadsheet_text_element(part))
+                {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                apply_spreadsheet_text_value(
+                    &path,
+                    &local,
+                    &text,
+                    &mut document,
+                    current_row.as_mut(),
+                    current_cell.as_mut(),
+                );
+                if local == "c" && current_row.is_some() {
+                    if c_depth == 1
+                        && let Some(mut cell) = current_cell.take()
+                    {
+                        next_column_index = cell.column_index + 1;
+                        normalize_spreadsheet_cell(&mut cell);
+                        if let Some(row) = current_row.as_mut() {
+                            row.cells.push(cell);
+                        }
+                    }
+                    c_depth = c_depth.saturating_sub(1);
+                } else if local == "rowsItem"
+                    && let Some(mut row) = current_row.take()
+                {
+                    row.cells.sort_by_key(|cell| cell.column_index);
+                    document.rows.push(row);
+                }
+                if spreadsheet_text_element(&local) {
+                    text.clear();
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    if document.rows.is_empty() {
+        return Err(anyhow!("SpreadsheetDocument XML has no rowsItem entries"));
+    }
+    document.rows.sort_by_key(|row| row.index);
+    Ok(document)
+}
+
+fn spreadsheet_text_element(local: &str) -> bool {
+    matches!(
+        local,
+        "size" | "index" | "formatIndex" | "i" | "f" | "content" | "parameter"
+    )
+}
+
+fn apply_spreadsheet_text_value(
+    path: &[String],
+    local: &str,
+    text: &str,
+    document: &mut SpreadsheetDocumentXml,
+    row: Option<&mut SpreadsheetDocumentXmlRow>,
+    cell: Option<&mut SpreadsheetDocumentXmlCell>,
+) {
+    let value = text.trim();
+    match local {
+        "size" if path_ends_with(path, &["columns", "size"]) => {
+            if let Ok(size) = value.parse::<usize>() {
+                document.column_count = document.column_count.max(size);
+            }
+        }
+        "index" if path_ends_with(path, &["rowsItem", "index"]) => {
+            if let Some(row) = row
+                && let Ok(index) = value.parse::<usize>()
+            {
+                row.index = index;
+            }
+        }
+        "formatIndex" if path_ends_with(path, &["rowsItem", "row", "formatIndex"]) => {
+            if let Some(row) = row
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                row.format_index = format_index;
+            }
+        }
+        "i" => {
+            if let Some(cell) = cell
+                && let Ok(index) = value.parse::<usize>()
+            {
+                cell.column_index = index;
+            }
+        }
+        "f" => {
+            if let Some(cell) = cell
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                cell.format_index = format_index;
+            }
+        }
+        "content" => {
+            if let Some(cell) = cell {
+                cell.text = Some(text.to_string());
+                cell.empty_text = false;
+            }
+        }
+        "parameter" => {
+            if let Some(cell) = cell {
+                cell.parameter = Some(text.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_spreadsheet_cell(cell: &mut SpreadsheetDocumentXmlCell) {
+    if cell.parameter.is_some() {
+        cell.text = None;
+        cell.empty_text = false;
+    }
+}
+
+fn row_format_index_for_moxel(format_index: usize) -> usize {
+    format_index.saturating_sub(1)
+}
+
+fn cell_format_index_for_moxel(format_index: usize) -> usize {
+    if format_index <= 1 {
+        0
+    } else {
+        format_index - 1
+    }
+}
+
+fn format_spreadsheet_cell_for_moxel(cell: &SpreadsheetDocumentXmlCell) -> String {
+    let format_index = cell_format_index_for_moxel(cell.format_index);
+    let localized = if let Some(parameter) = &cell.parameter {
+        format!(
+            "{{1,1,{{{},{}}}}}",
+            format_1c_string(""),
+            format_1c_string(parameter)
+        )
+    } else if let Some(text) = &cell.text {
+        format!(
+            "{{1,1,{{{},{}}}}}",
+            format_1c_string("ru"),
+            format_1c_string(text)
+        )
+    } else if cell.empty_text {
+        "{1,0}".to_string()
+    } else {
+        return format!("{{0,{format_index}}}");
+    };
+    format!("{{16,{format_index},{localized},0}}")
+}
+
 pub fn pack_form_body_blob_from_module_text(
     base_blob: &[u8],
     module_text: &[u8],
@@ -6926,6 +7221,51 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
         assert_eq!(packed.plain_bytes, bytes.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_simple_spreadsheet_document_xml() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>3</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+			<c>
+				<i>2</i>
+				<c>
+					<f>0</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.starts_with("MOXCEL\0"));
+        assert!(text.contains(r#"{16,0,{1,1,{"ru","Hello"}},0}"#));
+        assert!(text.contains(r#"{16,0,{1,1,{"","Name"}},0}"#));
+        assert!(text.contains(r#"2,{16,0,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
     }
