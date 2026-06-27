@@ -85,6 +85,7 @@ struct FormXmlBodyProperties {
     attributes: Vec<FormXmlAttribute>,
     commands: Vec<FormXmlCommand>,
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
+    child_items: Vec<FormXmlChildItem>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -130,6 +131,14 @@ struct FormXmlCommandInterfaceItem {
     index: Option<usize>,
     default_visible: Option<bool>,
     visible_common: Option<bool>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlChildItem {
+    tag: String,
+    id: String,
+    name: String,
+    title: Vec<LocalizedString>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3167,6 +3176,7 @@ pub fn pack_form_body_blob_from_form_xml(
             || properties.group.is_some()
             || !properties.events.is_empty()
             || properties.auto_command_bar.is_some()
+            || !properties.child_items.is_empty()
         {
             let container = FormBodyContainer::parse(&plain)?;
             let mut layout = plain[container.layout_range.clone()].trim().to_string();
@@ -3175,6 +3185,7 @@ pub fn pack_form_body_blob_from_form_xml(
                 let _ = patch_form_layout_auto_command_bar(&mut layout, auto_command_bar)?;
             }
             patch_form_layout_events(&mut layout, &properties.events)?;
+            patch_form_layout_child_items(&mut layout, &properties.child_items)?;
             plain.replace_range(container.layout_range, &layout);
         }
         if !properties.commands.is_empty() {
@@ -3235,6 +3246,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
+    let mut current_child_items = Vec::<FormXmlChildItem>::new();
+    let mut current_child_title_lang = None::<String>;
+    let mut current_child_title_content = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -3287,6 +3301,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
                 {
                     current_command_interface_item = Some(FormXmlCommandInterfaceItem::default());
+                } else if is_form_child_item_xml_tag(&local)
+                    && (path.last().map(String::as_str) == Some("ChildItems")
+                        || current_child_items.last().is_some_and(|item| {
+                            path.last().map(String::as_str) == Some(item.tag.as_str())
+                        }))
+                {
+                    if let Some(item) = parse_form_child_item_xml(&local, &event)? {
+                        current_child_items.push(item);
+                    }
+                } else if local == "item"
+                    && path_ends_with_for_child_title(&path, &current_child_items)
+                {
+                    current_child_title_lang = None;
+                    current_child_title_content = None;
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -3388,6 +3416,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &["Form", "Commands", "Command", "ToolTip", "item", "content"],
                     )
+                    || path_ends_with_for_child_title_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_title_content(&path, &current_child_items)
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3474,6 +3504,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &["Form", "Commands", "Command", "ToolTip", "item", "content"],
                     )
+                    || path_ends_with_for_child_title_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_title_content(&path, &current_child_items)
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3732,6 +3764,34 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             properties.command_interface_items.push(item);
                         }
                     }
+                    "lang" if path_ends_with_for_child_title_lang(&path, &current_child_items) => {
+                        current_child_title_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with_for_child_title_content(&path, &current_child_items) =>
+                    {
+                        current_child_title_content = Some(text_value.to_string());
+                    }
+                    "item" if path_ends_with_for_child_title_item(&path, &current_child_items) => {
+                        if let (Some(item), Some(lang), Some(content)) = (
+                            current_child_items.last_mut(),
+                            current_child_title_lang.take(),
+                            current_child_title_content.take(),
+                        ) {
+                            item.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    _ if current_child_items
+                        .last()
+                        .is_some_and(|item| local == item.tag)
+                        && path
+                            .last()
+                            .is_some_and(|current| current.as_str() == local.as_str()) =>
+                    {
+                        if let Some(item) = current_child_items.pop() {
+                            properties.child_items.push(item);
+                        }
+                    }
                     _ => {}
                 }
                 let _ = path.pop();
@@ -3808,6 +3868,68 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         main_attribute: None,
         settings: None,
     }))
+}
+
+fn parse_form_child_item_xml(
+    tag: &str,
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlChildItem>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlChildItem {
+        tag: tag.to_string(),
+        id,
+        name,
+        title: Vec::new(),
+    }))
+}
+
+fn is_form_child_item_xml_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "UsualGroup"
+            | "CommandBar"
+            | "Popup"
+            | "ButtonGroup"
+            | "Button"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "SearchControlAddition"
+    )
+}
+
+fn path_ends_with_for_child_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title"])
+}
+
+fn path_ends_with_for_child_title_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item"])
+}
+
+fn path_ends_with_for_child_title_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item", "lang"])
+}
+
+fn path_ends_with_for_child_title_content(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item", "content"])
 }
 
 fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
@@ -3909,6 +4031,160 @@ fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Res
         let _ = patch_form_layout_event(layout, &identifiers, &event.handler)?;
     }
     Ok(())
+}
+
+fn patch_form_layout_child_items(layout: &mut String, items: &[FormXmlChildItem]) -> Result<()> {
+    for item in items {
+        let _ = patch_form_layout_child_item(layout, item)?;
+    }
+    Ok(())
+}
+
+fn patch_form_layout_child_item(text: &mut String, item: &FormXmlChildItem) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if form_layout_child_item_matches(text, &fields, item) {
+        patch_form_layout_child_item_entry(text, &fields, item)?;
+        return Ok(true);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_child_item(&mut nested, item)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn form_layout_child_item_matches(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> bool {
+    let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return false;
+    };
+    if form_layout_child_item_tag(wrapper, text, fields) != Some(item.tag.as_str()) {
+        return false;
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = form_layout_child_item_name(text, wrapper, fields);
+    existing_id.as_deref() == Some(item.id.as_str())
+        || existing_name.as_deref() == Some(item.name.as_str())
+}
+
+fn patch_form_layout_child_item_entry(
+    text: &mut String,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> Result<()> {
+    let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return Ok(());
+    };
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = form_layout_child_item_name_range(text, wrapper, fields)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range, format_1c_string(&item.name)));
+    }
+    if !item.title.is_empty()
+        && let Some(title_range) = form_layout_child_item_title_range(text, wrapper, fields)
+    {
+        replacements.push((title_range, format_1c_synonyms(&item.title)));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn form_layout_child_item_tag<'a>(
+    wrapper: &str,
+    text: &'a str,
+    fields: &[Range<usize>],
+) -> Option<&'static str> {
+    match wrapper {
+        "22" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" => Some("CommandBar"),
+            "1" => Some("Popup"),
+            "5" => Some("UsualGroup"),
+            "6" => Some("ButtonGroup"),
+            _ => None,
+        },
+        "34" => Some("Button"),
+        "48" => {
+            if fields.get(4).map(|range| text[range.clone()].trim()) == Some("1") {
+                Some("LabelField")
+            } else {
+                Some("InputField")
+            }
+        }
+        "6" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" => Some("SearchStringAddition"),
+            "2" => Some("SearchControlAddition"),
+            _ => None,
+        },
+        "73" => Some("Table"),
+        _ => None,
+    }
+}
+
+fn form_layout_child_item_name(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<String> {
+    form_layout_child_item_name_range(text, wrapper, fields)
+        .and_then(|range| parse_1c_quoted_string(&text[range]).ok())
+}
+
+fn form_layout_child_item_name_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "73" | "34" => &[5],
+        "48" => &[6, 7],
+        _ => &[6],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        parse_1c_quoted_string(&text[range.clone()])
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(|_| range)
+    })
+}
+
+fn form_layout_child_item_title_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "73" => &[9],
+        "34" => &[6],
+        "48" => &[9, 10],
+        _ => &[7],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        scan_braced_fields(text, range.start).ok().map(|_| range)
+    })
 }
 
 fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &str) -> Result<bool> {
@@ -11246,6 +11522,57 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.trailing[0], "{0}");
         assert_eq!(parsed.trailing[1], "{0,0}");
         assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="NewBar" id="64">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>New bar</v8:content>
+				</v8:item>
+			</Title>
+			<ChildItems>
+				<Button name="NewButton" id="44">
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>New button</v8:content>
+						</v8:item>
+					</Title>
+				</Button>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""NewBar""#));
+        assert!(parsed.layout.contains(r#"{1,"en","New bar"}"#));
+        assert!(parsed.layout.contains(r#""NewButton""#));
+        assert!(parsed.layout.contains(r#"{1,"en","New button"}"#));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert!(!parsed.layout.contains("Old bar"));
+        assert!(!parsed.layout.contains("OldButton"));
+        assert!(!parsed.layout.contains("Old button"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
         assert_eq!(
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
