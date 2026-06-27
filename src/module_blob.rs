@@ -957,6 +957,12 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     if !spreadsheet.merges.is_empty() {
         fields.push(format_spreadsheet_merges_for_moxel(&spreadsheet.merges));
     }
+    if !spreadsheet.areas.is_empty() {
+        fields.push(format_spreadsheet_named_areas_for_moxel(&spreadsheet.areas));
+    }
+    if let Some(print_area) = &spreadsheet.print_area {
+        fields.push(format_spreadsheet_area_bounds_for_moxel(print_area));
+    }
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -976,6 +982,8 @@ struct SpreadsheetDocumentXml {
     column_count: usize,
     rows: Vec<SpreadsheetDocumentXmlRow>,
     merges: Vec<SpreadsheetDocumentXmlMerge>,
+    areas: Vec<SpreadsheetDocumentXmlArea>,
+    print_area: Option<SpreadsheetDocumentXmlArea>,
 }
 
 #[derive(Debug, Default)]
@@ -1011,6 +1019,17 @@ struct SpreadsheetDocumentXmlMerge {
     width: i32,
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlArea {
+    name: String,
+    area_type: String,
+    begin_column: i32,
+    begin_row: i32,
+    end_column: i32,
+    end_row: i32,
+    columns_id: Option<String>,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1020,6 +1039,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_row = None::<SpreadsheetDocumentXmlRow>;
     let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
     let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
+    let mut current_area = None::<SpreadsheetDocumentXmlArea>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1033,6 +1053,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     next_column_index = 0;
                 } else if local == "merge" {
                     current_merge = Some(SpreadsheetDocumentXmlMerge::default());
+                } else if local == "namedItem" {
+                    current_area = Some(SpreadsheetDocumentXmlArea::default());
+                } else if local == "printArea" {
+                    current_area = Some(SpreadsheetDocumentXmlArea::default());
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1104,6 +1128,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_row.as_mut(),
                     current_cell.as_mut(),
                     current_merge.as_mut(),
+                    current_area.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1129,6 +1154,14 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(merge) = current_merge.take()
                 {
                     document.merges.push(merge);
+                } else if local == "namedItem"
+                    && let Some(area) = current_area.take()
+                {
+                    document.areas.push(area);
+                } else if local == "printArea"
+                    && let Some(area) = current_area.take()
+                {
+                    document.print_area = Some(area);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
@@ -1164,6 +1197,13 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "c"
             | "h"
             | "w"
+            | "name"
+            | "type"
+            | "beginRow"
+            | "endRow"
+            | "beginColumn"
+            | "endColumn"
+            | "columnsID"
     )
 }
 
@@ -1175,6 +1215,7 @@ fn apply_spreadsheet_text_value(
     row: Option<&mut SpreadsheetDocumentXmlRow>,
     cell: Option<&mut SpreadsheetDocumentXmlCell>,
     merge: Option<&mut SpreadsheetDocumentXmlMerge>,
+    area: Option<&mut SpreadsheetDocumentXmlArea>,
 ) {
     let value = text.trim();
     match local {
@@ -1262,8 +1303,58 @@ fn apply_spreadsheet_text_value(
                 merge.width = width.max(0);
             }
         }
+        "name" if path_ends_with(path, &["namedItem", "name"]) => {
+            if let Some(area) = area {
+                area.name = text.to_string();
+            }
+        }
+        "type" if spreadsheet_area_property_path(path, "type") => {
+            if let Some(area) = area {
+                area.area_type = text.to_string();
+            }
+        }
+        "beginRow" if spreadsheet_area_property_path(path, "beginRow") => {
+            if let Some(area) = area
+                && let Ok(begin_row) = value.parse::<i32>()
+            {
+                area.begin_row = begin_row;
+            }
+        }
+        "endRow" if spreadsheet_area_property_path(path, "endRow") => {
+            if let Some(area) = area
+                && let Ok(end_row) = value.parse::<i32>()
+            {
+                area.end_row = end_row;
+            }
+        }
+        "beginColumn" if spreadsheet_area_property_path(path, "beginColumn") => {
+            if let Some(area) = area
+                && let Ok(begin_column) = value.parse::<i32>()
+            {
+                area.begin_column = begin_column;
+            }
+        }
+        "endColumn" if spreadsheet_area_property_path(path, "endColumn") => {
+            if let Some(area) = area
+                && let Ok(end_column) = value.parse::<i32>()
+            {
+                area.end_column = end_column;
+            }
+        }
+        "columnsID" if path_ends_with(path, &["namedItem", "area", "columnsID"]) => {
+            if let Some(area) = area
+                && !value.is_empty()
+            {
+                area.columns_id = Some(text.to_string());
+            }
+        }
         _ => {}
     }
+}
+
+fn spreadsheet_area_property_path(path: &[String], property: &str) -> bool {
+    path_ends_with(path, &["namedItem", "area", property])
+        || path_ends_with(path, &["printArea", property])
 }
 
 fn normalize_spreadsheet_cell(cell: &mut SpreadsheetDocumentXmlCell) {
@@ -1320,6 +1411,43 @@ fn format_spreadsheet_merges_for_moxel(merges: &[SpreadsheetDocumentXmlMerge]) -
         ));
     }
     format!("{{{}}}", fields.join(","))
+}
+
+fn format_spreadsheet_named_areas_for_moxel(areas: &[SpreadsheetDocumentXmlArea]) -> String {
+    let mut fields = Vec::with_capacity(areas.len() * 2 + 1);
+    fields.push(areas.len().to_string());
+    for area in areas {
+        fields.push(format_1c_string(&area.name));
+        fields.push(format!(
+            "{{1,{},0}}",
+            format_spreadsheet_area_bounds_for_moxel(area)
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn format_spreadsheet_area_bounds_for_moxel(area: &SpreadsheetDocumentXmlArea) -> String {
+    let area_type = spreadsheet_area_type_code(&area.area_type);
+    let columns_id = area
+        .columns_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("00000000-0000-0000-0000-000000000000");
+    format!(
+        "{{{area_type},{},{},{},{},{columns_id}}}",
+        area.begin_column.max(0),
+        area.begin_row.max(0),
+        area.end_column.max(area.begin_column).max(0),
+        area.end_row.max(area.begin_row).max(0)
+    )
+}
+
+fn spreadsheet_area_type_code(area_type: &str) -> &'static str {
+    match area_type {
+        "Rows" => "1",
+        "Columns" => "2",
+        _ => "3",
+    }
 }
 
 pub fn pack_form_body_blob_from_module_text(
@@ -7425,6 +7553,52 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{1,{2,1,3,4}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_named_and_print_areas() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<columns>
+		<size>5</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<namedItem xsi:type="NamedItemCells">
+		<name>Header</name>
+		<area>
+			<type>Rectangle</type>
+			<beginRow>1</beginRow>
+			<endRow>3</endRow>
+			<beginColumn>2</beginColumn>
+			<endColumn>4</endColumn>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+		</area>
+	</namedItem>
+	<printArea>
+		<type>Rows</type>
+		<beginRow>5</beginRow>
+		<endRow>7</endRow>
+		<beginColumn>0</beginColumn>
+		<endColumn>4</endColumn>
+	</printArea>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(
+            text.contains(r#"{1,"Header",{1,{3,2,1,4,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0}}"#)
+        );
+        assert!(text.contains("{1,0,5,4,7,00000000-0000-0000-0000-000000000000}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
