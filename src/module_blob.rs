@@ -84,6 +84,7 @@ struct FormXmlBodyProperties {
     auto_command_bar: Option<FormXmlAutoCommandBar>,
     attributes: Vec<FormXmlAttribute>,
     commands: Vec<FormXmlCommand>,
+    command_interface_items: Vec<FormXmlCommandInterfaceItem>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -121,6 +122,14 @@ struct FormXmlDynamicListSettings {
     manual_query: Option<bool>,
     dynamic_data_read: Option<bool>,
     query_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlCommandInterfaceItem {
+    command_group: Option<String>,
+    index: Option<usize>,
+    default_visible: Option<bool>,
+    visible_common: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3184,6 +3193,18 @@ pub fn pack_form_body_blob_from_form_xml(
                 plain.replace_range(attributes_range, &attributes);
             }
         }
+        if !properties.command_interface_items.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(command_interface_range) = container.trailing_ranges.get(3).cloned() {
+                let mut command_interface =
+                    plain[command_interface_range.clone()].trim().to_string();
+                patch_form_command_interface(
+                    &mut command_interface,
+                    &properties.command_interface_items,
+                )?;
+                plain.replace_range(command_interface_range, &command_interface);
+            }
+        }
     }
     if let Some(module_text) = module_text {
         let container = FormBodyContainer::parse(&plain)?;
@@ -3213,6 +3234,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_lang = None::<String>;
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
+    let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -3229,6 +3251,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ManualQuery"
                         | "DynamicDataRead"
                         | "QueryText"
+                        | "CommandGroup"
+                        | "Index"
+                        | "DefaultVisible"
+                        | "Common"
                         | "lang"
                         | "content"
                 ) {
@@ -3257,6 +3283,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if let Some(attribute) = current_attribute.as_mut() {
                         attribute.settings = Some(FormXmlDynamicListSettings::default());
                     }
+                } else if local == "Item"
+                    && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
+                {
+                    current_command_interface_item = Some(FormXmlCommandInterfaceItem::default());
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -3303,6 +3333,47 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with(
                         &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "CommandGroup",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Index",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "DefaultVisible",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Visible",
+                            "Common",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
                         &["Form", "Commands", "Command", "Title", "item", "lang"],
                     )
                     || path_ends_with(
@@ -3345,6 +3416,47 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "CommandGroup",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Index",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "DefaultVisible",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Visible",
+                            "Common",
+                        ],
                     )
                     || path_ends_with(
                         &path,
@@ -3534,6 +3646,92 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             properties.attributes.push(attribute);
                         }
                     }
+                    "CommandGroup"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "CommandGroup",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.command_group = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Index"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Index",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.index = Some(text_value.trim().parse().with_context(|| {
+                                format!(
+                                    "invalid Form CommandInterface Index: {}",
+                                    text_value.trim()
+                                )
+                            })?);
+                        }
+                    }
+                    "DefaultVisible"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "DefaultVisible",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.default_visible = Some(parse_form_xml_bool(
+                                "CommandInterface/DefaultVisible",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Common"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Visible",
+                                "Common",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.visible_common = Some(parse_form_xml_bool(
+                                "CommandInterface/Visible/Common",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "CommandInterface", "NavigationPanel", "Item"],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.take() {
+                            properties.command_interface_items.push(item);
+                        }
+                    }
                     _ => {}
                 }
                 let _ = path.pop();
@@ -3548,6 +3746,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ManualQuery"
                         | "DynamicDataRead"
                         | "QueryText"
+                        | "CommandGroup"
+                        | "Index"
+                        | "DefaultVisible"
+                        | "Common"
                         | "lang"
                         | "content"
                 ) {
@@ -3765,6 +3967,85 @@ fn patch_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> R
         let _ = patch_form_body_command(text, command)?;
     }
     Ok(())
+}
+
+fn patch_form_command_interface(
+    text: &mut String,
+    items: &[FormXmlCommandInterfaceItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let item_ranges = fields
+        .iter()
+        .skip(2)
+        .filter_map(|range| {
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return None;
+            }
+            let item_fields = scan_braced_fields(text, range.start).ok()?;
+            (item_fields.first().map(|field| text[field.clone()].trim()) == Some("3"))
+                .then_some(range.clone())
+        })
+        .collect::<Vec<_>>();
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    for (range, item) in item_ranges.into_iter().zip(items) {
+        let mut item_text = text[range.clone()].to_string();
+        patch_form_command_interface_item(&mut item_text, item)?;
+        replacements.push((range, item_text));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn patch_form_command_interface_item(
+    text: &mut String,
+    item: &FormXmlCommandInterfaceItem,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(command_group) = &item.command_group
+        && let Some(range) = fields.get(5)
+    {
+        let uuid = common_command_group_uuid(command_group).ok_or_else(|| {
+            anyhow!("unsupported Form CommandInterface CommandGroup: {command_group}")
+        })?;
+        replacements.push((range.clone(), format!("{{0,{uuid}}}")));
+    }
+    if let Some(index) = item.index
+        && let Some(range) = fields.get(6)
+    {
+        replacements.push((range.clone(), index.to_string()));
+    }
+    if let Some(default_visible) = item.default_visible
+        && let Some(range) = fields.get(7)
+    {
+        replacements.push((
+            range.clone(),
+            if default_visible { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if let Some(visible_common) = item.visible_common
+        && let Some(range) = fields.get(8)
+    {
+        replacements.push((
+            range.clone(),
+            format_form_nested_common_bool(visible_common),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn format_form_nested_common_bool(value: bool) -> String {
+    format!("{{0,{{0,{},0}}}}", format_form_setting_bool(value))
 }
 
 fn patch_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute]) -> Result<()> {
@@ -10921,6 +11202,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.trailing[0], "{0}");
         assert_eq!(parsed.trailing[1], "{0,0}");
         assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_command_interface() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>2</Index>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[3].contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(!parsed.trailing[3].contains("eacad741-96b9-4b3a-bf79-dde9ecead1a1"));
+        assert!(parsed.trailing[3].contains("},2,0,{0,{0,{\"B\",0},0}}"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
         assert_eq!(
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
