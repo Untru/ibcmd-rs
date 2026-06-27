@@ -13813,29 +13813,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
     #[test]
     fn packs_form_body_xml_uuid_based_events() -> anyhow::Result<()> {
+        let unknown_event_uuid = "213d1900-dcad-4616-9f20-3f077156a40f";
         let base = super::deflate_raw(
-            r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"СтарыйВыбор",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"СтароеОповещение",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"СтароеСоздание",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}},"",{0}}"#.as_bytes(),
+            format!(r#"{{4,{{59,{{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"СтарыйВыбор",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"СтароеОповещение",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"СтароеСоздание",{unknown_event_uuid},"СтарыйUuid",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}}}},"",{{0}}}}"#).as_bytes(),
         )?;
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
 	<Events>
 		<Event name="ChoiceProcessing">НовыйВыбор</Event>
 		<Event name="NotificationProcessing">НовоеОповещение</Event>
 		<Event name="OnCreateAtServer">НовоеСоздание</Event>
+		<Event name="{unknown_event_uuid}">НовыйUuid</Event>
 	</Events>
 </Form>
 "#
-        .as_bytes();
+        )
+        .into_bytes();
 
-        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let packed = super::pack_form_body_blob_from_form_xml(&base, &xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
 
         assert!(parsed.layout.contains("\"НовыйВыбор\""));
         assert!(parsed.layout.contains("\"НовоеОповещение\""));
         assert!(parsed.layout.contains("\"НовоеСоздание\""));
+        assert!(parsed.layout.contains("\"НовыйUuid\""));
         assert!(!parsed.layout.contains("СтарыйВыбор"));
         assert!(!parsed.layout.contains("СтароеОповещение"));
         assert!(!parsed.layout.contains("СтароеСоздание"));
+        assert!(!parsed.layout.contains("СтарыйUuid"));
         assert_eq!(parsed.module_text, "");
         assert_eq!(parsed.trailing, vec!["{0}"]);
 

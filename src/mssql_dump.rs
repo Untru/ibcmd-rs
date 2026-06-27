@@ -4063,7 +4063,10 @@ fn parse_form_event_identifier(field: &str) -> Option<String> {
     let identifier = parse_1c_quoted_string_with_len(field)
         .map(|(value, _)| value)
         .unwrap_or_else(|| field.to_string());
-    form_event_name_from_identifier(identifier.trim()).map(ToOwned::to_owned)
+    let identifier = identifier.trim();
+    form_event_name_from_identifier(identifier)
+        .map(ToOwned::to_owned)
+        .or_else(|| is_uuid_text(identifier).then(|| identifier.to_string()))
 }
 
 fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
@@ -4080,10 +4083,22 @@ fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
         "OnWriteAtServer" => Some("OnWriteAtServer"),
         "OnLoadDataFromSettingsAtServer" => Some("OnLoadDataFromSettingsAtServer"),
         "BeforeLoadDataFromSettingsAtServer" => Some("BeforeLoadDataFromSettingsAtServer"),
+        "OnSaveDataInSettingsAtServer" => Some("OnSaveDataInSettingsAtServer"),
+        "BeforeLoadUserSettingsAtServer" => Some("BeforeLoadUserSettingsAtServer"),
+        "OnLoadUserSettingsAtServer" => Some("OnLoadUserSettingsAtServer"),
+        "OnSaveUserSettingsAtServer" => Some("OnSaveUserSettingsAtServer"),
+        "BeforeLoadVariantAtServer" => Some("BeforeLoadVariantAtServer"),
+        "OnLoadVariantAtServer" => Some("OnLoadVariantAtServer"),
+        "OnSaveVariantAtServer" => Some("OnSaveVariantAtServer"),
+        "OnUpdateUserSettingSetAtServer" => Some("OnUpdateUserSettingSetAtServer"),
         "FillCheckProcessingAtServer" => Some("FillCheckProcessingAtServer"),
         "ChoiceProcessing" => Some("ChoiceProcessing"),
         "NotificationProcessing" => Some("NotificationProcessing"),
         "ExternalEvent" => Some("ExternalEvent"),
+        "Opening" => Some("Opening"),
+        "OnReopen" => Some("OnReopen"),
+        "OnActivate" => Some("OnActivate"),
+        "OnMainServerAvailabilityChange" => Some("OnMainServerAvailabilityChange"),
         "3ccc650e-f631-4cae-8e33-3eaac610b5f9" => Some("OnOpen"),
         "1d632984-de3c-4b4b-ad9f-d69682a10182" => Some("ChoiceProcessing"),
         "3699f6a3-9a2a-4c82-a775-6ff4824a08ca" => Some("NotificationProcessing"),
@@ -4944,25 +4959,57 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
     let identifier = parse_1c_quoted_string_with_len(field)
         .map(|(value, _)| value)
         .unwrap_or_else(|| field.to_string());
-    match identifier.trim() {
+    let identifier = identifier.trim();
+    match identifier {
+        "ActivationProcessing" => Some("ActivationProcessing".to_string()),
+        "AdditionalDetailProcessing" => Some("AdditionalDetailProcessing".to_string()),
+        "AutoComplete" => Some("AutoComplete".to_string()),
         "OnGetDataAtServer" => Some("OnGetDataAtServer".to_string()),
         "OnChange" => Some("OnChange".to_string()),
         "StartChoice" => Some("StartChoice".to_string()),
+        "StartListChoice" => Some("StartListChoice".to_string()),
+        "ValueChoice" => Some("ValueChoice".to_string()),
         "Click" => Some("Click".to_string()),
+        "OnClick" => Some("OnClick".to_string()),
         "Clearing" => Some("Clearing".to_string()),
         "URLProcessing" => Some("URLProcessing".to_string()),
+        "URLGetProcessing" => Some("URLGetProcessing".to_string()),
+        "URLListGetProcessing" => Some("URLListGetProcessing".to_string()),
         "TextEditEnd" => Some("TextEditEnd".to_string()),
+        "EditTextChange" => Some("EditTextChange".to_string()),
         "OnActivateCell" => Some("OnActivateCell".to_string()),
+        "OnActivateField" => Some("OnActivateField".to_string()),
+        "OnActivateRow" => Some("OnActivateRow".to_string()),
         "BeforeAddRow" => Some("BeforeAddRow".to_string()),
         "Creating" => Some("Creating".to_string()),
         "OnCurrentPageChange" => Some("OnCurrentPageChange".to_string()),
+        "OnCurrentParentChange" => Some("OnCurrentParentChange".to_string()),
         "OnEditEnd" => Some("OnEditEnd".to_string()),
+        "BeforeEditEnd" => Some("BeforeEditEnd".to_string()),
         "BeforeDeleteRow" => Some("BeforeDeleteRow".to_string()),
         "OnStartEdit" => Some("OnStartEdit".to_string()),
         "Selection" => Some("Selection".to_string()),
         "BeforeRowChange" => Some("BeforeRowChange".to_string()),
         "AfterDeleteRow" => Some("AfterDeleteRow".to_string()),
-        _ => parse_form_event_identifier(identifier.trim()),
+        "BeforeCollapse" => Some("BeforeCollapse".to_string()),
+        "BeforeExpand" => Some("BeforeExpand".to_string()),
+        "BeforePrint" => Some("BeforePrint".to_string()),
+        "DetailProcessing" => Some("DetailProcessing".to_string()),
+        "DocumentComplete" => Some("DocumentComplete".to_string()),
+        "Drag" => Some("Drag".to_string()),
+        "DragCheck" => Some("DragCheck".to_string()),
+        "DragEnd" => Some("DragEnd".to_string()),
+        "DragStart" => Some("DragStart".to_string()),
+        "MultipleValuesDelete" => Some("MultipleValuesDelete".to_string()),
+        "NavigationProcessing" => Some("NavigationProcessing".to_string()),
+        "NewWriteProcessing" => Some("NewWriteProcessing".to_string()),
+        "OnChangeAreaContent" => Some("OnChangeAreaContent".to_string()),
+        "OnChangeDisplaySettings" => Some("OnChangeDisplaySettings".to_string()),
+        "OnIntervalEditEnd" => Some("OnIntervalEditEnd".to_string()),
+        "OnPeriodOutput" => Some("OnPeriodOutput".to_string()),
+        "RefreshRequestProcessing" => Some("RefreshRequestProcessing".to_string()),
+        "Tuning" => Some("Tuning".to_string()),
+        _ => parse_form_event_identifier(identifier),
     }
 }
 
@@ -11772,8 +11819,9 @@ mod tests {
 
     #[test]
     fn extracts_form_uuid_events_and_auto_command_bar_to_body_xml() {
+        let unknown_event_uuid = "213d1900-dcad-4616-9f20-3f077156a40f";
         let form_body = deflate_for_test(
-            r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1},{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+            format!(r#"{{4,{{59,{{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",{unknown_event_uuid},"ПослеЗаписиНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}},{{22,{{-1,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,9,"ФормаКоманднаяПанель",{{1,0}}}}}},"",{{0}}}}"#).as_bytes(),
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
@@ -11787,6 +11835,9 @@ mod tests {
         assert!(
             form_xml.contains(r#"<Event name="OnCreateAtServer">ПриСозданииНаСервере</Event>"#)
         );
+        assert!(form_xml.contains(&format!(
+            r#"<Event name="{unknown_event_uuid}">ПослеЗаписиНаСервере</Event>"#
+        )));
     }
 
     #[test]
@@ -11868,7 +11919,7 @@ mod tests {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let external_command_uuid = "11111111-1111-4111-8111-111111111111";
         let layout = format!(
-            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}},"OnChange","NameChanged","StartChoice","NameChoice"}},"OnGetDataAtServer","RowsGetData"}}}}"#
+            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}},"OnChange","NameChanged","StartChoice","NameChoice","ValueChoice","NameValueChoice",213d1900-dcad-4616-9f20-3f077156a40f,"NameUuidEvent"}},"OnGetDataAtServer","RowsGetData"}}}}"#
         );
         let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
         let attributes = vec![FormAttribute {
@@ -11908,6 +11959,18 @@ mod tests {
         assert_eq!(
             xml.matches(r#"<Event name="StartChoice">NameChoice</Event>"#)
                 .count(),
+            1
+        );
+        assert_eq!(
+            xml.matches(r#"<Event name="ValueChoice">NameValueChoice</Event>"#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            xml.matches(
+                r#"<Event name="213d1900-dcad-4616-9f20-3f077156a40f">NameUuidEvent</Event>"#
+            )
+            .count(),
             1
         );
     }
