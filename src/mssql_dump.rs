@@ -649,6 +649,11 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
     ("4", "Ext/ParentConfigurations.bin", SourceAssetKind::Binary),
     (
+        "10",
+        "Ext/MobileClientSignature.bin",
+        SourceAssetKind::InflatedBinary,
+    ),
+    (
         "c",
         "Ext/MainSectionPicture.xml",
         SourceAssetKind::ExtPicture,
@@ -10416,6 +10421,8 @@ mod tests {
         let png = b"\x89PNG\r\n\x1a\n";
         let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let parent_blob = b"parent-cf".to_vec();
+        let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
+        let mobile_signature_blob = deflate_for_test(&mobile_signature);
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let rows = vec![
             ConfigRow {
@@ -10455,6 +10462,12 @@ mod tests {
                 binary_hex: encode_hex_for_test(&session_body),
             },
             ConfigRow {
+                file_name: format!("{uuid}.10"),
+                part_no: 0,
+                data_size: mobile_signature_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&mobile_signature_blob),
+            },
+            ConfigRow {
                 file_name: format!("{uuid}.c"),
                 part_no: 0,
                 data_size: main_picture_blob.len() as i64,
@@ -10465,7 +10478,7 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 4);
-        assert_eq!(dumped.source_asset_rows, 3);
+        assert_eq!(dumped.source_asset_rows, 4);
         assert_eq!(
             fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
             ordinary_text
@@ -10491,6 +10504,10 @@ mod tests {
             fs::read(root.join("Ext/ParentConfigurations.bin")).unwrap(),
             parent_blob
         );
+        assert_eq!(
+            fs::read(root.join("Ext/MobileClientSignature.bin")).unwrap(),
+            mobile_signature
+        );
         assert!(
             fs::read_to_string(root.join("Ext/Splash.xml"))
                 .unwrap()
@@ -10512,6 +10529,11 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.c"))
             .unwrap();
+        let mobile_signature_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.10"))
+            .unwrap();
         assert_eq!(
             splash_row.source_asset_path.as_deref(),
             Some("Ext/Splash.xml")
@@ -10523,6 +10545,10 @@ mod tests {
         assert_eq!(
             main_picture_row.source_asset_path.as_deref(),
             Some("Ext/MainSectionPicture.xml")
+        );
+        assert_eq!(
+            mobile_signature_row.source_asset_path.as_deref(),
+            Some("Ext/MobileClientSignature.bin")
         );
 
         let _ = fs::remove_dir_all(root);
