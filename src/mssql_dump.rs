@@ -1051,7 +1051,7 @@ struct MoxelSpreadsheet {
     fonts: Vec<MoxelFont>,
     pictures: Vec<MoxelPicture>,
     empty_headers_footers: bool,
-    default_format_index: usize,
+    default_format_index: Option<usize>,
     height: usize,
 }
 
@@ -3840,7 +3840,9 @@ fn parse_moxel_spreadsheet_text(
             row.format_index += format_offset;
         }
         for cell in &mut row.cells {
-            cell.format_index += format_offset;
+            if cell.format_index > 0 {
+                cell.format_index += format_offset;
+            }
         }
     }
     let max_format_index = rows
@@ -3851,8 +3853,13 @@ fn parse_moxel_spreadsheet_text(
             });
             max_index.max(row_max)
         });
-    let default_format_index =
-        moxel_default_format_index(&column_sets, print_settings.as_ref(), max_format_index + 1);
+    let default_format_width = parse_moxel_default_format_width(&fields, column_format_slots);
+    let default_format_index = moxel_default_format_index(
+        &column_sets,
+        print_settings.as_ref(),
+        !default_format.is_empty() || default_format_width.is_some(),
+        max_format_index + 1,
+    );
     let height = moxel_spreadsheet_height(&rows, &merges, &areas);
     let (column_formats, formats) = parse_moxel_formats(&fields, column_format_slots, &style_refs);
     let all_formats = column_formats
@@ -3865,7 +3872,7 @@ fn parse_moxel_spreadsheet_text(
         column_count,
         column_sets,
         column_formats,
-        default_format_width: parse_moxel_default_format_width(&fields, column_format_slots),
+        default_format_width,
         default_format,
         formats,
         rows,
@@ -4016,21 +4023,27 @@ fn moxel_column_format_slots(column_sets: &[MoxelColumnSet], column_count: usize
 fn moxel_default_format_index(
     column_sets: &[MoxelColumnSet],
     print_settings: Option<&MoxelPrintSettings>,
+    has_default_format: bool,
     fallback: usize,
-) -> usize {
+) -> Option<usize> {
     if print_settings.is_some() && column_sets.len() > 1 {
-        return column_sets
-            .get(1)
-            .and_then(|column_set| {
-                column_set
-                    .columns
-                    .iter()
-                    .map(|column| column.format_index)
-                    .max()
-            })
-            .unwrap_or(fallback);
+        return Some(
+            column_sets
+                .get(1)
+                .and_then(|column_set| {
+                    column_set
+                        .columns
+                        .iter()
+                        .map(|column| column.format_index)
+                        .max()
+                })
+                .unwrap_or(fallback),
+        );
     }
-    fallback
+    if has_default_format {
+        return Some(fallback);
+    }
+    None
 }
 
 fn parse_moxel_row_column_set_ids(
@@ -4374,8 +4387,8 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
     let format_index = fields
         .get(1)
         .and_then(|value| value.trim().parse::<usize>().ok())
-        .unwrap_or(0)
-        + 1;
+        .map(|value| if value == 0 { 0 } else { value + 1 })
+        .unwrap_or(0);
     let detail_parameter = if cell_kind == "24" {
         fields.get(2).and_then(|value| parse_1c_string(value))
     } else {
@@ -4958,7 +4971,9 @@ fn parse_moxel_direct_color(value: &str) -> Option<String> {
 fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Left"),
+        2 => Some("Right"),
         6 => Some("Center"),
+        7 => Some("Right"),
         _ => None,
     }
 }
@@ -5177,10 +5192,11 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
         push_moxel_empty_headers_footers_xml(&mut xml);
     }
     xml.push_str("\t<templateMode>true</templateMode>\r\n");
-    xml.push_str(&format!(
-        "\t<defaultFormatIndex>{}</defaultFormatIndex>\r\n",
-        spreadsheet.default_format_index
-    ));
+    if let Some(default_format_index) = spreadsheet.default_format_index {
+        xml.push_str(&format!(
+            "\t<defaultFormatIndex>{default_format_index}</defaultFormatIndex>\r\n"
+        ));
+    }
     xml.push_str(&format!("\t<height>{}</height>\r\n", spreadsheet.height));
     xml.push_str(&format!("\t<vgRows>{}</vgRows>\r\n", spreadsheet.height));
     for merge in &spreadsheet.merges {
@@ -5200,6 +5216,7 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     }
     let format_count = spreadsheet
         .default_format_index
+        .unwrap_or(0)
         .max(spreadsheet.column_formats.len() + spreadsheet.formats.len())
         .max(1);
     for format_index in 1..=format_count {
@@ -5342,7 +5359,7 @@ fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -
     {
         return format;
     }
-    if format_index == spreadsheet.default_format_index {
+    if spreadsheet.default_format_index == Some(format_index) {
         let mut format = spreadsheet.default_format.clone();
         if format.width.is_none() {
             format.width = spreadsheet.default_format_width;
@@ -10087,10 +10104,19 @@ mod tests {
     #[test]
     fn formats_moxel_alignment_and_text_placement_mappings() {
         assert_eq!(moxel_horizontal_alignment(0), Some("Left"));
+        assert_eq!(moxel_horizontal_alignment(2), Some("Right"));
         assert_eq!(moxel_horizontal_alignment(6), Some("Center"));
+        assert_eq!(moxel_horizontal_alignment(7), Some("Right"));
         assert_eq!(moxel_text_placement(0), Some("Auto"));
         assert_eq!(moxel_text_placement(2), Some("Block"));
         assert_eq!(moxel_text_placement(3), Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_cell_zero_format_stays_zero() {
+        let cell = parse_moxel_cell("{16,0,{0},0}", 0).unwrap();
+
+        assert_eq!(cell.format_index, 0);
     }
 
     #[test]
@@ -10139,10 +10165,17 @@ mod tests {
         let settings = MoxelPrintSettings::default();
 
         assert_eq!(
-            moxel_default_format_index(&column_sets, Some(&settings), 21),
-            6
+            moxel_default_format_index(&column_sets, Some(&settings), false, 21),
+            Some(6)
         );
-        assert_eq!(moxel_default_format_index(&column_sets, None, 21), 21);
+        assert_eq!(
+            moxel_default_format_index(&column_sets, None, true, 21),
+            Some(21)
+        );
+        assert_eq!(
+            moxel_default_format_index(&column_sets, None, false, 21),
+            None
+        );
     }
 
     #[test]
