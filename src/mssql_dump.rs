@@ -1021,6 +1021,7 @@ struct FormItemAsset {
 struct MoxelSpreadsheet {
     column_count: usize,
     column_widths: Vec<usize>,
+    default_format_width: Option<usize>,
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
@@ -3707,6 +3708,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     Some(MoxelSpreadsheet {
         column_count,
         column_widths: parse_moxel_column_widths(&fields, column_count),
+        default_format_width: parse_moxel_default_format_width(&fields, column_count),
         rows,
         merges,
         areas,
@@ -3892,6 +3894,17 @@ fn parse_moxel_column_widths(fields: &[&str], column_count: usize) -> Vec<usize>
     widths[widths.len() - column_count..].to_vec()
 }
 
+fn parse_moxel_default_format_width(fields: &[&str], column_count: usize) -> Option<usize> {
+    let widths = fields
+        .iter()
+        .filter_map(|field| parse_moxel_column_width(field))
+        .collect::<Vec<_>>();
+    if widths.len() <= column_count {
+        return None;
+    }
+    widths.first().copied()
+}
+
 fn parse_moxel_column_width(text: &str) -> Option<usize> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 2 || fields.first()?.trim() != "128" {
@@ -4053,10 +4066,16 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
 }
 
 fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
-    let Some(width) = spreadsheet
+    let width = spreadsheet
         .column_widths
         .get(format_index.saturating_sub(1))
-    else {
+        .copied()
+        .or_else(|| {
+            (format_index == spreadsheet.default_format_index)
+                .then_some(spreadsheet.default_format_width)
+                .flatten()
+        });
+    let Some(width) = width else {
         xml.push_str("\t<format/>\r\n");
         return;
     };
@@ -8472,10 +8491,11 @@ mod tests {
             xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
             9
         );
-        assert_eq!(xml.matches("\t<format/>\r\n").count(), 6);
+        assert_eq!(xml.matches("\t<format/>\r\n").count(), 5);
         assert!(xml.contains("\t<format>\r\n\t\t<width>25</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>85</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>226</width>\r\n\t</format>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
         let default_format_index_pos = xml
             .find("<defaultFormatIndex>9</defaultFormatIndex>")
             .unwrap();
