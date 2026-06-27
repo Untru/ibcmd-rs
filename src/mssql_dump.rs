@@ -3619,17 +3619,12 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     if fields.first()?.trim() != "8" {
         return None;
     }
-    let column_count = fields.get(2)?.trim().parse::<usize>().ok()? + 1;
+    let declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()? + 1;
     let mut rows = Vec::new();
-    let mut max_format_index = 1usize;
     let mut index = 3usize;
     let mut expected_row_index = 0usize;
     while index < fields.len() {
         if let Some((row, next_index)) = parse_moxel_row_at(&fields, index, expected_row_index) {
-            max_format_index = max_format_index.max(row.format_index);
-            for cell in &row.cells {
-                max_format_index = max_format_index.max(cell.format_index);
-            }
             rows.push(row);
             expected_row_index += 1;
             index = next_index;
@@ -3640,6 +3635,27 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     if rows.is_empty() {
         return None;
     }
+    let observed_column_count = rows
+        .iter()
+        .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
+        .max()
+        .unwrap_or(0);
+    let column_count = if observed_column_count > 0 {
+        observed_column_count
+    } else {
+        declared_column_count
+    };
+    for row in &mut rows {
+        for cell in &mut row.cells {
+            cell.format_index += column_count.saturating_sub(1);
+        }
+    }
+    let max_format_index = rows.iter().fold(column_count.max(1), |max_index, row| {
+        let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
+            cell_max.max(cell.format_index)
+        });
+        max_index.max(row_max)
+    });
     Some(MoxelSpreadsheet {
         column_count,
         rows,
@@ -3757,12 +3773,13 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
         "\t<columns>\r\n\t\t<size>{}</size>\r\n",
         spreadsheet.column_count
     ));
-    for column_index in 0..spreadsheet.column_count.saturating_sub(1) {
+    for column_index in 0..spreadsheet.column_count {
+        let format_index = column_index + 1;
         xml.push_str(&format!(
             "\t\t<columnsItem>\r\n\
 \t\t\t<index>{column_index}</index>\r\n\
 \t\t\t<column>\r\n\
-\t\t\t\t<formatIndex>1</formatIndex>\r\n\
+\t\t\t\t<formatIndex>{format_index}</formatIndex>\r\n\
 \t\t\t</column>\r\n\
 \t\t</columnsItem>\r\n"
         ));
@@ -3784,7 +3801,7 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
         "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n\t\t<row>\r\n",
         row.index
     ));
-    if row.format_index > 0 {
+    if row.format_index > 1 {
         xml.push_str(&format!(
             "\t\t\t<formatIndex>{}</formatIndex>\r\n",
             row.format_index
@@ -8087,6 +8104,26 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0}}",
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("<size>3</size>"));
+        assert!(xml.contains(
+            "<index>2</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+        ));
+        assert!(xml.contains("<empty>true</empty>"));
+        assert!(!xml.contains("<formatIndex>1</formatIndex>\r\n\t\t\t<empty>true</empty>"));
+        assert!(xml.contains("<f>4</f>"));
+        assert!(xml.contains("<f>5</f>"));
+        assert!(xml.contains("<f>6</f>"));
+        assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
     }
 
     #[test]
