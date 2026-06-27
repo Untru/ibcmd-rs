@@ -1054,6 +1054,7 @@ struct MoxelSpreadsheet {
 
 struct MoxelRow {
     index: usize,
+    index_to: Option<usize>,
     format_index: usize,
     columns_id: Option<String>,
     cells: Vec<MoxelCell>,
@@ -4036,10 +4037,19 @@ fn trim_moxel_trailing_empty_rows(
     else {
         return;
     };
+    let mut last_trimmed_index = None;
     while rows.last().is_some_and(|row| {
         row.index > material_limit && row.format_index <= 1 && row.cells.is_empty()
     }) {
+        if let Some(index) = rows.last().map(|row| row.index) {
+            last_trimmed_index = Some(last_trimmed_index.unwrap_or(index).max(index));
+        }
         rows.pop();
+    }
+    if let (Some(index_to), Some(row)) = (last_trimmed_index, rows.last_mut()) {
+        if row.index == material_limit && row.format_index <= 1 && row.cells.is_empty() {
+            row.index_to = Some(index_to);
+        }
     }
 }
 
@@ -4230,6 +4240,7 @@ fn parse_moxel_row_shape(
     Some((
         MoxelRow {
             index: row_index,
+            index_to: None,
             format_index,
             columns_id: None,
             cells,
@@ -4956,9 +4967,13 @@ fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
 
 fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
     xml.push_str(&format!(
-        "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n\t\t<row>\r\n",
+        "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n",
         row.index
     ));
+    if let Some(index_to) = row.index_to {
+        xml.push_str(&format!("\t\t<indexTo>{index_to}</indexTo>\r\n"));
+    }
+    xml.push_str("\t\t<row>\r\n");
     if row.format_index > 1 {
         xml.push_str(&format!(
             "\t\t\t<formatIndex>{}</formatIndex>\r\n",
@@ -9422,7 +9437,9 @@ mod tests {
 
         assert!(xml.contains("<height>5</height>"));
         assert!(xml.contains("<vgRows>5</vgRows>"));
-        assert!(xml.contains("<index>5</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
+        assert!(xml.contains(
+            "<index>5</index>\r\n\t\t<indexTo>15</indexTo>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"
+        ));
         assert!(!xml.contains("<index>6</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
         assert!(!xml.contains("<index>15</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
     }
