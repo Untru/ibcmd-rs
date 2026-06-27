@@ -1182,7 +1182,58 @@ fn is_root_metadata_xml(path: &str) -> bool {
         return false;
     }
     let parts = lower.split('/').collect::<Vec<_>>();
-    parts.len() == 2 && parts[0] != "commonmodules"
+    parts.len() == 2 && is_stage_root_metadata_collection(parts[0])
+}
+
+fn is_stage_root_metadata_collection(value: &str) -> bool {
+    matches!(
+        value,
+        "catalogs"
+            | "documents"
+            | "informationregisters"
+            | "accumulationregisters"
+            | "accountingregisters"
+            | "calculationregisters"
+            | "chartsofcharacteristictypes"
+            | "chartsofaccounts"
+            | "chartsofcalculationtypes"
+            | "chartsofcalculationregisters"
+            | "commonforms"
+            | "commonpictures"
+            | "commontemplates"
+            | "commonattributes"
+            | "commandgroups"
+            | "documentjournals"
+            | "reports"
+            | "dataprocessors"
+            | "enums"
+            | "exchangeplans"
+            | "eventsubscriptions"
+            | "filtercriteria"
+            | "functionaloptions"
+            | "functionaloptionsparameters"
+            | "httpservices"
+            | "languages"
+            | "scheduledjobs"
+            | "sessionparameters"
+            | "settingsstorages"
+            | "styleitems"
+            | "styles"
+            | "subsystems"
+            | "roles"
+            | "commoncommands"
+            | "businessprocesses"
+            | "bots"
+            | "definedtypes"
+            | "tasks"
+            | "constants"
+            | "documentnumerators"
+            | "integrationservices"
+            | "sequences"
+            | "webservices"
+            | "wsreferences"
+            | "xdtopackages"
+    )
 }
 
 fn is_template_metadata_xml(path: &str) -> bool {
@@ -4396,6 +4447,14 @@ mod tests {
                     object_hint: Some("CommonModules/Foo".to_string()),
                 },
                 SourceFile {
+                    path: "Ext/CommandInterface.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("CommandInterface".to_string()),
+                    object_hint: Some("Ext".to_string()),
+                },
+                SourceFile {
                     path: "Reports/Sales/Templates/Main.xml".to_string(),
                     size_bytes: 1,
                     sha256: "aa".to_string(),
@@ -4452,6 +4511,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(metadata, vec!["Bots/Notify.xml"]);
+        assert!(!is_root_metadata_xml("Ext/CommandInterface.xml"));
         assert!(is_stage_metadata_xml("Reports/Sales/Templates/Main.xml"));
         assert!(!is_stage_metadata_xml(
             "Reports/Sales/Templates/Main/Ext/Template.xml"
