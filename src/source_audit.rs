@@ -370,10 +370,39 @@ fn roundtrip_difference_message(first: &str, second: &str) -> String {
         .position(|(left, right)| left != right)
         .unwrap_or_else(|| first.len().min(second.len()));
     format!(
-        "round-trip SpreadsheetDocument XML differs: first_bytes={}, second_bytes={}, first_diff_offset={first_diff}",
+        "round-trip SpreadsheetDocument XML differs: first_bytes={}, second_bytes={}, first_diff_offset={first_diff}, first_context=\"{}\", second_context=\"{}\"",
         first.len(),
-        second.len()
+        second.len(),
+        diff_context(first, first_diff),
+        diff_context(second, first_diff)
     )
+}
+
+fn diff_context(text: &str, byte_offset: usize) -> String {
+    let center = floor_char_boundary(text, byte_offset.min(text.len()));
+    let start = text[..center]
+        .char_indices()
+        .rev()
+        .nth(80)
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    let end = text[center..]
+        .char_indices()
+        .nth(80)
+        .map(|(index, _)| center + index)
+        .unwrap_or(text.len());
+    text[start..end]
+        .chars()
+        .flat_map(|ch| ch.escape_default())
+        .collect()
+}
+
+fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 fn push_roundtrip_error(
@@ -530,5 +559,15 @@ mod tests {
         assert!(report.errors.is_empty());
 
         Ok(())
+    }
+
+    #[test]
+    fn roundtrip_difference_message_handles_utf8_offsets() {
+        let message =
+            roundtrip_difference_message("prefix Привет suffix", "prefix Проверка suffix");
+
+        assert!(message.contains("first_diff_offset="));
+        assert!(message.contains("first_context="));
+        assert!(message.contains("second_context="));
     }
 }

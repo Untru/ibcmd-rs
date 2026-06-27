@@ -8780,8 +8780,9 @@ mod tests {
     use std::io::Write;
 
     use crate::module_blob::{
-        ReturnValuesReuse, pack_module_blob_bytes, pack_simple_metadata_blob_from_xml,
-        parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
+        ReturnValuesReuse, pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml,
+        pack_simple_metadata_blob_from_xml, parse_common_module_xml_properties,
+        parse_simple_metadata_xml_properties,
     };
 
     #[test]
@@ -10966,6 +10967,81 @@ mod tests {
             let picture = parse_moxel_picture(text, &BTreeMap::new()).unwrap();
             assert_eq!(picture.ref_name.as_deref(), Some(expected_ref));
         }
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_global_format_indexes() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>3</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>2</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>2</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<formatIndex>5</formatIndex>
+			<c>
+				<c>
+					<f>6</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>40</width>
+	</format>
+	<format>
+		<width>50</width>
+	</format>
+	<format>
+		<width>60</width>
+	</format>
+	<format>
+		<fillType>Parameter</fillType>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+	</format>
+	<format>
+		<verticalAlignment>Center</verticalAlignment>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<formatIndex>5</formatIndex>"));
+        assert!(extracted.contains("<f>6</f>"));
     }
 
     #[test]

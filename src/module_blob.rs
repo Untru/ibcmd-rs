@@ -943,6 +943,8 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
             .max()
             .unwrap_or(1),
     );
+    let column_format_slots = spreadsheet_column_format_slots(&spreadsheet, column_count);
+    let format_offset = column_format_slots.saturating_sub(1);
     let declared_columns = column_count.saturating_sub(1);
     let mut fields = vec![
         "8".to_string(),
@@ -955,11 +957,11 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     for row in &spreadsheet.rows {
         for row_index in row.expanded_indexes() {
             fields.push(row_index.to_string());
-            fields.push(row_format_index_for_moxel(row.format_index).to_string());
+            fields.push(row_format_index_for_moxel(row.format_index, format_offset).to_string());
             fields.push(row.cells.len().to_string());
             for cell in &row.cells {
                 fields.push(cell.column_index.to_string());
-                fields.push(format_spreadsheet_cell_for_moxel(cell));
+                fields.push(format_spreadsheet_cell_for_moxel(cell, format_offset));
             }
         }
     }
@@ -983,7 +985,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
     fields.extend(format_spreadsheet_formats_for_moxel(
         &spreadsheet,
-        column_count,
+        column_format_slots,
     ));
     fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
     if !spreadsheet.pictures.is_empty() {
@@ -2209,20 +2211,41 @@ fn normalize_spreadsheet_cell(cell: &mut SpreadsheetDocumentXmlCell) {
     }
 }
 
-fn row_format_index_for_moxel(format_index: usize) -> usize {
-    format_index.saturating_sub(1)
+fn spreadsheet_column_format_slots(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_count: usize,
+) -> usize {
+    spreadsheet
+        .column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .map(|column| column.format_index)
+        .max()
+        .unwrap_or(column_count.max(1))
+        .max(1)
 }
 
-fn cell_format_index_for_moxel(format_index: usize) -> usize {
+fn row_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
     if format_index <= 1 {
         0
     } else {
-        format_index - 1
+        format_index.saturating_sub(format_offset + 1)
     }
 }
 
-fn format_spreadsheet_cell_for_moxel(cell: &SpreadsheetDocumentXmlCell) -> String {
-    let format_index = cell_format_index_for_moxel(cell.format_index);
+fn cell_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
+    if format_index <= 1 {
+        0
+    } else {
+        format_index.saturating_sub(format_offset + 1)
+    }
+}
+
+fn format_spreadsheet_cell_for_moxel(
+    cell: &SpreadsheetDocumentXmlCell,
+    format_offset: usize,
+) -> String {
+    let format_index = cell_format_index_for_moxel(cell.format_index, format_offset);
     let localized = if let Some(parameter) = &cell.parameter {
         format!(
             "{{1,1,{{{},{}}}}}",
@@ -2566,30 +2589,35 @@ fn bool_to_usize(value: bool) -> usize {
 
 fn format_spreadsheet_formats_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
-    column_count: usize,
+    column_format_slots: usize,
 ) -> Vec<String> {
     if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
         return Vec::new();
     }
-    let body_format_count = spreadsheet
+    let source_format_count = spreadsheet
         .formats
         .len()
-        .max(spreadsheet.default_format_index.unwrap_or(0));
-    let column_placeholder_count = column_count.max(1);
+        .max(spreadsheet.default_format_index.unwrap_or(0))
+        .max(column_format_slots);
+    let body_format_count = source_format_count.saturating_sub(column_format_slots);
+    let column_placeholder_count = column_format_slots.max(1);
     let count = body_format_count + column_placeholder_count;
     let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
     let mut format_fields = Vec::with_capacity(count + 1);
     format_fields.push(count.to_string());
-    for index in 0..body_format_count {
-        let field = spreadsheet
-            .formats
-            .get(index)
-            .and_then(|format| format_spreadsheet_format_for_moxel(format, &mut style_refs))
-            .unwrap_or_else(spreadsheet_empty_format_for_moxel);
-        format_fields.push(field);
+    for global_index in column_format_slots + 1..=source_format_count {
+        format_fields.push(format_spreadsheet_format_index_for_moxel(
+            spreadsheet,
+            global_index,
+            &mut style_refs,
+        ));
     }
-    for _ in 0..column_placeholder_count {
-        format_fields.push(spreadsheet_empty_format_for_moxel());
+    for global_index in 1..=column_placeholder_count {
+        format_fields.push(format_spreadsheet_format_index_for_moxel(
+            spreadsheet,
+            global_index,
+            &mut style_refs,
+        ));
     }
     let mut fields = style_refs
         .iter()
@@ -2597,6 +2625,18 @@ fn format_spreadsheet_formats_for_moxel(
         .collect::<Vec<_>>();
     fields.push(format!("{{{}}}", format_fields.join(",")));
     fields
+}
+
+fn format_spreadsheet_format_index_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    global_index: usize,
+    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+) -> String {
+    spreadsheet
+        .formats
+        .get(global_index.saturating_sub(1))
+        .and_then(|format| format_spreadsheet_format_for_moxel(format, style_refs))
+        .unwrap_or_else(spreadsheet_empty_format_for_moxel)
 }
 
 fn spreadsheet_empty_format_for_moxel() -> String {
@@ -9337,7 +9377,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains(r#"{3,{128,72},{33024,6,1},{1,0}}"#));
+        assert!(text.contains(r#"{2,{33024,6,1},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -9368,7 +9408,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{3,0,{4625920}},{3,3,{-7}},{2,{3200,72,0,1},{1,0}}"));
+        assert!(text.contains("{3,0,{4625920}},{3,3,{-7}},{1,{3200,72,0,1}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -9398,7 +9438,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{2,{1,1},{1,0}}"));
+        assert!(text.contains("{1,{1,1}}"));
         assert!(text.contains(r#"{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,"Arial",1,100}"#));
         assert!(text.contains("{7,2,60,{-31},700,0,1,0,1,100}"));
         assert_eq!(packed.plain_bytes, text.len());
@@ -9434,7 +9474,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{2,{30,0,0,0,0},{1,0}}"));
+        assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{1,{30,0,0,0,0}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
