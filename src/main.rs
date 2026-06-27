@@ -117,6 +117,15 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::MssqlAuditSourceParity(args) => {
+            let report = ibcmd_rs::mssql::audit_source_parity(&args)?;
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::MssqlClone(args) => {
             let report = ibcmd_rs::mssql::clone_database(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);

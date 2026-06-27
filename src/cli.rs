@@ -43,6 +43,8 @@ pub enum Commands {
     StorageMap(TraceAnalyzeArgs),
     /// Compare two SQL Server 1C databases by table shape and row counts.
     MssqlCompare(MssqlCompareArgs),
+    /// Dry-run source load parity against SQL base blobs without writing ConfigSave.
+    MssqlAuditSourceParity(MssqlAuditSourceParityArgs),
     /// Clone a SQL Server database with backup/restore.
     MssqlClone(MssqlCloneArgs),
     /// Export ConfigSave/Params storage tables to a native BCP bundle.
@@ -361,6 +363,28 @@ pub struct MssqlCompareArgs {
     /// Right database name.
     #[arg(long)]
     pub right: String,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlAuditSourceParityArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Baseline database name whose Config blobs are used for dry-run packing.
+    #[arg(long)]
+    pub database: String,
+    /// Root folder with XML sources to scan.
+    #[arg(long)]
+    pub source_root: PathBuf,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Optional maximum number of staged XML objects per SQL batch.
+    #[arg(long)]
+    pub batch_size: Option<usize>,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
@@ -2768,6 +2792,28 @@ mod tests {
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let parity = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-audit-source-parity",
+            "--database",
+            "TestDb",
+            "--source-root",
+            r"C:\sources",
+            "--batch-size",
+            "2",
+            "-o",
+            r"C:\audit\parity.json",
+        ]);
+        match parity.command {
+            Commands::MssqlAuditSourceParity(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
+                assert_eq!(args.batch_size, Some(2));
+                assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\parity.json")));
             }
             other => panic!("unexpected command: {other:?}"),
         }

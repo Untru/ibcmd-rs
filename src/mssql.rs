@@ -10,26 +10,27 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
-    MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs, MssqlDeltaImportArgs,
-    MssqlStageAccountingRegisterObjectArgs, MssqlStageAccumulationRegisterObjectArgs,
-    MssqlStageBotObjectArgs, MssqlStageBusinessProcessObjectArgs,
-    MssqlStageCalculationRegisterObjectArgs, MssqlStageCatalogObjectArgs,
-    MssqlStageChartOfAccountsObjectArgs, MssqlStageChartOfCalculationRegistersObjectArgs,
-    MssqlStageChartOfCalculationTypesObjectArgs, MssqlStageChartOfCharacteristicTypesObjectArgs,
-    MssqlStageCommandGroupObjectArgs, MssqlStageCommonAttributeObjectArgs,
-    MssqlStageCommonCommandObjectArgs, MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs,
-    MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
-    MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
-    MssqlStageCommonPictureObjectArgs, MssqlStageCommonTemplateObjectArgs,
-    MssqlStageConstantObjectArgs, MssqlStageDataProcessorObjectArgs,
-    MssqlStageDefinedTypeObjectArgs, MssqlStageDocumentJournalObjectArgs,
-    MssqlStageDocumentNumeratorObjectArgs, MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs,
-    MssqlStageEventSubscriptionObjectArgs, MssqlStageExchangePlanObjectArgs,
-    MssqlStageFilterCriteriaObjectArgs, MssqlStageFunctionalOptionObjectArgs,
-    MssqlStageFunctionalOptionsParameterObjectArgs, MssqlStageHTTPServiceObjectArgs,
-    MssqlStageInformationRegisterObjectArgs, MssqlStageIntegrationServiceObjectArgs,
-    MssqlStageLanguageObjectArgs, MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs,
-    MssqlStageRoleObjectArgs, MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
+    MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs,
+    MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
+    MssqlStageAccumulationRegisterObjectArgs, MssqlStageBotObjectArgs,
+    MssqlStageBusinessProcessObjectArgs, MssqlStageCalculationRegisterObjectArgs,
+    MssqlStageCatalogObjectArgs, MssqlStageChartOfAccountsObjectArgs,
+    MssqlStageChartOfCalculationRegistersObjectArgs, MssqlStageChartOfCalculationTypesObjectArgs,
+    MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageCommandGroupObjectArgs,
+    MssqlStageCommonAttributeObjectArgs, MssqlStageCommonCommandObjectArgs,
+    MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs, MssqlStageCommonModuleMetadataArgs,
+    MssqlStageCommonModuleObjectArgs, MssqlStageCommonModuleObjectsArgs,
+    MssqlStageCommonModulesArgs, MssqlStageCommonPictureObjectArgs,
+    MssqlStageCommonTemplateObjectArgs, MssqlStageConstantObjectArgs,
+    MssqlStageDataProcessorObjectArgs, MssqlStageDefinedTypeObjectArgs,
+    MssqlStageDocumentJournalObjectArgs, MssqlStageDocumentNumeratorObjectArgs,
+    MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs, MssqlStageEventSubscriptionObjectArgs,
+    MssqlStageExchangePlanObjectArgs, MssqlStageFilterCriteriaObjectArgs,
+    MssqlStageFunctionalOptionObjectArgs, MssqlStageFunctionalOptionsParameterObjectArgs,
+    MssqlStageHTTPServiceObjectArgs, MssqlStageInformationRegisterObjectArgs,
+    MssqlStageIntegrationServiceObjectArgs, MssqlStageLanguageObjectArgs,
+    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs,
+    MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
     MssqlStageSessionParameterObjectArgs, MssqlStageSettingsStorageObjectArgs,
     MssqlStageSourceCommonModuleObjectsArgs, MssqlStageSourceMetadataObjectsArgs,
     MssqlStageSourceObjectsArgs, MssqlStageStyleItemObjectArgs, MssqlStageStyleObjectArgs,
@@ -53,6 +54,7 @@ use crate::module_blob::{
 };
 use crate::parallel;
 use crate::source::scan_sources;
+use crate::source_audit::{SourceLoadCoverageAuditReport, audit_source_load_coverage};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
@@ -61,6 +63,42 @@ pub struct MssqlCompareReport {
     pub same: bool,
     pub summary: MssqlCompareSummary,
     pub differences: Vec<MssqlDifference>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlSourceParityAuditReport {
+    pub database: String,
+    pub source_root: PathBuf,
+    pub source_coverage: SourceLoadCoverageAuditReport,
+    pub selected_metadata_xml_files: usize,
+    pub selected_common_module_xml_files: usize,
+    pub prepared_metadata_objects: usize,
+    pub prepared_common_modules: usize,
+    pub prepared_metadata_body_rows: usize,
+    pub prepared_total_config_rows: usize,
+    pub prepare_failures: Vec<MssqlSourceParityPrepareFailure>,
+    pub versions_blob: Option<GeneratedBlobReport>,
+    pub version_replacements: Vec<VersionReplacement>,
+    pub batches: Vec<MssqlSourceParityBatchReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlSourceParityPrepareFailure {
+    pub kind: String,
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceParityBatchReport {
+    pub index: usize,
+    pub metadata_objects: usize,
+    pub common_modules: usize,
+    pub staged_rows: usize,
+    pub running_staged_rows: usize,
+    pub include_stable_rows: bool,
+    pub include_versions_row: bool,
+    pub expected_total_rows: usize,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -433,6 +471,117 @@ fn require_non_lab_confirmation(allowed: bool, action: &str) -> Result<()> {
 pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(report)?;
     fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
+}
+
+pub fn audit_source_parity(
+    args: &MssqlAuditSourceParityArgs,
+) -> Result<MssqlSourceParityAuditReport> {
+    let source_coverage = audit_source_load_coverage(&args.source_root)?;
+    let manifest = scan_sources(&args.source_root)?;
+    let metadata_xmls = source_metadata_xmls(&manifest, &args.source_root);
+    let common_module_xmls = source_common_module_xmls(&manifest, &args.source_root);
+    if metadata_xmls.is_empty() && common_module_xmls.is_empty() {
+        return Err(anyhow!(
+            "no supported root XML objects or common modules found under {}",
+            args.source_root.display()
+        ));
+    }
+
+    let source = MetadataSourceContext::new(args.source_root.clone());
+    let metadata_results = parallel::install(|| {
+        metadata_xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_metadata_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    Some(&source),
+                )
+                .map_err(|error| MssqlSourceParityPrepareFailure {
+                    kind: "metadata_object".to_string(),
+                    path: source_relative_path(&args.source_root, xml),
+                    message: error.to_string(),
+                })
+            })
+            .collect::<Vec<_>>()
+    })?;
+    let common_module_results = parallel::install(|| {
+        common_module_xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_common_module_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    None,
+                )
+                .map_err(|error| MssqlSourceParityPrepareFailure {
+                    kind: "common_module".to_string(),
+                    path: source_relative_path(&args.source_root, xml),
+                    message: error.to_string(),
+                })
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut metadata_objects = Vec::new();
+    let mut common_modules = Vec::new();
+    let mut prepare_failures = Vec::new();
+    for result in metadata_results {
+        match result {
+            Ok(object) => metadata_objects.push(object),
+            Err(error) => prepare_failures.push(error),
+        }
+    }
+    for result in common_module_results {
+        match result {
+            Ok(module) => common_modules.push(module),
+            Err(error) => prepare_failures.push(error),
+        }
+    }
+    prepare_failures.sort_by(|left, right| {
+        left.kind
+            .cmp(&right.kind)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
+    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let changes = source_stage_change_ids(&metadata_objects, &common_modules);
+    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+
+    let batch_size = args.batch_size.unwrap_or(500).max(1);
+    let batches =
+        build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size);
+    let batch_reports = source_stage_batch_reports(&batches);
+    let prepared_metadata_body_rows = metadata_objects
+        .iter()
+        .map(|object| object.body_rows.len())
+        .sum::<usize>();
+    let prepared_total_config_rows =
+        metadata_objects.len() + prepared_metadata_body_rows + common_modules.len() * 2;
+
+    Ok(MssqlSourceParityAuditReport {
+        database: args.database.clone(),
+        source_root: source_coverage.root.clone(),
+        source_coverage,
+        selected_metadata_xml_files: metadata_xmls.len(),
+        selected_common_module_xml_files: common_module_xmls.len(),
+        prepared_metadata_objects: metadata_objects.len(),
+        prepared_common_modules: common_modules.len(),
+        prepared_metadata_body_rows,
+        prepared_total_config_rows,
+        prepare_failures,
+        versions_blob: Some(GeneratedBlobReport {
+            bytes: patched_versions.blob.len(),
+            sha256: patched_versions.output_sha256,
+        }),
+        version_replacements: patched_versions.replacements,
+        batches: batch_reports,
+    })
 }
 
 pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
@@ -1055,18 +1204,7 @@ pub fn stage_source_objects(
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
 
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
-    let changes = metadata_objects
-        .iter()
-        .flat_map(|object| {
-            std::iter::once(object.object_id.clone())
-                .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
-        })
-        .chain(
-            common_modules
-                .iter()
-                .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()]),
-        )
-        .collect::<Vec<_>>();
+    let changes = source_stage_change_ids(&metadata_objects, &common_modules);
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
@@ -1077,6 +1215,7 @@ pub fn stage_source_objects(
     let mut running_rows = 0usize;
     let mut after = before.clone();
 
+    let batch_reports = source_stage_batch_reports(&batches);
     for (index, batch) in batches.iter().enumerate() {
         let script = batch_stage_script_path(
             args.script_output.as_ref(),
@@ -1088,20 +1227,17 @@ pub fn stage_source_objects(
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        let include_stable_rows = index == 0;
-        let include_versions_row = index + 1 == batches.len();
+        let batch_report = &batch_reports[index];
         running_rows += batch.row_count;
-        let expected_total_rows = running_rows
-            + if include_stable_rows { 2 } else { 0 }
-            + if include_versions_row { 1 } else { 0 };
+        debug_assert_eq!(running_rows, batch_report.running_staged_rows);
         let sql = build_stage_source_objects_sql(
             &args.database,
             &batch.metadata_objects,
             &batch.common_modules,
             &patched_versions.blob,
-            include_stable_rows,
-            include_versions_row,
-            expected_total_rows,
+            batch_report.include_stable_rows,
+            batch_report.include_versions_row,
+            batch_report.expected_total_rows,
         );
         fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
         run_sql_file(&args.sqlcmd, &args.server, &script)?;
@@ -4186,6 +4322,57 @@ fn build_source_stage_batches(
     batches
 }
 
+fn source_stage_change_ids(
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+) -> Vec<String> {
+    metadata_objects
+        .iter()
+        .flat_map(|object| {
+            std::iter::once(object.object_id.clone())
+                .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
+        })
+        .chain(
+            common_modules
+                .iter()
+                .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()]),
+        )
+        .collect()
+}
+
+fn source_stage_batch_reports(batches: &[SourceStageBatch]) -> Vec<MssqlSourceParityBatchReport> {
+    let mut running_rows = 0usize;
+    batches
+        .iter()
+        .enumerate()
+        .map(|(index, batch)| {
+            running_rows += batch.row_count;
+            let include_stable_rows = index == 0;
+            let include_versions_row = index + 1 == batches.len();
+            let expected_total_rows = running_rows
+                + if include_stable_rows { 2 } else { 0 }
+                + if include_versions_row { 1 } else { 0 };
+            MssqlSourceParityBatchReport {
+                index,
+                metadata_objects: batch.metadata_objects.len(),
+                common_modules: batch.common_modules.len(),
+                staged_rows: batch.row_count,
+                running_staged_rows: running_rows,
+                include_stable_rows,
+                include_versions_row,
+                expected_total_rows,
+            }
+        })
+        .collect()
+}
+
+fn source_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 #[derive(Debug, Clone)]
 enum SourceStageItem {
     Metadata(PreparedMetadataObjectStage),
@@ -4440,16 +4627,48 @@ mod tests {
         ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest, DeltaBundleManifest,
         PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataBodyStage,
         PreparedMetadataObjectStage, StorageBundleManifest, StorageTableManifest, TableShape,
-        compare_shapes, compare_storage_table_manifests, infer_common_module_text_path,
-        is_root_common_module_xml, is_root_metadata_xml, is_stage_metadata_xml, quote_ident,
-        quote_string, require_non_lab_confirmation, source_common_module_xmls,
-        source_metadata_xmls, validate_delta_manifest, validate_storage_manifest,
+        build_source_stage_batches, compare_shapes, compare_storage_table_manifests,
+        infer_common_module_text_path, is_root_common_module_xml, is_root_metadata_xml,
+        is_stage_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
+        source_common_module_xmls, source_metadata_xmls, source_stage_batch_reports,
+        validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::path::PathBuf;
+
+    fn test_simple_metadata_properties(
+        kind: &str,
+        uuid: &str,
+        name: &str,
+    ) -> SimpleMetadataXmlProperties {
+        SimpleMetadataXmlProperties {
+            kind: kind.to_string(),
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        }
+    }
+
+    fn test_common_module_properties(uuid: &str, name: &str) -> CommonModuleXmlProperties {
+        CommonModuleXmlProperties {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            global: false,
+            client_managed_application: false,
+            server: true,
+            external_connection: false,
+            client_ordinary_application: false,
+            server_call: false,
+            privileged: false,
+            return_values_reuse: ReturnValuesReuse::DontUse,
+        }
+    }
 
     #[test]
     fn quotes_sql_identifier_and_string() {
@@ -5059,6 +5278,85 @@ mod tests {
             super::infer_role_rights_body_path(r"Roles\Editor.xml".as_ref()),
             std::path::PathBuf::from(r"Roles\Editor\Ext\Rights.xml")
         );
+    }
+
+    #[test]
+    fn reports_source_stage_batch_accounting() {
+        let metadata_objects = vec![
+            PreparedMetadataObjectStage {
+                object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                kind: "Catalog".to_string(),
+                xml: PathBuf::from("Catalogs/A.xml"),
+                properties: test_simple_metadata_properties(
+                    "Catalog",
+                    "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                    "A",
+                ),
+                metadata_plain_bytes: 1,
+                metadata_blob: vec![1],
+                metadata_blob_sha256: "aa".to_string(),
+                body_rows: vec![
+                    PreparedMetadataBodyStage {
+                        body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                        path: PathBuf::from("Catalogs/A/Ext/Predefined.xml"),
+                        blob: vec![2],
+                        blob_sha256: "bb".to_string(),
+                    },
+                    PreparedMetadataBodyStage {
+                        body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1".to_string(),
+                        path: PathBuf::from("Catalogs/A/Ext/Help.xml"),
+                        blob: vec![3],
+                        blob_sha256: "cc".to_string(),
+                    },
+                ],
+            },
+            PreparedMetadataObjectStage {
+                object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                kind: "Enum".to_string(),
+                xml: PathBuf::from("Enums/B.xml"),
+                properties: test_simple_metadata_properties(
+                    "Enum",
+                    "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+                    "B",
+                ),
+                metadata_plain_bytes: 1,
+                metadata_blob: vec![4],
+                metadata_blob_sha256: "dd".to_string(),
+                body_rows: Vec::new(),
+            },
+        ];
+        let common_modules = vec![PreparedCommonModuleObjectStage {
+            module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+            module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+            xml: PathBuf::from("CommonModules/C.xml"),
+            text: PathBuf::from("CommonModules/C/Ext/Module.bsl"),
+            properties: test_common_module_properties("cccccccc-cccc-4ccc-cccc-cccccccccccc", "C"),
+            metadata_plain_bytes: 1,
+            metadata_blob: vec![5],
+            metadata_blob_sha256: "ee".to_string(),
+            text_bytes: 1,
+            module_blob: vec![6],
+            module_blob_sha256: "ff".to_string(),
+        }];
+
+        let batches = build_source_stage_batches(metadata_objects, common_modules, 2);
+        let reports = source_stage_batch_reports(&batches);
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].metadata_objects, 1);
+        assert_eq!(reports[0].common_modules, 1);
+        assert_eq!(reports[0].staged_rows, 5);
+        assert_eq!(reports[0].running_staged_rows, 5);
+        assert!(reports[0].include_stable_rows);
+        assert!(!reports[0].include_versions_row);
+        assert_eq!(reports[0].expected_total_rows, 7);
+        assert_eq!(reports[1].metadata_objects, 1);
+        assert_eq!(reports[1].common_modules, 0);
+        assert_eq!(reports[1].staged_rows, 1);
+        assert_eq!(reports[1].running_staged_rows, 6);
+        assert!(!reports[1].include_stable_rows);
+        assert!(reports[1].include_versions_row);
+        assert_eq!(reports[1].expected_total_rows, 7);
     }
 
     #[test]
