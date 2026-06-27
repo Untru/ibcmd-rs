@@ -3772,8 +3772,95 @@ fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
     {
         return None;
     }
+    let events = extract_form_body_events(&form_fields);
 
-    Some(format_form_body_xml())
+    Some(format_form_body_xml(&events))
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct FormBodyEvent {
+    name: String,
+    handler: String,
+}
+
+fn extract_form_body_events(fields: &[&str]) -> Vec<FormBodyEvent> {
+    let mut events = Vec::new();
+    let mut seen = BTreeSet::new();
+    collect_form_body_events(fields, &mut events, &mut seen);
+    events
+}
+
+fn collect_form_body_events(
+    fields: &[&str],
+    events: &mut Vec<FormBodyEvent>,
+    seen: &mut BTreeSet<(String, String)>,
+) {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if let Some(event) = parse_form_body_event_fields(&nested)
+            && seen.insert((event.name.clone(), event.handler.clone()))
+        {
+            events.push(event);
+        }
+        collect_form_body_events(&nested, events, seen);
+    }
+}
+
+fn parse_form_body_event_fields(fields: &[&str]) -> Option<FormBodyEvent> {
+    parse_form_body_event_pair(fields.first()?, fields.get(1)?)
+        .or_else(|| parse_form_body_event_pair(fields.get(1)?, fields.get(2)?))
+}
+
+fn parse_form_body_event_pair(event_field: &str, handler_field: &str) -> Option<FormBodyEvent> {
+    let event = parse_form_event_identifier(event_field)?;
+    let (handler, _) = parse_1c_quoted_string_with_len(handler_field.trim())?;
+    let handler = handler.trim();
+    if handler.is_empty() || !is_probable_form_event_handler(handler) {
+        return None;
+    }
+    Some(FormBodyEvent {
+        name: event,
+        handler: handler.to_string(),
+    })
+}
+
+fn parse_form_event_identifier(field: &str) -> Option<String> {
+    let field = field.trim();
+    let identifier = parse_1c_quoted_string_with_len(field)
+        .map(|(value, _)| value)
+        .unwrap_or_else(|| field.to_string());
+    form_event_name_from_identifier(identifier.trim()).map(ToOwned::to_owned)
+}
+
+fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
+    match identifier {
+        "OnOpen" => Some("OnOpen"),
+        "BeforeClose" => Some("BeforeClose"),
+        "OnClose" => Some("OnClose"),
+        "OnCreateAtServer" => Some("OnCreateAtServer"),
+        "OnReadAtServer" => Some("OnReadAtServer"),
+        "BeforeWriteAtServer" => Some("BeforeWriteAtServer"),
+        "AfterWriteAtServer" => Some("AfterWriteAtServer"),
+        "ChoiceProcessing" => Some("ChoiceProcessing"),
+        "NotificationProcessing" => Some("NotificationProcessing"),
+        "ExternalEvent" => Some("ExternalEvent"),
+        _ => None,
+    }
+}
+
+fn is_probable_form_event_handler(value: &str) -> bool {
+    if value.len() > 512 || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    value.chars().all(|ch| {
+        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
+    })
 }
 
 fn extract_form_item_assets(bytes: &[u8]) -> Vec<FormItemAsset> {
@@ -3916,11 +4003,24 @@ fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
     deduped
 }
 
-fn format_form_body_xml() -> String {
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+fn format_form_body_xml(events: &[FormBodyEvent]) -> String {
+    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-</Form>\r\n"
-        .to_string()
+"
+    .to_string();
+    if !events.is_empty() {
+        xml.push_str("\t<Events>\r\n");
+        for event in events {
+            xml.push_str(&format!(
+                "\t\t<Event name=\"{}\">{}</Event>\r\n",
+                escape_xml_text(&event.name),
+                escape_xml_text(&event.handler)
+            ));
+        }
+        xml.push_str("\t</Events>\r\n");
+    }
+    xml.push_str("</Form>\r\n");
+    xml
 }
 
 pub(crate) fn extract_moxel_spreadsheet_xml(
@@ -9947,6 +10047,7 @@ mod tests {
             fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml")).unwrap();
         assert!(form_xml.contains("<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\""));
         assert!(form_xml.contains("version=\"2.20\""));
+        assert!(!form_xml.contains("<Events>"));
         let body_row = dumped
             .rows
             .iter()
@@ -9962,6 +10063,21 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_form_events_to_body_xml() {
+        let form_body = deflate_for_test(
+            b"{4,{7,{0,\"OnOpen\",\"PriOtkrytii\"},{1,\"ChoiceProcessing\",\"ObrabotkaVybora\"},{2,\"NotAFormEvent\",\"Ignored\"},{3,\"OnClose\",\"\"}},\"\",{0}}",
+        );
+
+        let form_xml = extract_form_body_xml(&form_body).unwrap();
+
+        assert!(form_xml.contains("<Events>"));
+        assert!(form_xml.contains(r#"<Event name="OnOpen">PriOtkrytii</Event>"#));
+        assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ObrabotkaVybora</Event>"#));
+        assert!(!form_xml.contains("NotAFormEvent"));
+        assert!(!form_xml.contains(r#"<Event name="OnClose">"#));
     }
 
     #[test]
