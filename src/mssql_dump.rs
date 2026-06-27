@@ -1041,6 +1041,7 @@ struct MoxelSpreadsheet {
     column_sets: Vec<MoxelColumnSet>,
     column_widths: Vec<usize>,
     default_format_width: Option<usize>,
+    default_format: MoxelFormat,
     formats: Vec<MoxelFormat>,
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
@@ -1048,6 +1049,7 @@ struct MoxelSpreadsheet {
     lines: Vec<MoxelLine>,
     fonts: Vec<MoxelFont>,
     pictures: Vec<MoxelPicture>,
+    empty_headers_footers: bool,
     default_format_index: usize,
     height: usize,
 }
@@ -1063,6 +1065,7 @@ struct MoxelRow {
 
 struct MoxelColumnSet {
     id: Option<String>,
+    size: usize,
     columns: Vec<MoxelColumn>,
 }
 
@@ -3815,6 +3818,8 @@ fn parse_moxel_spreadsheet_text(
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
+    let default_format = parse_moxel_default_format(&fields, object_refs);
+    let empty_headers_footers = parse_moxel_empty_headers_footers(&fields);
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
@@ -3830,11 +3835,7 @@ fn parse_moxel_spreadsheet_text(
     } else {
         column_sets
     };
-    let column_format_slots = column_sets
-        .iter()
-        .map(|column_set| column_set.columns.len())
-        .sum::<usize>()
-        .max(column_count);
+    let column_format_slots = moxel_column_format_slots(&column_sets, column_count);
     let format_offset = column_format_slots.saturating_sub(1);
     for row in &mut rows {
         if let Some(columns_id) = row_column_ids.get(&row.index) {
@@ -3863,6 +3864,7 @@ fn parse_moxel_spreadsheet_text(
         column_sets,
         column_widths: parse_moxel_column_widths(&fields, column_format_slots),
         default_format_width: parse_moxel_default_format_width(&fields, column_format_slots),
+        default_format,
         formats,
         rows,
         merges,
@@ -3870,6 +3872,7 @@ fn parse_moxel_spreadsheet_text(
         lines,
         fonts,
         pictures,
+        empty_headers_footers,
         default_format_index: max_format_index + 1,
         height,
     })
@@ -3878,6 +3881,7 @@ fn parse_moxel_spreadsheet_text(
 fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnSet> {
     vec![MoxelColumnSet {
         id: None,
+        size: column_count,
         columns: (0..column_count)
             .map(|index| MoxelColumn {
                 index,
@@ -3944,7 +3948,12 @@ fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     }
     let declared_count = fields.first()?.trim().parse::<usize>().ok()?;
     let count = fields.get(3)?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 2048 || declared_count != count || fields.len() != count * 2 + 4 {
+    if count == 0
+        || count > 2048
+        || declared_count == 0
+        || declared_count > count
+        || fields.len() != count * 2 + 4
+    {
         return None;
     }
     let uuid = parse_uuid_field(fields.get(2)?.trim())?;
@@ -3968,7 +3977,11 @@ fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
                 .ok()?,
         });
     }
-    Some(MoxelColumnSet { id, columns })
+    Some(MoxelColumnSet {
+        id,
+        size: declared_count,
+        columns,
+    })
 }
 
 fn normalize_moxel_column_set_format_indices(column_sets: &mut [MoxelColumnSet]) {
@@ -3985,6 +3998,16 @@ fn normalize_moxel_column_set_format_indices(column_sets: &mut [MoxelColumnSet])
     {
         column.format_index = column.format_index.saturating_sub(raw_offset).max(1);
     }
+}
+
+fn moxel_column_format_slots(column_sets: &[MoxelColumnSet], column_count: usize) -> usize {
+    column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .map(|column| column.format_index)
+        .max()
+        .unwrap_or(column_count)
+        .max(column_count)
 }
 
 fn parse_moxel_row_column_set_ids(
@@ -4372,12 +4395,14 @@ fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
         }
         "2" if fields.len() >= 10 => {
             let raw_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
-            if raw_fields.first()?.trim() != "-31" {
-                return None;
-            }
+            let ref_name = match raw_fields.first()?.trim() {
+                "-31" => "style:NormalTextFont",
+                "-32" => "style:LargeTextFont",
+                _ => return None,
+            };
             let weight = fields.get(4)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
-                ref_name: Some("style:NormalTextFont".to_string()),
+                ref_name: Some(ref_name.to_string()),
                 face_name: None,
                 height: None,
                 bold: weight >= 700,
@@ -4489,6 +4514,38 @@ fn parse_moxel_default_format_width(fields: &[&str], column_count: usize) -> Opt
         return None;
     }
     widths.first().copied()
+}
+
+fn parse_moxel_default_format(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> MoxelFormat {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_default_format_field(field, object_refs))
+        .next()
+        .unwrap_or_default()
+}
+
+fn parse_moxel_default_format_field(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelFormat> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3
+        || fields.first().map(|field| field.trim()) != Some("1")
+        || fields.get(1).map(|field| field.trim()) != Some("0")
+    {
+        return None;
+    }
+    let border_color = fields
+        .get(2)
+        .and_then(|field| parse_moxel_style_ref_slot(field, object_refs))
+        .flatten()?;
+    Some(MoxelFormat {
+        border_color: Some(border_color),
+        ..MoxelFormat::default()
+    })
 }
 
 fn parse_moxel_formats(
@@ -4661,6 +4718,54 @@ fn parse_moxel_style_refs(
         .collect()
 }
 
+fn parse_moxel_empty_headers_footers(fields: &[&str]) -> bool {
+    fields.windows(6).any(|window| {
+        window
+            .iter()
+            .all(|field| parse_moxel_empty_header_footer(field))
+    })
+}
+
+fn parse_moxel_empty_header_footer(text: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(text, 0) else {
+        return false;
+    };
+    if fields.len() != 5 || fields.first().map(|field| field.trim()) != Some("16") {
+        return false;
+    }
+    if fields.get(1).map(|field| field.trim()) != Some("0")
+        || fields.get(3).map(|field| field.trim()) != Some("1")
+    {
+        return false;
+    }
+    let Some(text_fields) = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return false;
+    };
+    let Some(format_fields) = fields
+        .get(4)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return false;
+    };
+    text_fields.len() == 2
+        && text_fields.first().map(|field| field.trim()) == Some("1")
+        && text_fields.get(1).map(|field| field.trim()) == Some("0")
+        && format_fields.len() == 3
+        && format_fields.first().map(|field| field.trim()) == Some("1")
+        && format_fields.get(2).map(|field| field.trim()) == Some("1")
+        && format_fields.get(1).and_then(|field| {
+            let nested = split_1c_braced_fields(field, 0)?;
+            Some(
+                nested.len() == 2
+                    && nested.first().map(|value| value.trim()) == Some("1")
+                    && nested.get(1).map(|value| value.trim()) == Some("0"),
+            )
+        }) == Some(true)
+}
+
 fn parse_moxel_style_ref_slot(
     text: &str,
     object_refs: &BTreeMap<String, String>,
@@ -4674,6 +4779,7 @@ fn parse_moxel_style_ref_slot(
         "3" => match payload.first()?.trim() {
             "-1" | "-3" => Some(None),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
+            "-28" => Some(Some("style:ReportLineColor".to_string())),
             "0" => {
                 let uuid = parse_uuid_field(payload.get(1)?.trim())?;
                 let style_ref = object_refs
@@ -4686,9 +4792,16 @@ fn parse_moxel_style_ref_slot(
         },
         "0" => payload
             .first()
-            .and_then(|value| parse_moxel_direct_color(value.trim()))
+            .and_then(|value| parse_moxel_style_color(value.trim()))
             .map(Some),
         _ => None,
+    }
+}
+
+fn parse_moxel_style_color(value: &str) -> Option<String> {
+    match value.parse::<u32>().ok()? {
+        8765644 => Some("style:ReportLineColor".to_string()),
+        _ => parse_moxel_direct_color(value),
     }
 }
 
@@ -4908,6 +5021,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for row in &spreadsheet.rows {
         push_moxel_row_xml(&mut xml, row);
     }
+    if spreadsheet.empty_headers_footers {
+        push_moxel_empty_headers_footers_xml(&mut xml);
+    }
     xml.push_str("\t<templateMode>true</templateMode>\r\n");
     xml.push_str(&format!(
         "\t<defaultFormatIndex>{}</defaultFormatIndex>\r\n",
@@ -4942,10 +5058,7 @@ fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
     if let Some(id) = &column_set.id {
         xml.push_str(&format!("\t\t<id>{}</id>\r\n", escape_xml_text(id)));
     }
-    xml.push_str(&format!(
-        "\t\t<size>{}</size>\r\n",
-        column_set.columns.len()
-    ));
+    xml.push_str(&format!("\t\t<size>{}</size>\r\n", column_set.size));
     for column in &column_set.columns {
         let column_index = column.index;
         let format_index = column.format_index;
@@ -4959,6 +5072,21 @@ fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
         ));
     }
     xml.push_str("\t</columns>\r\n");
+}
+
+fn push_moxel_empty_headers_footers_xml(xml: &mut String) {
+    for tag in [
+        "leftHeader",
+        "centerHeader",
+        "rightHeader",
+        "leftFooter",
+        "centerFooter",
+        "rightFooter",
+    ] {
+        xml.push_str(&format!(
+            "\t<{tag}>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</{tag}>\r\n"
+        ));
+    }
 }
 
 fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
@@ -5021,14 +5149,10 @@ fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -
     let column_format_slots = spreadsheet
         .column_widths
         .len()
-        .max(
-            spreadsheet
-                .column_sets
-                .iter()
-                .map(|column_set| column_set.columns.len())
-                .sum::<usize>(),
-        )
-        .max(spreadsheet.column_count);
+        .max(moxel_column_format_slots(
+            &spreadsheet.column_sets,
+            spreadsheet.column_count,
+        ));
     if let Some(width) = spreadsheet
         .column_widths
         .get(format_index.saturating_sub(1))
@@ -5040,6 +5164,13 @@ fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -
         };
     }
     if format_index == spreadsheet.default_format_index {
+        let mut format = spreadsheet.default_format.clone();
+        if format.width.is_none() {
+            format.width = spreadsheet.default_format_width;
+        }
+        if !format.is_empty() {
+            return format;
+        }
         return MoxelFormat {
             width: spreadsheet.default_format_width,
             ..MoxelFormat::default()
@@ -9645,6 +9776,46 @@ mod tests {
         ));
         assert!(xml.contains("\t<format>\r\n\t\t<width>135</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
+    }
+
+    #[test]
+    fn formats_moxel_receipt_columns_headers_style_font_and_default_format() {
+        let object_refs = BTreeMap::from([(
+            "757b547b-b79c-459a-a64a-eef19a09a38f".to_string(),
+            "StyleItem.ГиперссылкаЦвет".to_string(),
+        )]);
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{32,0},{0},0,{16,0,{1,0},1,{1,{1,0},1}},{16,0,{1,0},1,{1,{1,0},1}},{16,0,{1,0},1,{1,{1,0},1}},{16,0,{1,0},1,{1,{1,0},1}},{16,0,{1,0},1,{1,{1,0},1}},{16,0,{1,0},1,{1,{1,0},1}},1,2,4,0,0,2,0,{16,1,{1,1,{\"\",\"Наименование\"}},0},1,{16,2,{1,1,{\"\",\"Значение\"}},0},1,3,1,0,{16,4,{1,1,{\"\",\"Значение\"}},0},2,0,1,0,{24,5,\"Файл\",{1,1,{\"ru\",\"Открыть для просмотра\"}},0},3,6,1,0,{16,1,{1,1,{\"\",\"Значение\"}},0},{2,0,00000000-0000-0000-0000-000000000000,12,0,7,1,8,2,9,3,9,4,9,5,9,6,9,7,9,8,9,9,9,10,9,11,9},4,0,0,0,0,0,0,0,0,{2,{0,1,1,1,0},{0,3,1,3,0}},{0},{0},{4,\"Заголовок\",{1,{1,-1,1,-1,1,00000000-0000-0000-0000-000000000000},0},\"ОткрытьДляПросмотра\",{1,{1,-1,2,-1,2,00000000-0000-0000-0000-000000000000},0},\"Строка\",{1,{1,-1,0,-1,0,00000000-0000-0000-0000-000000000000},0},\"Текст\",{1,{1,-1,3,-1,3,00000000-0000-0000-0000-000000000000},0}},\"\",{{0,6,6,{\"N\",1000},7,{\"N\",1000},8,{\"N\",1000},9,{\"N\",1000},10,{\"N\",1000},11,{\"N\",1000}}},{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,1,2,1,2,9,{49152,3,1},{49312,0,68,3,1},{1,0},{49569,0,0,68,6,3,1},{67109889,1,3,1},{16384,3},{128,403},{128,377},{128,68},2,{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,2,60,{-32},400,0,1,0,1,100},0,0,0,4,{3,0,{8765644}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f}},0,0,0,\"\",0,{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},{1,0,{3,3,{-28}}},0,0,0,1,0,0,0}",
+            &object_refs,
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
+        assert!(xml.contains(
+            "<index>11</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+        ));
+        assert_eq!(xml.matches("<columnsItem>").count(), 12);
+        assert!(xml.contains("<leftHeader>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</leftHeader>"));
+        assert!(xml.contains("<rightFooter>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</rightFooter>"));
+        assert!(xml.contains("<defaultFormatIndex>10</defaultFormatIndex>"));
+        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Наименование</parameter>"));
+        assert!(xml.contains("<formatIndex>6</formatIndex>"));
+        assert!(xml.contains(
+            "<font ref=\"style:LargeTextFont\" bold=\"false\" italic=\"false\" underline=\"true\" strikeout=\"false\" kind=\"StyleItem\"/>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<width>403</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>377</width>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<borderColor>style:ReportLineColor</borderColor>\r\n\t\t<width>68</width>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<fillType>Parameter</fillType>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>1</font>\r\n\t\t<textColor>style:ГиперссылкаЦвет</textColor>\r\n\t\t<hyperLink>true</hyperLink>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<borderColor>style:ReportLineColor</borderColor>\r\n\t</format>"
+        ));
     }
 
     #[test]
