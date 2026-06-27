@@ -1022,6 +1022,7 @@ struct MoxelSpreadsheet {
     column_count: usize,
     column_widths: Vec<usize>,
     default_format_width: Option<usize>,
+    formats: Vec<MoxelFormat>,
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
@@ -1078,6 +1079,72 @@ struct MoxelFont {
 
 struct MoxelLine {
     style: &'static str,
+}
+
+#[derive(Clone, Default)]
+struct MoxelFormat {
+    font: Option<usize>,
+    left_border: Option<usize>,
+    top_border: Option<usize>,
+    right_border: Option<usize>,
+    bottom_border: Option<usize>,
+    height: Option<usize>,
+    width: Option<usize>,
+    horizontal_alignment: Option<&'static str>,
+    vertical_alignment: Option<&'static str>,
+    text_placement: Option<&'static str>,
+    fill_type: Option<&'static str>,
+    protection: Option<bool>,
+    indent: Option<usize>,
+    auto_indent: Option<usize>,
+    pic_index: Option<usize>,
+    picture_size_mode: Option<&'static str>,
+    pic_horizontal_alignment: Option<&'static str>,
+    pic_vertical_alignment: Option<&'static str>,
+}
+
+impl MoxelFormat {
+    fn is_empty(&self) -> bool {
+        self.font.is_none()
+            && self.left_border.is_none()
+            && self.top_border.is_none()
+            && self.right_border.is_none()
+            && self.bottom_border.is_none()
+            && self.height.is_none()
+            && self.width.is_none()
+            && self.horizontal_alignment.is_none()
+            && self.vertical_alignment.is_none()
+            && self.text_placement.is_none()
+            && self.fill_type.is_none()
+            && self.protection.is_none()
+            && self.indent.is_none()
+            && self.auto_indent.is_none()
+            && self.pic_index.is_none()
+            && self.picture_size_mode.is_none()
+            && self.pic_horizontal_alignment.is_none()
+            && self.pic_vertical_alignment.is_none()
+    }
+
+    fn is_width_only(&self) -> bool {
+        self.width.is_some()
+            && self.font.is_none()
+            && self.left_border.is_none()
+            && self.top_border.is_none()
+            && self.right_border.is_none()
+            && self.bottom_border.is_none()
+            && self.height.is_none()
+            && self.horizontal_alignment.is_none()
+            && self.vertical_alignment.is_none()
+            && self.text_placement.is_none()
+            && self.fill_type.is_none()
+            && self.protection.is_none()
+            && self.indent.is_none()
+            && self.auto_indent.is_none()
+            && self.pic_index.is_none()
+            && self.picture_size_mode.is_none()
+            && self.pic_horizontal_alignment.is_none()
+            && self.pic_vertical_alignment.is_none()
+    }
 }
 
 struct CommandInterfaceEntry {
@@ -3709,6 +3776,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
         column_count,
         column_widths: parse_moxel_column_widths(&fields, column_count),
         default_format_width: parse_moxel_default_format_width(&fields, column_count),
+        formats: parse_moxel_formats(&fields, column_count),
         rows,
         merges,
         areas,
@@ -3905,6 +3973,155 @@ fn parse_moxel_default_format_width(fields: &[&str], column_count: usize) -> Opt
     widths.first().copied()
 }
 
+fn parse_moxel_formats(fields: &[&str], column_count: usize) -> Vec<MoxelFormat> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count <= column_count || count > 2048 || index + count >= fields.len() {
+            continue;
+        }
+        let mut formats = Vec::with_capacity(count);
+        for field in &fields[index + 1..=index + count] {
+            let Some(format) = parse_moxel_format(field) else {
+                formats.clear();
+                break;
+            };
+            formats.push(format);
+        }
+        if formats.len() == count
+            && formats
+                .iter()
+                .rev()
+                .take(column_count)
+                .all(MoxelFormat::is_width_only)
+        {
+            formats.truncate(count - column_count);
+            return formats;
+        }
+    }
+    Vec::new()
+}
+
+fn parse_moxel_format(text: &str) -> Option<MoxelFormat> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let flags = fields.first()?.trim().parse::<u64>().ok()?;
+    let bits = moxel_format_bits(flags)?;
+    if bits.len() + 1 != fields.len() {
+        return None;
+    }
+    let values = bits
+        .iter()
+        .copied()
+        .zip(fields.iter().skip(1).copied())
+        .collect::<Vec<_>>();
+    Some(MoxelFormat {
+        font: parse_moxel_format_usize(&values, 0),
+        left_border: parse_moxel_format_usize(&values, 1),
+        top_border: parse_moxel_format_usize(&values, 2),
+        right_border: parse_moxel_format_usize(&values, 3),
+        bottom_border: parse_moxel_format_usize(&values, 4),
+        height: parse_moxel_format_usize(&values, 6),
+        width: parse_moxel_format_usize(&values, 7),
+        horizontal_alignment: parse_moxel_format_usize(&values, 8)
+            .and_then(moxel_horizontal_alignment),
+        vertical_alignment: parse_moxel_format_usize(&values, 9).and_then(moxel_vertical_alignment),
+        text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
+        fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
+        indent: parse_moxel_format_usize(&values, 30),
+        auto_indent: parse_moxel_format_usize(&values, 31),
+        pic_index: parse_moxel_format_usize(&values, 35),
+        picture_size_mode: parse_moxel_format_usize(&values, 36).and_then(moxel_picture_size_mode),
+        pic_horizontal_alignment: parse_moxel_format_usize(&values, 37)
+            .and_then(moxel_picture_alignment),
+        pic_vertical_alignment: parse_moxel_format_usize(&values, 38)
+            .and_then(moxel_picture_alignment),
+    })
+}
+
+fn moxel_format_bits(flags: u64) -> Option<Vec<u8>> {
+    if flags == 0 {
+        return None;
+    }
+    let mut bits = Vec::new();
+    for bit in 0..64 {
+        if flags & (1u64 << bit) == 0 {
+            continue;
+        }
+        if !matches!(
+            bit,
+            0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 14 | 15 | 16 | 30 | 31 | 35 | 36 | 37 | 38
+        ) {
+            return None;
+        }
+        bits.push(bit);
+    }
+    Some(bits)
+}
+
+fn parse_moxel_format_usize(values: &[(u8, &str)], bit: u8) -> Option<usize> {
+    values
+        .iter()
+        .find(|(value_bit, _)| *value_bit == bit)
+        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+}
+
+fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
+    match value {
+        6 => Some("Center"),
+        _ => None,
+    }
+}
+
+fn moxel_vertical_alignment(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("Top"),
+        _ => None,
+    }
+}
+
+fn moxel_text_placement(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("Block"),
+        3 => Some("Wrap"),
+        _ => None,
+    }
+}
+
+fn moxel_fill_type(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("Text"),
+        1 => Some("Parameter"),
+        _ => None,
+    }
+}
+
+fn moxel_protection(value: usize) -> Option<bool> {
+    match value {
+        0 => Some(true),
+        1 => Some(false),
+        _ => None,
+    }
+}
+
+fn moxel_picture_size_mode(value: usize) -> Option<&'static str> {
+    match value {
+        6 => Some("Proportionally"),
+        _ => None,
+    }
+}
+
+fn moxel_picture_alignment(value: usize) -> Option<&'static str> {
+    match value {
+        2 | 24 => Some("Center"),
+        _ => None,
+    }
+}
+
 fn parse_moxel_column_width(text: &str) -> Option<usize> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() != 2 || fields.first()?.trim() != "128" {
@@ -4066,22 +4283,79 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
 }
 
 fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
-    let width = spreadsheet
-        .column_widths
-        .get(format_index.saturating_sub(1))
-        .copied()
-        .or_else(|| {
-            (format_index == spreadsheet.default_format_index)
-                .then_some(spreadsheet.default_format_width)
-                .flatten()
-        });
-    let Some(width) = width else {
+    let format = moxel_format_for_index(spreadsheet, format_index);
+    if format.is_empty() {
         xml.push_str("\t<format/>\r\n");
         return;
     };
     xml.push_str("\t<format>\r\n");
-    xml.push_str(&format!("\t\t<width>{width}</width>\r\n"));
+    push_moxel_format_usize(xml, "font", format.font);
+    push_moxel_format_usize(xml, "leftBorder", format.left_border);
+    push_moxel_format_usize(xml, "topBorder", format.top_border);
+    push_moxel_format_usize(xml, "rightBorder", format.right_border);
+    push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
+    push_moxel_format_usize(xml, "height", format.height);
+    push_moxel_format_usize(xml, "width", format.width);
+    push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
+    push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
+    push_moxel_format_text(xml, "textPlacement", format.text_placement);
+    push_moxel_format_text(xml, "fillType", format.fill_type);
+    if let Some(protection) = format.protection {
+        xml.push_str(&format!("\t\t<protection>{protection}</protection>\r\n"));
+    }
+    push_moxel_format_usize(xml, "indent", format.indent);
+    push_moxel_format_usize(xml, "autoIndent", format.auto_indent);
+    push_moxel_format_usize(xml, "picIndex", format.pic_index);
+    push_moxel_format_text(xml, "pictureSizeMode", format.picture_size_mode);
+    push_moxel_format_text(
+        xml,
+        "picHorizontalAlignment",
+        format.pic_horizontal_alignment,
+    );
+    push_moxel_format_text(xml, "picVerticalAlignment", format.pic_vertical_alignment);
     xml.push_str("\t</format>\r\n");
+}
+
+fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -> MoxelFormat {
+    if let Some(width) = spreadsheet
+        .column_widths
+        .get(format_index.saturating_sub(1))
+        .copied()
+    {
+        return MoxelFormat {
+            width: Some(width),
+            ..MoxelFormat::default()
+        };
+    }
+    if format_index == spreadsheet.default_format_index {
+        return MoxelFormat {
+            width: spreadsheet.default_format_width,
+            ..MoxelFormat::default()
+        };
+    }
+    if format_index <= spreadsheet.column_count {
+        return MoxelFormat::default();
+    }
+    spreadsheet
+        .formats
+        .get(format_index - spreadsheet.column_count - 1)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn push_moxel_format_usize(xml: &mut String, tag: &str, value: Option<usize>) {
+    if let Some(value) = value {
+        xml.push_str(&format!("\t\t<{tag}>{value}</{tag}>\r\n"));
+    }
+}
+
+fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        xml.push_str(&format!(
+            "\t\t<{tag}>{}</{tag}>\r\n",
+            escape_xml_text(value)
+        ));
+    }
 }
 
 fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -8465,7 +8739,7 @@ mod tests {
     #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},6,{719,0,0,0,0,45,72,0},{138,0,0,72},{16769,0,90,6,3},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -8491,10 +8765,19 @@ mod tests {
             xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
             9
         );
-        assert_eq!(xml.matches("\t<format/>\r\n").count(), 5);
+        assert_eq!(xml.matches("\t<format/>\r\n").count(), 2);
         assert!(xml.contains("\t<format>\r\n\t\t<width>25</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>85</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>226</width>\r\n\t</format>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<leftBorder>0</leftBorder>\r\n\t\t<topBorder>0</topBorder>\r\n\t\t<rightBorder>0</rightBorder>\r\n\t\t<height>45</height>\r\n\t\t<width>72</width>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<leftBorder>0</leftBorder>\r\n\t\t<rightBorder>0</rightBorder>\r\n\t\t<width>72</width>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>90</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t</format>"
+        ));
         assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
         let default_format_index_pos = xml
             .find("<defaultFormatIndex>9</defaultFormatIndex>")
