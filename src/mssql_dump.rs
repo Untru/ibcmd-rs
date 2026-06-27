@@ -1046,6 +1046,7 @@ struct MoxelSpreadsheet {
     areas: Vec<MoxelArea>,
     lines: Vec<MoxelLine>,
     fonts: Vec<MoxelFont>,
+    pictures: Vec<MoxelPicture>,
     default_format_index: usize,
     height: usize,
 }
@@ -1097,6 +1098,10 @@ struct MoxelFont {
 
 struct MoxelLine {
     style: &'static str,
+}
+
+struct MoxelPicture {
+    index: usize,
 }
 
 #[derive(Clone, Default)]
@@ -3780,6 +3785,7 @@ fn parse_moxel_spreadsheet_text(
     let areas = parse_moxel_areas(&fields);
     let lines = parse_moxel_lines(&fields);
     let fonts = parse_moxel_fonts(&fields);
+    let pictures = parse_moxel_pictures(&fields);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let observed_column_count = rows
         .iter()
@@ -3813,6 +3819,7 @@ fn parse_moxel_spreadsheet_text(
         areas,
         lines,
         fonts,
+        pictures,
         default_format_index: max_format_index + 1,
         height,
     })
@@ -3980,6 +3987,42 @@ fn parse_moxel_lines(fields: &[&str]) -> Vec<MoxelLine> {
         .iter()
         .filter_map(|field| parse_moxel_line(field))
         .collect()
+}
+
+fn parse_moxel_pictures(fields: &[&str]) -> Vec<MoxelPicture> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count == 0 || count > 512 || index + count >= fields.len() {
+            continue;
+        }
+        let mut pictures = Vec::with_capacity(count);
+        for field in &fields[index + 1..=index + count] {
+            let Some(picture) = parse_moxel_picture(field) else {
+                pictures.clear();
+                break;
+            };
+            pictures.push(picture);
+        }
+        if pictures.len() == count {
+            return pictures;
+        }
+    }
+    Vec::new()
+}
+
+fn parse_moxel_picture(text: &str) -> Option<MoxelPicture> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    Some(MoxelPicture {
+        index: fields.get(1)?.trim().parse::<usize>().ok()?,
+    })
 }
 
 fn parse_moxel_column_widths(fields: &[&str], column_count: usize) -> Vec<usize> {
@@ -4359,6 +4402,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for format_index in 1..=spreadsheet.default_format_index.max(1) {
         push_moxel_format_xml(&mut xml, spreadsheet, format_index);
     }
+    for picture in &spreadsheet.pictures {
+        push_moxel_picture_xml(&mut xml, picture);
+    }
     xml.push_str("</document>\r\n");
     xml
 }
@@ -4439,6 +4485,13 @@ fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<&str>) {
             escape_xml_text(value)
         ));
     }
+}
+
+fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
+    xml.push_str("\t<picture>\r\n");
+    xml.push_str(&format!("\t\t<index>{}</index>\r\n", picture.index));
+    xml.push_str("\t\t<picture/>\r\n");
+    xml.push_str("\t</picture>\r\n");
 }
 
 fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -8826,7 +8879,7 @@ mod tests {
             "StyleItem.ЦветШтампаЭП".to_string(),
         )]);
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},7,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{3221308845,1,1,1,2,139,6,2,2,0,0,0},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},7,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{3221308845,1,1,1,2,139,6,2,2,0,0,0},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},1,{4,0,{0},\"\",-1,-1,1,0,\"\"}}",
             &object_refs,
         )
         .unwrap();
@@ -8870,6 +8923,9 @@ mod tests {
             "\t<format>\r\n\t\t<font>1</font>\r\n\t\t<topBorder>1</topBorder>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>139</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<textPlacement>Block</textPlacement>\r\n\t\t<protection>true</protection>\r\n\t\t<indent>0</indent>\r\n\t\t<autoIndent>0</autoIndent>\r\n\t</format>"
         ));
         assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
+        assert!(
+            xml.contains("\t<picture>\r\n\t\t<index>0</index>\r\n\t\t<picture/>\r\n\t</picture>")
+        );
         let default_format_index_pos = xml
             .find("<defaultFormatIndex>9</defaultFormatIndex>")
             .unwrap();
@@ -8905,8 +8961,10 @@ mod tests {
         let line_pos = xml.find("<line width=\"1\"").unwrap();
         let font_pos = xml.find("<font faceName=\"Arial\"").unwrap();
         let format_pos = xml.find("<format>").unwrap();
+        let picture_pos = xml.find("<picture>").unwrap();
         assert!(line_pos < font_pos);
         assert!(font_pos < format_pos);
+        assert!(format_pos < picture_pos);
     }
 
     #[test]
