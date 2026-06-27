@@ -22,6 +22,8 @@ cargo run -- probe --deep
 cargo run -- scan C:\path\to\xml-sources -o current-manifest.json
 cargo run -- plan current-manifest.json -b baseline-manifest.json -o load-plan.json
 cargo run -- profile-run --capture-output -- ibcmd infobase config load ...
+cargo run -- dump-sources --settings C:\repo\autumn-properties.json --extension EmergingTravelGroup -o C:\repo\src\cfe\EmergingTravelGroup --overwrite
+cargo run -- mssql-dump-config --database MyInfobase -o C:\repo\db-dump --include-config-save --inflate --extract-module-text
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
 cargo run -- storage-map .\trace\events.xml -o storage-map.json

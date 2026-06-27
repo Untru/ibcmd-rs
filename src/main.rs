@@ -43,6 +43,14 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::profile::run_profiled(args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::DumpSources(args) => {
+            let report = ibcmd_rs::dump_sources::dump_sources(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlDumpConfig(args) => {
+            let report = ibcmd_rs::mssql_dump::dump_config(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::TraceTemplate(args) => {
             ibcmd_rs::templates::write_trace_templates(&args.output_dir, args.overwrite)?;
             println!("Trace templates written to {}", args.output_dir.display());

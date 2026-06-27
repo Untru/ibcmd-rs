@@ -9,37 +9,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::{
     MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs, MssqlDeltaImportArgs,
-    MssqlStageBusinessProcessObjectArgs, MssqlStageCommonModuleArgs,
+    MssqlStageAccountingRegisterObjectArgs, MssqlStageAccumulationRegisterObjectArgs,
+    MssqlStageBotObjectArgs, MssqlStageBusinessProcessObjectArgs,
+    MssqlStageCalculationRegisterObjectArgs, MssqlStageCatalogObjectArgs,
+    MssqlStageChartOfAccountsObjectArgs, MssqlStageChartOfCalculationRegistersObjectArgs,
+    MssqlStageChartOfCalculationTypesObjectArgs, MssqlStageChartOfCharacteristicTypesObjectArgs,
+    MssqlStageCommandGroupObjectArgs, MssqlStageCommonAttributeObjectArgs,
+    MssqlStageCommonCommandObjectArgs, MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs,
     MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
     MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
-    MssqlStageCatalogObjectArgs, MssqlStageDataProcessorObjectArgs,
-    MssqlStageCommonAttributeObjectArgs, MssqlStageCommonCommandObjectArgs,
-    MssqlStageCommonFormObjectArgs,
-    MssqlStageCommonPictureObjectArgs,
-    MssqlStageCommonTemplateObjectArgs, MssqlStageConstantObjectArgs,
-    MssqlStageDefinedTypeObjectArgs, MssqlStageEventSubscriptionObjectArgs,
-    MssqlStageCommandGroupObjectArgs, MssqlStageEnumObjectArgs, MssqlStageDocumentObjectArgs,
-    MssqlStageFunctionalOptionObjectArgs,
+    MssqlStageCommonPictureObjectArgs, MssqlStageCommonTemplateObjectArgs,
+    MssqlStageConstantObjectArgs, MssqlStageDataProcessorObjectArgs,
+    MssqlStageDefinedTypeObjectArgs, MssqlStageDocumentJournalObjectArgs,
+    MssqlStageDocumentNumeratorObjectArgs, MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs,
+    MssqlStageEventSubscriptionObjectArgs, MssqlStageExchangePlanObjectArgs,
+    MssqlStageFilterCriteriaObjectArgs, MssqlStageFunctionalOptionObjectArgs,
     MssqlStageFunctionalOptionsParameterObjectArgs, MssqlStageHTTPServiceObjectArgs,
-    MssqlStageDocumentJournalObjectArgs, MssqlStageExchangePlanObjectArgs,
-    MssqlStageInformationRegisterObjectArgs, MssqlStageLanguageObjectArgs,
-    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs,
-    MssqlStageScheduledJobObjectArgs, MssqlStageSessionParameterObjectArgs,
-    MssqlStageSettingsStorageObjectArgs, MssqlStageStyleItemObjectArgs,
-    MssqlStageStyleObjectArgs, MssqlStageBotObjectArgs,
-    MssqlStageDocumentNumeratorObjectArgs, MssqlStageIntegrationServiceObjectArgs,
-    MssqlStageSequenceObjectArgs, MssqlStageWSReferenceObjectArgs,
-    MssqlStageSubsystemObjectArgs, MssqlStageTaskObjectArgs, MssqlStageWebServiceObjectArgs,
-    MssqlStageFilterCriteriaObjectArgs, MssqlStageAccountingRegisterObjectArgs,
-    MssqlStageAccumulationRegisterObjectArgs,
-    MssqlStageCalculationRegisterObjectArgs,
-    MssqlStageChartOfAccountsObjectArgs,
-    MssqlStageChartOfCalculationRegistersObjectArgs,
-    MssqlStageChartOfCalculationTypesObjectArgs,
-    MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageXdtopackageObjectArgs,
+    MssqlStageInformationRegisterObjectArgs, MssqlStageIntegrationServiceObjectArgs,
+    MssqlStageLanguageObjectArgs, MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs,
+    MssqlStageRoleObjectArgs, MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
+    MssqlStageSessionParameterObjectArgs, MssqlStageSettingsStorageObjectArgs,
     MssqlStageSourceCommonModuleObjectsArgs, MssqlStageSourceMetadataObjectsArgs,
-    MssqlStageSourceObjectsArgs,
-    MssqlStorageExportArgs, MssqlStorageImportArgs,
+    MssqlStageSourceObjectsArgs, MssqlStageStyleItemObjectArgs, MssqlStageStyleObjectArgs,
+    MssqlStageSubsystemObjectArgs, MssqlStageTaskObjectArgs, MssqlStageWSReferenceObjectArgs,
+    MssqlStageWebServiceObjectArgs, MssqlStageXdtopackageObjectArgs, MssqlStorageExportArgs,
+    MssqlStorageImportArgs,
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
@@ -974,7 +968,9 @@ pub fn stage_source_common_module_objects(
     stage_common_module_objects(&stage_args)
 }
 
-pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageSourceObjectsReport> {
+pub fn stage_source_objects(
+    args: &MssqlStageSourceObjectsArgs,
+) -> Result<StageSourceObjectsReport> {
     require_non_lab_confirmation(args.allow_non_lab, "source tree staging")?;
     if !args.replace_config_save {
         return Err(anyhow!(
@@ -1029,18 +1025,17 @@ pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageS
     let changes = metadata_objects
         .iter()
         .map(|object| object.object_id.clone())
-        .chain(common_modules.iter().flat_map(|module| {
-            [module.module_id.clone(), module.module_body_id.clone()]
-        }))
+        .chain(
+            common_modules
+                .iter()
+                .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()]),
+        )
         .collect::<Vec<_>>();
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
-    let batches = build_source_stage_batches(
-        metadata_objects.clone(),
-        common_modules.clone(),
-        batch_size,
-    );
+    let batches =
+        build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size);
     let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let mut scripts = Vec::with_capacity(batches.len());
     let mut running_rows = 0usize;
@@ -1078,19 +1073,17 @@ pub fn stage_source_objects(args: &MssqlStageSourceObjectsArgs) -> Result<StageS
         scripts.push(script);
     }
 
-    let script = scripts
-        .last()
-        .cloned()
-        .unwrap_or_else(|| args.script_output.clone().unwrap_or_else(|| {
+    let script = scripts.last().cloned().unwrap_or_else(|| {
+        args.script_output.clone().unwrap_or_else(|| {
             default_stage_script_path(
                 &args.database,
                 &format!(
                     "source_objects_{}_{}",
-                    metadata_object_count,
-                    common_module_count
+                    metadata_object_count, common_module_count
                 ),
             )
-        }));
+        })
+    });
     let metadata_objects = metadata_objects
         .into_iter()
         .map(|object| StagedMetadataObjectReport {
@@ -1208,7 +1201,9 @@ pub fn stage_document_journal_object(
     stage_metadata_objects(&metadata_args)
 }
 
-pub fn stage_report_object(args: &MssqlStageReportObjectArgs) -> Result<StageMetadataObjectsReport> {
+pub fn stage_report_object(
+    args: &MssqlStageReportObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
         database: args.database.clone(),
@@ -1238,7 +1233,9 @@ pub fn stage_data_processor_object(
     stage_metadata_objects(&metadata_args)
 }
 
-pub fn stage_catalog_object(args: &MssqlStageCatalogObjectArgs) -> Result<StageMetadataObjectsReport> {
+pub fn stage_catalog_object(
+    args: &MssqlStageCatalogObjectArgs,
+) -> Result<StageMetadataObjectsReport> {
     let metadata_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
         database: args.database.clone(),
@@ -1972,7 +1969,8 @@ fn stage_common_module_specs(
                 let module_body_id = format!("{}.0", spec.module_id);
                 let text = fs::read(&spec.text)
                     .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
-                let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
+                let base_module_blob =
+                    fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
                 let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
                 Ok(PreparedCommonModuleStage {
                     spec,
@@ -2136,7 +2134,10 @@ fn ensure_unique_source_stage_ids(
     Ok(())
 }
 
-fn source_metadata_xmls(manifest: &crate::source::SourceManifest, source_root: &Path) -> Vec<PathBuf> {
+fn source_metadata_xmls(
+    manifest: &crate::source::SourceManifest,
+    source_root: &Path,
+) -> Vec<PathBuf> {
     manifest
         .files
         .iter()
@@ -2537,22 +2538,18 @@ fn first_i32(stdout: &str) -> Option<i32> {
 }
 
 fn extract_json_array(stdout: &str, context: &str) -> Result<String> {
-    let start = stdout
-        .find('[')
-        .ok_or_else(|| {
-            anyhow!(
-                "{context}: sqlcmd output does not contain JSON array: {}",
-                summarize_text(stdout)
-            )
-        })?;
-    let end = stdout
-        .rfind(']')
-        .ok_or_else(|| {
-            anyhow!(
-                "{context}: sqlcmd output does not contain JSON array end: {}",
-                summarize_text(stdout)
-            )
-        })?;
+    let start = stdout.find('[').ok_or_else(|| {
+        anyhow!(
+            "{context}: sqlcmd output does not contain JSON array: {}",
+            summarize_text(stdout)
+        )
+    })?;
+    let end = stdout.rfind(']').ok_or_else(|| {
+        anyhow!(
+            "{context}: sqlcmd output does not contain JSON array end: {}",
+            summarize_text(stdout)
+        )
+    })?;
     Ok(stdout[start..=end]
         .chars()
         .filter(|ch| !ch.is_control())
@@ -3048,7 +3045,11 @@ fn build_source_stage_batches(
     let mut items = metadata_objects
         .into_iter()
         .map(SourceStageItem::Metadata)
-        .chain(common_modules.into_iter().map(SourceStageItem::CommonModule))
+        .chain(
+            common_modules
+                .into_iter()
+                .map(SourceStageItem::CommonModule),
+        )
         .collect::<Vec<_>>();
     items.sort_by(|left, right| left.path().cmp(right.path()));
 
@@ -3129,7 +3130,11 @@ fn batch_stage_script_path(
             .extension()
             .and_then(|value| value.to_str())
             .unwrap_or("sql");
-        return parent.join(format!("{stem}_batch{batch}.{}", extension, batch = batch_index + 1));
+        return parent.join(format!(
+            "{stem}_batch{batch}.{}",
+            extension,
+            batch = batch_index + 1
+        ));
     }
     default_stage_script_path(database, &format!("{name}_batch{}", batch_index + 1))
 }
@@ -3218,10 +3223,10 @@ mod tests {
         ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest, DeltaBundleManifest,
         PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataObjectStage,
         StorageBundleManifest, StorageTableManifest, TableShape, compare_shapes,
-        compare_storage_table_manifests, infer_common_module_text_path, quote_ident, quote_string,
-        require_non_lab_confirmation, validate_delta_manifest, validate_storage_manifest,
-        is_root_common_module_xml, is_root_metadata_xml, source_common_module_xmls,
-        source_metadata_xmls,
+        compare_storage_table_manifests, infer_common_module_text_path, is_root_common_module_xml,
+        is_root_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
+        source_common_module_xmls, source_metadata_xmls, validate_delta_manifest,
+        validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -3390,8 +3395,7 @@ mod tests {
             ],
         };
 
-        let metadata_xmls =
-            source_metadata_xmls(&manifest, std::path::Path::new(r"C:\sources"));
+        let metadata_xmls = source_metadata_xmls(&manifest, std::path::Path::new(r"C:\sources"));
         let common_module_xmls =
             source_common_module_xmls(&manifest, std::path::Path::new(r"C:\sources"));
 
@@ -3707,7 +3711,9 @@ mod tests {
             PreparedMetadataObjectStage {
                 object_id: "abababab-abab-4aba-baba-abababababab".to_string(),
                 kind: "CommonAttribute".to_string(),
-                xml: PathBuf::from("CommonAttributes/ОтредактированныеПредопределенныеРеквизиты.xml"),
+                xml: PathBuf::from(
+                    "CommonAttributes/ОтредактированныеПредопределенныеРеквизиты.xml",
+                ),
                 properties: SimpleMetadataXmlProperties {
                     kind: "CommonAttribute".to_string(),
                     uuid: "abababab-abab-4aba-baba-abababababab".to_string(),
