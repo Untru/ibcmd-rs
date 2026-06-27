@@ -83,6 +83,7 @@ struct FormXmlBodyProperties {
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
     attributes: Vec<FormXmlAttribute>,
+    parameters: Vec<FormXmlParameter>,
     commands: Vec<FormXmlCommand>,
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
     child_items: Vec<FormXmlChildItem>,
@@ -117,6 +118,18 @@ struct FormXmlAttribute {
     name: String,
     main_attribute: Option<bool>,
     settings: Option<FormXmlDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlParameter {
+    name: String,
+    types: Vec<String>,
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
+    key_parameter: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -3238,6 +3251,14 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
                 plain.replace_range(commands_range, &commands);
             }
         }
+        if !properties.parameters.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(parameters_range) = container.trailing_ranges.get(1).cloned() {
+                let mut parameters = plain[parameters_range.clone()].trim().to_string();
+                patch_form_body_parameters(&mut parameters, &properties.parameters, source)?;
+                plain.replace_range(parameters_range, &parameters);
+            }
+        }
         if !properties.attributes.is_empty() {
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
@@ -3288,6 +3309,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_lang = None::<String>;
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
+    let mut current_parameter = None::<FormXmlParameter>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
     let mut current_child_title_lang = None::<String>;
@@ -3318,6 +3340,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Common"
                         | "CommandName"
                         | "DataPath"
+                        | "KeyParameter"
+                        | "Type"
+                        | "Length"
+                        | "AllowedLength"
+                        | "Digits"
+                        | "FractionDigits"
+                        | "AllowedSign"
                         | "lang"
                         | "content"
                 ) {
@@ -3336,6 +3365,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     current_command = parse_form_command_xml(&event)?;
                 } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
                     current_attribute = parse_form_attribute_xml(&event)?;
+                } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
+                    current_parameter = parse_form_parameter_xml(&event)?;
                 } else if local == "Settings"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
                     && current_attribute
@@ -3492,6 +3523,58 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3601,6 +3684,58 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3715,6 +3850,117 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "Command" if path_ends_with(&path, &["Form", "Commands", "Command"]) => {
                         if let Some(command) = current_command.take() {
                             properties.commands.push(command);
+                        }
+                    }
+                    "Type"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Parameters", "Parameter", "Type", "Type"],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                parameter.types.push(value.to_string());
+                            }
+                        }
+                    }
+                    "KeyParameter"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Parameters", "Parameter", "KeyParameter"],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.key_parameter = Some(parse_form_xml_bool(
+                                "Parameter/KeyParameter",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Length"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "StringQualifiers",
+                                "Length",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.string_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedLength"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "StringQualifiers",
+                                "AllowedLength",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.string_allowed_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Digits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "NumberQualifiers",
+                                "Digits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "FractionDigits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "NumberQualifiers",
+                                "FractionDigits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_fraction_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedSign"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "NumberQualifiers",
+                                "AllowedSign",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_allowed_sign = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Parameter" if path_ends_with(&path, &["Form", "Parameters", "Parameter"]) => {
+                        if let Some(parameter) = current_parameter.take() {
+                            properties.parameters.push(parameter);
                         }
                     }
                     "MainAttribute"
@@ -4038,6 +4284,19 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         name,
         main_attribute: None,
         settings: None,
+    }))
+}
+
+fn parse_form_parameter_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlParameter>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(FormXmlParameter {
+        name,
+        ..FormXmlParameter::default()
     }))
 }
 
@@ -4808,6 +5067,95 @@ fn patch_form_command_interface_item(
 
 fn format_form_nested_common_bool(value: bool) -> String {
     format!("{{0,{{0,{},0}}}}", format_form_setting_bool(value))
+}
+
+fn patch_form_body_parameters(
+    text: &mut String,
+    parameters: &[FormXmlParameter],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    for parameter in parameters {
+        let _ = patch_form_body_parameter(text, parameter, source)?;
+    }
+    Ok(())
+}
+
+fn patch_form_body_parameter(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_parameter_entry(&mut nested, parameter, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_parameter_entry(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    let existing_name = fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    if existing_name.as_deref() != Some(parameter.name.as_str()) {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = fields.get(1) {
+        replacements.push((name_range.clone(), format_1c_string(&parameter.name)));
+    }
+    if !parameter.types.is_empty()
+        && let Some(type_range) = fields.get(2)
+    {
+        replacements.push((
+            type_range.clone(),
+            format_form_parameter_type_pattern(parameter, source)?,
+        ));
+    }
+    if let Some(key_parameter) = parameter.key_parameter
+        && let Some(key_range) = fields.get(3)
+    {
+        replacements.push((
+            key_range.clone(),
+            if key_parameter { "1" } else { "0" }.to_string(),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(true)
+}
+
+fn format_form_parameter_type_pattern(
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value_types = parse_metadata_type_pattern_elements(
+        "Form Parameter",
+        &parameter.types,
+        parameter.string_length.clone(),
+        parameter.string_allowed_length.clone(),
+        parameter.number_digits.clone(),
+        parameter.number_fraction_digits.clone(),
+        parameter.number_allowed_sign.clone(),
+        source,
+        true,
+    )?;
+    Ok(format_metadata_type_pattern(&value_types))
 }
 
 fn patch_form_body_attributes(
@@ -12011,6 +12359,56 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_parameters() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-parameter-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("ChartsOfAccounts"))?;
+        std::fs::write(
+            root.join("ChartsOfAccounts").join("Хозрасчетный.xml"),
+            r#"<MetaDataObject><ChartOfAccounts><InternalInfo><GeneratedType name="ChartOfAccountsRef.Хозрасчетный"><TypeId>99999999-9999-4999-8999-999999999999</TypeId></GeneratedType></InternalInfo><Properties><Name>Хозрасчетный</Name></Properties></ChartOfAccounts></MetaDataObject>"#
+                .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            r##"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Счет",{"Pattern",{"#",88888888-8888-4888-8888-888888888888}},0}},{0,0},{0}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Счет">
+			<Type>
+				<v8:Type>cfg:ChartOfAccountsRef.Хозрасчетный</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(
+            parsed.trailing[1]
+                .contains(r##""Счет",{"Pattern",{"#",99999999-9999-4999-8999-999999999999}},1"##)
+        );
+        assert!(!parsed.trailing[1].contains("88888888-8888-4888-8888-888888888888"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
 
         let _ = std::fs::remove_dir_all(root);
         Ok(())

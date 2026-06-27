@@ -3805,6 +3805,7 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
     let events = extract_form_body_events(&form_fields);
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
     let attributes = extract_form_body_attributes(&body.trailing, object_refs);
+    let parameters = extract_form_body_parameters(&body.trailing, object_refs);
     let commands = extract_form_body_commands(&body.trailing, object_refs);
     let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
     let command_interface = extract_form_command_interface(&body.trailing, object_refs);
@@ -3815,6 +3816,7 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
         &events,
         &child_items,
         &attributes,
+        &parameters,
         &commands,
         &command_interface,
     ))
@@ -3845,6 +3847,13 @@ struct FormAttribute {
     main_attribute: bool,
     use_always: Vec<String>,
     settings: Option<FormDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormParameter {
+    name: String,
+    value_types: Vec<ConstantValueType>,
+    key_parameter: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4323,6 +4332,47 @@ fn parse_form_main_table_ref(
     }
     fields.iter().skip(1).find_map(|value| {
         parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
+    })
+}
+
+fn extract_form_body_parameters(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormParameter> {
+    let Some(fields) = trailing
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .skip(2)
+        .filter_map(|field| parse_form_parameter(field, object_refs))
+        .collect()
+}
+
+fn parse_form_parameter(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormParameter> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let name = parse_1c_quoted_string_with_len(fields.get(1)?.trim())?.0;
+    if name.trim().is_empty() {
+        return None;
+    }
+    let value_types = fields
+        .get(2)
+        .and_then(|field| parse_metadata_type_pattern(field, object_refs))?;
+    let key_parameter = match fields.get(3).map(|field| field.trim()) {
+        Some("1") => true,
+        Some("0") | None => false,
+        _ => return None,
+    };
+    Some(FormParameter {
+        name,
+        value_types,
+        key_parameter,
     })
 }
 
@@ -4932,6 +4982,7 @@ fn format_form_body_xml(
     events: &[FormBodyEvent],
     child_items: &[FormChildItem],
     attributes: &[FormAttribute],
+    parameters: &[FormParameter],
     commands: &[FormCommand],
     command_interface: &Option<FormCommandInterface>,
 ) -> String {
@@ -4968,6 +5019,7 @@ fn format_form_body_xml(
     }
     xml.push_str(&format_form_child_items_xml(child_items, 1));
     xml.push_str(&format_form_attributes_xml(attributes));
+    xml.push_str(&format_form_parameters_xml(parameters));
     if !commands.is_empty() {
         xml.push_str("\t<Commands>\r\n");
         for command in commands {
@@ -5133,6 +5185,26 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
         xml.push_str("\t\t</Attribute>\r\n");
     }
     xml.push_str("\t</Attributes>\r\n");
+    xml
+}
+
+fn format_form_parameters_xml(parameters: &[FormParameter]) -> String {
+    if parameters.is_empty() {
+        return String::new();
+    }
+    let mut xml = "\t<Parameters>\r\n".to_string();
+    for parameter in parameters {
+        xml.push_str(&format!(
+            "\t\t<Parameter name=\"{}\">\r\n",
+            escape_xml_text(&parameter.name)
+        ));
+        xml.push_str(&format_metadata_types_xml(&parameter.value_types));
+        if parameter.key_parameter {
+            xml.push_str("\t\t\t<KeyParameter>true</KeyParameter>\r\n");
+        }
+        xml.push_str("\t\t</Parameter>\r\n");
+    }
+    xml.push_str("\t</Parameters>\r\n");
     xml
 }
 
@@ -7809,7 +7881,7 @@ struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 enum ConstantValueType {
     Boolean,
     String {
@@ -7992,6 +8064,37 @@ fn parse_generated_type_entries_from_blob(
             &fields,
             11,
             "ChartOfCharacteristicTypesManager",
+            &header.name,
+        );
+    }
+    if object_code == 32 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            1,
+            "ChartOfAccountsObject",
+            &header.name,
+        );
+        push_indexed_generated_type(&mut entries, &fields, 3, "ChartOfAccountsRef", &header.name);
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            5,
+            "ChartOfAccountsSelection",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            7,
+            "ChartOfAccountsList",
+            &header.name,
+        );
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            9,
+            "ChartOfAccountsManager",
             &header.name,
         );
     }
@@ -11337,9 +11440,10 @@ mod tests {
     fn extracts_form_attributes_and_commands_from_body_tail() {
         let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let parameter_type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let form_body = deflate_for_test(
             format!(
-                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,4,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}}}},{{0,0}}}}}},{{0,0}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,4,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}}}},{{0,0}}}}}},{{0,1,{{0,"Счет",{{"Pattern",{{"#",{parameter_type_uuid}}}}},1}}}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
             )
             .as_bytes(),
         );
@@ -11348,6 +11452,10 @@ mod tests {
             (
                 option_uuid.to_string(),
                 "FunctionalOption.ИспользоватьФункцию".to_string(),
+            ),
+            (
+                parameter_type_uuid.to_string(),
+                "cfg:ChartOfAccountsRef.Хозрасчетный".to_string(),
             ),
         ]);
 
@@ -11361,6 +11469,9 @@ mod tests {
         assert!(form_xml.contains("<ManualQuery>true</ManualQuery>"));
         assert!(form_xml.contains("<DynamicDataRead>true</DynamicDataRead>"));
         assert!(form_xml.contains("<MainTable>Catalog.Товары</MainTable>"));
+        assert!(form_xml.contains(r#"<Parameter name="Счет">"#));
+        assert!(form_xml.contains("<v8:Type>cfg:ChartOfAccountsRef.Хозрасчетный</v8:Type>"));
+        assert!(form_xml.contains("<KeyParameter>true</KeyParameter>"));
         assert!(form_xml.contains(r#"<Command name="Выполнить" id="2">"#));
         assert!(form_xml.contains("<Action>Выполнить</Action>"));
         assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
@@ -14950,6 +15061,15 @@ mod tests {
             )
             .as_bytes(),
         );
+        let accounts_uuid = "99999999-9999-4999-8999-999999999991";
+        let accounts_object_type_id = "99999999-9999-4999-8999-999999999992";
+        let accounts_ref_type_id = "99999999-9999-4999-8999-999999999993";
+        let accounts_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{32,{accounts_object_type_id},11111111-1111-4111-8111-111111111111,{accounts_ref_type_id},22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,77777777-7777-4777-8777-777777777777,\r\n{{0,\r\n{{3,\r\n{{1,0,{accounts_uuid}}},\"MainAccounts\",{{1,\"en\",\"Main accounts\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
         let rows = vec![
             ConfigRow {
                 file_name: info_register_uuid.to_string(),
@@ -14962,6 +15082,12 @@ mod tests {
                 part_no: 0,
                 data_size: chart_blob.len() as i64,
                 binary_hex: encode_hex_for_test(&chart_blob),
+            },
+            ConfigRow {
+                file_name: accounts_uuid.to_string(),
+                part_no: 0,
+                data_size: accounts_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&accounts_blob),
             },
         ];
 
@@ -14982,6 +15108,14 @@ mod tests {
         assert_eq!(
             index.get(chart_ref_type_id).map(String::as_str),
             Some("cfg:ChartOfCharacteristicTypesRef.ExpenseItems")
+        );
+        assert_eq!(
+            index.get(accounts_object_type_id).map(String::as_str),
+            Some("cfg:ChartOfAccountsObject.MainAccounts")
+        );
+        assert_eq!(
+            index.get(accounts_ref_type_id).map(String::as_str),
+            Some("cfg:ChartOfAccountsRef.MainAccounts")
         );
     }
 
