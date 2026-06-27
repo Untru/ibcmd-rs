@@ -876,6 +876,37 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
     })
 }
 
+pub fn pack_form_body_blob_from_module_text(
+    base_blob: &[u8],
+    module_text: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base Form body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("4") {
+        return Err(anyhow!("base Form body does not start with type marker 4"));
+    }
+    let module_range = fields
+        .get(2)
+        .ok_or_else(|| anyhow!("base Form body has no module text field"))?
+        .clone();
+    let module_text = std::str::from_utf8(module_text)
+        .context("Form module text is not valid UTF-8")?
+        .trim_start_matches('\u{feff}');
+    plain.replace_range(module_range, &format_1c_string(module_text));
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
 pub fn pack_base64_payload_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
     let payload = encode_base64(bytes);
     let plain = format!("{{#base64:{payload}}}").into_bytes();
@@ -5459,6 +5490,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
         assert_eq!(packed.plain_bytes, bytes.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_module_text_preserving_base_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let packed = super::pack_form_body_blob_from_module_text(
+            &base,
+            b"\xEF\xBB\xBFProcedure Run()\r\n\tMessage(\"Hi\");\r\nEndProcedure\r\n",
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{4,{7,{\"layout\"}},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{3,{\"picture\"},\"payload\"}}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
     }

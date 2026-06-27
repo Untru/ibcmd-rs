@@ -41,11 +41,12 @@ use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, pack_base64_payload_blob_from_bytes,
     pack_common_module_metadata_blob_from_xml, pack_ext_picture_blob_from_bytes,
-    pack_help_blob_from_parts, pack_module_blob_bytes, pack_raw_deflated_blob_from_bytes,
-    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
-    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
-    parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml,
-    parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes,
+    pack_form_body_blob_from_module_text, pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_raw_deflated_blob_from_bytes, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
+    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
+    patch_versions_blob_bytes,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -1925,6 +1926,9 @@ fn prepare_metadata_body_rows(
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
         }
+        "Form" | "CommonForm" => {
+            prepare_form_body_row(sqlcmd, server, database, xml_path, properties)
+        }
         _ => Ok(Vec::new()),
     }?;
     rows.extend(prepare_object_help_body_row(
@@ -2112,6 +2116,31 @@ fn prepare_common_picture_body_row(
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_form_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let module_path = infer_form_module_body_path(xml_path);
+    if !module_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let module_text = fs::read(&module_path)
+        .with_context(|| format!("failed to read Form module {}", module_path.display()))?;
+    let packed = pack_form_body_blob_from_module_text(&base_body, &module_text)
+        .with_context(|| format!("failed to pack Form body {}", module_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: module_path,
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
     }])
@@ -3810,6 +3839,16 @@ fn infer_object_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
     xml.with_extension("").join("Ext").join(file_name)
 }
 
+fn infer_form_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Form.xml")
+}
+
+fn infer_form_module_body_path(xml: &Path) -> PathBuf {
+    infer_form_body_path(xml)
+        .with_extension("")
+        .join("Module.bsl")
+}
+
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
     let package_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -4443,6 +4482,18 @@ mod tests {
                 "RecordSetModule.bsl"
             ),
             std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
+        );
+    }
+
+    #[test]
+    fn infers_form_body_paths() {
+        assert_eq!(
+            super::infer_form_body_path(r"Catalogs\Products\Forms\ItemForm.xml".as_ref()),
+            std::path::PathBuf::from(r"Catalogs\Products\Forms\ItemForm\Ext\Form.xml")
+        );
+        assert_eq!(
+            super::infer_form_module_body_path(r"CommonForms\SharedForm.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonForms\SharedForm\Ext\Form\Module.bsl")
         );
     }
 
