@@ -3098,6 +3098,10 @@ fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
         "Picture.png"
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         "Picture.gif"
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "Picture.jpg"
+    } else if bytes.starts_with(b"BM") {
+        "Picture.bmp"
     } else if bytes.starts_with(b"\x00\x00\x01\x00") {
         "Picture.ico"
     } else if bytes.starts_with(b"PK\x03\x04") {
@@ -12927,6 +12931,11 @@ mod tests {
         );
         assert_eq!(ext_picture_file_name(b"GIF87apayload"), "Picture.gif");
         assert_eq!(ext_picture_file_name(b"GIF89apayload"), "Picture.gif");
+        assert_eq!(
+            ext_picture_file_name(b"\xff\xd8\xff\xe0payload"),
+            "Picture.jpg"
+        );
+        assert_eq!(ext_picture_file_name(b"BMpayload"), "Picture.bmp");
         assert_eq!(
             ext_picture_file_name(b"\x00\x00\x01\x00payload"),
             "Picture.ico"
