@@ -93,7 +93,7 @@ cargo run -- mssql-stage-source-objects --database target_db --source-root C:\fu
 4. Common module body compiler: build a valid module `.0` blob from BSL source
    as `deflate(V8File(info,text))`, using a base blob for element headers.
 5. Versions patcher: build a staged `versions` blob by replacing generation,
-   `root`, `version`, `versions`, and changed file UUIDs.
+   optional `root`/`version`/`versions` entries when present, and changed file UUIDs.
 6. SQL common-module stager: read active `Config`, generate the changed `.0`
    and `versions` blobs, and write the five-row `ConfigSave` staging set.
 7. Multi-module stager: stage several common module body changes in one

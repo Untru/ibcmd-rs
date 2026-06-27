@@ -5838,14 +5838,14 @@ pub fn patch_versions_blob_bytes(
     let mut replacements = Vec::new();
     replacements.push(replace_header_uuid(&mut text)?);
 
-    let mut names = Vec::new();
     if include_standard_entries {
-        names.extend([
-            "root".to_string(),
-            "version".to_string(),
-            "versions".to_string(),
-        ]);
+        for name in ["root", "version", "versions"] {
+            if let Some(replacement) = replace_named_uuid_optional(&mut text, name)? {
+                replacements.push(replacement);
+            }
+        }
     }
+    let mut names = Vec::new();
     names.extend(changes.iter().cloned());
     names.sort();
     names.dedup();
@@ -7660,6 +7660,18 @@ fn replace_named_uuid(text: &mut String, name: &str) -> Result<VersionReplacemen
         .ok_or_else(|| anyhow!("versions entry not found: {name}"))?;
     let uuid_start = marker_start + marker.len();
     replace_uuid_at(text, uuid_start, name)
+}
+
+fn replace_named_uuid_optional(
+    text: &mut String,
+    name: &str,
+) -> Result<Option<VersionReplacement>> {
+    let marker = format!("\"{name}\",");
+    let Some(marker_start) = text.find(&marker) else {
+        return Ok(None);
+    };
+    let uuid_start = marker_start + marker.len();
+    replace_uuid_at(text, uuid_start, name).map(Some)
 }
 
 fn replace_uuid_at(text: &mut String, uuid_start: usize, name: &str) -> Result<VersionReplacement> {
@@ -11980,5 +11992,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(super::is_uuid_text(&header.new_uuid));
         assert!(super::is_uuid_text(&root.new_uuid));
         assert!(super::is_uuid_text(&file.new_uuid));
+    }
+
+    #[test]
+    fn patches_versions_blob_without_standard_entries() -> anyhow::Result<()> {
+        let text = "\u{feff}{1,2,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"file.0\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\"file.1\",cccccccc-cccc-4ccc-cccc-cccccccccccc}";
+        let input = super::deflate_raw(text.as_bytes())?;
+
+        let patched = super::patch_versions_blob_bytes(&input, &["file.0".to_string()], true)?;
+        let plain = super::inflate_raw(&patched.blob)?;
+        let output = String::from_utf8(plain)?;
+
+        assert_eq!(output.len(), text.len());
+        assert_eq!(
+            patched
+                .replacements
+                .iter()
+                .map(|replacement| replacement.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["<generation>", "file.0"]
+        );
+        assert!(output.contains("\"file.1\",cccccccc-cccc-4ccc-cccc-cccccccccccc"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn versions_blob_patch_still_requires_changed_entries() -> anyhow::Result<()> {
+        let text = "\u{feff}{1,1,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"file.0\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}";
+        let input = super::deflate_raw(text.as_bytes())?;
+
+        let error =
+            super::patch_versions_blob_bytes(&input, &["missing.0".to_string()], true).unwrap_err();
+
+        assert_eq!(error.to_string(), "versions entry not found: missing.0");
+
+        Ok(())
     }
 }
