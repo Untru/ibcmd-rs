@@ -7200,7 +7200,9 @@ fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> b
 }
 
 fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
-    contains_wrapped_metadata_object_code(text, 13, uuid)
+    parse_metadata_object_code(text) == Some(0)
+        && (contains_wrapped_metadata_object_code(text, 13, uuid)
+            || contains_wrapped_metadata_object_code(text, 14, uuid))
 }
 
 fn is_template_metadata_text(text: &str, uuid: &str) -> bool {
@@ -9989,7 +9991,7 @@ mod tests {
         );
         let owned_form_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{owned_form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}"
+                "{{1,\r\n{{0,\r\n{{14,\r\n{{3,\r\n{{1,0,{owned_form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}"
             )
             .as_bytes(),
         );
@@ -12718,6 +12720,27 @@ mod tests {
             .unwrap()
             .relative_path,
             PathBuf::from("Tasks").join("Task.xml")
+        );
+
+        let catalog_uuid = "66666666-6666-4666-8666-666666666666";
+        let catalog_form_uuid = "77777777-7777-4777-8777-777777777777";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{catalog_form_uuid},{catalog_form_uuid},1,{{1,{{1,9,{{-13}},510405d3-2a0c-4fea-960a-7fee59b32f,{{14,25,1183c14f-f814-49c6-9233-a3c26b3f64cf}}}}}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        assert_eq!(
+            extract_metadata_source_xml(
+                &catalog_blob,
+                catalog_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .relative_path,
+            PathBuf::from("Catalogs").join("Products.xml")
         );
     }
 
