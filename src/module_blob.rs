@@ -967,9 +967,10 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
     }
-    if let Some(formats) = format_spreadsheet_formats_for_moxel(&spreadsheet, column_count) {
-        fields.push(formats);
-    }
+    fields.extend(format_spreadsheet_formats_for_moxel(
+        &spreadsheet,
+        column_count,
+    ));
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -1087,9 +1088,12 @@ struct SpreadsheetDocumentXmlFormat {
     right_border: Option<usize>,
     bottom_border: Option<usize>,
     height: Option<usize>,
+    border_color: Option<String>,
     width: Option<usize>,
     horizontal_alignment: Option<String>,
     vertical_alignment: Option<String>,
+    back_color: Option<String>,
+    text_color: Option<String>,
     text_placement: Option<String>,
     fill_type: Option<String>,
     drawing_border: Option<usize>,
@@ -1342,9 +1346,12 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "rightBorder"
             | "bottomBorder"
             | "height"
+            | "borderColor"
             | "width"
             | "horizontalAlignment"
             | "verticalAlignment"
+            | "backColor"
+            | "textColor"
             | "textPlacement"
             | "fillType"
             | "drawingBorder"
@@ -1677,6 +1684,11 @@ fn apply_spreadsheet_text_value(
                 format.height = Some(parsed)
             });
         }
+        "borderColor" if path_ends_with(path, &["format", "borderColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.border_color = Some(parsed)
+            });
+        }
         "width" if path_ends_with(path, &["format", "width"]) => {
             set_spreadsheet_format_usize(format, value, |format, parsed| {
                 format.width = Some(parsed)
@@ -1690,6 +1702,16 @@ fn apply_spreadsheet_text_value(
         "verticalAlignment" if path_ends_with(path, &["format", "verticalAlignment"]) => {
             set_spreadsheet_format_string(format, text, |format, parsed| {
                 format.vertical_alignment = Some(parsed)
+            });
+        }
+        "backColor" if path_ends_with(path, &["format", "backColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.back_color = Some(parsed)
+            });
+        }
+        "textColor" if path_ends_with(path, &["format", "textColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.text_color = Some(parsed)
             });
         }
         "textPlacement" if path_ends_with(path, &["format", "textPlacement"]) => {
@@ -2170,9 +2192,9 @@ fn bool_to_usize(value: bool) -> usize {
 fn format_spreadsheet_formats_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     column_count: usize,
-) -> Option<String> {
+) -> Vec<String> {
     if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
-        return None;
+        return Vec::new();
     }
     let body_format_count = spreadsheet
         .formats
@@ -2180,27 +2202,43 @@ fn format_spreadsheet_formats_for_moxel(
         .max(spreadsheet.default_format_index.unwrap_or(0));
     let column_placeholder_count = column_count.max(1);
     let count = body_format_count + column_placeholder_count;
-    let mut fields = Vec::with_capacity(count + 1);
-    fields.push(count.to_string());
+    let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
+    let mut format_fields = Vec::with_capacity(count + 1);
+    format_fields.push(count.to_string());
     for index in 0..body_format_count {
         let field = spreadsheet
             .formats
             .get(index)
-            .and_then(format_spreadsheet_format_for_moxel)
+            .and_then(|format| format_spreadsheet_format_for_moxel(format, &mut style_refs))
             .unwrap_or_else(spreadsheet_empty_format_for_moxel);
-        fields.push(field);
+        format_fields.push(field);
     }
     for _ in 0..column_placeholder_count {
-        fields.push(spreadsheet_empty_format_for_moxel());
+        format_fields.push(spreadsheet_empty_format_for_moxel());
     }
-    Some(format!("{{{}}}", fields.join(",")))
+    let mut fields = style_refs
+        .iter()
+        .map(format_spreadsheet_style_ref_slot_for_moxel)
+        .collect::<Vec<_>>();
+    fields.push(format!("{{{}}}", format_fields.join(",")));
+    fields
 }
 
 fn spreadsheet_empty_format_for_moxel() -> String {
     "{1,0}".to_string()
 }
 
-fn format_spreadsheet_format_for_moxel(format: &SpreadsheetDocumentXmlFormat) -> Option<String> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SpreadsheetStyleRefSlot {
+    DirectColor(u32),
+    SystemStyle(i32),
+    WebColor(u32),
+}
+
+fn format_spreadsheet_format_for_moxel(
+    format: &SpreadsheetDocumentXmlFormat,
+    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+) -> Option<String> {
     let mut values = Vec::<(u8, usize)>::new();
     push_spreadsheet_format_value(&mut values, 0, format.font);
     if let Some(border) = format.border {
@@ -2214,6 +2252,14 @@ fn format_spreadsheet_format_for_moxel(format: &SpreadsheetDocumentXmlFormat) ->
         push_spreadsheet_format_value(&mut values, 4, format.bottom_border);
     }
     push_spreadsheet_format_value(&mut values, 6, format.height);
+    push_spreadsheet_format_value(
+        &mut values,
+        5,
+        format
+            .border_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+    );
     push_spreadsheet_format_value(&mut values, 7, format.width);
     push_spreadsheet_format_value(
         &mut values,
@@ -2230,6 +2276,22 @@ fn format_spreadsheet_format_for_moxel(format: &SpreadsheetDocumentXmlFormat) ->
             .vertical_alignment
             .as_deref()
             .and_then(spreadsheet_vertical_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        10,
+        format
+            .text_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        11,
+        format
+            .back_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
     );
     push_spreadsheet_format_value(
         &mut values,
@@ -2312,6 +2374,69 @@ fn format_spreadsheet_format_for_moxel(format: &SpreadsheetDocumentXmlFormat) ->
 fn push_spreadsheet_format_value(values: &mut Vec<(u8, usize)>, bit: u8, value: Option<usize>) {
     if let Some(value) = value {
         values.push((bit, value));
+    }
+}
+
+fn spreadsheet_style_ref_index(
+    value: &str,
+    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+) -> Option<usize> {
+    let slot = spreadsheet_style_ref_slot(value)?;
+    if let Some(index) = style_refs.iter().position(|existing| existing == &slot) {
+        return Some(index);
+    }
+    let index = style_refs.len();
+    style_refs.push(slot);
+    Some(index)
+}
+
+fn spreadsheet_style_ref_slot(value: &str) -> Option<SpreadsheetStyleRefSlot> {
+    if let Some(color) = spreadsheet_direct_color_code(value) {
+        return Some(SpreadsheetStyleRefSlot::DirectColor(color));
+    }
+    if let Some(code) = spreadsheet_system_style_code(value) {
+        return Some(SpreadsheetStyleRefSlot::SystemStyle(code));
+    }
+    spreadsheet_web_color_code(value).map(SpreadsheetStyleRefSlot::WebColor)
+}
+
+fn format_spreadsheet_style_ref_slot_for_moxel(slot: &SpreadsheetStyleRefSlot) -> String {
+    match slot {
+        SpreadsheetStyleRefSlot::DirectColor(value) => format!("{{3,0,{{{value}}}}}"),
+        SpreadsheetStyleRefSlot::SystemStyle(value) => format!("{{3,3,{{{value}}}}}"),
+        SpreadsheetStyleRefSlot::WebColor(value) => format!("{{3,2,{{{value}}}}}"),
+    }
+}
+
+fn spreadsheet_direct_color_code(value: &str) -> Option<u32> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let red = u32::from_str_radix(&hex[0..2], 16).ok()?;
+    let green = u32::from_str_radix(&hex[2..4], 16).ok()?;
+    let blue = u32::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(red | (green << 8) | (blue << 16))
+}
+
+fn spreadsheet_system_style_code(value: &str) -> Option<i32> {
+    match value {
+        "style:FieldBackColor" => Some(-10),
+        "style:ButtonBackColor" => Some(-7),
+        "style:ReportLineColor" => Some(-28),
+        _ => None,
+    }
+}
+
+fn spreadsheet_web_color_code(value: &str) -> Option<u32> {
+    match value {
+        "d3p1:Crimson" => Some(21),
+        "d3p1:Gainsboro" => Some(48),
+        "d3p1:LemonChiffon" => Some(64),
+        "d3p1:LightYellow" => Some(79),
+        "d3p1:PaleGoldenrod" => Some(108),
+        "d3p1:RoyalBlue" => Some(121),
+        _ => None,
     }
 }
 
@@ -8692,6 +8817,36 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(text.contains(r#"{3,{128,72},{33024,6,1},{1,0}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_format_colors() -> anyhow::Result<()> {
+        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<format>
+		<width>72</width>
+		<textColor>#009646</textColor>
+		<backColor>style:ButtonBackColor</backColor>
+	</format>
+</document>
+"##;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{3,0,{4625920}},{3,3,{-7}},{2,{3200,72,0,1},{1,0}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
