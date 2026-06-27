@@ -967,6 +967,9 @@ pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDefla
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
     }
+    if let Some(formats) = format_spreadsheet_formats_for_moxel(&spreadsheet, column_count) {
+        fields.push(formats);
+    }
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -1331,6 +1334,31 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "paperSource"
             | "pageWidth"
             | "pageHeight"
+            | "defaultFormatIndex"
+            | "font"
+            | "border"
+            | "leftBorder"
+            | "topBorder"
+            | "rightBorder"
+            | "bottomBorder"
+            | "height"
+            | "width"
+            | "horizontalAlignment"
+            | "verticalAlignment"
+            | "textPlacement"
+            | "fillType"
+            | "drawingBorder"
+            | "bySelectedColumns"
+            | "detailsUse"
+            | "hyperLink"
+            | "protection"
+            | "indent"
+            | "autoIndent"
+            | "mask"
+            | "picIndex"
+            | "pictureSizeMode"
+            | "picHorizontalAlignment"
+            | "picVerticalAlignment"
     )
 }
 
@@ -1346,6 +1374,7 @@ fn apply_spreadsheet_text_value(
     merge: Option<&mut SpreadsheetDocumentXmlMerge>,
     area: Option<&mut SpreadsheetDocumentXmlArea>,
     print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
 ) {
     let value = text.trim();
     match local {
@@ -1608,6 +1637,131 @@ fn apply_spreadsheet_text_value(
                 settings.page_height = Some(parsed)
             });
         }
+        "defaultFormatIndex" if path_ends_with(path, &["defaultFormatIndex"]) => {
+            if let Ok(parsed) = value.parse::<usize>() {
+                document.default_format_index = Some(parsed);
+            }
+        }
+        "font" if path_ends_with(path, &["format", "font"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.font = Some(parsed)
+            });
+        }
+        "border" if path_ends_with(path, &["format", "border"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.border = Some(parsed)
+            });
+        }
+        "leftBorder" if path_ends_with(path, &["format", "leftBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.left_border = Some(parsed)
+            });
+        }
+        "topBorder" if path_ends_with(path, &["format", "topBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.top_border = Some(parsed)
+            });
+        }
+        "rightBorder" if path_ends_with(path, &["format", "rightBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.right_border = Some(parsed)
+            });
+        }
+        "bottomBorder" if path_ends_with(path, &["format", "bottomBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.bottom_border = Some(parsed)
+            });
+        }
+        "height" if path_ends_with(path, &["format", "height"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.height = Some(parsed)
+            });
+        }
+        "width" if path_ends_with(path, &["format", "width"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.width = Some(parsed)
+            });
+        }
+        "horizontalAlignment" if path_ends_with(path, &["format", "horizontalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.horizontal_alignment = Some(parsed)
+            });
+        }
+        "verticalAlignment" if path_ends_with(path, &["format", "verticalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.vertical_alignment = Some(parsed)
+            });
+        }
+        "textPlacement" if path_ends_with(path, &["format", "textPlacement"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.text_placement = Some(parsed)
+            });
+        }
+        "fillType" if path_ends_with(path, &["format", "fillType"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.fill_type = Some(parsed)
+            });
+        }
+        "drawingBorder" if path_ends_with(path, &["format", "drawingBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.drawing_border = Some(parsed)
+            });
+        }
+        "bySelectedColumns" if path_ends_with(path, &["format", "bySelectedColumns"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.by_selected_columns = Some(parsed)
+            });
+        }
+        "detailsUse" if path_ends_with(path, &["format", "detailsUse"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.details_use = Some(parsed)
+            });
+        }
+        "hyperLink" if path_ends_with(path, &["format", "hyperLink"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.hyper_link = Some(parsed)
+            });
+        }
+        "protection" if path_ends_with(path, &["format", "protection"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.protection = Some(parsed)
+            });
+        }
+        "indent" if path_ends_with(path, &["format", "indent"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.indent = Some(parsed)
+            });
+        }
+        "autoIndent" if path_ends_with(path, &["format", "autoIndent"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.auto_indent = Some(parsed)
+            });
+        }
+        "mask" if path_ends_with(path, &["format", "mask"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.mask = Some(parsed)
+            });
+        }
+        "picIndex" if path_ends_with(path, &["format", "picIndex"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.pic_index = Some(parsed)
+            });
+        }
+        "pictureSizeMode" if path_ends_with(path, &["format", "pictureSizeMode"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.picture_size_mode = Some(parsed)
+            });
+        }
+        "picHorizontalAlignment" if path_ends_with(path, &["format", "picHorizontalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.pic_horizontal_alignment = Some(parsed)
+            });
+        }
+        "picVerticalAlignment" if path_ends_with(path, &["format", "picVerticalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.pic_vertical_alignment = Some(parsed)
+            });
+        }
         _ => {}
     }
 }
@@ -1631,6 +1785,38 @@ fn set_spreadsheet_print_settings_bool(
 ) {
     if let Some(print_settings) = print_settings {
         setter(print_settings, value.eq_ignore_ascii_case("true"));
+    }
+}
+
+fn set_spreadsheet_format_usize(
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, usize),
+) {
+    if let Some(format) = format
+        && let Ok(parsed) = value.parse::<usize>()
+    {
+        setter(format, parsed);
+    }
+}
+
+fn set_spreadsheet_format_bool(
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, bool),
+) {
+    if let Some(format) = format {
+        setter(format, value.eq_ignore_ascii_case("true"));
+    }
+}
+
+fn set_spreadsheet_format_string(
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, String),
+) {
+    if let Some(format) = format {
+        setter(format, value.to_string());
     }
 }
 
@@ -1979,6 +2165,215 @@ fn spreadsheet_page_orientation_code(value: &str) -> usize {
 
 fn bool_to_usize(value: bool) -> usize {
     if value { 1 } else { 0 }
+}
+
+fn format_spreadsheet_formats_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_count: usize,
+) -> Option<String> {
+    if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
+        return None;
+    }
+    let body_format_count = spreadsheet
+        .formats
+        .len()
+        .max(spreadsheet.default_format_index.unwrap_or(0));
+    let column_placeholder_count = column_count.max(1);
+    let count = body_format_count + column_placeholder_count;
+    let mut fields = Vec::with_capacity(count + 1);
+    fields.push(count.to_string());
+    for index in 0..body_format_count {
+        let field = spreadsheet
+            .formats
+            .get(index)
+            .and_then(format_spreadsheet_format_for_moxel)
+            .unwrap_or_else(spreadsheet_empty_format_for_moxel);
+        fields.push(field);
+    }
+    for _ in 0..column_placeholder_count {
+        fields.push(spreadsheet_empty_format_for_moxel());
+    }
+    Some(format!("{{{}}}", fields.join(",")))
+}
+
+fn spreadsheet_empty_format_for_moxel() -> String {
+    "{1,0}".to_string()
+}
+
+fn format_spreadsheet_format_for_moxel(format: &SpreadsheetDocumentXmlFormat) -> Option<String> {
+    let mut values = Vec::<(u8, usize)>::new();
+    push_spreadsheet_format_value(&mut values, 0, format.font);
+    if let Some(border) = format.border {
+        for bit in [1, 2, 3, 4] {
+            push_spreadsheet_format_value(&mut values, bit, Some(border));
+        }
+    } else {
+        push_spreadsheet_format_value(&mut values, 1, format.left_border);
+        push_spreadsheet_format_value(&mut values, 2, format.top_border);
+        push_spreadsheet_format_value(&mut values, 3, format.right_border);
+        push_spreadsheet_format_value(&mut values, 4, format.bottom_border);
+    }
+    push_spreadsheet_format_value(&mut values, 6, format.height);
+    push_spreadsheet_format_value(&mut values, 7, format.width);
+    push_spreadsheet_format_value(
+        &mut values,
+        8,
+        format
+            .horizontal_alignment
+            .as_deref()
+            .and_then(spreadsheet_horizontal_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        9,
+        format
+            .vertical_alignment
+            .as_deref()
+            .and_then(spreadsheet_vertical_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        14,
+        format
+            .text_placement
+            .as_deref()
+            .and_then(spreadsheet_text_placement_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        15,
+        format
+            .fill_type
+            .as_deref()
+            .and_then(spreadsheet_fill_type_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        16,
+        format.protection.map(spreadsheet_protection_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        19,
+        format
+            .details_use
+            .as_deref()
+            .and_then(spreadsheet_details_use_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        20,
+        format.by_selected_columns.map(bool_to_usize),
+    );
+    push_spreadsheet_format_value(&mut values, 26, format.hyper_link.map(bool_to_usize));
+    push_spreadsheet_format_value(&mut values, 30, format.indent);
+    push_spreadsheet_format_value(&mut values, 31, format.auto_indent);
+    if format.mask.as_deref() == Some("") {
+        push_spreadsheet_format_value(&mut values, 34, Some(0));
+    }
+    push_spreadsheet_format_value(&mut values, 35, format.pic_index);
+    push_spreadsheet_format_value(
+        &mut values,
+        36,
+        format
+            .picture_size_mode
+            .as_deref()
+            .and_then(spreadsheet_picture_size_mode_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        37,
+        format
+            .pic_horizontal_alignment
+            .as_deref()
+            .and_then(spreadsheet_picture_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        38,
+        format
+            .pic_vertical_alignment
+            .as_deref()
+            .and_then(spreadsheet_picture_alignment_code),
+    );
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by_key(|(bit, _)| *bit);
+    let flags = values
+        .iter()
+        .fold(0u64, |acc, (bit, _)| acc | (1u64 << bit));
+    let mut fields = Vec::with_capacity(values.len() + 1);
+    fields.push(flags.to_string());
+    fields.extend(values.into_iter().map(|(_, value)| value.to_string()));
+    Some(format!("{{{}}}", fields.join(",")))
+}
+
+fn push_spreadsheet_format_value(values: &mut Vec<(u8, usize)>, bit: u8, value: Option<usize>) {
+    if let Some(value) = value {
+        values.push((bit, value));
+    }
+}
+
+fn spreadsheet_horizontal_alignment_code(value: &str) -> Option<usize> {
+    match value {
+        "Left" => Some(0),
+        "Right" => Some(2),
+        "Center" => Some(6),
+        _ => None,
+    }
+}
+
+fn spreadsheet_vertical_alignment_code(value: &str) -> Option<usize> {
+    match value {
+        "Top" => Some(0),
+        "Center" => Some(24),
+        _ => None,
+    }
+}
+
+fn spreadsheet_text_placement_code(value: &str) -> Option<usize> {
+    match value {
+        "Auto" => Some(0),
+        "Block" => Some(2),
+        "Wrap" => Some(3),
+        _ => None,
+    }
+}
+
+fn spreadsheet_fill_type_code(value: &str) -> Option<usize> {
+    match value {
+        "Text" => Some(0),
+        "Parameter" => Some(1),
+        "Template" => Some(2),
+        _ => None,
+    }
+}
+
+fn spreadsheet_details_use_code(value: &str) -> Option<usize> {
+    match value {
+        "Cell" => Some(0),
+        "Row" => Some(1),
+        _ => None,
+    }
+}
+
+fn spreadsheet_protection_code(value: bool) -> usize {
+    if value { 0 } else { 1 }
+}
+
+fn spreadsheet_picture_size_mode_code(value: &str) -> Option<usize> {
+    match value {
+        "Proportionally" => Some(6),
+        _ => None,
+    }
+}
+
+fn spreadsheet_picture_alignment_code(value: &str) -> Option<usize> {
+    match value {
+        "Center" => Some(2),
+        _ => None,
+    }
 }
 
 pub fn pack_form_body_blob_from_module_text(
@@ -8258,6 +8653,45 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains(
             r#"{{0,18,0,{"N",9},1,{"N",2},2,{"N",80},3,{"N",1},4,{"N",2},5,{"N",1},6,{"N",1000},7,{"N",1100},8,{"N",1200},9,{"N",1300},10,{"N",140},11,{"N",150},12,{"N",0},13,{"N",1},14,{"S","Printer ""A"""},15,{"N",7},16,{"N",210},17,{"N",297}}}"#
         ));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_basic_formats() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+		<fillType>Parameter</fillType>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{3,{128,72},{33024,6,1},{1,0}}"#));
+        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
