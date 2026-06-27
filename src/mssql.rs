@@ -39,7 +39,7 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, pack_base64_payload_blob_from_bytes,
+    VersionReplacement, pack_base64_payload_blob_from_bytes, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_ext_picture_blob_from_bytes,
     pack_form_body_blob_from_module_text, pack_help_blob_from_parts, pack_module_blob_bytes,
     pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
@@ -1941,6 +1941,9 @@ fn prepare_metadata_body_rows(
     rows.extend(prepare_nested_command_module_body_rows(
         sqlcmd, server, database, xml_path, xml, properties,
     )?);
+    rows.extend(prepare_command_interface_body_row(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
     Ok(rows)
 }
 
@@ -2172,6 +2175,38 @@ fn prepare_role_rights_body_row(
     }])
 }
 
+fn prepare_command_interface_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(suffix) = command_interface_body_suffix(&properties.kind) else {
+        return Ok(Vec::new());
+    };
+    let body_path = infer_command_interface_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read CommandInterface XML {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_command_interface_blob_from_xml(&base_body, &xml)
+        .with_context(|| format!("failed to pack CommandInterface {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
 fn prepare_object_help_body_row(
     sqlcmd: &Path,
     server: &str,
@@ -2292,6 +2327,13 @@ fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static 
         "ChartOfCharacteristicTypes" => &[("15", "ObjectModule.bsl"), ("16", "ManagerModule.bsl")],
         "IntegrationService" => &[("0", "Module.bsl")],
         _ => &[],
+    }
+}
+
+fn command_interface_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Subsystem" => Some("1"),
+        _ => None,
     }
 }
 
@@ -3879,6 +3921,12 @@ fn infer_role_rights_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Rights.xml")
 }
 
+fn infer_command_interface_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("")
+        .join("Ext")
+        .join("CommandInterface.xml")
+}
+
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
     let package_name = xml.file_stem().unwrap_or_default();
     xml.parent()
@@ -4533,6 +4581,16 @@ mod tests {
             super::infer_role_rights_body_path(r"Roles\Editor.xml".as_ref()),
             std::path::PathBuf::from(r"Roles\Editor\Ext\Rights.xml")
         );
+    }
+
+    #[test]
+    fn infers_command_interface_body_path_and_suffix() {
+        assert_eq!(
+            super::infer_command_interface_body_path(r"Subsystems\Admin.xml".as_ref()),
+            std::path::PathBuf::from(r"Subsystems\Admin\Ext\CommandInterface.xml")
+        );
+        assert_eq!(super::command_interface_body_suffix("Subsystem"), Some("1"));
+        assert_eq!(super::command_interface_body_suffix("Catalog"), None);
     }
 
     #[test]
