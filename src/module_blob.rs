@@ -4224,8 +4224,16 @@ fn patch_form_layout_child_items(
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
+    let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
     for item in items {
-        let _ = patch_form_layout_child_item(layout, item, commands, &table_ids_by_name, source)?;
+        let _ = patch_form_layout_child_item(
+            layout,
+            item,
+            commands,
+            &table_ids_by_name,
+            &table_column_ids_by_name,
+            source,
+        )?;
     }
     Ok(())
 }
@@ -4235,6 +4243,7 @@ fn patch_form_layout_child_item(
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
@@ -4245,6 +4254,7 @@ fn patch_form_layout_child_item(
             item,
             commands,
             table_ids_by_name,
+            table_column_ids_by_name,
             source,
         )?;
         return Ok(true);
@@ -4255,7 +4265,14 @@ fn patch_form_layout_child_item(
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_layout_child_item(&mut nested, item, commands, table_ids_by_name, source)? {
+        if patch_form_layout_child_item(
+            &mut nested,
+            item,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            source,
+        )? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -4293,6 +4310,7 @@ fn patch_form_layout_child_item_entry(
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
@@ -4324,7 +4342,8 @@ fn patch_form_layout_child_item_entry(
     if item.tag == "Button"
         && let Some(data_path) = &item.data_path
         && let Some(data_path_range) = fields.get(9)
-        && let Some(data_path_ref) = format_form_button_data_path(data_path, table_ids_by_name)
+        && let Some(data_path_ref) =
+            format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
     {
         replacements.push((data_path_range.clone(), data_path_ref));
     }
@@ -4340,6 +4359,14 @@ fn form_layout_table_ids_by_name(layout: &str) -> Result<BTreeMap<String, String
     let mut tables = BTreeMap::new();
     collect_form_layout_table_ids_by_name(layout, &mut tables)?;
     Ok(tables)
+}
+
+fn form_layout_table_column_ids_by_name(
+    layout: &str,
+) -> Result<BTreeMap<(String, String), String>> {
+    let mut columns = BTreeMap::new();
+    collect_form_layout_table_column_ids_by_name(layout, &mut columns)?;
+    Ok(columns)
 }
 
 fn collect_form_layout_table_ids_by_name(
@@ -4367,16 +4394,69 @@ fn collect_form_layout_table_ids_by_name(
     Ok(())
 }
 
+fn collect_form_layout_table_column_ids_by_name(
+    text: &str,
+    columns: &mut BTreeMap<(String, String), String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
+        && let Some(table_name) = form_layout_child_item_name(text, "73", &fields)
+    {
+        collect_form_layout_table_column_ids_for_table(text, &table_name, columns)?;
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_column_ids_by_name(&text[range], columns)?;
+    }
+    Ok(())
+}
+
+fn collect_form_layout_table_column_ids_for_table(
+    text: &str,
+    table_name: &str,
+    columns: &mut BTreeMap<(String, String), String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let wrapper = fields.first().map(|range| text[range.clone()].trim());
+    if matches!(
+        wrapper.and_then(|wrapper| form_layout_child_item_tag(wrapper, text, &fields)),
+        Some("InputField" | "LabelField")
+    ) && let Some(wrapper) = wrapper
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && let Some(id) = identity
+            .first()
+            .map(|range| text[range.clone()].trim().to_string())
+        && let Some(name) = form_layout_child_item_name(text, wrapper, &fields)
+    {
+        columns.insert((table_name.to_string(), name), id);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_column_ids_for_table(&text[range], table_name, columns)?;
+    }
+    Ok(())
+}
+
 fn format_form_button_data_path(
     data_path: &str,
     table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
 ) -> Option<String> {
     let data_path = data_path.trim();
     let rest = data_path.strip_prefix("Items.")?;
     let (table_name, field_name) = rest.split_once(".CurrentData.")?;
     let column_id = match field_name {
-        "Ссылка" => "8",
-        _ => return None,
+        "Ссылка" => "8".to_string(),
+        _ => table_column_ids_by_name
+            .get(&(table_name.to_string(), field_name.to_string()))
+            .cloned()?,
     };
     let table_id = table_ids_by_name.get(table_name)?;
     Some(format!("{{2,{{{table_id}}},{{{column_id}}}}}"))
@@ -11847,7 +11927,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            br##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0}}},"Old module",{0}}"##,
+            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0}}}},"Old module",{0}}"##
+                .as_bytes(),
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
@@ -11867,7 +11948,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<ChildItems>
 				<Button name="NewButton" id="44">
 					<CommandName>Form.Command.Do</CommandName>
-					<DataPath>Items.Rows.CurrentData.Ссылка</DataPath>
+					<DataPath>Items.Rows.CurrentData.Наименование</DataPath>
 					<Title>
 						<v8:item>
 							<v8:lang>en</v8:lang>
@@ -11899,7 +11980,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
         );
-        assert!(parsed.layout.contains("{2,{25},{8}}"));
+        assert!(parsed.layout.contains("{2,{25},{40}}"));
         assert!(!parsed.layout.contains("OldBar"));
         assert!(!parsed.layout.contains("Old bar"));
         assert!(!parsed.layout.contains("OldButton"));

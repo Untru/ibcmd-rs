@@ -4407,11 +4407,13 @@ fn extract_form_child_items(
         .or_else(|| attributes.first())
         .map(|attribute| attribute.name.as_str());
     let table_name_by_id = form_table_names_by_id(fields);
+    let table_column_names_by_id = form_table_column_names_by_id(fields);
     parse_form_child_item_pairs(
         fields,
         main_data_path,
         None,
         &table_name_by_id,
+        &table_column_names_by_id,
         commands,
         object_refs,
     )
@@ -4423,6 +4425,7 @@ fn parse_form_child_item_pairs(
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
     table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChildItem>> {
@@ -4444,6 +4447,7 @@ fn parse_form_child_item_pairs(
                 main_data_path,
                 parent_data_path,
                 table_name_by_id,
+                table_column_names_by_id,
                 commands,
                 object_refs,
             ) else {
@@ -4470,6 +4474,7 @@ fn parse_form_child_item(
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
     table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
@@ -4490,6 +4495,7 @@ fn parse_form_child_item(
         main_data_path,
         parent_data_path,
         table_name_by_id,
+        table_column_names_by_id,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
     let child_items = parse_form_child_item_pairs(
@@ -4497,6 +4503,7 @@ fn parse_form_child_item(
         main_data_path,
         child_parent_data_path,
         table_name_by_id,
+        table_column_names_by_id,
         commands,
         object_refs,
     )
@@ -4587,13 +4594,14 @@ fn parse_form_child_item_data_path(
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
     table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
     match tag {
         "Table" => main_data_path.map(ToOwned::to_owned),
         "InputField" | "LabelField" => parent_data_path.map(|parent| format!("{parent}.{name}")),
-        "Button" => fields
-            .get(9)
-            .and_then(|field| parse_form_button_data_path(field, table_name_by_id)),
+        "Button" => fields.get(9).and_then(|field| {
+            parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
+        }),
         _ => table_name_by_id.get(id).cloned(),
     }
 }
@@ -4631,6 +4639,12 @@ fn form_table_names_by_id(fields: &[&str]) -> BTreeMap<String, String> {
     tables
 }
 
+fn form_table_column_names_by_id(fields: &[&str]) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut tables = BTreeMap::new();
+    collect_form_table_column_names(fields, &mut tables);
+    tables
+}
+
 fn collect_form_table_names(fields: &[&str], tables: &mut BTreeMap<String, String>) {
     for field in fields {
         let field = field.trim();
@@ -4655,9 +4669,68 @@ fn collect_form_table_names(fields: &[&str], tables: &mut BTreeMap<String, Strin
     }
 }
 
+fn collect_form_table_column_names(
+    fields: &[&str],
+    tables: &mut BTreeMap<String, BTreeMap<String, String>>,
+) {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if nested.first().map(|value| value.trim()) == Some("73")
+            && let Some(identity) = nested
+                .get(1)
+                .and_then(|field| split_1c_braced_fields(field, 0))
+            && let Some(table_id) = identity.first().map(|value| value.trim().to_string())
+        {
+            let mut columns = BTreeMap::new();
+            collect_form_table_column_names_for_table(&nested, &mut columns);
+            if !columns.is_empty() {
+                tables.insert(table_id, columns);
+            }
+        }
+        collect_form_table_column_names(&nested, tables);
+    }
+}
+
+fn collect_form_table_column_names_for_table(
+    fields: &[&str],
+    columns: &mut BTreeMap<String, String>,
+) {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        let wrapper = nested.first().map(|value| value.trim()).unwrap_or_default();
+        if matches!(
+            form_child_item_tag(wrapper, &nested),
+            Some("InputField" | "LabelField")
+        ) && let Some(identity) = nested
+            .get(1)
+            .and_then(|field| split_1c_braced_fields(field, 0))
+            && let (Some(id), Some(name)) = (
+                identity.first().map(|value| value.trim().to_string()),
+                parse_form_child_item_name(wrapper, &nested),
+            )
+        {
+            columns.insert(id, name);
+        }
+        collect_form_table_column_names_for_table(&nested, columns);
+    }
+}
+
 fn parse_form_button_data_path(
     field: &str,
     table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("2") {
@@ -4672,9 +4745,13 @@ fn parse_form_button_data_path(
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0))
         .and_then(|fields| fields.first().map(|value| value.trim().to_string()))?;
-    let field_name = match column.as_str() {
-        "8" => "Ссылка",
-        _ => return None,
+    let field_name = if column == "8" {
+        "Ссылка".to_string()
+    } else {
+        table_column_names_by_id
+            .get(table_id)
+            .and_then(|columns| columns.get(&column))
+            .cloned()?
     };
     Some(format!("Items.{table_name}.CurrentData.{field_name}"))
 }
@@ -11215,7 +11292,7 @@ mod tests {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let external_command_uuid = "11111111-1111-4111-8111-111111111111";
         let layout = format!(
-            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{0}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}}}}}}"#
+            r#"{{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{22,{{64,{form_uuid}}},0,0,0,0,"Панель",{{1,0}},0,1,1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{44,{form_uuid}}},0,0,0,"Выполнить",{{1,0}},1,{{0,{external_command_uuid}}},{{2,{{25}},{{40}}}}}}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{{73,{{25,{form_uuid}}},0,1,0,"СписокТаблица",0,0,0,{{1,0}},1,dddddddd-dddd-4ddd-dddd-dddddddddddd,{{48,{{40,{form_uuid}}},0,0,0,2,"Наименование",1,0,{{1,0}}}}}}}}"#
         );
         let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
         let attributes = vec![FormAttribute {
@@ -11237,6 +11314,7 @@ mod tests {
         assert!(xml.contains(r#"<Button name="Выполнить" id="44">"#));
         assert!(xml.contains("<Type>CommandBarButton</Type>"));
         assert!(xml.contains("<CommandName>DataProcessor.Loader.Command.Load</CommandName>"));
+        assert!(xml.contains("<DataPath>Items.СписокТаблица.CurrentData.Наименование</DataPath>"));
         assert!(xml.contains(r#"<Table name="СписокТаблица" id="25">"#));
         assert!(xml.contains("<DataPath>Список</DataPath>"));
         assert!(xml.contains(r#"<InputField name="Наименование" id="40">"#));
