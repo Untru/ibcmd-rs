@@ -4810,7 +4810,13 @@ fn parse_form_child_item(
         id: id.to_string(),
         name,
         group: (tag == "UsualGroup").then_some("Vertical"),
-        item_type: (tag == "Button").then_some("CommandBarButton"),
+        item_type: if tag == "Button" {
+            fields
+                .get(7)
+                .and_then(|field| parse_form_button_type(field))
+        } else {
+            None
+        },
         title: parse_form_child_item_title(wrapper, &fields),
         events: parse_form_child_item_event_fields(&fields),
         data_path,
@@ -4823,6 +4829,15 @@ fn parse_form_child_item(
         },
         child_items,
     })
+}
+
+fn parse_form_button_type(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("UsualButton"),
+        "1" => Some("CommandBarButton"),
+        "2" => Some("Hyperlink"),
+        _ => None,
+    }
 }
 
 fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
@@ -11874,6 +11889,30 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn extracts_form_button_type_from_layout_code() {
+        for (code, expected_type) in [
+            ("0", "UsualButton"),
+            ("1", "CommandBarButton"),
+            ("2", "Hyperlink"),
+        ] {
+            let item = parse_form_child_item(
+                &format!(
+                    r#"{{34,{{44,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,"Button",{{1,0}},{code},{{0}},{{0}}}}"#
+                ),
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.item_type, Some(expected_type));
+        }
     }
 
     #[test]

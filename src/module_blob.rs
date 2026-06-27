@@ -183,6 +183,7 @@ struct FormXmlChildItem {
     tag: String,
     id: String,
     name: String,
+    item_type: Option<String>,
     title: Vec<LocalizedString>,
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
@@ -3692,6 +3693,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
@@ -3973,6 +3975,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
@@ -4727,6 +4730,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             }
                         }
                     }
+                    "Type" if path_ends_with_for_child_type(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.item_type = Some(text_value.trim().to_string());
+                        }
+                    }
                     "CommandName"
                         if path_ends_with_for_child_command_name(&path, &current_child_items) =>
                     {
@@ -4779,6 +4787,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Index"
                         | "DefaultVisible"
                         | "Common"
+                        | "Type"
                         | "CommandName"
                         | "DataPath"
                         | "lang"
@@ -4869,6 +4878,7 @@ fn parse_form_child_item_xml(
         tag: tag.to_string(),
         id,
         name,
+        item_type: None,
         title: Vec::new(),
         events: Vec::new(),
         command_name: None,
@@ -5000,6 +5010,13 @@ fn path_ends_with_for_child_title_content(path: &[String], items: &[FormXmlChild
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Title", "item", "content"])
+}
+
+fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Type"])
 }
 
 fn path_ends_with_for_child_command_name(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -5228,6 +5245,13 @@ fn patch_form_layout_child_item_entry(
         replacements.push((title_range, format_1c_synonyms(&item.title)));
     }
     if item.tag == "Button"
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_button_type_code(item_type)
+        && let Some(type_range) = fields.get(7)
+    {
+        replacements.push((type_range.clone(), type_code.to_string()));
+    }
+    if item.tag == "Button"
         && let Some(command_name) = &item.command_name
         && let Some(command_range) = fields.get(8)
         && let Some(command_ref) = format_form_button_command_reference(
@@ -5254,6 +5278,15 @@ fn patch_form_layout_child_item_entry(
     }
     patch_form_layout_events(text, &item.events)?;
     Ok(())
+}
+
+fn form_button_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "UsualButton" => Some("0"),
+        "CommandBarButton" => Some("1"),
+        "Hyperlink" => Some("2"),
+        _ => None,
+    }
 }
 
 fn form_layout_table_ids_by_name(layout: &str) -> Result<BTreeMap<String, String>> {
@@ -13549,6 +13582,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			</Title>
 			<ChildItems>
 				<Button name="NewButton" id="44">
+					<Type>UsualButton</Type>
 					<CommandName>Form.Command.Do</CommandName>
 					<DataPath>Items.Rows.CurrentData.Наименование</DataPath>
 					<Title>
@@ -13583,6 +13617,13 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.layout.contains(r#"{1,"en","New bar"}"#));
         assert!(parsed.layout.contains(r#""NewButton""#));
         assert!(parsed.layout.contains(r#"{1,"en","New button"}"#));
+        assert!(
+            parsed
+                .layout
+                .contains(r#""NewButton",{1,"en","New button"},0,"#),
+            "{}",
+            parsed.layout
+        );
         assert!(
             parsed
                 .layout
