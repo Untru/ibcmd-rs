@@ -81,6 +81,13 @@ struct FormXmlBodyProperties {
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     group: Option<FormXmlGroup>,
     events: Vec<FormXmlEvent>,
+    auto_command_bar: Option<FormXmlAutoCommandBar>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlAutoCommandBar {
+    id: String,
+    name: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3118,10 +3125,14 @@ pub fn pack_form_body_blob_from_form_xml(
         if properties.window_opening_mode.is_some()
             || properties.group.is_some()
             || !properties.events.is_empty()
+            || properties.auto_command_bar.is_some()
         {
             let container = FormBodyContainer::parse(&plain)?;
             let mut layout = plain[container.layout_range.clone()].trim().to_string();
             patch_form_layout_properties(&mut layout, &properties)?;
+            if let Some(auto_command_bar) = &properties.auto_command_bar {
+                let _ = patch_form_layout_auto_command_bar(&mut layout, auto_command_bar)?;
+            }
             patch_form_layout_events(&mut layout, &properties.events)?;
             plain.replace_range(container.layout_range, &layout);
         }
@@ -3163,7 +3174,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     current_event_name = Some(name);
                 }
+                if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
+                    properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
                 path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
+                    properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
             }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
@@ -3221,6 +3241,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     Ok(properties)
 }
 
+fn parse_form_auto_command_bar_xml(
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlAutoCommandBar>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAutoCommandBar { id, name }))
+}
+
 fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpeningMode> {
     match value {
         "DontBlock" => Ok(FormXmlWindowOpeningMode::DontBlock),
@@ -3266,6 +3298,37 @@ fn patch_form_layout_properties(
         }
     }
     Ok(())
+}
+
+fn patch_form_layout_auto_command_bar(
+    text: &mut String,
+    command_bar: &FormXmlAutoCommandBar,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("22")
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && identity
+            .first()
+            .is_some_and(|range| text[range.clone()].trim() == command_bar.id)
+        && let Some(name_range) = fields.get(6)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        text.replace_range(name_range.clone(), &format_1c_string(&command_bar.name));
+        return Ok(true);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_auto_command_bar(&mut nested, command_bar)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
@@ -10141,6 +10204,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!parsed.layout.contains("OldOpen"));
         assert!(!parsed.layout.contains("OldChoice"));
         assert!(!parsed.layout.contains("ShouldNotBeAdded"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,\"OldBar\",{1,0}}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1"/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"NewBar\""));
+        assert!(!parsed.layout.contains("OldBar"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
         assert_eq!(
