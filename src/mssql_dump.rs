@@ -442,7 +442,9 @@ enum SourceAssetKind {
     },
     BusinessProcessFlowchart,
     ExtPicture,
-    Form,
+    Form {
+        object_refs: BTreeMap<String, String>,
+    },
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
@@ -549,7 +551,7 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
-    paths.extend(form_body_asset_paths(rows, &file_names));
+    paths.extend(form_body_asset_paths(rows, &file_names, &object_refs));
     paths.extend(template_body_asset_paths(
         &template_refs,
         &file_names,
@@ -619,6 +621,7 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
 fn form_body_asset_paths(
     rows: &[ConfigRow],
     file_names: &BTreeSet<&str>,
+    object_refs: &BTreeMap<String, String>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (form_uuid, form_ref) in build_form_source_reference_index(rows) {
@@ -632,7 +635,9 @@ fn form_body_asset_paths(
             body_id,
             SourceAsset {
                 primary_path: form_dir.join("Ext").join("Form.xml"),
-                kind: SourceAssetKind::Form,
+                kind: SourceAssetKind::Form {
+                    object_refs: object_refs.clone(),
+                },
             },
         );
     }
@@ -925,8 +930,8 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::Form => {
-            let xml = extract_form_body_xml(bytes).with_context(|| {
+        SourceAssetKind::Form { object_refs } => {
+            let xml = extract_form_body_xml(bytes, object_refs).with_context(|| {
                 format!(
                     "failed to extract form xml from source asset {}",
                     asset.primary_path.display()
@@ -3772,17 +3777,21 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
     )
 }
 
-fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
+fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     let properties = extract_form_body_properties(&form_fields);
     let events = extract_form_body_events(&form_fields);
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
+    let attributes = extract_form_body_attributes(&body.trailing, object_refs);
+    let commands = extract_form_body_commands(&body.trailing, object_refs);
 
     Some(format_form_body_xml(
         &properties,
         auto_command_bar.as_ref(),
         &events,
+        &attributes,
+        &commands,
     ))
 }
 
@@ -3802,6 +3811,34 @@ struct FormBodyEvent {
 struct FormAutoCommandBar {
     id: String,
     name: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormAttribute {
+    id: String,
+    name: String,
+    main_attribute: bool,
+    use_always: Vec<String>,
+    settings: Option<FormDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormDynamicListSettings {
+    manual_query: bool,
+    dynamic_data_read: bool,
+    query_text: Option<String>,
+    main_table: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormCommand {
+    id: String,
+    name: String,
+    title: Vec<(String, String)>,
+    tooltip: Vec<(String, String)>,
+    action: String,
+    functional_options: Vec<String>,
+    current_row_use: Option<&'static str>,
 }
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
@@ -4092,6 +4129,214 @@ fn form_item_picture_file_name(item_name: &str, content: &[u8], occurrence: usiz
     format!("{property_name}.{extension}")
 }
 
+fn extract_form_body_attributes(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormAttribute> {
+    let Some(fields) = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return Vec::new();
+    };
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return Vec::new();
+    }
+    fields
+        .iter()
+        .skip(2)
+        .filter_map(|field| parse_form_attribute(field, object_refs))
+        .collect()
+}
+
+fn parse_form_attribute(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormAttribute> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("9") {
+        return None;
+    }
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let name = parse_1c_quoted_string_with_len(fields.get(3)?.trim())?.0;
+    if name.is_empty() {
+        return None;
+    }
+    let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
+    let settings = fields
+        .get(14)
+        .and_then(|field| parse_form_dynamic_list_settings(field, object_refs));
+    let use_always = settings
+        .as_ref()
+        .map(|settings| form_dynamic_list_use_always(&name, settings))
+        .unwrap_or_default();
+    Some(FormAttribute {
+        id: id.to_string(),
+        name,
+        main_attribute,
+        use_always,
+        settings,
+    })
+}
+
+fn parse_form_dynamic_list_settings(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormDynamicListSettings> {
+    let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let mut manual_query = false;
+    let mut dynamic_data_read = false;
+    let mut query_text = None;
+    let mut main_table = None;
+    for window in settings_fields.windows(2) {
+        let key = parse_1c_quoted_string_with_len(window[0].trim())
+            .map(|(value, _)| value)
+            .unwrap_or_default();
+        match key.as_str() {
+            "QueryText" => query_text = parse_form_setting_string(window[1]),
+            "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
+            "ManualQuery" => manual_query = parse_form_setting_bool(window[1]).unwrap_or(false),
+            "DynamicalDataSelection" => {
+                dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
+            }
+            _ => {}
+        }
+    }
+    if query_text.is_none() && main_table.is_none() && !manual_query && !dynamic_data_read {
+        return None;
+    }
+    Some(FormDynamicListSettings {
+        manual_query,
+        dynamic_data_read,
+        query_text,
+        main_table,
+    })
+}
+
+fn form_dynamic_list_use_always(
+    attribute_name: &str,
+    settings: &FormDynamicListSettings,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    if let Some(query_text) = &settings.query_text {
+        for field in ["Наименование", "Ссылка"] {
+            if query_text.contains(field) {
+                fields.push(format!("{attribute_name}.{field}"));
+            }
+        }
+    }
+    fields
+}
+
+fn parse_form_setting_string(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"S\"") {
+        return None;
+    }
+    parse_1c_quoted_string_with_len(fields.get(1)?.trim()).map(|(value, _)| value)
+}
+
+fn parse_form_setting_bool(field: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"B\"") {
+        return None;
+    }
+    match fields.get(1).map(|value| value.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_main_table_ref(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"#\"") {
+        return None;
+    }
+    fields.iter().skip(1).find_map(|value| {
+        parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
+    })
+}
+
+fn extract_form_body_commands(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormCommand> {
+    let Some(fields) = trailing
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .skip(2)
+        .filter_map(|field| parse_form_command(field, object_refs))
+        .collect()
+}
+
+fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Option<FormCommand> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("11") {
+        return None;
+    }
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    let name = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?.0;
+    let action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
+    if id.is_empty() || name.is_empty() || action.is_empty() {
+        return None;
+    }
+    Some(FormCommand {
+        id: id.to_string(),
+        name,
+        title: fields
+            .get(3)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default(),
+        tooltip: fields
+            .get(4)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default(),
+        action,
+        functional_options: fields
+            .get(12)
+            .map(|field| parse_form_reference_list(field, object_refs))
+            .unwrap_or_default(),
+        current_row_use: parse_form_current_row_use(fields.get(9).copied()),
+    })
+}
+
+fn parse_form_localized_strings(field: &str) -> Vec<(String, String)> {
+    parse_1c_synonyms(field)
+}
+
+fn parse_form_reference_list(field: &str, object_refs: &BTreeMap<String, String>) -> Vec<String> {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .filter_map(|value| {
+            parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
+        })
+        .collect()
+}
+
+fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
+    match field.map(str::trim)? {
+        "3" => Some("DontUse"),
+        _ => None,
+    }
+}
+
 fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
     let mut seen = BTreeSet::<(String, String)>::new();
     let mut deduped = Vec::new();
@@ -4107,6 +4352,8 @@ fn format_form_body_xml(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
     events: &[FormBodyEvent],
+    attributes: &[FormAttribute],
+    commands: &[FormCommand],
 ) -> String {
     let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
@@ -4139,7 +4386,120 @@ fn format_form_body_xml(
         }
         xml.push_str("\t</Events>\r\n");
     }
+    xml.push_str(&format_form_attributes_xml(attributes));
+    if !commands.is_empty() {
+        xml.push_str("\t<Commands>\r\n");
+        for command in commands {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\" id=\"{}\">\r\n",
+                escape_xml_text(&command.name),
+                escape_xml_text(&command.id)
+            ));
+            xml.push_str(&format_form_localized_section("Title", &command.title, 3));
+            xml.push_str(&format_form_localized_section(
+                "ToolTip",
+                &command.tooltip,
+                3,
+            ));
+            xml.push_str(&format!(
+                "\t\t\t<Action>{}</Action>\r\n",
+                escape_xml_text(&command.action)
+            ));
+            if !command.functional_options.is_empty() {
+                xml.push_str("\t\t\t<FunctionalOptions>\r\n");
+                for item in &command.functional_options {
+                    xml.push_str(&format!(
+                        "\t\t\t\t<Item>{}</Item>\r\n",
+                        escape_xml_text(item)
+                    ));
+                }
+                xml.push_str("\t\t\t</FunctionalOptions>\r\n");
+            }
+            if let Some(current_row_use) = command.current_row_use {
+                xml.push_str(&format!(
+                    "\t\t\t<CurrentRowUse>{}</CurrentRowUse>\r\n",
+                    escape_xml_text(current_row_use)
+                ));
+            }
+            xml.push_str("\t\t</Command>\r\n");
+        }
+        xml.push_str("\t</Commands>\r\n");
+    }
     xml.push_str("</Form>\r\n");
+    xml
+}
+
+fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
+    if attributes.is_empty() {
+        return "\t<Attributes/>\r\n".to_string();
+    }
+    let mut xml = "\t<Attributes>\r\n".to_string();
+    for attribute in attributes {
+        xml.push_str(&format!(
+            "\t\t<Attribute name=\"{}\" id=\"{}\">\r\n",
+            escape_xml_text(&attribute.name),
+            escape_xml_text(&attribute.id)
+        ));
+        if attribute.settings.is_some() {
+            xml.push_str("\t\t\t<Type>\r\n");
+            xml.push_str("\t\t\t\t<v8:Type>cfg:DynamicList</v8:Type>\r\n");
+            xml.push_str("\t\t\t</Type>\r\n");
+        }
+        if attribute.main_attribute {
+            xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
+        }
+        if !attribute.use_always.is_empty() {
+            xml.push_str("\t\t\t<UseAlways>\r\n");
+            for field in &attribute.use_always {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Field>{}</Field>\r\n",
+                    escape_xml_text(field)
+                ));
+            }
+            xml.push_str("\t\t\t</UseAlways>\r\n");
+        }
+        if let Some(settings) = &attribute.settings {
+            xml.push_str("\t\t\t<Settings xsi:type=\"DynamicList\">\r\n");
+            if settings.manual_query {
+                xml.push_str("\t\t\t\t<ManualQuery>true</ManualQuery>\r\n");
+            }
+            if settings.dynamic_data_read {
+                xml.push_str("\t\t\t\t<DynamicDataRead>true</DynamicDataRead>\r\n");
+            }
+            if let Some(query_text) = &settings.query_text {
+                xml.push_str(&format!(
+                    "\t\t\t\t<QueryText>{}</QueryText>\r\n",
+                    escape_xml_text(query_text)
+                ));
+            }
+            if let Some(main_table) = &settings.main_table {
+                xml.push_str(&format!(
+                    "\t\t\t\t<MainTable>{}</MainTable>\r\n",
+                    escape_xml_text(main_table)
+                ));
+            }
+            xml.push_str("\t\t\t</Settings>\r\n");
+        }
+        xml.push_str("\t\t</Attribute>\r\n");
+    }
+    xml.push_str("\t</Attributes>\r\n");
+    xml
+}
+
+fn format_form_localized_section(name: &str, values: &[(String, String)], indent: usize) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<{}>\r\n", name);
+    for (lang, content) in values {
+        xml.push_str(&format!(
+            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
+            escape_xml_text(lang),
+            escape_xml_text(content)
+        ));
+    }
+    xml.push_str(&format!("{tab}</{}>\r\n", name));
     xml
 }
 
@@ -10187,7 +10547,7 @@ mod tests {
             b"{4,{7,{0,\"OnOpen\",\"PriOtkrytii\"},{1,\"ChoiceProcessing\",\"ObrabotkaVybora\"},{2,\"NotAFormEvent\",\"Ignored\"},{3,\"OnClose\",\"\"}},\"\",{0}}",
         );
 
-        let form_xml = extract_form_body_xml(&form_body).unwrap();
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<Events>"));
         assert!(form_xml.contains(r#"<Event name="OnOpen">PriOtkrytii</Event>"#));
@@ -10202,7 +10562,7 @@ mod tests {
             r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1},{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
-        let form_xml = extract_form_body_xml(&form_body).unwrap();
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains(r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#));
         assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ОбработкаВыбора</Event>"#));
@@ -10221,10 +10581,44 @@ mod tests {
             r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,2,1,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
-        let form_xml = extract_form_body_xml(&form_body).unwrap();
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
+    }
+
+    #[test]
+    fn extracts_form_attributes_and_commands_from_body_tail() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let form_body = deflate_for_test(
+            format!(
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,4,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}}}},{{0,0}}}}}},{{0,0}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (catalog_uuid.to_string(), "Catalog.Товары".to_string()),
+            (
+                option_uuid.to_string(),
+                "FunctionalOption.ИспользоватьФункцию".to_string(),
+            ),
+        ]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains(r#"<Attribute name="Список" id="1">"#));
+        assert!(form_xml.contains("<v8:Type>cfg:DynamicList</v8:Type>"));
+        assert!(form_xml.contains("<MainAttribute>true</MainAttribute>"));
+        assert!(form_xml.contains("<Field>Список.Наименование</Field>"));
+        assert!(form_xml.contains("<Field>Список.Ссылка</Field>"));
+        assert!(form_xml.contains("<ManualQuery>true</ManualQuery>"));
+        assert!(form_xml.contains("<DynamicDataRead>true</DynamicDataRead>"));
+        assert!(form_xml.contains("<MainTable>Catalog.Товары</MainTable>"));
+        assert!(form_xml.contains(r#"<Command name="Выполнить" id="2">"#));
+        assert!(form_xml.contains("<Action>Выполнить</Action>"));
+        assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
+        assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
     }
 
     #[test]

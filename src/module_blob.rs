@@ -72,6 +72,7 @@ pub struct PatchedVersionsBlob {
 pub struct ParsedFormBodyBlob {
     pub layout: String,
     pub module_text: String,
+    pub trailing: Vec<String>,
     pub trailing_fields: usize,
 }
 
@@ -3101,6 +3102,11 @@ pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
     Ok(ParsedFormBodyBlob {
         layout,
         module_text,
+        trailing: container
+            .trailing_ranges
+            .into_iter()
+            .map(|range| plain[range].trim().to_string())
+            .collect(),
         trailing_fields: container.trailing_fields,
     })
 }
@@ -3109,6 +3115,7 @@ pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
 struct FormBodyContainer {
     layout_range: Range<usize>,
     module_range: Range<usize>,
+    trailing_ranges: Vec<Range<usize>>,
     trailing_fields: usize,
 }
 
@@ -3138,6 +3145,7 @@ impl FormBodyContainer {
         Ok(Self {
             layout_range,
             module_range,
+            trailing_ranges: fields.iter().skip(3).cloned().collect(),
             trailing_fields: fields.len().saturating_sub(3),
         })
     }
