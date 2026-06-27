@@ -135,6 +135,13 @@ pub struct PackedScheduleBlob {
 }
 
 #[derive(Debug, Clone)]
+pub struct PackedRawDeflatedBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
 }
@@ -841,6 +848,16 @@ pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
     Ok(PackedScheduleBlob {
         blob,
         plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    let blob = deflate_raw(bytes)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: bytes.len(),
         output_sha256,
     })
 }
@@ -5160,6 +5177,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             "{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_raw_deflated_blob_from_bytes() -> anyhow::Result<()> {
+        let bytes = b"<?xml version=\"1.0\"?><Definition><Item name=\"A\"/></Definition>";
+
+        let packed = super::pack_raw_deflated_blob_from_bytes(bytes)?;
+
+        assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
+        assert_eq!(packed.plain_bytes, bytes.len());
 
         Ok(())
     }

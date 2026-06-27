@@ -38,9 +38,10 @@ use crate::cli::{
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, pack_common_module_metadata_blob_from_xml, pack_module_blob_bytes,
-    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
-    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
-    parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
+    pack_raw_deflated_blob_from_bytes, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
+    patch_versions_blob_bytes,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -1867,6 +1868,22 @@ fn prepare_metadata_body_rows(
         "ScheduledJob" => {
             prepare_scheduled_job_body_row(sqlcmd, server, database, xml_path, properties)
         }
+        "XDTOPackage" => prepare_raw_deflated_body_row(
+            sqlcmd,
+            server,
+            database,
+            infer_xdto_package_body_path(xml_path),
+            properties,
+            "XDTOPackage body",
+        ),
+        "WSReference" => prepare_raw_deflated_body_row(
+            sqlcmd,
+            server,
+            database,
+            infer_ws_reference_definition_path(xml_path),
+            properties,
+            "WSReference definition",
+        ),
         _ => Ok(Vec::new()),
     }
 }
@@ -1920,6 +1937,31 @@ fn prepare_scheduled_job_body_row(
         .with_context(|| format!("failed to read JobSchedule XML {}", body_path.display()))?;
     let packed = pack_schedule_blob_from_xml(&xml)
         .with_context(|| format!("failed to pack JobSchedule {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_raw_deflated_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    body_path: PathBuf,
+    properties: &SimpleMetadataXmlProperties,
+    label: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path)
+        .with_context(|| format!("failed to read {label} {}", body_path.display()))?;
+    let packed = pack_raw_deflated_blob_from_bytes(&bytes)
+        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -3289,6 +3331,24 @@ fn infer_scheduled_job_schedule_path(xml: &Path) -> PathBuf {
         .join("Schedule.xml")
 }
 
+fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
+    let package_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(package_name)
+        .join("Ext")
+        .join("Package.bin")
+}
+
+fn infer_ws_reference_definition_path(xml: &Path) -> PathBuf {
+    let reference_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(reference_name)
+        .join("Ext")
+        .join("WSDefinition.xml")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -3711,6 +3771,18 @@ mod tests {
         assert_eq!(
             infer_common_module_text_path(r"CommonModules\РаботаСБанкамиВызовСервера.xml".as_ref()),
             std::path::PathBuf::from(r"CommonModules\РаботаСБанкамиВызовСервера\Ext\Module.bsl")
+        );
+    }
+
+    #[test]
+    fn infers_raw_deflated_metadata_body_paths() {
+        assert_eq!(
+            super::infer_xdto_package_body_path(r"XDTOPackages\Exchange.xml".as_ref()),
+            std::path::PathBuf::from(r"XDTOPackages\Exchange\Ext\Package.bin")
+        );
+        assert_eq!(
+            super::infer_ws_reference_definition_path(r"WSReferences\UpdateFiles.xml".as_ref()),
+            std::path::PathBuf::from(r"WSReferences\UpdateFiles\Ext\WSDefinition.xml")
         );
     }
 
