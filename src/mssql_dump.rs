@@ -4247,10 +4247,6 @@ fn parse_moxel_row_column_set_ids(
                 pair_mode = false;
                 break;
             };
-            if row_index == 0 {
-                pair_mode = false;
-                break;
-            }
             row_column_ids.insert(row_index, columns_id.clone());
         }
         if pair_mode {
@@ -11084,6 +11080,246 @@ mod tests {
     }
 
     #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_row_columns_id() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>2</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>2</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>4</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>First</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<formatIndex>4</formatIndex>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<c>
+				<c>
+					<f>5</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+	<format>
+		<width>30</width>
+	</format>
+	<format>
+		<width>40</width>
+	</format>
+	<format>
+		<width>50</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_row_zero_columns_id() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<c>
+				<c>
+					<f>2</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_multiple_row_columns_id_from_zero() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<c>
+				<c>
+					<f>2</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>First</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>
+			<c>
+				<c>
+					<f>2</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Second</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+        assert!(extracted.contains("<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>"));
+    }
+
+    #[test]
     fn formats_moxel_receipt_columns_headers_style_font_and_default_format() {
         let object_refs = BTreeMap::from([(
             "757b547b-b79c-459a-a64a-eef19a09a38f".to_string(),
@@ -11200,6 +11436,33 @@ mod tests {
         );
         assert_eq!(
             row_column_ids.get(&12).map(String::as_str),
+            Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9")
+        );
+    }
+
+    #[test]
+    fn formats_moxel_row_column_ids_accept_row_zero_pair_mapping() {
+        let additional_sets = vec![
+            MoxelColumnSet {
+                id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                size: 1,
+                columns: vec![],
+            },
+            MoxelColumnSet {
+                id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
+                size: 1,
+                columns: vec![],
+            },
+        ];
+        let fields = ["2", "0", "0", "1", "1", "0"];
+        let row_column_ids = parse_moxel_row_column_set_ids(&fields, 0, &additional_sets).unwrap();
+
+        assert_eq!(
+            row_column_ids.get(&0).map(String::as_str),
+            Some("5c3926f2-4223-4ca7-a6a7-7160301c991d")
+        );
+        assert_eq!(
+            row_column_ids.get(&1).map(String::as_str),
             Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9")
         );
     }
