@@ -23,6 +23,8 @@ pub enum Commands {
     AuditSpreadsheetRoundtrip(AuditSpreadsheetRoundtripArgs),
     /// Audit managed Form.xml source coverage and complexity.
     AuditFormSources(AuditFormSourcesArgs),
+    /// Audit source-tree files that current SQL loader can or cannot consume.
+    AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Print the current compatibility matrix for implemented operations.
@@ -201,6 +203,15 @@ pub struct AuditSpreadsheetRoundtripArgs {
 
 #[derive(Debug, Args)]
 pub struct AuditFormSourcesArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditSourceLoadCoverageArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
@@ -2679,6 +2690,24 @@ mod tests {
             Commands::AuditFormSources(args) => {
                 assert_eq!(args.root, PathBuf::from(r"C:\sources"));
                 assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\forms.json")));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let load_coverage = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-source-load-coverage",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\load-coverage.json",
+        ]);
+        match load_coverage.command {
+            Commands::AuditSourceLoadCoverage(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\load-coverage.json"))
+                );
             }
             other => panic!("unexpected command: {other:?}"),
         }

@@ -15,6 +15,7 @@ use crate::module_blob::{
 };
 use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
+use crate::source::{SourceKind, scan_sources};
 
 #[derive(Debug, Serialize)]
 pub struct SpreadsheetTemplateAuditReport {
@@ -93,6 +94,44 @@ pub struct FormSourceAuditError {
     pub message: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SourceLoadCoverageAuditReport {
+    pub root: PathBuf,
+    pub total_files: usize,
+    pub total_bytes: u64,
+    pub files_by_kind: Vec<SourceKindCount>,
+    pub stage_entry_files: usize,
+    pub stage_metadata_xml_files: usize,
+    pub stage_common_module_xml_files: usize,
+    pub potentially_stageable_body_files: usize,
+    pub module_files: usize,
+    pub supported_module_files: usize,
+    pub supported_ext_body_files: usize,
+    pub unsupported_form_xml_files: usize,
+    pub unsupported_form_xml_bytes: u64,
+    pub form_xml_stageable_by_module: usize,
+    pub form_xml_without_stageable_module: usize,
+    pub ignored_form_ext_files: usize,
+    pub ignored_form_ext_bytes: u64,
+    pub known_uncovered_files: usize,
+    pub known_uncovered_bytes: u64,
+    pub top_known_uncovered: Vec<SourceLoadCoverageItem>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SourceKindCount {
+    pub kind: String,
+    pub count: usize,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SourceLoadCoverageItem {
+    pub path: String,
+    pub bytes: u64,
+    pub reason: String,
+}
+
 #[derive(Debug, Default)]
 struct FormXmlShape {
     top_level_elements: BTreeMap<String, usize>,
@@ -107,6 +146,112 @@ struct SpreadsheetTemplateRoundTripItemAudit {
     matched: usize,
     different: usize,
     errors: Vec<SpreadsheetTemplateRoundTripAuditError>,
+}
+
+pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAuditReport> {
+    let manifest = scan_sources(root)?;
+    let mut files_by_kind = BTreeMap::<String, (usize, u64)>::new();
+    let mut stage_metadata_xml_files = 0usize;
+    let mut stage_common_module_xml_files = 0usize;
+    let mut module_files = 0usize;
+    let mut supported_module_files = 0usize;
+    let mut supported_ext_body_files = 0usize;
+    let mut unsupported_form_xml_files = 0usize;
+    let mut unsupported_form_xml_bytes = 0u64;
+    let mut form_xml_stageable_by_module = 0usize;
+    let mut ignored_form_ext_files = 0usize;
+    let mut ignored_form_ext_bytes = 0u64;
+    let mut known_uncovered = Vec::new();
+
+    for file in &manifest.files {
+        let kind = source_kind_name(&file.kind).to_string();
+        let entry = files_by_kind.entry(kind).or_default();
+        entry.0 += 1;
+        entry.1 += file.size_bytes;
+
+        if is_stage_metadata_xml_path(&file.path) {
+            stage_metadata_xml_files += 1;
+        }
+        if is_root_common_module_xml_path(&file.path) {
+            stage_common_module_xml_files += 1;
+        }
+
+        if file.kind == SourceKind::Module {
+            module_files += 1;
+            if is_supported_module_file(&file.path) {
+                supported_module_files += 1;
+            }
+        }
+        if is_supported_ext_body_file(&file.path) {
+            supported_ext_body_files += 1;
+        }
+
+        if is_form_ext_xml_path(&file.path) {
+            unsupported_form_xml_files += 1;
+            unsupported_form_xml_bytes += file.size_bytes;
+            if form_module_path_exists(&manifest.files, &file.path) {
+                form_xml_stageable_by_module += 1;
+            }
+            known_uncovered.push(SourceLoadCoverageItem {
+                path: file.path.clone(),
+                bytes: file.size_bytes,
+                reason: "full Form.xml body is not compiled by current loader".to_string(),
+            });
+        } else if is_form_ext_non_module_file(&file.path) {
+            ignored_form_ext_files += 1;
+            ignored_form_ext_bytes += file.size_bytes;
+            known_uncovered.push(SourceLoadCoverageItem {
+                path: file.path.clone(),
+                bytes: file.size_bytes,
+                reason: "non-module file under Ext/Form is not loaded by current form body packer"
+                    .to_string(),
+            });
+        } else if is_known_uncovered_configuration_asset(&file.path) {
+            known_uncovered.push(SourceLoadCoverageItem {
+                path: file.path.clone(),
+                bytes: file.size_bytes,
+                reason: "configuration asset is not routed by current loader".to_string(),
+            });
+        }
+    }
+
+    known_uncovered.sort_by(|left, right| {
+        right
+            .bytes
+            .cmp(&left.bytes)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let known_uncovered_files = known_uncovered.len();
+    let known_uncovered_bytes = known_uncovered.iter().map(|item| item.bytes).sum();
+    known_uncovered.truncate(50);
+
+    let stage_entry_files = stage_metadata_xml_files + stage_common_module_xml_files;
+    let potentially_stageable_body_files = supported_module_files + supported_ext_body_files;
+    let form_xml_without_stageable_module =
+        unsupported_form_xml_files.saturating_sub(form_xml_stageable_by_module);
+
+    Ok(SourceLoadCoverageAuditReport {
+        root: manifest.root,
+        total_files: manifest.files.len(),
+        total_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
+        files_by_kind: sorted_source_kind_counts(files_by_kind),
+        stage_entry_files,
+        stage_metadata_xml_files,
+        stage_common_module_xml_files,
+        potentially_stageable_body_files,
+        module_files,
+        supported_module_files,
+        supported_ext_body_files,
+        unsupported_form_xml_files,
+        unsupported_form_xml_bytes,
+        form_xml_stageable_by_module,
+        form_xml_without_stageable_module,
+        ignored_form_ext_files,
+        ignored_form_ext_bytes,
+        known_uncovered_files,
+        known_uncovered_bytes,
+        top_known_uncovered: known_uncovered,
+    })
 }
 
 pub fn audit_spreadsheet_templates(root: &Path) -> Result<SpreadsheetTemplateAuditReport> {
@@ -166,6 +311,201 @@ pub fn audit_spreadsheet_templates(root: &Path) -> Result<SpreadsheetTemplateAud
         failed: errors.len(),
         errors,
     })
+}
+
+fn sorted_source_kind_counts(counts: BTreeMap<String, (usize, u64)>) -> Vec<SourceKindCount> {
+    let mut counts = counts
+        .into_iter()
+        .map(|(kind, (count, bytes))| SourceKindCount { kind, count, bytes })
+        .collect::<Vec<_>>();
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    counts
+}
+
+fn source_kind_name(kind: &SourceKind) -> &'static str {
+    match kind {
+        SourceKind::ConfigurationRoot => "configuration_root",
+        SourceKind::MetadataXml => "metadata_xml",
+        SourceKind::Module => "module",
+        SourceKind::Form => "form",
+        SourceKind::Template => "template",
+        SourceKind::Binary => "binary",
+        SourceKind::OtherXml => "other_xml",
+        SourceKind::Other => "other",
+    }
+}
+
+fn is_stage_metadata_xml_path(path: &str) -> bool {
+    is_configuration_metadata_xml_path(path)
+        || is_root_metadata_xml_path(path)
+        || is_template_metadata_xml_path(path)
+        || is_form_metadata_xml_path(path)
+}
+
+fn is_configuration_metadata_xml_path(path: &str) -> bool {
+    normalize_source_path(path).eq_ignore_ascii_case("Configuration.xml")
+}
+
+fn is_root_metadata_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && is_stage_root_metadata_collection(parts[0])
+}
+
+fn is_root_common_module_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && parts[0] == "commonmodules"
+}
+
+fn is_template_metadata_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "templates"
+}
+
+fn is_form_metadata_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "forms"
+}
+
+fn is_stage_root_metadata_collection(value: &str) -> bool {
+    matches!(
+        value,
+        "catalogs"
+            | "documents"
+            | "informationregisters"
+            | "accumulationregisters"
+            | "accountingregisters"
+            | "calculationregisters"
+            | "chartsofcharacteristictypes"
+            | "chartsofaccounts"
+            | "chartsofcalculationtypes"
+            | "chartsofcalculationregisters"
+            | "commonforms"
+            | "commonpictures"
+            | "commontemplates"
+            | "commonattributes"
+            | "commandgroups"
+            | "documentjournals"
+            | "reports"
+            | "dataprocessors"
+            | "enums"
+            | "exchangeplans"
+            | "eventsubscriptions"
+            | "filtercriteria"
+            | "functionaloptions"
+            | "functionaloptionsparameters"
+            | "httpservices"
+            | "languages"
+            | "scheduledjobs"
+            | "sessionparameters"
+            | "settingsstorages"
+            | "styleitems"
+            | "styles"
+            | "subsystems"
+            | "roles"
+            | "commoncommands"
+            | "businessprocesses"
+            | "bots"
+            | "definedtypes"
+            | "tasks"
+            | "constants"
+            | "documentnumerators"
+            | "integrationservices"
+            | "sequences"
+            | "webservices"
+            | "wsreferences"
+            | "xdtopackages"
+    )
+}
+
+fn is_supported_module_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    matches!(
+        lower.rsplit('/').next(),
+        Some("module.bsl")
+            | Some("managermodule.bsl")
+            | Some("objectmodule.bsl")
+            | Some("recordsetmodule.bsl")
+            | Some("valuemanagermodule.bsl")
+            | Some("commandmodule.bsl")
+    )
+}
+
+fn is_supported_ext_body_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    lower.ends_with("/ext/rights.xml")
+        || lower.ends_with("/ext/schedule.xml")
+        || lower.ends_with("/ext/template.xml")
+        || lower.ends_with("/ext/template.txt")
+        || lower.ends_with("/ext/template.bin")
+        || lower.ends_with("/ext/picture.xml")
+        || lower.ends_with("/ext/predefined.xml")
+        || lower.ends_with("/ext/content.xml")
+        || lower.ends_with("/ext/flowchart.xml")
+        || lower.ends_with("/ext/help.xml")
+        || lower.ends_with("/ext/commandinterface.xml")
+        || lower.ends_with("/ext/style.xml")
+}
+
+fn is_form_ext_xml_path(path: &str) -> bool {
+    normalize_source_path(path)
+        .to_ascii_lowercase()
+        .ends_with("/ext/form.xml")
+}
+
+fn is_form_ext_non_module_file(path: &str) -> bool {
+    let normalized = normalize_source_path(path);
+    let lower = normalized.to_ascii_lowercase();
+    lower.contains("/ext/form/")
+        && !lower.ends_with("/ext/form/module.bsl")
+        && !lower.ends_with("/ext/form.xml")
+}
+
+fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &str) -> bool {
+    let module_path = normalize_source_path(form_xml_path)
+        .trim_end_matches("Form.xml")
+        .to_string()
+        + "Form/Module.bsl";
+    files
+        .iter()
+        .any(|file| normalize_source_path(&file.path).eq_ignore_ascii_case(&module_path))
+}
+
+fn is_known_uncovered_configuration_asset(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "ext/additionalindexes.xml"
+            | "ext/mobileclientsignature.bin"
+            | "ext/standaloneconfigurationcontent.bin"
+            | "ext/mainsectioncommandinterface.xml"
+            | "ext/clientapplicationinterface.xml"
+            | "ext/homepageworkarea.xml"
+    )
+}
+
+fn normalize_source_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 pub fn audit_spreadsheet_template_roundtrip(
@@ -875,6 +1215,74 @@ mod tests {
             count: 1
         }));
         assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
+
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn audits_source_load_coverage_marks_stage_entries_and_uncovered_forms() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-load-coverage-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
+        fs::create_dir_all(root.join("Catalogs/Products/Ext"))?;
+        fs::create_dir_all(root.join("CommonModules/Foo/Ext"))?;
+        fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="11111111-1111-4111-8111-111111111111"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm.xml"),
+            br#"<MetaDataObject><Form uuid="22222222-2222-4222-8222-222222222222"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml"),
+            br#"<Form><Attributes/></Form>"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl"),
+            b"Procedure Open(Command)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon/Picture.png"),
+            b"\x89PNG\r\n\x1a\n",
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Ext/Predefined.xml"),
+            b"<Data/>",
+        )?;
+        fs::write(
+            root.join("CommonModules/Foo.xml"),
+            br#"<MetaDataObject><CommonModule uuid="33333333-3333-4333-8333-333333333333"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("CommonModules/Foo/Ext/Module.bsl"),
+            b"Procedure Run()\nEndProcedure\n",
+        )?;
+
+        let report = audit_source_load_coverage(&root)?;
+
+        assert_eq!(report.total_files, 8);
+        assert_eq!(report.stage_metadata_xml_files, 2);
+        assert_eq!(report.stage_common_module_xml_files, 1);
+        assert_eq!(report.stage_entry_files, 3);
+        assert_eq!(report.module_files, 2);
+        assert_eq!(report.supported_module_files, 2);
+        assert_eq!(report.supported_ext_body_files, 1);
+        assert_eq!(report.potentially_stageable_body_files, 3);
+        assert_eq!(report.unsupported_form_xml_files, 1);
+        assert_eq!(report.form_xml_stageable_by_module, 1);
+        assert_eq!(report.form_xml_without_stageable_module, 0);
+        assert_eq!(report.ignored_form_ext_files, 1);
+        assert_eq!(report.known_uncovered_files, 2);
+        assert!(
+            report
+                .top_known_uncovered
+                .iter()
+                .any(|item| item.path == "Catalogs/Products/Forms/ListForm/Ext/Form.xml")
+        );
 
         let _ = fs::remove_dir_all(root);
         Ok(())
