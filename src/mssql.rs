@@ -1202,7 +1202,15 @@ fn is_form_metadata_xml(path: &str) -> bool {
 }
 
 fn is_stage_metadata_xml(path: &str) -> bool {
-    is_root_metadata_xml(path) || is_template_metadata_xml(path) || is_form_metadata_xml(path)
+    is_configuration_metadata_xml(path)
+        || is_root_metadata_xml(path)
+        || is_template_metadata_xml(path)
+        || is_form_metadata_xml(path)
+}
+
+fn is_configuration_metadata_xml(path: &str) -> bool {
+    path.replace('\\', "/")
+        .eq_ignore_ascii_case("Configuration.xml")
 }
 
 fn is_root_common_module_xml(path: &str) -> bool {
@@ -2284,7 +2292,11 @@ fn prepare_object_module_body_rows(
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = Vec::new();
     for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
-        let body_path = infer_object_module_body_path(xml_path, file_name);
+        let body_path = if properties.kind == "Configuration" {
+            infer_configuration_module_body_path(xml_path, file_name)
+        } else {
+            infer_object_module_body_path(xml_path, file_name)
+        };
         if !body_path.exists() {
             continue;
         }
@@ -2307,6 +2319,12 @@ fn prepare_object_module_body_rows(
 fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static str)] {
     match kind {
         "Bot" => &[("1", "Module.bsl")],
+        "Configuration" => &[
+            ("0", "OrdinaryApplicationModule.bsl"),
+            ("5", "ExternalConnectionModule.bsl"),
+            ("6", "ManagedApplicationModule.bsl"),
+            ("7", "SessionModule.bsl"),
+        ],
         "CommonCommand" => &[("2", "CommandModule.bsl")],
         "Constant" => &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")],
         "SettingsStorage" => &[("8", "ManagerModule.bsl")],
@@ -3907,6 +3925,13 @@ fn infer_object_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
     xml.with_extension("").join("Ext").join(file_name)
 }
 
+fn infer_configuration_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join("Ext")
+        .join(file_name)
+}
+
 fn infer_form_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Form.xml")
 }
@@ -4142,6 +4167,7 @@ mod tests {
         assert!(!is_stage_metadata_xml(
             "Catalogs/Products/Forms/ItemForm/Ext/Form.xml"
         ));
+        assert!(is_stage_metadata_xml("Configuration.xml"));
         assert_eq!(modules, vec!["CommonModules/Foo.xml"]);
     }
 
@@ -4231,6 +4257,14 @@ mod tests {
                     xml_root: Some("Form".to_string()),
                     object_hint: Some("Catalogs/Products".to_string()),
                 },
+                SourceFile {
+                    path: "Configuration.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::ConfigurationRoot,
+                    xml_root: Some("Configuration".to_string()),
+                    object_hint: Some("Configuration".to_string()),
+                },
             ],
         };
 
@@ -4247,7 +4281,8 @@ mod tests {
                 "C:/sources/Bots/Notify.xml",
                 "C:/sources/Styles/Theme.xml",
                 "C:/sources/DataProcessors/Import/Templates/Schema.xml",
-                "C:/sources/Catalogs/Products/Forms/ItemForm.xml"
+                "C:/sources/Catalogs/Products/Forms/ItemForm.xml",
+                "C:/sources/Configuration.xml"
             ]
         );
         assert_eq!(
@@ -4542,6 +4577,15 @@ mod tests {
             super::object_module_body_suffixes("IntegrationService"),
             &[("0", "Module.bsl")]
         );
+        assert_eq!(
+            super::object_module_body_suffixes("Configuration"),
+            &[
+                ("0", "OrdinaryApplicationModule.bsl"),
+                ("5", "ExternalConnectionModule.bsl"),
+                ("6", "ManagedApplicationModule.bsl"),
+                ("7", "SessionModule.bsl")
+            ]
+        );
         assert!(super::object_module_body_suffixes("Role").is_empty());
     }
 
@@ -4560,6 +4604,13 @@ mod tests {
                 "RecordSetModule.bsl"
             ),
             std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
+        );
+        assert_eq!(
+            super::infer_configuration_module_body_path(
+                r"Configuration.xml".as_ref(),
+                "ManagedApplicationModule.bsl"
+            ),
+            std::path::PathBuf::from(r"Ext\ManagedApplicationModule.bsl")
         );
     }
 

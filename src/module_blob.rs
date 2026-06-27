@@ -4701,6 +4701,36 @@ mod tests {
     }
 
     #[test]
+    fn parses_configuration_xml_properties() {
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Configuration uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>DemoApp</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>Demo app</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Configuration comment</Comment>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#;
+
+        let properties = super::parse_simple_metadata_xml_properties(xml).unwrap();
+
+        assert_eq!(properties.kind, "Configuration");
+        assert_eq!(properties.uuid, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa");
+        assert_eq!(properties.name, "DemoApp");
+        assert_eq!(properties.comment, "Configuration comment");
+        assert_eq!(properties.synonyms.len(), 1);
+        assert_eq!(properties.synonyms[0].lang, "en");
+        assert_eq!(properties.synonyms[0].content, "Demo app");
+    }
+
+    #[test]
     fn patches_simple_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
