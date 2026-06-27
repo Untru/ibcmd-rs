@@ -82,6 +82,7 @@ struct FormXmlBodyProperties {
     group: Option<FormXmlGroup>,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
+    commands: Vec<FormXmlCommand>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -94,6 +95,21 @@ struct FormXmlAutoCommandBar {
 struct FormXmlEvent {
     name: String,
     handler: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlCommand {
+    id: String,
+    name: String,
+    title: Vec<LocalizedString>,
+    tooltip: Vec<LocalizedString>,
+    action: Option<String>,
+    current_row_use: Option<FormXmlCommandCurrentRowUse>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlCommandCurrentRowUse {
+    DontUse,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -126,7 +142,7 @@ pub struct CommonModuleXmlProperties {
     pub return_values_reuse: ReturnValuesReuse,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct LocalizedString {
     pub lang: String,
     pub content: String,
@@ -3136,6 +3152,14 @@ pub fn pack_form_body_blob_from_form_xml(
             patch_form_layout_events(&mut layout, &properties.events)?;
             plain.replace_range(container.layout_range, &layout);
         }
+        if !properties.commands.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(commands_range) = container.trailing_ranges.get(2).cloned() {
+                let mut commands = plain[commands_range.clone()].trim().to_string();
+                patch_form_body_commands(&mut commands, &properties.commands)?;
+                plain.replace_range(commands_range, &commands);
+            }
+        }
     }
     if let Some(module_text) = module_text {
         let container = FormBodyContainer::parse(&plain)?;
@@ -3160,12 +3184,25 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut text_value = String::new();
     let mut properties = FormXmlBodyProperties::default();
     let mut current_event_name = None::<String>;
+    let mut current_command = None::<FormXmlCommand>;
+    let mut current_localized_section = None::<String>;
+    let mut current_localized_lang = None::<String>;
+    let mut current_localized_content = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if matches!(local.as_str(), "WindowOpeningMode" | "Group" | "Event") {
+                if matches!(
+                    local.as_str(),
+                    "WindowOpeningMode"
+                        | "Group"
+                        | "Event"
+                        | "Action"
+                        | "CurrentRowUse"
+                        | "lang"
+                        | "content"
+                ) {
                     text_value.clear();
                 }
                 if local == "Event"
@@ -3176,6 +3213,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
+                if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
+                    current_command = parse_form_command_xml(&event)?;
+                } else if matches!(local.as_str(), "Title" | "ToolTip")
+                    && path_ends_with(&path, &["Form", "Commands", "Command"])
+                {
+                    current_localized_section = Some(local.clone());
+                } else if local == "item"
+                    && (path_ends_with(&path, &["Form", "Commands", "Command", "Title"])
+                        || path_ends_with(&path, &["Form", "Commands", "Command", "ToolTip"]))
+                {
+                    current_localized_lang = None;
+                    current_localized_content = None;
                 }
                 path.push(local);
             }
@@ -3189,6 +3239,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "content"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                    )
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3197,6 +3265,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "content"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                    )
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3224,10 +3310,95 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             }
                         }
                     }
+                    "lang"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item", "lang"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                        ) =>
+                    {
+                        current_localized_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item", "content"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                        ) =>
+                    {
+                        current_localized_content = Some(text_value.to_string());
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item"],
+                        ) =>
+                    {
+                        if let (Some(command), Some(section), Some(lang), Some(content)) = (
+                            current_command.as_mut(),
+                            current_localized_section.as_deref(),
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            let value = LocalizedString { lang, content };
+                            match section {
+                                "Title" => command.title.push(value),
+                                "ToolTip" => command.tooltip.push(value),
+                                _ => {}
+                            }
+                        }
+                    }
+                    "Title" | "ToolTip"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", local.as_str()],
+                        ) =>
+                    {
+                        current_localized_section = None;
+                    }
+                    "Action"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", "Action"]) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.action = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CurrentRowUse"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "CurrentRowUse"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.current_row_use =
+                                Some(parse_form_command_current_row_use_xml(text_value.trim())?);
+                        }
+                    }
+                    "Command" if path_ends_with(&path, &["Form", "Commands", "Command"]) => {
+                        if let Some(command) = current_command.take() {
+                            properties.commands.push(command);
+                        }
+                    }
                     _ => {}
                 }
                 let _ = path.pop();
-                if matches!(local.as_str(), "WindowOpeningMode" | "Group" | "Event") {
+                if matches!(
+                    local.as_str(),
+                    "WindowOpeningMode"
+                        | "Group"
+                        | "Event"
+                        | "Action"
+                        | "CurrentRowUse"
+                        | "lang"
+                        | "content"
+                ) {
                     text_value.clear();
                 }
             }
@@ -3251,6 +3422,30 @@ fn parse_form_auto_command_bar_xml(
         return Ok(None);
     };
     Ok(Some(FormXmlAutoCommandBar { id, name }))
+}
+
+fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlCommand>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlCommand {
+        id,
+        name,
+        title: Vec::new(),
+        tooltip: Vec::new(),
+        action: None,
+        current_row_use: None,
+    }))
+}
+
+fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandCurrentRowUse> {
+    match value {
+        "DontUse" => Ok(FormXmlCommandCurrentRowUse::DontUse),
+        other => Err(anyhow!("unsupported Form Command CurrentRowUse: {other}")),
+    }
 }
 
 fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpeningMode> {
@@ -3387,6 +3582,100 @@ fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static st
         FormXmlWindowOpeningMode::DontBlock => "0",
         FormXmlWindowOpeningMode::LockOwner => "1",
         FormXmlWindowOpeningMode::LockWholeInterface => "2",
+    }
+}
+
+fn patch_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> Result<()> {
+    for command in commands {
+        let _ = patch_form_body_command(text, command)?;
+    }
+    Ok(())
+}
+
+fn patch_form_body_command(text: &mut String, command: &FormXmlCommand) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_command_entry(&mut nested, command)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+        if patch_form_body_command(&mut nested, command)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_command_entry(text: &mut String, command: &FormXmlCommand) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+        return Ok(false);
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = fields
+        .get(2)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    let matches_command = existing_id.as_deref() == Some(command.id.as_str())
+        || existing_name.as_deref() == Some(command.name.as_str());
+    if !matches_command {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+
+    if let Some(name_range) = fields.get(2)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range.clone(), format_1c_string(&command.name)));
+    }
+    if !command.title.is_empty()
+        && let Some(title_range) = fields.get(3)
+    {
+        replacements.push((title_range.clone(), format_1c_synonyms(&command.title)));
+    }
+    if !command.tooltip.is_empty()
+        && let Some(tooltip_range) = fields.get(4)
+    {
+        replacements.push((tooltip_range.clone(), format_1c_synonyms(&command.tooltip)));
+    }
+    if let Some(action) = &command.action
+        && let Some(action_range) = fields.get(8)
+        && parse_1c_quoted_string(&text[action_range.clone()]).is_ok()
+    {
+        replacements.push((action_range.clone(), format_1c_string(action)));
+    }
+    if let Some(current_row_use) = command.current_row_use
+        && let Some(current_row_use_range) = fields.get(9)
+    {
+        replacements.push((
+            current_row_use_range.clone(),
+            form_command_current_row_use_code(current_row_use).to_string(),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+
+    Ok(true)
+}
+
+fn form_command_current_row_use_code(value: FormXmlCommandCurrentRowUse) -> &'static str {
+    match value {
+        FormXmlCommandCurrentRowUse::DontUse => "3",
     }
 }
 
@@ -10232,6 +10521,56 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!parsed.layout.contains("OldBar"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_commands() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,\"ru\",\"Old title\"},{1,\"ru\",\"Old tip\"},0,0,0,\"OldAction\",0,0,0,{0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>New title</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>New tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>NewAction</Action>
+			<CurrentRowUse>DontUse</CurrentRowUse>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[2].contains(r#""Do",{1,"ru","New title"}"#));
+        assert!(parsed.trailing[2].contains(r#"{1,"ru","New tip"}"#));
+        assert!(parsed.trailing[2].contains(r#""NewAction",3,0,0,{0}"#));
+        assert!(!parsed.trailing[2].contains("Old title"));
+        assert!(!parsed.trailing[2].contains("Old tip"));
+        assert!(!parsed.trailing[2].contains("OldAction"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
         assert_eq!(
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
