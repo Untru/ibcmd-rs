@@ -3828,6 +3828,7 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
 struct FormBodyProperties {
     title: Vec<(String, String)>,
     window_opening_mode: Option<&'static str>,
+    auto_title: Option<bool>,
     group: Option<&'static str>,
     command_bar_location: Option<&'static str>,
 }
@@ -3948,6 +3949,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default(),
         window_opening_mode: extract_form_window_opening_mode(fields),
+        auto_title: extract_form_auto_title(fields),
         group: extract_form_root_group(fields),
         command_bar_location: extract_form_command_bar_location(fields),
     }
@@ -3958,6 +3960,13 @@ fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
         "0" => Some("DontBlock"),
         "1" => Some("LockOwner"),
         "2" => Some("LockWholeInterface"),
+        _ => None,
+    }
+}
+
+fn extract_form_auto_title(fields: &[&str]) -> Option<bool> {
+    match fields.get(9).map(|field| field.trim())? {
+        "0" => Some(false),
         _ => None,
     }
 }
@@ -5376,6 +5385,9 @@ fn format_form_body_xml(
             "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
             escape_xml_text(window_opening_mode)
         ));
+    }
+    if properties.auto_title == Some(false) {
+        xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
@@ -11970,12 +11982,13 @@ mod tests {
     #[test]
     fn extracts_form_top_level_properties_to_body_xml() {
         let form_body = deflate_for_test(
-            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,1,0,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},1,1,0,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
+        assert!(form_xml.contains("<AutoTitle>false</AutoTitle>"));
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
         assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
     }
