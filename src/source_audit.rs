@@ -472,6 +472,7 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/commandinterface.xml")
         || lower.ends_with("/ext/style.xml")
         || lower == "ext/mobileclientsignature.bin"
+        || lower == "ext/mainsectioncommandinterface.xml"
 }
 
 fn is_form_ext_xml_path(path: &str) -> bool {
@@ -504,7 +505,6 @@ fn is_known_uncovered_configuration_asset(path: &str) -> bool {
         lower.as_str(),
         "ext/additionalindexes.xml"
             | "ext/standaloneconfigurationcontent.bin"
-            | "ext/mainsectioncommandinterface.xml"
             | "ext/clientapplicationinterface.xml"
             | "ext/homepageworkarea.xml"
     )
@@ -1272,17 +1272,21 @@ mod tests {
             root.join("Ext/MobileClientSignature.bin"),
             b"{2,\"\",\"\",{0},0}",
         )?;
+        fs::write(
+            root.join("Ext/MainSectionCommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 9);
+        assert_eq!(report.total_files, 10);
         assert_eq!(report.stage_metadata_xml_files, 2);
         assert_eq!(report.stage_common_module_xml_files, 1);
         assert_eq!(report.stage_entry_files, 3);
         assert_eq!(report.module_files, 2);
         assert_eq!(report.supported_module_files, 2);
-        assert_eq!(report.supported_ext_body_files, 2);
-        assert_eq!(report.potentially_stageable_body_files, 4);
+        assert_eq!(report.supported_ext_body_files, 3);
+        assert_eq!(report.potentially_stageable_body_files, 5);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);

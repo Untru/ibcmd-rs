@@ -527,6 +527,22 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
                 );
             }
         }
+        let main_section_interface_id = format!("{metadata_id}.9");
+        if let Some(row) = rows_by_file_name.get(main_section_interface_id.as_str())
+            && let Ok(bytes) = decode_hex(&row.binary_hex)
+            && parse_command_interface_blob(&bytes, &command_refs, &metadata_refs).is_some()
+        {
+            paths.insert(
+                main_section_interface_id,
+                SourceAsset {
+                    primary_path: PathBuf::from("Ext/MainSectionCommandInterface.xml"),
+                    kind: SourceAssetKind::CommandInterface {
+                        command_refs: command_refs.clone(),
+                        metadata_refs: metadata_refs.clone(),
+                    },
+                },
+            );
+        }
     }
     for row in rows {
         if row.file_name.contains('.') {
@@ -10423,6 +10439,9 @@ mod tests {
         let parent_blob = b"parent-cf".to_vec();
         let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
         let mobile_signature_blob = deflate_for_test(&mobile_signature);
+        let main_section_command_interface = deflate_for_test(
+            b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
+        );
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let rows = vec![
             ConfigRow {
@@ -10468,6 +10487,12 @@ mod tests {
                 binary_hex: encode_hex_for_test(&mobile_signature_blob),
             },
             ConfigRow {
+                file_name: format!("{uuid}.9"),
+                part_no: 0,
+                data_size: main_section_command_interface.len() as i64,
+                binary_hex: encode_hex_for_test(&main_section_command_interface),
+            },
+            ConfigRow {
                 file_name: format!("{uuid}.c"),
                 part_no: 0,
                 data_size: main_picture_blob.len() as i64,
@@ -10478,7 +10503,7 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 4);
-        assert_eq!(dumped.source_asset_rows, 4);
+        assert_eq!(dumped.source_asset_rows, 5);
         assert_eq!(
             fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
             ordinary_text
@@ -10508,6 +10533,12 @@ mod tests {
             fs::read(root.join("Ext/MobileClientSignature.bin")).unwrap(),
             mobile_signature
         );
+        let main_section_xml =
+            fs::read_to_string(root.join("Ext/MainSectionCommandInterface.xml")).unwrap();
+        assert!(main_section_xml.contains("<CommandInterface"));
+        assert!(
+            main_section_xml.contains(r#"<Command name="0:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#)
+        );
         assert!(
             fs::read_to_string(root.join("Ext/Splash.xml"))
                 .unwrap()
@@ -10534,6 +10565,11 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.10"))
             .unwrap();
+        let main_section_interface_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.9"))
+            .unwrap();
         assert_eq!(
             splash_row.source_asset_path.as_deref(),
             Some("Ext/Splash.xml")
@@ -10549,6 +10585,10 @@ mod tests {
         assert_eq!(
             mobile_signature_row.source_asset_path.as_deref(),
             Some("Ext/MobileClientSignature.bin")
+        );
+        assert_eq!(
+            main_section_interface_row.source_asset_path.as_deref(),
+            Some("Ext/MainSectionCommandInterface.xml")
         );
 
         let _ = fs::remove_dir_all(root);

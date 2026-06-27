@@ -2565,6 +2565,14 @@ fn prepare_configuration_asset_body_rows(
         "10",
         "MobileClientSignature",
     )?);
+    rows.extend(prepare_configuration_command_interface_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
+        "9",
+    )?);
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
         server,
@@ -2612,6 +2620,39 @@ fn prepare_configuration_ext_picture_body_row(
         format!(
             "failed to pack Configuration ExtPicture {}",
             picture_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_command_interface_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration CommandInterface {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_command_interface_blob_from_xml(&base_body, &xml).with_context(|| {
+        format!(
+            "failed to pack Configuration CommandInterface {}",
+            body_path.display()
         )
     })?;
     Ok(vec![PreparedMetadataBodyStage {
