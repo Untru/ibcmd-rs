@@ -4459,6 +4459,9 @@ fn parse_moxel_row_at_for_scanning(
     ) {
         return Some(row);
     }
+    if expected_row_index != 0 {
+        return None;
+    }
     parse_moxel_row_shape(
         fields,
         index,
@@ -11465,6 +11468,20 @@ mod tests {
             row_column_ids.get(&1).map(String::as_str),
             Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9")
         );
+    }
+
+    #[test]
+    fn formats_moxel_scanning_does_not_treat_column_mapping_as_empty_row() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{0},{0},0,1,1,5,{16,2,{1,1,{\"ru\",\"Hello\"}},0},{10,0,00000000-0000-0000-0000-000000000000,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,1,{10,0,cab491a9-17d5-47b2-96fc-7a31b2075a1c,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,0,0,{0}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(xml.matches("<rowsItem>").count(), 1);
+        assert!(xml.contains("<index>0</index>"));
+        assert!(!xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
     }
 
     #[test]
