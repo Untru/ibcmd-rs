@@ -107,6 +107,7 @@ struct FormXmlCommand {
     title: Vec<LocalizedString>,
     tooltip: Vec<LocalizedString>,
     action: Option<String>,
+    functional_options: Vec<String>,
     current_row_use: Option<FormXmlCommandCurrentRowUse>,
 }
 
@@ -3232,7 +3233,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(commands_range) = container.trailing_ranges.get(2).cloned() {
                 let mut commands = plain[commands_range.clone()].trim().to_string();
-                patch_form_body_commands(&mut commands, &properties.commands)?;
+                patch_form_body_commands(&mut commands, &properties.commands, source)?;
                 plain.replace_range(commands_range, &commands);
             }
         }
@@ -3302,6 +3303,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Event"
                         | "Action"
                         | "CurrentRowUse"
+                        | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
                         | "DynamicDataRead"
@@ -3385,6 +3387,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    )
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
                     || path_ends_with(
                         &path,
@@ -3489,6 +3495,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    )
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
                     || path_ends_with(
                         &path,
@@ -3679,6 +3689,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(command) = current_command.as_mut() {
                             command.current_row_use =
                                 Some(parse_form_command_current_row_use_xml(text_value.trim())?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                command.functional_options.push(value.to_string());
+                            }
                         }
                     }
                     "Command" if path_ends_with(&path, &["Form", "Commands", "Command"]) => {
@@ -3922,6 +3945,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Event"
                         | "Action"
                         | "CurrentRowUse"
+                        | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
                         | "DynamicDataRead"
@@ -3975,6 +3999,7 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         title: Vec::new(),
         tooltip: Vec::new(),
         action: None,
+        functional_options: Vec::new(),
         current_row_use: None,
     }))
 }
@@ -4647,9 +4672,13 @@ fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static st
     }
 }
 
-fn patch_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> Result<()> {
+fn patch_form_body_commands(
+    text: &mut String,
+    commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
     for command in commands {
-        let _ = patch_form_body_command(text, command)?;
+        let _ = patch_form_body_command(text, command, source)?;
     }
     Ok(())
 }
@@ -4894,18 +4923,22 @@ fn format_form_setting_metadata_ref(
     Ok(format!("{{\"#\",{uuid}}}"))
 }
 
-fn patch_form_body_command(text: &mut String, command: &FormXmlCommand) -> Result<bool> {
+fn patch_form_body_command(
+    text: &mut String,
+    command: &FormXmlCommand,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     for range in fields {
         if !text[range.clone()].trim_start().starts_with('{') {
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_body_command_entry(&mut nested, command)? {
+        if patch_form_body_command_entry(&mut nested, command, source)? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
-        if patch_form_body_command(&mut nested, command)? {
+        if patch_form_body_command(&mut nested, command, source)? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -4913,7 +4946,11 @@ fn patch_form_body_command(text: &mut String, command: &FormXmlCommand) -> Resul
     Ok(false)
 }
 
-fn patch_form_body_command_entry(text: &mut String, command: &FormXmlCommand) -> Result<bool> {
+fn patch_form_body_command_entry(
+    text: &mut String,
+    command: &FormXmlCommand,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
         return Ok(false);
@@ -4966,6 +5003,15 @@ fn patch_form_body_command_entry(text: &mut String, command: &FormXmlCommand) ->
             form_command_current_row_use_code(current_row_use).to_string(),
         ));
     }
+    if !command.functional_options.is_empty()
+        && let Some(functional_options_range) = fields.get(12)
+        && let Some(source) = source
+    {
+        replacements.push((
+            functional_options_range.clone(),
+            format_form_reference_list(source, &command.functional_options)?,
+        ));
+    }
 
     replacements.sort_by_key(|(range, _)| range.start);
     for (range, replacement) in replacements.into_iter().rev() {
@@ -4979,6 +5025,20 @@ fn form_command_current_row_use_code(value: FormXmlCommandCurrentRowUse) -> &'st
     match value {
         FormXmlCommandCurrentRowUse::DontUse => "3",
     }
+}
+
+fn format_form_reference_list(
+    source: &MetadataSourceContext,
+    references: &[String],
+) -> Result<String> {
+    let mut text = format!("{{0,{}", references.len());
+    for reference in references {
+        let uuid = source.resolve_metadata_reference_uuid(reference)?;
+        text.push(',');
+        text.push_str(&uuid);
+    }
+    text.push('}');
+    Ok(text)
 }
 
 fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<()> {
@@ -11899,8 +11959,19 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
     #[test]
     fn packs_form_body_xml_existing_commands() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-command-options-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("FunctionalOptions"))?;
+        std::fs::write(
+            root.join("FunctionalOptions").join("UseFeature.xml"),
+            br#"<MetaDataObject><FunctionalOption uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>UseFeature</Name></Properties></FunctionalOption></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
         let base = super::deflate_raw(
-            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,\"ru\",\"Old title\"},{1,\"ru\",\"Old tip\"},0,0,0,\"OldAction\",0,0,0,{0}}},{0}}",
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,\"ru\",\"Old title\"},{1,\"ru\",\"Old tip\"},0,0,0,\"OldAction\",0,0,0,{0,1,88888888-8888-4888-8888-888888888888}}},{0}}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
@@ -11920,22 +11991,30 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			</ToolTip>
 			<Action>NewAction</Action>
 			<CurrentRowUse>DontUse</CurrentRowUse>
+			<FunctionalOptions>
+				<Item>FunctionalOption.UseFeature</Item>
+			</FunctionalOptions>
 		</Command>
 	</Commands>
 </Form>
 "#;
 
-        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
 
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[2].contains(r#""Do",{1,"ru","New title"}"#));
         assert!(parsed.trailing[2].contains(r#"{1,"ru","New tip"}"#));
-        assert!(parsed.trailing[2].contains(r#""NewAction",3,0,0,{0}"#));
+        assert!(
+            parsed.trailing[2]
+                .contains(r#""NewAction",3,0,0,{0,1,99999999-9999-4999-8999-999999999999}"#)
+        );
         assert!(!parsed.trailing[2].contains("Old title"));
         assert!(!parsed.trailing[2].contains("Old tip"));
         assert!(!parsed.trailing[2].contains("OldAction"));
+        assert!(!parsed.trailing[2].contains("88888888-8888-4888-8888-888888888888"));
         assert_eq!(parsed.trailing[0], "{0}");
         assert_eq!(parsed.trailing[1], "{0,0}");
         assert_eq!(parsed.trailing[3], "{0}");
@@ -11944,6 +12023,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
 
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
