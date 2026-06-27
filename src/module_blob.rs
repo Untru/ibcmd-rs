@@ -1200,7 +1200,7 @@ struct SpreadsheetDocumentXmlDrawing {
 
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
+    reader.config_mut().trim_text(false);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut document = SpreadsheetDocumentXml::default();

@@ -11045,6 +11045,45 @@ mod tests {
     }
 
     #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_text_entity_spacing() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>CatalogRef &quot;ReportsKinds&quot; -&amp;nbsp;the report type</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(
+            extracted.contains("CatalogRef &quot;ReportsKinds&quot; -&amp;nbsp;the report type")
+        );
+    }
+
+    #[test]
     fn formats_moxel_receipt_columns_headers_style_font_and_default_format() {
         let object_refs = BTreeMap::from([(
             "757b547b-b79c-459a-a64a-eef19a09a38f".to_string(),
