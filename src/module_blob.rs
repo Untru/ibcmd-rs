@@ -139,6 +139,7 @@ struct FormXmlChildItem {
     id: String,
     name: String,
     title: Vec<LocalizedString>,
+    command_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3185,7 +3186,11 @@ pub fn pack_form_body_blob_from_form_xml(
                 let _ = patch_form_layout_auto_command_bar(&mut layout, auto_command_bar)?;
             }
             patch_form_layout_events(&mut layout, &properties.events)?;
-            patch_form_layout_child_items(&mut layout, &properties.child_items)?;
+            patch_form_layout_child_items(
+                &mut layout,
+                &properties.child_items,
+                &properties.commands,
+            )?;
             plain.replace_range(container.layout_range, &layout);
         }
         if !properties.commands.is_empty() {
@@ -3269,6 +3274,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Index"
                         | "DefaultVisible"
                         | "Common"
+                        | "CommandName"
                         | "lang"
                         | "content"
                 ) {
@@ -3418,6 +3424,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_command_name(&path, &current_child_items)
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3506,6 +3513,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_command_name(&path, &current_child_items)
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3781,6 +3789,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.title.push(LocalizedString { lang, content });
                         }
                     }
+                    "CommandName"
+                        if path_ends_with_for_child_command_name(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.command_name = Some(text_value.trim().to_string());
+                        }
+                    }
                     _ if current_child_items
                         .last()
                         .is_some_and(|item| local == item.tag)
@@ -3810,6 +3825,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Index"
                         | "DefaultVisible"
                         | "Common"
+                        | "CommandName"
                         | "lang"
                         | "content"
                 ) {
@@ -3885,6 +3901,7 @@ fn parse_form_child_item_xml(
         id,
         name,
         title: Vec::new(),
+        command_name: None,
     }))
 }
 
@@ -3930,6 +3947,13 @@ fn path_ends_with_for_child_title_content(path: &[String], items: &[FormXmlChild
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Title", "item", "content"])
+}
+
+fn path_ends_with_for_child_command_name(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "CommandName"])
 }
 
 fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
@@ -4033,17 +4057,25 @@ fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Res
     Ok(())
 }
 
-fn patch_form_layout_child_items(layout: &mut String, items: &[FormXmlChildItem]) -> Result<()> {
+fn patch_form_layout_child_items(
+    layout: &mut String,
+    items: &[FormXmlChildItem],
+    commands: &[FormXmlCommand],
+) -> Result<()> {
     for item in items {
-        let _ = patch_form_layout_child_item(layout, item)?;
+        let _ = patch_form_layout_child_item(layout, item, commands)?;
     }
     Ok(())
 }
 
-fn patch_form_layout_child_item(text: &mut String, item: &FormXmlChildItem) -> Result<bool> {
+fn patch_form_layout_child_item(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if form_layout_child_item_matches(text, &fields, item) {
-        patch_form_layout_child_item_entry(text, &fields, item)?;
+        patch_form_layout_child_item_entry(text, &fields, item, commands)?;
         return Ok(true);
     }
 
@@ -4052,7 +4084,7 @@ fn patch_form_layout_child_item(text: &mut String, item: &FormXmlChildItem) -> R
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_layout_child_item(&mut nested, item)? {
+        if patch_form_layout_child_item(&mut nested, item, commands)? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -4088,6 +4120,7 @@ fn patch_form_layout_child_item_entry(
     text: &mut String,
     fields: &[Range<usize>],
     item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
 ) -> Result<()> {
     let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
         return Ok(());
@@ -4103,12 +4136,52 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((title_range, format_1c_synonyms(&item.title)));
     }
+    if item.tag == "Button"
+        && let Some(command_name) = &item.command_name
+        && let Some(command_range) = fields.get(8)
+        && let Some(command_ref) = format_form_button_command_reference(
+            &text[command_range.clone()],
+            command_name,
+            commands,
+        )?
+    {
+        replacements.push((command_range.clone(), command_ref));
+    }
 
     replacements.sort_by_key(|(range, _)| range.start);
     for (range, replacement) in replacements.into_iter().rev() {
         text.replace_range(range, &replacement);
     }
     Ok(())
+}
+
+fn format_form_button_command_reference(
+    existing: &str,
+    command_name: &str,
+    commands: &[FormXmlCommand],
+) -> Result<Option<String>> {
+    if let Some(uuid) = form_standard_command_uuid(command_name) {
+        return Ok(Some(format!("{{0,{uuid}}}")));
+    }
+    let Some(name) = command_name.strip_prefix("Form.Command.") else {
+        return Ok(None);
+    };
+    let Some(command) = commands.iter().find(|command| command.name == name) else {
+        return Ok(None);
+    };
+    let fields = scan_braced_fields(existing.trim(), 0)?;
+    let Some(uuid) = fields.get(1).map(|range| existing[range.clone()].trim()) else {
+        return Ok(None);
+    };
+    Ok(Some(format!("{{{},{uuid}}}", command.id)))
+}
+
+fn form_standard_command_uuid(command_name: &str) -> Option<&'static str> {
+    match command_name {
+        "Form.StandardCommand.Create" => Some("4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
+        "Form.StandardCommand.Help" => Some("39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+        _ => None,
+    }
 }
 
 fn form_layout_child_item_tag<'a>(
@@ -11537,6 +11610,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Action>Do</Action>
+		</Command>
+	</Commands>
 	<ChildItems>
 		<CommandBar name="NewBar" id="64">
 			<Title>
@@ -11547,6 +11625,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			</Title>
 			<ChildItems>
 				<Button name="NewButton" id="44">
+					<CommandName>Form.Command.Do</CommandName>
 					<Title>
 						<v8:item>
 							<v8:lang>en</v8:lang>
@@ -11567,6 +11646,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.layout.contains(r#"{1,"en","New bar"}"#));
         assert!(parsed.layout.contains(r#""NewButton""#));
         assert!(parsed.layout.contains(r#"{1,"en","New button"}"#));
+        assert!(
+            parsed
+                .layout
+                .contains("{2,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
         assert!(!parsed.layout.contains("OldBar"));
         assert!(!parsed.layout.contains("Old bar"));
         assert!(!parsed.layout.contains("OldButton"));
