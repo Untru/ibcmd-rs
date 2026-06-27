@@ -218,9 +218,13 @@ BSL по именам:
 8. Корневые assets конфигурации. В `sfc` встречаются `AdditionalIndexes.xml`, `StandaloneConfigurationContent.bin`, `ClientApplicationInterface.xml`, `HomePageWorkArea.xml`; текущий staging покрывает часть конфигурационных assets (`Splash`, `ParentConfigurations`, `MainSectionPicture`, `MobileClientSignature`, `MainSectionCommandInterface`).
 9. Бинарные legacy bodies. В `sfc` встречаются `Form.bin`, `Module.bin`, `ObjectModule.bin`; текущий код ориентирован на XML/BSL-представление и не импортирует эти файлы как отдельный полноценный источник.
 
-## Итоговая оценка
+## Итоговая оценка универсальной готовности
 
-`ibcmd-rs` уже подходит как база для инструмента загрузки/выгрузки и покрывает много инфраструктурных форматов. Но на базе `D:\УХА\sfc` его нельзя считать полноценно готовым аналогом `ibcmd`.
+`ibcmd-rs` уже подходит как база для инструмента загрузки/выгрузки и покрывает много инфраструктурных форматов. Но на основании проверки через `D:\УХА\sfc` его нельзя считать полноценно готовым аналогом `ibcmd` для произвольных конфигураций.
+
+Числа ниже не являются целью "подогнать инструмент под `sfc`". Они показывают масштаб классов объектов, которые должны стабильно проходить в любой большой конфигурации: если класс закрыт на `sfc`, это сильный аргумент в пользу универсальности; если не закрыт, это риск для любых похожих ERP/КА/УХА-конфигураций.
+
+Короткий вывод на 2026-06-27: текущий `ibcmd-rs` уже может выгружать и загружать значимые срезы конфигурации, но пока не может гарантированно полностью выгрузить произвольную SQL-базу в исходники и затем загрузить эти исходники в новую базу без штатного `ibcmd`.
 
 Ориентировочная готовность:
 
@@ -248,11 +252,11 @@ BSL по именам:
 | Агент макетов и assets | `src/module_blob.rs`, `src/source_audit.rs`, MOXCEL, CommonPictures, Template.bin | `audit-spreadsheet-templates` дает 14 046 / 14 046 packed; `audit-spreadsheet-roundtrip` дает 14 046 / 14 046 matched без отказов и compare-расхождений. Следующий критерий - SQL end-to-end проверка SpreadsheetDocument и stress-test `BinaryData`/`AddIn`. |
 | Агент форм | compile/decompile `Ext/Form.xml`, form item assets | Есть `audit-form-sources` baseline: 13 044 форм, 590 МБ XML, 12 216 stageable-by-module, 828 без stageable body, 295 ignored non-module `Ext/Form` files. Обратный compile уже патчит верхние свойства, существующую `AutoCommandBar`, существующие `Events`, существующие `Attributes`, существующие `Commands`, часть существующего `CommandInterface/NavigationPanel` и часть существующих `ChildItems`, включая локальные/стандартные `Button/CommandName` и явный `Button/DataPath`. Следующий критерий - добавить внешнюю резолюцию ссылок и затем создание/удаление элементов хотя бы на малой форме, затем расширять до `sfc`. |
 | Агент интеграции | test harness, SQL clone, сравнение с `ibcmd` | Есть сценарий `ibcmd load` vs `ibcmd-rs stage/load` на копии базы и post-compare по `_Config`/`ConfigSave`/source dump. |
-| Агент parity-аудита | source coverage, SQL dry-run, batch accounting, dump/load diff | Есть `audit-source-load-coverage` source-side baseline без SQL: 55 789 stage entry files, 59 970 potentially stageable body files, 13 342 known uncovered. SQL-backed `mssql-audit-source-parity` уже прогнан на копии `sfc` по справочнику `Валюты`, форме `Валюты.ФормаСписка` и смешанному smoke-срезу; scoped scan по `path-prefix` больше не обходит весь `sfc`. Actual `mssql-stage-source-objects --path-prefix Catalogs/Валюты` записал 19-row staged set в `ConfigSave` одноразовой SQL-копии. Следующий критерий - применить staged set через 1С/ibcmd и сделать post-dump/post-compare. |
+| Агент parity-аудита | source coverage, SQL dry-run, batch accounting, dump/load diff | Есть `audit-source-load-coverage` source-side baseline без SQL: 55 789 stage entry files, 59 970 potentially stageable body files, 13 342 known uncovered. SQL-backed `mssql-audit-source-parity` уже прогнан на копии `sfc` по справочнику `Валюты`, форме `Валюты.ФормаСписка` и смешанному smoke-срезу; scoped scan по `path-prefix` больше не обходит весь `sfc`. Actual `mssql-stage-source-objects --path-prefix Catalogs/Валюты` записал 19-row staged set в `ConfigSave`, штатный `ibcmd config check/apply` применил этот staged set, а post-export подтвердил отсутствие missing/extra файлов на срезе. Следующий критерий - расширить проверку на несколько семейств объектов и добавить native `ibcmd-rs dump -> compare` после apply. |
 
 Ближайший рациональный план работ:
 
-1. Разобрать `audit-spreadsheet-roundtrip` для `SpreadsheetDocument`: сначала 941 первичный `extract` failure, затем 133 `extract-repacked`, затем массовые `compare`-расхождения XML.
+1. Довести `SpreadsheetDocument` от закрытого dry-run round-trip 14 046/14 046 до SQL end-to-end: `native dump -> stage/load -> apply -> native dump -> diff`.
 2. Проверить и покрыть тестом batch accounting в `mssql-stage-source-objects`, особенно второй batch и stable rows.
 3. Расширить `mssql-audit-source-parity` на копии SQL-базы `sfc` по нескольким семействам объектов и разложить failures по типам: missing base blob, unsupported packer, broken source reference, batch/accounting issue.
 4. Начать отдельную ветку по полноценному `Form.xml` round-trip: сначала анализ реальной структуры, затем выгрузка, затем упаковка обратно.
