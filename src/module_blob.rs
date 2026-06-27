@@ -2945,6 +2945,9 @@ fn format_spreadsheet_picture_for_moxel(
     else {
         return Ok(format!("{{4,{}}}", picture.index));
     };
+    if let Some(code) = spreadsheet_standard_picture_code(ref_name) {
+        return Ok(format!("{{4,{},{{{code}}}}}", picture.index));
+    }
     let reference = if let Some(name) = ref_name.strip_prefix("v8ui:") {
         format!("CommonPicture.{name}")
     } else {
@@ -2955,6 +2958,13 @@ fn format_spreadsheet_picture_for_moxel(
     })?;
     let uuid = source.resolve_common_picture_uuid(&reference)?;
     Ok(format!("{{4,{},{{0,{uuid}}}}}", picture.index))
+}
+
+fn spreadsheet_standard_picture_code(ref_name: &str) -> Option<i32> {
+    match ref_name {
+        "v8ui:Print" | "StdPicture.Print" => Some(-13),
+        _ => None,
+    }
 }
 
 fn format_spreadsheet_fonts_for_moxel(fonts: &[SpreadsheetDocumentXmlFont]) -> Vec<String> {
@@ -9563,6 +9573,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{1,{4,0,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_standard_print_picture_ref() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<picture>
+		<index>0</index>
+		<picture ref="v8ui:Print"/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{1,{4,0,{-13}}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

@@ -4823,6 +4823,9 @@ fn parse_moxel_picture(text: &str, object_refs: &BTreeMap<String, String>) -> Op
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0))
         .and_then(|picture_ref| {
+            if picture_ref.first().map(|field| field.trim()) == Some("-13") {
+                return Some("v8ui:Print".to_string());
+            }
             if picture_ref.first().map(|field| field.trim()) != Some("0") {
                 return None;
             }
@@ -10924,6 +10927,14 @@ mod tests {
         ));
         assert!(xml.contains("\t<format>\r\n\t\t<width>135</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
+    }
+
+    #[test]
+    fn formats_moxel_standard_print_picture_ref() {
+        let picture = parse_moxel_picture("{4,0,{-13}}", &BTreeMap::new()).unwrap();
+
+        assert_eq!(picture.index, 0);
+        assert_eq!(picture.ref_name.as_deref(), Some("v8ui:Print"));
     }
 
     #[test]
