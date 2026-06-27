@@ -1021,6 +1021,7 @@ struct FormItemAsset {
 struct MoxelSpreadsheet {
     column_count: usize,
     rows: Vec<MoxelRow>,
+    areas: Vec<MoxelArea>,
     max_format_index: usize,
 }
 
@@ -1040,6 +1041,15 @@ struct MoxelCell {
 struct MoxelLocalizedValue {
     lang: String,
     content: String,
+}
+
+struct MoxelArea {
+    name: String,
+    area_type: &'static str,
+    begin_row: i32,
+    end_row: i32,
+    begin_column: i32,
+    end_column: i32,
 }
 
 struct CommandInterfaceEntry {
@@ -3641,6 +3651,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     if rows.is_empty() {
         return None;
     }
+    let areas = parse_moxel_areas(&fields);
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
@@ -3665,6 +3676,7 @@ fn parse_moxel_spreadsheet_text(text: &str) -> Option<MoxelSpreadsheet> {
     Some(MoxelSpreadsheet {
         column_count,
         rows,
+        areas,
         max_format_index,
     })
 }
@@ -3772,6 +3784,51 @@ fn parse_moxel_localized_value(text: &str) -> Option<MoxelLocalizedValue> {
     Some(MoxelLocalizedValue { lang, content })
 }
 
+fn parse_moxel_areas(fields: &[&str]) -> Vec<MoxelArea> {
+    fields
+        .iter()
+        .filter_map(|field| parse_moxel_area_list(field))
+        .next()
+        .unwrap_or_default()
+}
+
+fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if count == 0 || count > 512 || fields.len() != count * 2 + 1 {
+        return None;
+    }
+    let mut areas = Vec::with_capacity(count);
+    for index in 0..count {
+        let name = parse_1c_string(fields.get(index * 2 + 1)?)?;
+        let area = parse_moxel_area(fields.get(index * 2 + 2)?, name)?;
+        areas.push(area);
+    }
+    Some(areas)
+}
+
+fn parse_moxel_area(text: &str, name: String) -> Option<MoxelArea> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let bounds = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let area_type = match bounds.first()?.trim() {
+        "1" => "Rows",
+        "2" => "Columns",
+        "3" => "Rectangle",
+        _ => return None,
+    };
+    Some(MoxelArea {
+        name,
+        area_type,
+        begin_column: bounds.get(1)?.trim().parse::<i32>().ok()?,
+        begin_row: bounds.get(2)?.trim().parse::<i32>().ok()?,
+        end_column: bounds.get(3)?.trim().parse::<i32>().ok()?,
+        end_row: bounds.get(4)?.trim().parse::<i32>().ok()?,
+    })
+}
+
 fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     let mut xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
@@ -3805,12 +3862,40 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for row in &spreadsheet.rows {
         push_moxel_row_xml(&mut xml, row);
     }
+    for area in &spreadsheet.areas {
+        push_moxel_area_xml(&mut xml, area);
+    }
     xml.push_str("\t<defaultFormatIndex>1</defaultFormatIndex>\r\n");
     for _ in 0..spreadsheet.max_format_index.max(1) {
         xml.push_str("\t<format/>\r\n");
     }
     xml.push_str("</document>\r\n");
     xml
+}
+
+fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
+    xml.push_str("\t<namedItem xsi:type=\"NamedItemCells\">\r\n");
+    xml.push_str(&format!(
+        "\t\t<name>{}</name>\r\n",
+        escape_xml_text(&area.name)
+    ));
+    xml.push_str("\t\t<area>\r\n");
+    xml.push_str(&format!("\t\t\t<type>{}</type>\r\n", area.area_type));
+    xml.push_str(&format!(
+        "\t\t\t<beginRow>{}</beginRow>\r\n",
+        area.begin_row
+    ));
+    xml.push_str(&format!("\t\t\t<endRow>{}</endRow>\r\n", area.end_row));
+    xml.push_str(&format!(
+        "\t\t\t<beginColumn>{}</beginColumn>\r\n",
+        area.begin_column
+    ));
+    xml.push_str(&format!(
+        "\t\t\t<endColumn>{}</endColumn>\r\n",
+        area.end_column
+    ));
+    xml.push_str("\t\t</area>\r\n");
+    xml.push_str("\t</namedItem>\r\n");
 }
 
 fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
@@ -8132,7 +8217,7 @@ mod tests {
     #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}}}",
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -8149,6 +8234,13 @@ mod tests {
         assert!(xml.contains("ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ"));
         assert!(xml.contains("<parameter>ТекстШтампа</parameter>"));
         assert!(!xml.contains("<v8:content>ТекстШтампа</v8:content>"));
+        assert!(xml.contains("<namedItem xsi:type=\"NamedItemCells\">"));
+        assert!(xml.contains("<name>Штамп</name>"));
+        assert!(xml.contains("<type>Rectangle</type>"));
+        assert!(xml.contains("<beginRow>1</beginRow>"));
+        assert!(xml.contains("<endRow>6</endRow>"));
+        assert!(xml.contains("<beginColumn>1</beginColumn>"));
+        assert!(xml.contains("<endColumn>2</endColumn>"));
     }
 
     #[test]
