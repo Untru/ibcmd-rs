@@ -990,6 +990,8 @@ struct SpreadsheetDocumentXml {
     areas: Vec<SpreadsheetDocumentXmlArea>,
     print_area: Option<SpreadsheetDocumentXmlArea>,
     print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
+    default_format_index: Option<usize>,
+    formats: Vec<SpreadsheetDocumentXmlFormat>,
 }
 
 #[derive(Debug, Default)]
@@ -1073,6 +1075,34 @@ struct SpreadsheetDocumentXmlPrintSettings {
     page_height: Option<usize>,
 }
 
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlFormat {
+    font: Option<usize>,
+    border: Option<usize>,
+    left_border: Option<usize>,
+    top_border: Option<usize>,
+    right_border: Option<usize>,
+    bottom_border: Option<usize>,
+    height: Option<usize>,
+    width: Option<usize>,
+    horizontal_alignment: Option<String>,
+    vertical_alignment: Option<String>,
+    text_placement: Option<String>,
+    fill_type: Option<String>,
+    drawing_border: Option<usize>,
+    by_selected_columns: Option<bool>,
+    details_use: Option<String>,
+    hyper_link: Option<bool>,
+    protection: Option<bool>,
+    indent: Option<usize>,
+    auto_indent: Option<usize>,
+    mask: Option<String>,
+    pic_index: Option<usize>,
+    picture_size_mode: Option<String>,
+    pic_horizontal_alignment: Option<String>,
+    pic_vertical_alignment: Option<String>,
+}
+
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -1086,6 +1116,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
     let mut current_area = None::<SpreadsheetDocumentXmlArea>;
     let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
+    let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
     let mut c_depth = 0usize;
     let mut next_column_index = 0usize;
     let mut text = String::new();
@@ -1109,6 +1140,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
                 } else if local == "printSettings" {
                     current_print_settings = Some(SpreadsheetDocumentXmlPrintSettings::default());
+                } else if local == "format" {
+                    current_format = Some(SpreadsheetDocumentXmlFormat::default());
                 } else if current_row.is_some() && local == "c" {
                     c_depth += 1;
                     if c_depth == 1 {
@@ -1184,6 +1217,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_merge.as_mut(),
                     current_area.as_mut(),
                     current_print_settings.as_mut(),
+                    current_format.as_mut(),
                 );
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
@@ -1231,6 +1265,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(print_settings) = current_print_settings.take()
                 {
                     document.print_settings = Some(print_settings);
+                } else if local == "format"
+                    && let Some(format) = current_format.take()
+                {
+                    document.formats.push(format);
                 }
                 if spreadsheet_text_element(&local) {
                     text.clear();
