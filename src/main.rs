@@ -18,6 +18,42 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&manifest)?);
             }
         }
+        Commands::AuditSpreadsheetTemplates(args) => {
+            let report = ibcmd_rs::source_audit::audit_spreadsheet_templates(&args.root)?;
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::AuditSpreadsheetRoundtrip(args) => {
+            let report = ibcmd_rs::source_audit::audit_spreadsheet_template_roundtrip(&args.root)?;
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::AuditFormSources(args) => {
+            let report = ibcmd_rs::source_audit::audit_form_sources(&args.root)?;
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::AuditSourceLoadCoverage(args) => {
+            let report = ibcmd_rs::source_audit::audit_source_load_coverage(&args.root)?;
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::Plan(args) => {
             let current = ibcmd_rs::source::read_manifest(&args.current)?;
             let baseline = match args.baseline {
@@ -77,6 +113,15 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::compare_databases(&args)?;
             if let Some(output) = args.output {
                 ibcmd_rs::mssql::write_compare_report(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::MssqlAuditSourceParity(args) => {
+            let report = ibcmd_rs::mssql::audit_source_parity(&args)?;
+            if let Some(output) = args.output {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(&output, json)?;
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }

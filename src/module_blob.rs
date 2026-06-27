@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
@@ -26,6 +26,8 @@ const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
+const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
+const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -64,6 +66,13 @@ pub struct PatchedVersionsBlob {
     pub plain_bytes: usize,
     pub output_sha256: String,
     pub replacements: Vec<VersionReplacement>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ParsedFormBodyBlob {
+    pub layout: String,
+    pub module_text: String,
+    pub trailing_fields: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,6 +127,91 @@ pub struct PackedSimpleMetadataBlob {
     pub blob: Vec<u8>,
     pub plain_bytes: usize,
     pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackedStyleBodyBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackedScheduleBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackedRawDeflatedBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackedExtPictureBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PackedHelpBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleRightsXml {
+    set_for_new_objects: bool,
+    objects: Vec<RoleObjectRightsXml>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleObjectRightsXml {
+    name: String,
+    rights: Vec<RoleRightXml>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleRightXml {
+    name: String,
+    value: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CommandInterfaceXmlEntry {
+    name: String,
+    common: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ExchangePlanContentXmlItem {
+    metadata: String,
+    auto_record: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct PredefinedDataXmlItem {
+    id: String,
+    name: String,
+    code: String,
+    description: String,
+    is_folder: bool,
+    children: Vec<PredefinedDataXmlItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FlowchartXmlItem {
+    id: String,
+    name: String,
+    tab_order: String,
+    explanation: Option<String>,
+    task_description: Option<String>,
+    events: BTreeMap<String, Option<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -186,7 +280,28 @@ impl MetadataSourceContext {
         Ok(properties.uuid)
     }
 
-    #[cfg(test)]
+    fn resolve_style_item_uuid(&self, reference: &str) -> Result<String> {
+        let name = reference
+            .trim()
+            .strip_prefix("StyleItem.")
+            .ok_or_else(|| anyhow!("unsupported StyleItem reference: {reference}"))?;
+        let path = self
+            .source_root
+            .join("StyleItems")
+            .join(format!("{name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read StyleItem XML {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)?;
+        if properties.kind != "StyleItem" {
+            return Err(anyhow!(
+                "expected StyleItem XML at {}, got {}",
+                path.display(),
+                properties.kind
+            ));
+        }
+        Ok(properties.uuid)
+    }
+
     fn resolve_simple_metadata_uuid(
         &self,
         reference: &str,
@@ -234,7 +349,6 @@ impl MetadataSourceContext {
             .with_context(|| format!("failed to resolve TypeId from {}", path.display()))
     }
 
-    #[cfg(test)]
     fn resolve_metadata_reference_uuid(&self, reference: &str) -> Result<String> {
         let reference = reference.trim();
         let (prefix, folder) = metadata_reference_source_folder(reference).ok_or_else(|| {
@@ -432,6 +546,4388 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+pub fn pack_style_body_blob_from_xml(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedStyleBodyBlob> {
+    let items = parse_style_body_xml_items(xml)?;
+    let mut fields = Vec::with_capacity(items.len() + 3);
+    fields.push("2".to_string());
+    fields.push(items.len().to_string());
+    for item in &items {
+        fields.push(format_style_body_item(item, source)?);
+    }
+    fields.push("{0}".to_string());
+    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+
+    Ok(PackedStyleBodyBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct StyleBodyXmlItem {
+    name: String,
+    value: StyleBodyXmlValue,
+}
+
+#[derive(Debug, Clone)]
+enum StyleBodyXmlValue {
+    Color(String),
+    Font(BTreeMap<String, String>),
+    Border(BTreeMap<String, String>),
+}
+
+fn parse_style_body_xml_items(xml: &[u8]) -> Result<Vec<StyleBodyXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut items = Vec::<StyleBodyXmlItem>::new();
+    let mut item_name = None::<String>;
+    let mut color_text = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["Style"]) && local == "Item" {
+                    item_name = xml_attr_value(&event, "name");
+                    color_text = None;
+                } else if path_ends_with(&path, &["Style", "Item"]) && local == "Color" {
+                    color_text = Some(String::new());
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["Style", "Item"]) {
+                    if local == "Font" {
+                        let name = item_name
+                            .clone()
+                            .ok_or_else(|| anyhow!("Style Item name is missing"))?;
+                        items.push(StyleBodyXmlItem {
+                            name,
+                            value: StyleBodyXmlValue::Font(xml_attrs_map(&event)),
+                        });
+                    } else if local == "Border" {
+                        let name = item_name
+                            .clone()
+                            .ok_or_else(|| anyhow!("Style Item name is missing"))?;
+                        items.push(StyleBodyXmlItem {
+                            name,
+                            value: StyleBodyXmlValue::Border(xml_attrs_map(&event)),
+                        });
+                    }
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["Style", "Item", "Color"])
+                    && let Some(value) = color_text.as_mut()
+                {
+                    let text = text.xml_content()?;
+                    let text = unescape(text.as_ref())?;
+                    value.push_str(text.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["Style", "Item", "Color"])
+                    && let Some(value) = color_text.as_mut()
+                {
+                    value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Style", "Item", "Color"])
+                    && let Some(value) = color_text.as_mut()
+                {
+                    let text = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    value.push_str(&text);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Color" && path_ends_with(&path, &["Style", "Item", "Color"]) {
+                    let name = item_name
+                        .clone()
+                        .ok_or_else(|| anyhow!("Style Item name is missing"))?;
+                    let value = color_text.take().unwrap_or_default();
+                    items.push(StyleBodyXmlItem {
+                        name,
+                        value: StyleBodyXmlValue::Color(value.trim().to_string()),
+                    });
+                } else if local == "Item" && path_ends_with(&path, &["Style", "Item"]) {
+                    item_name = None;
+                    color_text = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(items)
+}
+
+fn xml_attrs_map(event: &BytesStart<'_>) -> BTreeMap<String, String> {
+    event
+        .attributes()
+        .with_checks(false)
+        .filter_map(|attr| attr.ok())
+        .filter_map(|attr| {
+            let name = String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
+            let value = attr.unescape_value().ok().map(|value| value.into_owned())?;
+            Some((name, value))
+        })
+        .collect()
+}
+
+fn format_style_body_item(
+    item: &StyleBodyXmlItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let key = style_body_key_for_name(&item.name, source)?;
+    let (kind, value) = match &item.value {
+        StyleBodyXmlValue::Color(value) => ("0", format_style_body_color_value(value, source)?),
+        StyleBodyXmlValue::Font(attrs) => ("1", format_style_body_font_value(attrs, source)?),
+        StyleBodyXmlValue::Border(attrs) => ("2", format_style_body_border_value(attrs, source)?),
+    };
+    Ok(format!("{{{key},{kind},{value}}}"))
+}
+
+fn style_body_key_for_name(name: &str, source: Option<&MetadataSourceContext>) -> Result<String> {
+    if let Some(code) = style_body_standard_code_for_name(name) {
+        return Ok(format!("{{{code}}}"));
+    }
+    if name.starts_with("StyleItem.") {
+        let source = source.ok_or_else(|| {
+            anyhow!("source root is required to resolve Style body reference {name}")
+        })?;
+        let uuid = source.resolve_style_item_uuid(name)?;
+        return Ok(format!("{{0,{uuid}}}"));
+    }
+    Err(anyhow!("unsupported Style Item name: {name}"))
+}
+
+fn style_body_ref_key(reference: &str, source: Option<&MetadataSourceContext>) -> Result<String> {
+    let reference = reference.trim();
+    let name = reference
+        .strip_prefix("style:")
+        .ok_or_else(|| anyhow!("unsupported Style reference: {reference}"))?;
+    if style_body_standard_code_for_name(name).is_some() || name.starts_with("StyleItem.") {
+        return style_body_key_for_name(name, source);
+    }
+    style_body_key_for_name(&format!("StyleItem.{name}"), source)
+}
+
+fn format_style_body_color_value(
+    value: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value = value.trim();
+    if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() != 6 {
+            return Err(anyhow!("unsupported Style color literal: {value}"));
+        }
+        let red = u32::from_str_radix(&hex[0..2], 16)?;
+        let green = u32::from_str_radix(&hex[2..4], 16)?;
+        let blue = u32::from_str_radix(&hex[4..6], 16)?;
+        let packed = red | (green << 8) | (blue << 16);
+        return Ok(format!("{{4,0,{{{packed}}},0}}"));
+    }
+    if let Some(name) = value.strip_prefix("web:") {
+        let code = style_body_web_color_code(name)
+            .ok_or_else(|| anyhow!("unsupported Style web color: {value}"))?;
+        return Ok(format!("{{4,2,{{{code}}},2}}"));
+    }
+    if value.starts_with("style:") {
+        let key = style_body_ref_key(value, source)?;
+        return Ok(format!("{{4,3,{key},3}}"));
+    }
+    Err(anyhow!("unsupported Style color value: {value}"))
+}
+
+fn format_style_body_font_value(
+    attrs: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let reference = attrs
+        .get("ref")
+        .map(|value| style_body_ref_key(value, source))
+        .transpose()?
+        .unwrap_or_else(|| "{-20}".to_string());
+    let height = attrs
+        .get("height")
+        .map(|value| value.as_str())
+        .unwrap_or("0");
+    let bold = parse_optional_xml_bool(attrs.get("bold"))?;
+    let italic = parse_optional_xml_bool(attrs.get("italic"))?;
+    let underline = parse_optional_xml_bool(attrs.get("underline"))?;
+    let strikeout = parse_optional_xml_bool(attrs.get("strikeout"))?;
+    let scale = attrs
+        .get("scale")
+        .map(|value| value.as_str())
+        .unwrap_or("100");
+    if height == "0" && !bold && !italic && !underline && !strikeout && scale == "100" {
+        return Ok(format!("{{8,2,0,{reference},1,100}}"));
+    }
+    let weight = if bold { 700 } else { 400 };
+    Ok(format!(
+        "{{8,2,{height},{reference},{weight},{italic},{underline},{strikeout},1,{scale}}}",
+        italic = bool_code(italic),
+        underline = bool_code(underline),
+        strikeout = bool_code(strikeout),
+    ))
+}
+
+fn format_style_body_border_value(
+    attrs: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let reference = attrs
+        .get("ref")
+        .map(|value| style_body_ref_key(value, source))
+        .transpose()?
+        .unwrap_or_else(|| "{-18}".to_string());
+    Ok(format!("{{3,1,{reference},0,0,0}}"))
+}
+
+fn parse_optional_xml_bool(value: Option<&String>) -> Result<bool> {
+    match value.map(|value| value.as_str()) {
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        Some(value) => Err(anyhow!("invalid XML boolean: {value}")),
+        None => Ok(false),
+    }
+}
+
+fn bool_code(value: bool) -> u8 {
+    if value { 1 } else { 0 }
+}
+
+fn style_body_standard_code_for_name(name: &str) -> Option<i32> {
+    match name {
+        "FormBackColor" => Some(-1),
+        "FormTextColor" => Some(-11),
+        "ButtonBackColor" => Some(-3),
+        "ButtonTextColor" => Some(-15),
+        "FieldBackColor" => Some(-7),
+        "FieldTextColor" => Some(-13),
+        "FieldSelectionBackColor" => Some(-21),
+        "FieldSelectedTextColor" => Some(-10),
+        "FieldAlternativeBackColor" => Some(-14),
+        "ToolTipBackColor" => Some(-23),
+        "ToolTipTextColor" => Some(-24),
+        "SpecialTextColor" => Some(-16),
+        "NegativeTextColor" => Some(-17),
+        "BorderColor" => Some(-22),
+        "ReportHeaderBackColor" => Some(-25),
+        "ReportGroup1BackColor" => Some(-26),
+        "ReportGroup2BackColor" => Some(-27),
+        "ReportLineColor" => Some(-28),
+        "ControlBorder" => Some(-18),
+        "TextFont" => Some(-20),
+        "SmallTextFont" => Some(-30),
+        "NormalTextFont" => Some(-31),
+        "LargeTextFont" => Some(-32),
+        "ExtraLargeTextFont" => Some(-33),
+        "ButtonBorderColor" => Some(-34),
+        "TableHeaderBackColor" => Some(-35),
+        "TableHeaderTextColor" => Some(-36),
+        "TableFooterBackColor" => Some(-37),
+        "TableFooterTextColor" => Some(-38),
+        _ => None,
+    }
+}
+
+fn style_body_web_color_code(name: &str) -> Option<i32> {
+    match name {
+        "Black" => Some(8),
+        "Blue" => Some(10),
+        "Cream" => Some(20),
+        "DarkBlue" => Some(23),
+        "DarkRed" => Some(33),
+        "DarkSlateGray" => Some(37),
+        "FireBrick" => Some(44),
+        "FloralWhite" => Some(45),
+        "ForestGreen" => Some(46),
+        "Gainsboro" => Some(48),
+        "Gray" => Some(52),
+        "Green" => Some(53),
+        "HoneyDew" => Some(55),
+        "LightCyan" => Some(67),
+        "LightGoldenRod" => Some(68),
+        "LightGoldenRodYellow" => Some(69),
+        "LightGray" => Some(71),
+        "LightPink" => Some(72),
+        "LightYellow" => Some(79),
+        "Maroon" => Some(84),
+        "MintCream" => Some(97),
+        "MistyRose" => Some(98),
+        "Red" => Some(119),
+        "RosyBrown" => Some(120),
+        "Silver" => Some(128),
+        "SlateBlue" => Some(130),
+        "SteelBlue" => Some(134),
+        "Violet" => Some(140),
+        "VioletRed" => Some(141),
+        "WhiteSmoke" => Some(144),
+        "Yellow" => Some(145),
+        _ => None,
+    }
+}
+
+pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
+    let schedule = parse_schedule_xml(xml)?;
+    let mut fields = Vec::with_capacity(16 + schedule.week_days.len() + schedule.months.len());
+    fields.push(format_schedule_date(&schedule.begin_date)?);
+    fields.push(format_schedule_date(&schedule.end_date)?);
+    fields.push(format_schedule_time(&schedule.begin_time)?);
+    fields.push(format_schedule_time(&schedule.end_time)?);
+    fields.push(format_schedule_time(&schedule.completion_time)?);
+    fields.push(schedule.completion_interval);
+    fields.push(schedule.repeat_period_in_day);
+    fields.push(schedule.repeat_pause);
+    fields.push(schedule.week_days.len().to_string());
+    fields.extend(schedule.week_days);
+    fields.push(schedule.week_day_in_month);
+    fields.push(schedule.day_in_month);
+    fields.push(schedule.months.len().to_string());
+    fields.extend(schedule.months);
+    fields.push(schedule.weeks_period);
+    fields.push(schedule.days_repeat_period);
+
+    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+
+    Ok(PackedScheduleBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    let blob = deflate_raw(bytes)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: bytes.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    pack_moxel_spreadsheet_blob_from_xml_with_source(xml, None)
+}
+
+pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
+    let spreadsheet = parse_spreadsheet_document_xml(xml)?;
+    let column_count = spreadsheet.column_count.max(
+        spreadsheet
+            .rows
+            .iter()
+            .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
+            .max()
+            .unwrap_or(1),
+    );
+    let column_format_slots = spreadsheet_column_format_slots(&spreadsheet, column_count);
+    let format_offset = column_format_slots.saturating_sub(1);
+    let declared_columns = column_count.saturating_sub(1);
+    let mut fields = vec![
+        "8".to_string(),
+        "1".to_string(),
+        declared_columns.to_string(),
+        r#"{"ru","ru",0,1,"ru","Русский","Русский",0}"#.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+    ];
+    for row in &spreadsheet.rows {
+        for row_index in row.expanded_indexes() {
+            fields.push(row_index.to_string());
+            fields.push(row_format_index_for_moxel(row.format_index, format_offset).to_string());
+            fields.push(row.cells.len().to_string());
+            for cell in &row.cells {
+                fields.push(cell.column_index.to_string());
+                fields.push(format_spreadsheet_cell_for_moxel(cell, format_offset));
+            }
+        }
+    }
+    fields.extend(format_spreadsheet_empty_headers_footers_for_moxel(
+        &spreadsheet,
+    ));
+    fields.extend(format_spreadsheet_column_sets_for_moxel(&spreadsheet));
+    if !spreadsheet.merges.is_empty() {
+        fields.push(format_spreadsheet_merges_for_moxel(&spreadsheet.merges));
+    }
+    if !spreadsheet.areas.is_empty() {
+        fields.push(format_spreadsheet_named_areas_for_moxel(&spreadsheet.areas));
+    }
+    if let Some(print_area) = &spreadsheet.print_area {
+        fields.push(format_spreadsheet_area_bounds_for_moxel(print_area));
+    }
+    if let Some(print_settings) = &spreadsheet.print_settings {
+        fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
+    }
+    fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
+    fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
+    fields.extend(format_spreadsheet_formats_for_moxel(
+        &spreadsheet,
+        column_format_slots,
+    ));
+    fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
+    if !spreadsheet.pictures.is_empty() {
+        fields.push(format_spreadsheet_pictures_for_moxel(
+            &spreadsheet.pictures,
+            source,
+        )?);
+    }
+    fields.push("2".to_string());
+    fields.push("{0,1}".to_string());
+
+    let plain_body = format!("{{{}}}", fields.join(","));
+    let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{plain_body}");
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXml {
+    column_count: usize,
+    column_sets: Vec<SpreadsheetDocumentXmlColumnSet>,
+    rows: Vec<SpreadsheetDocumentXmlRow>,
+    merges: Vec<SpreadsheetDocumentXmlMerge>,
+    areas: Vec<SpreadsheetDocumentXmlArea>,
+    print_area: Option<SpreadsheetDocumentXmlArea>,
+    print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
+    default_format_index: Option<usize>,
+    formats: Vec<SpreadsheetDocumentXmlFormat>,
+    fonts: Vec<SpreadsheetDocumentXmlFont>,
+    lines: Vec<SpreadsheetDocumentXmlLine>,
+    empty_header_footer_tags: BTreeSet<String>,
+    pictures: Vec<SpreadsheetDocumentXmlPicture>,
+    drawings: Vec<SpreadsheetDocumentXmlDrawing>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlColumnSet {
+    id: Option<String>,
+    size: usize,
+    columns: Vec<SpreadsheetDocumentXmlColumn>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlColumn {
+    index: usize,
+    format_index: usize,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlRow {
+    index: usize,
+    index_to: Option<usize>,
+    format_index: usize,
+    columns_id: Option<String>,
+    empty: bool,
+    cells: Vec<SpreadsheetDocumentXmlCell>,
+}
+
+impl SpreadsheetDocumentXmlRow {
+    fn expanded_indexes(&self) -> std::ops::RangeInclusive<usize> {
+        let end = self.index_to.unwrap_or(self.index).max(self.index);
+        self.index..=end
+    }
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlCell {
+    column_index: usize,
+    format_index: usize,
+    text: Option<String>,
+    parameter: Option<String>,
+    detail_parameter: Option<String>,
+    empty_text: bool,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlMerge {
+    row: i32,
+    column: i32,
+    height: i32,
+    width: i32,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlArea {
+    name: String,
+    area_type: String,
+    begin_column: i32,
+    begin_row: i32,
+    end_column: i32,
+    end_row: i32,
+    columns_id: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlPrintSettings {
+    page_orientation: Option<String>,
+    scale: Option<usize>,
+    collate: Option<bool>,
+    copies: Option<usize>,
+    per_page: Option<usize>,
+    top_margin: Option<usize>,
+    left_margin: Option<usize>,
+    bottom_margin: Option<usize>,
+    right_margin: Option<usize>,
+    header_size: Option<usize>,
+    footer_size: Option<usize>,
+    fit_to_page: Option<bool>,
+    black_and_white: Option<bool>,
+    printer_name: Option<String>,
+    paper: Option<usize>,
+    paper_source: Option<usize>,
+    page_width: Option<usize>,
+    page_height: Option<usize>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlFormat {
+    font: Option<usize>,
+    border: Option<usize>,
+    left_border: Option<usize>,
+    top_border: Option<usize>,
+    right_border: Option<usize>,
+    bottom_border: Option<usize>,
+    height: Option<usize>,
+    border_color: Option<String>,
+    width: Option<usize>,
+    horizontal_alignment: Option<String>,
+    vertical_alignment: Option<String>,
+    back_color: Option<String>,
+    text_color: Option<String>,
+    text_placement: Option<String>,
+    fill_type: Option<String>,
+    drawing_border: Option<usize>,
+    by_selected_columns: Option<bool>,
+    details_use: Option<String>,
+    hyper_link: Option<bool>,
+    protection: Option<bool>,
+    indent: Option<usize>,
+    auto_indent: Option<usize>,
+    mask: Option<String>,
+    pic_index: Option<usize>,
+    picture_size_mode: Option<String>,
+    pic_horizontal_alignment: Option<String>,
+    pic_vertical_alignment: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlFont {
+    ref_name: Option<String>,
+    face_name: Option<String>,
+    height: Option<usize>,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strikeout: bool,
+    kind: String,
+    scale: Option<usize>,
+}
+
+#[derive(Debug)]
+struct SpreadsheetDocumentXmlLine {
+    style: String,
+    line_type: String,
+    width: usize,
+}
+
+impl Default for SpreadsheetDocumentXmlLine {
+    fn default() -> Self {
+        Self {
+            style: String::new(),
+            line_type: "v8ui:SpreadsheetDocumentCellLineType".to_string(),
+            width: 1,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlHeaderFooter {
+    tag: String,
+    f_zero: bool,
+    tfl_empty: bool,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlPicture {
+    index: usize,
+    ref_name: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlDrawing {
+    format_index: usize,
+    begin_row: i32,
+    begin_row_offset: i32,
+    end_row: i32,
+    end_row_offset: i32,
+    begin_column: i32,
+    begin_column_offset: i32,
+    end_column: i32,
+    end_column_offset: i32,
+    auto_size: bool,
+    picture_size: String,
+    z_order: usize,
+    picture_index: usize,
+}
+
+fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut document = SpreadsheetDocumentXml::default();
+    let mut current_column_set = None::<SpreadsheetDocumentXmlColumnSet>;
+    let mut current_column = None::<SpreadsheetDocumentXmlColumn>;
+    let mut current_row = None::<SpreadsheetDocumentXmlRow>;
+    let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
+    let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
+    let mut current_area = None::<SpreadsheetDocumentXmlArea>;
+    let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
+    let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
+    let mut current_line = None::<SpreadsheetDocumentXmlLine>;
+    let mut current_header_footer = None::<SpreadsheetDocumentXmlHeaderFooter>;
+    let mut current_picture = None::<SpreadsheetDocumentXmlPicture>;
+    let mut current_drawing = None::<SpreadsheetDocumentXmlDrawing>;
+    let mut c_depth = 0usize;
+    let mut next_column_index = 0usize;
+    let mut text = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "columns" {
+                    current_column_set = Some(SpreadsheetDocumentXmlColumnSet::default());
+                } else if current_column_set.is_some() && local == "columnsItem" {
+                    current_column = Some(SpreadsheetDocumentXmlColumn::default());
+                } else if local == "rowsItem" {
+                    current_row = Some(SpreadsheetDocumentXmlRow::default());
+                    next_column_index = 0;
+                } else if local == "merge" {
+                    current_merge = Some(SpreadsheetDocumentXmlMerge::default());
+                } else if local == "namedItem" {
+                    current_area = Some(SpreadsheetDocumentXmlArea::default());
+                } else if local == "printArea" {
+                    current_area = Some(SpreadsheetDocumentXmlArea::default());
+                } else if local == "printSettings" {
+                    current_print_settings = Some(SpreadsheetDocumentXmlPrintSettings::default());
+                } else if local == "format" {
+                    current_format = Some(SpreadsheetDocumentXmlFormat::default());
+                } else if local == "font"
+                    && let Some(font) = parse_spreadsheet_font_xml_attributes(&event)?
+                {
+                    document.fonts.push(font);
+                } else if local == "line" {
+                    current_line = Some(parse_spreadsheet_line_xml_attributes(&event)?);
+                } else if local == "style"
+                    && let Some(line) = current_line.as_mut()
+                {
+                    if let Some(line_type) = xml_attribute_value(&event, "type")? {
+                        line.line_type = line_type;
+                    }
+                } else if spreadsheet_header_footer_tag(&local) {
+                    current_header_footer = Some(SpreadsheetDocumentXmlHeaderFooter {
+                        tag: local.clone(),
+                        ..Default::default()
+                    });
+                } else if local == "picture" && current_picture.is_none() {
+                    current_picture = Some(SpreadsheetDocumentXmlPicture::default());
+                } else if local == "drawing" {
+                    current_drawing = Some(SpreadsheetDocumentXmlDrawing::default());
+                } else if current_row.is_some() && local == "c" {
+                    c_depth += 1;
+                    if c_depth == 1 {
+                        current_cell = Some(SpreadsheetDocumentXmlCell {
+                            column_index: next_column_index,
+                            ..Default::default()
+                        });
+                    }
+                } else if current_cell.is_some() && local == "tl" {
+                    if let Some(cell) = current_cell.as_mut() {
+                        cell.empty_text = true;
+                    }
+                }
+                if spreadsheet_text_element(&local) {
+                    text.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "font" {
+                    if let Some(font) = parse_spreadsheet_font_xml_attributes(&event)? {
+                        document.fonts.push(font);
+                    }
+                } else if local == "tfl"
+                    && let Some(header_footer) = current_header_footer.as_mut()
+                {
+                    header_footer.tfl_empty = true;
+                } else if local == "picture" && current_picture.is_some() {
+                    if let Some(picture) = current_picture.as_mut() {
+                        picture.ref_name = xml_attribute_value(&event, "ref")?;
+                    }
+                } else if current_cell.is_some()
+                    && local == "tl"
+                    && let Some(cell) = current_cell.as_mut()
+                {
+                    cell.empty_text = true;
+                }
+            }
+            Ok(Event::Text(event)) => {
+                if path
+                    .last()
+                    .is_some_and(|part| spreadsheet_text_element(part))
+                {
+                    let value = event.xml_content()?;
+                    let value = unescape(value.as_ref())?;
+                    text.push_str(value.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path
+                    .last()
+                    .is_some_and(|part| spreadsheet_text_element(part))
+                {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path
+                    .last()
+                    .is_some_and(|part| spreadsheet_text_element(part))
+                {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                apply_spreadsheet_text_value(
+                    &path,
+                    &local,
+                    &text,
+                    &mut document,
+                    current_column_set.as_mut(),
+                    current_column.as_mut(),
+                    current_row.as_mut(),
+                    current_cell.as_mut(),
+                    current_merge.as_mut(),
+                    current_area.as_mut(),
+                    current_print_settings.as_mut(),
+                    current_format.as_mut(),
+                    current_line.as_mut(),
+                    current_header_footer.as_mut(),
+                    current_picture.as_mut(),
+                    current_drawing.as_mut(),
+                );
+                if local == "c" && current_row.is_some() {
+                    if c_depth == 1
+                        && let Some(mut cell) = current_cell.take()
+                    {
+                        next_column_index = cell.column_index + 1;
+                        normalize_spreadsheet_cell(&mut cell);
+                        if let Some(row) = current_row.as_mut() {
+                            row.cells.push(cell);
+                        }
+                    }
+                    c_depth = c_depth.saturating_sub(1);
+                } else if local == "rowsItem"
+                    && let Some(mut row) = current_row.take()
+                {
+                    if row.empty {
+                        row.cells.clear();
+                    } else {
+                        row.cells.sort_by_key(|cell| cell.column_index);
+                    }
+                    document.rows.push(row);
+                } else if local == "columnsItem"
+                    && let Some(column) = current_column.take()
+                    && let Some(column_set) = current_column_set.as_mut()
+                {
+                    column_set.columns.push(column);
+                } else if local == "columns"
+                    && let Some(column_set) = current_column_set.take()
+                {
+                    document.column_count = document.column_count.max(column_set.size);
+                    document.column_sets.push(column_set);
+                } else if local == "merge"
+                    && let Some(merge) = current_merge.take()
+                {
+                    document.merges.push(merge);
+                } else if local == "namedItem"
+                    && let Some(area) = current_area.take()
+                {
+                    document.areas.push(area);
+                } else if local == "printArea"
+                    && let Some(area) = current_area.take()
+                {
+                    document.print_area = Some(area);
+                } else if local == "printSettings"
+                    && let Some(print_settings) = current_print_settings.take()
+                {
+                    document.print_settings = Some(print_settings);
+                } else if local == "format"
+                    && let Some(format) = current_format.take()
+                {
+                    document.formats.push(format);
+                } else if local == "line"
+                    && let Some(line) = current_line.take()
+                {
+                    document.lines.push(line);
+                } else if spreadsheet_header_footer_tag(&local)
+                    && let Some(header_footer) = current_header_footer.take()
+                    && header_footer.f_zero
+                    && header_footer.tfl_empty
+                {
+                    document.empty_header_footer_tags.insert(header_footer.tag);
+                } else if local == "picture"
+                    && let Some(picture) = current_picture.take()
+                {
+                    document.pictures.push(picture);
+                } else if local == "drawing"
+                    && let Some(drawing) = current_drawing.take()
+                {
+                    document.drawings.push(drawing);
+                }
+                if spreadsheet_text_element(&local) {
+                    text.clear();
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    if document.rows.is_empty() {
+        return Err(anyhow!("SpreadsheetDocument XML has no rowsItem entries"));
+    }
+    document.rows.sort_by_key(|row| row.index);
+    Ok(document)
+}
+
+fn parse_spreadsheet_font_xml_attributes(
+    event: &BytesStart<'_>,
+) -> Result<Option<SpreadsheetDocumentXmlFont>> {
+    let mut font = SpreadsheetDocumentXmlFont::default();
+    let mut seen = false;
+    for attr in event.attributes() {
+        let attr = attr?;
+        let key = xml_local_name(attr.key.local_name().as_ref());
+        let value = attr.unescape_value()?.into_owned();
+        match key.as_str() {
+            "ref" => {
+                font.ref_name = Some(value);
+                seen = true;
+            }
+            "faceName" => {
+                font.face_name = Some(value);
+                seen = true;
+            }
+            "height" => {
+                if let Ok(height) = value.parse::<usize>() {
+                    font.height = Some(height);
+                    seen = true;
+                }
+            }
+            "bold" => {
+                font.bold = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "italic" => {
+                font.italic = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "underline" => {
+                font.underline = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "strikeout" => {
+                font.strikeout = value.eq_ignore_ascii_case("true");
+                seen = true;
+            }
+            "kind" => {
+                font.kind = value;
+                seen = true;
+            }
+            "scale" => {
+                if let Ok(scale) = value.parse::<usize>() {
+                    font.scale = Some(scale);
+                    seen = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(seen.then_some(font))
+}
+
+fn parse_spreadsheet_line_xml_attributes(
+    event: &BytesStart<'_>,
+) -> Result<SpreadsheetDocumentXmlLine> {
+    let mut line = SpreadsheetDocumentXmlLine::default();
+    if let Some(width) = xml_attribute_value(event, "width")?
+        && let Ok(width) = width.parse::<usize>()
+    {
+        line.width = width;
+    }
+    Ok(line)
+}
+
+fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Option<String>> {
+    for attr in event.attributes() {
+        let attr = attr?;
+        if xml_local_name(attr.key.local_name().as_ref()) == local_name {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn spreadsheet_header_footer_tag(local: &str) -> bool {
+    matches!(
+        local,
+        "leftHeader"
+            | "centerHeader"
+            | "rightHeader"
+            | "leftFooter"
+            | "centerFooter"
+            | "rightFooter"
+    )
+}
+
+fn spreadsheet_text_element(local: &str) -> bool {
+    matches!(
+        local,
+        "size"
+            | "id"
+            | "index"
+            | "indexTo"
+            | "formatIndex"
+            | "i"
+            | "f"
+            | "content"
+            | "parameter"
+            | "detailParameter"
+            | "empty"
+            | "r"
+            | "c"
+            | "h"
+            | "w"
+            | "name"
+            | "type"
+            | "beginRow"
+            | "endRow"
+            | "beginColumn"
+            | "endColumn"
+            | "columnsID"
+            | "pageOrientation"
+            | "scale"
+            | "collate"
+            | "copies"
+            | "perPage"
+            | "topMargin"
+            | "leftMargin"
+            | "bottomMargin"
+            | "rightMargin"
+            | "headerSize"
+            | "footerSize"
+            | "fitToPage"
+            | "blackAndWhite"
+            | "printerName"
+            | "paper"
+            | "paperSource"
+            | "pageWidth"
+            | "pageHeight"
+            | "defaultFormatIndex"
+            | "font"
+            | "border"
+            | "leftBorder"
+            | "topBorder"
+            | "rightBorder"
+            | "bottomBorder"
+            | "height"
+            | "borderColor"
+            | "width"
+            | "horizontalAlignment"
+            | "verticalAlignment"
+            | "backColor"
+            | "textColor"
+            | "textPlacement"
+            | "fillType"
+            | "drawingBorder"
+            | "bySelectedColumns"
+            | "detailsUse"
+            | "hyperLink"
+            | "protection"
+            | "indent"
+            | "autoIndent"
+            | "mask"
+            | "picIndex"
+            | "pictureSizeMode"
+            | "picHorizontalAlignment"
+            | "picVerticalAlignment"
+            | "style"
+            | "drawingType"
+            | "beginRowOffset"
+            | "endRowOffset"
+            | "beginColumnOffset"
+            | "endColumnOffset"
+            | "autoSize"
+            | "pictureSize"
+            | "zOrder"
+            | "pictureIndex"
+    )
+}
+
+fn apply_spreadsheet_text_value(
+    path: &[String],
+    local: &str,
+    text: &str,
+    document: &mut SpreadsheetDocumentXml,
+    column_set: Option<&mut SpreadsheetDocumentXmlColumnSet>,
+    column: Option<&mut SpreadsheetDocumentXmlColumn>,
+    row: Option<&mut SpreadsheetDocumentXmlRow>,
+    cell: Option<&mut SpreadsheetDocumentXmlCell>,
+    merge: Option<&mut SpreadsheetDocumentXmlMerge>,
+    area: Option<&mut SpreadsheetDocumentXmlArea>,
+    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    line: Option<&mut SpreadsheetDocumentXmlLine>,
+    header_footer: Option<&mut SpreadsheetDocumentXmlHeaderFooter>,
+    picture: Option<&mut SpreadsheetDocumentXmlPicture>,
+    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
+) {
+    let value = text.trim();
+    match local {
+        "size" if path_ends_with(path, &["columns", "size"]) => {
+            if let Ok(size) = value.parse::<usize>() {
+                if let Some(column_set) = column_set {
+                    column_set.size = size;
+                }
+                document.column_count = document.column_count.max(size);
+            }
+        }
+        "id" if path_ends_with(path, &["columns", "id"]) => {
+            if let Some(column_set) = column_set
+                && !value.is_empty()
+            {
+                column_set.id = Some(text.to_string());
+            }
+        }
+        "index" if path_ends_with(path, &["columns", "columnsItem", "index"]) => {
+            if let Some(column) = column
+                && let Ok(index) = value.parse::<usize>()
+            {
+                column.index = index;
+            }
+        }
+        "index" if path_ends_with(path, &["rowsItem", "index"]) => {
+            if let Some(row) = row
+                && let Ok(index) = value.parse::<usize>()
+            {
+                row.index = index;
+            }
+        }
+        "index" if path_ends_with(path, &["picture", "index"]) => {
+            if let Some(picture) = picture
+                && let Ok(index) = value.parse::<usize>()
+            {
+                picture.index = index;
+            }
+        }
+        "indexTo" if path_ends_with(path, &["rowsItem", "indexTo"]) => {
+            if let Some(row) = row
+                && let Ok(index_to) = value.parse::<usize>()
+            {
+                row.index_to = Some(index_to);
+            }
+        }
+        "formatIndex" if path_ends_with(path, &["rowsItem", "row", "formatIndex"]) => {
+            if let Some(row) = row
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                row.format_index = format_index;
+            }
+        }
+        "formatIndex" if path_ends_with(path, &["drawing", "formatIndex"]) => {
+            if let Some(drawing) = drawing
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                drawing.format_index = format_index;
+            }
+        }
+        "formatIndex"
+            if path_ends_with(path, &["columns", "columnsItem", "column", "formatIndex"]) =>
+        {
+            if let Some(column) = column
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                column.format_index = format_index;
+            }
+        }
+        "columnsID" if path_ends_with(path, &["rowsItem", "row", "columnsID"]) => {
+            if let Some(row) = row
+                && !value.is_empty()
+            {
+                row.columns_id = Some(text.to_string());
+            }
+        }
+        "empty" if path_ends_with(path, &["rowsItem", "row", "empty"]) => {
+            if let Some(row) = row {
+                row.empty = value.eq_ignore_ascii_case("true");
+            }
+        }
+        "i" => {
+            if let Some(cell) = cell
+                && let Ok(index) = value.parse::<usize>()
+            {
+                cell.column_index = index;
+            }
+        }
+        "f" => {
+            if let Some(cell) = cell
+                && let Ok(format_index) = value.parse::<usize>()
+            {
+                cell.format_index = format_index;
+            }
+            if let Some(header_footer) = header_footer
+                && value == "0"
+            {
+                header_footer.f_zero = true;
+            }
+        }
+        "content" => {
+            if let Some(cell) = cell {
+                cell.text = Some(text.to_string());
+                cell.empty_text = false;
+            }
+        }
+        "parameter" => {
+            if let Some(cell) = cell {
+                cell.parameter = Some(text.to_string());
+            }
+        }
+        "detailParameter" => {
+            if let Some(cell) = cell {
+                cell.detail_parameter = Some(text.to_string());
+            }
+        }
+        "r" if path_ends_with(path, &["merge", "r"]) => {
+            if let Some(merge) = merge
+                && let Ok(row) = value.parse::<i32>()
+            {
+                merge.row = row;
+            }
+        }
+        "c" if path_ends_with(path, &["merge", "c"]) => {
+            if let Some(merge) = merge
+                && let Ok(column) = value.parse::<i32>()
+            {
+                merge.column = column;
+            }
+        }
+        "h" if path_ends_with(path, &["merge", "h"]) => {
+            if let Some(merge) = merge
+                && let Ok(height) = value.parse::<i32>()
+            {
+                merge.height = height.max(0);
+            }
+        }
+        "w" if path_ends_with(path, &["merge", "w"]) => {
+            if let Some(merge) = merge
+                && let Ok(width) = value.parse::<i32>()
+            {
+                merge.width = width.max(0);
+            }
+        }
+        "name" if path_ends_with(path, &["namedItem", "name"]) => {
+            if let Some(area) = area {
+                area.name = text.to_string();
+            }
+        }
+        "type" if spreadsheet_area_property_path(path, "type") => {
+            if let Some(area) = area {
+                area.area_type = text.to_string();
+            }
+        }
+        "beginRow" if spreadsheet_area_property_path(path, "beginRow") => {
+            if let Some(area) = area
+                && let Ok(begin_row) = value.parse::<i32>()
+            {
+                area.begin_row = begin_row;
+            }
+        }
+        "endRow" if spreadsheet_area_property_path(path, "endRow") => {
+            if let Some(area) = area
+                && let Ok(end_row) = value.parse::<i32>()
+            {
+                area.end_row = end_row;
+            }
+        }
+        "beginColumn" if spreadsheet_area_property_path(path, "beginColumn") => {
+            if let Some(area) = area
+                && let Ok(begin_column) = value.parse::<i32>()
+            {
+                area.begin_column = begin_column;
+            }
+        }
+        "endColumn" if spreadsheet_area_property_path(path, "endColumn") => {
+            if let Some(area) = area
+                && let Ok(end_column) = value.parse::<i32>()
+            {
+                area.end_column = end_column;
+            }
+        }
+        "columnsID" if path_ends_with(path, &["namedItem", "area", "columnsID"]) => {
+            if let Some(area) = area
+                && !value.is_empty()
+            {
+                area.columns_id = Some(text.to_string());
+            }
+        }
+        "pageOrientation" if path_ends_with(path, &["printSettings", "pageOrientation"]) => {
+            if let Some(print_settings) = print_settings
+                && !value.is_empty()
+            {
+                print_settings.page_orientation = Some(text.to_string());
+            }
+        }
+        "scale" if path_ends_with(path, &["printSettings", "scale"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.scale = Some(parsed)
+            });
+        }
+        "collate" if path_ends_with(path, &["printSettings", "collate"]) => {
+            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
+                settings.collate = Some(parsed)
+            });
+        }
+        "copies" if path_ends_with(path, &["printSettings", "copies"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.copies = Some(parsed)
+            });
+        }
+        "perPage" if path_ends_with(path, &["printSettings", "perPage"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.per_page = Some(parsed)
+            });
+        }
+        "topMargin" if path_ends_with(path, &["printSettings", "topMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.top_margin = Some(parsed)
+            });
+        }
+        "leftMargin" if path_ends_with(path, &["printSettings", "leftMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.left_margin = Some(parsed)
+            });
+        }
+        "bottomMargin" if path_ends_with(path, &["printSettings", "bottomMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.bottom_margin = Some(parsed)
+            });
+        }
+        "rightMargin" if path_ends_with(path, &["printSettings", "rightMargin"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.right_margin = Some(parsed)
+            });
+        }
+        "headerSize" if path_ends_with(path, &["printSettings", "headerSize"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.header_size = Some(parsed)
+            });
+        }
+        "footerSize" if path_ends_with(path, &["printSettings", "footerSize"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.footer_size = Some(parsed)
+            });
+        }
+        "fitToPage" if path_ends_with(path, &["printSettings", "fitToPage"]) => {
+            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
+                settings.fit_to_page = Some(parsed)
+            });
+        }
+        "blackAndWhite" if path_ends_with(path, &["printSettings", "blackAndWhite"]) => {
+            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
+                settings.black_and_white = Some(parsed)
+            });
+        }
+        "printerName" if path_ends_with(path, &["printSettings", "printerName"]) => {
+            if let Some(print_settings) = print_settings {
+                print_settings.printer_name = Some(text.to_string());
+            }
+        }
+        "paper" if path_ends_with(path, &["printSettings", "paper"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.paper = Some(parsed)
+            });
+        }
+        "paperSource" if path_ends_with(path, &["printSettings", "paperSource"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.paper_source = Some(parsed)
+            });
+        }
+        "pageWidth" if path_ends_with(path, &["printSettings", "pageWidth"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.page_width = Some(parsed)
+            });
+        }
+        "pageHeight" if path_ends_with(path, &["printSettings", "pageHeight"]) => {
+            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
+                settings.page_height = Some(parsed)
+            });
+        }
+        "defaultFormatIndex" if path_ends_with(path, &["defaultFormatIndex"]) => {
+            if let Ok(parsed) = value.parse::<usize>() {
+                document.default_format_index = Some(parsed);
+            }
+        }
+        "font" if path_ends_with(path, &["format", "font"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.font = Some(parsed)
+            });
+        }
+        "border" if path_ends_with(path, &["format", "border"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.border = Some(parsed)
+            });
+        }
+        "leftBorder" if path_ends_with(path, &["format", "leftBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.left_border = Some(parsed)
+            });
+        }
+        "topBorder" if path_ends_with(path, &["format", "topBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.top_border = Some(parsed)
+            });
+        }
+        "rightBorder" if path_ends_with(path, &["format", "rightBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.right_border = Some(parsed)
+            });
+        }
+        "bottomBorder" if path_ends_with(path, &["format", "bottomBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.bottom_border = Some(parsed)
+            });
+        }
+        "height" if path_ends_with(path, &["format", "height"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.height = Some(parsed)
+            });
+        }
+        "borderColor" if path_ends_with(path, &["format", "borderColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.border_color = Some(parsed)
+            });
+        }
+        "width" if path_ends_with(path, &["format", "width"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.width = Some(parsed)
+            });
+        }
+        "horizontalAlignment" if path_ends_with(path, &["format", "horizontalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.horizontal_alignment = Some(parsed)
+            });
+        }
+        "verticalAlignment" if path_ends_with(path, &["format", "verticalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.vertical_alignment = Some(parsed)
+            });
+        }
+        "backColor" if path_ends_with(path, &["format", "backColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.back_color = Some(parsed)
+            });
+        }
+        "textColor" if path_ends_with(path, &["format", "textColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.text_color = Some(parsed)
+            });
+        }
+        "textPlacement" if path_ends_with(path, &["format", "textPlacement"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.text_placement = Some(parsed)
+            });
+        }
+        "fillType" if path_ends_with(path, &["format", "fillType"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.fill_type = Some(parsed)
+            });
+        }
+        "drawingBorder" if path_ends_with(path, &["format", "drawingBorder"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.drawing_border = Some(parsed)
+            });
+        }
+        "bySelectedColumns" if path_ends_with(path, &["format", "bySelectedColumns"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.by_selected_columns = Some(parsed)
+            });
+        }
+        "detailsUse" if path_ends_with(path, &["format", "detailsUse"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.details_use = Some(parsed)
+            });
+        }
+        "hyperLink" if path_ends_with(path, &["format", "hyperLink"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.hyper_link = Some(parsed)
+            });
+        }
+        "protection" if path_ends_with(path, &["format", "protection"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.protection = Some(parsed)
+            });
+        }
+        "indent" if path_ends_with(path, &["format", "indent"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.indent = Some(parsed)
+            });
+        }
+        "autoIndent" if path_ends_with(path, &["format", "autoIndent"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.auto_indent = Some(parsed)
+            });
+        }
+        "mask" if path_ends_with(path, &["format", "mask"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.mask = Some(parsed)
+            });
+        }
+        "picIndex" if path_ends_with(path, &["format", "picIndex"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.pic_index = Some(parsed)
+            });
+        }
+        "pictureSizeMode" if path_ends_with(path, &["format", "pictureSizeMode"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.picture_size_mode = Some(parsed)
+            });
+        }
+        "picHorizontalAlignment" if path_ends_with(path, &["format", "picHorizontalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.pic_horizontal_alignment = Some(parsed)
+            });
+        }
+        "picVerticalAlignment" if path_ends_with(path, &["format", "picVerticalAlignment"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.pic_vertical_alignment = Some(parsed)
+            });
+        }
+        "beginRow" if path_ends_with(path, &["drawing", "beginRow"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_row = parsed
+            });
+        }
+        "beginRowOffset" if path_ends_with(path, &["drawing", "beginRowOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_row_offset = parsed
+            });
+        }
+        "endRow" if path_ends_with(path, &["drawing", "endRow"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| drawing.end_row = parsed);
+        }
+        "endRowOffset" if path_ends_with(path, &["drawing", "endRowOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.end_row_offset = parsed
+            });
+        }
+        "beginColumn" if path_ends_with(path, &["drawing", "beginColumn"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_column = parsed
+            });
+        }
+        "beginColumnOffset" if path_ends_with(path, &["drawing", "beginColumnOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.begin_column_offset = parsed
+            });
+        }
+        "endColumn" if path_ends_with(path, &["drawing", "endColumn"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.end_column = parsed
+            });
+        }
+        "endColumnOffset" if path_ends_with(path, &["drawing", "endColumnOffset"]) => {
+            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
+                drawing.end_column_offset = parsed
+            });
+        }
+        "autoSize" if path_ends_with(path, &["drawing", "autoSize"]) => {
+            if let Some(drawing) = drawing {
+                drawing.auto_size = value.eq_ignore_ascii_case("true");
+            }
+        }
+        "pictureSize" if path_ends_with(path, &["drawing", "pictureSize"]) => {
+            if let Some(drawing) = drawing {
+                drawing.picture_size = text.to_string();
+            }
+        }
+        "zOrder" if path_ends_with(path, &["drawing", "zOrder"]) => {
+            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| {
+                drawing.z_order = parsed
+            });
+        }
+        "pictureIndex" if path_ends_with(path, &["drawing", "pictureIndex"]) => {
+            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| {
+                drawing.picture_index = parsed
+            });
+        }
+        "style" if path_ends_with(path, &["line", "style"]) => {
+            if let Some(line) = line {
+                line.style = text.to_string();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn set_spreadsheet_print_settings_usize(
+    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlPrintSettings, usize),
+) {
+    if let Some(print_settings) = print_settings
+        && let Ok(parsed) = value.parse::<usize>()
+    {
+        setter(print_settings, parsed);
+    }
+}
+
+fn set_spreadsheet_print_settings_bool(
+    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlPrintSettings, bool),
+) {
+    if let Some(print_settings) = print_settings {
+        setter(print_settings, value.eq_ignore_ascii_case("true"));
+    }
+}
+
+fn set_spreadsheet_format_usize(
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, usize),
+) {
+    if let Some(format) = format
+        && let Ok(parsed) = value.parse::<usize>()
+    {
+        setter(format, parsed);
+    }
+}
+
+fn set_spreadsheet_format_bool(
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, bool),
+) {
+    if let Some(format) = format {
+        setter(format, value.eq_ignore_ascii_case("true"));
+    }
+}
+
+fn set_spreadsheet_format_string(
+    format: Option<&mut SpreadsheetDocumentXmlFormat>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, String),
+) {
+    if let Some(format) = format {
+        setter(format, value.to_string());
+    }
+}
+
+fn set_spreadsheet_drawing_i32(
+    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlDrawing, i32),
+) {
+    if let Some(drawing) = drawing
+        && let Ok(parsed) = value.parse::<i32>()
+    {
+        setter(drawing, parsed);
+    }
+}
+
+fn set_spreadsheet_drawing_usize(
+    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
+    value: &str,
+    setter: impl FnOnce(&mut SpreadsheetDocumentXmlDrawing, usize),
+) {
+    if let Some(drawing) = drawing
+        && let Ok(parsed) = value.parse::<usize>()
+    {
+        setter(drawing, parsed);
+    }
+}
+
+fn spreadsheet_area_property_path(path: &[String], property: &str) -> bool {
+    path_ends_with(path, &["namedItem", "area", property])
+        || path_ends_with(path, &["printArea", property])
+}
+
+fn normalize_spreadsheet_cell(cell: &mut SpreadsheetDocumentXmlCell) {
+    if cell.parameter.is_some() {
+        cell.text = None;
+        cell.empty_text = false;
+    }
+}
+
+fn spreadsheet_column_format_slots(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_count: usize,
+) -> usize {
+    spreadsheet
+        .column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .map(|column| column.format_index)
+        .max()
+        .unwrap_or(column_count.max(1))
+        .max(1)
+}
+
+fn row_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
+    if format_index <= 1 {
+        0
+    } else {
+        format_index.saturating_sub(format_offset + 1)
+    }
+}
+
+fn cell_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
+    if format_index <= 1 {
+        0
+    } else {
+        format_index.saturating_sub(format_offset + 1)
+    }
+}
+
+fn format_spreadsheet_cell_for_moxel(
+    cell: &SpreadsheetDocumentXmlCell,
+    format_offset: usize,
+) -> String {
+    let format_index = cell_format_index_for_moxel(cell.format_index, format_offset);
+    let localized = if let Some(parameter) = &cell.parameter {
+        format!(
+            "{{1,1,{{{},{}}}}}",
+            format_1c_string(""),
+            format_1c_string(parameter)
+        )
+    } else if let Some(text) = &cell.text {
+        format!(
+            "{{1,1,{{{},{}}}}}",
+            format_1c_string("ru"),
+            format_1c_string(text)
+        )
+    } else if cell.empty_text {
+        "{1,0}".to_string()
+    } else {
+        return format!("{{0,{format_index}}}");
+    };
+    if let Some(detail_parameter) = &cell.detail_parameter {
+        return format!(
+            "{{24,{format_index},{},{localized},0}}",
+            format_1c_string(detail_parameter)
+        );
+    }
+    format!("{{16,{format_index},{localized},0}}")
+}
+
+fn format_spreadsheet_empty_headers_footers_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+) -> Vec<String> {
+    let tags = [
+        "leftHeader",
+        "centerHeader",
+        "rightHeader",
+        "leftFooter",
+        "centerFooter",
+        "rightFooter",
+    ];
+    if !tags
+        .iter()
+        .all(|tag| spreadsheet.empty_header_footer_tags.contains(*tag))
+    {
+        return Vec::new();
+    }
+    vec!["{16,0,{1,0},1,{1,{1,0},1}}".to_string(); tags.len()]
+}
+
+fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml) -> Vec<String> {
+    let has_column_metadata = spreadsheet
+        .column_sets
+        .iter()
+        .any(|column_set| column_set.id.is_some() || !column_set.columns.is_empty());
+    let has_row_columns_id = spreadsheet.rows.iter().any(|row| row.columns_id.is_some());
+    if !has_column_metadata && !has_row_columns_id {
+        return Vec::new();
+    }
+
+    let column_count = spreadsheet
+        .column_count
+        .max(
+            spreadsheet
+                .column_sets
+                .iter()
+                .flat_map(|column_set| column_set.columns.iter().map(|column| column.index + 1))
+                .max()
+                .unwrap_or(1),
+        )
+        .max(1);
+    let default_set = spreadsheet
+        .column_sets
+        .iter()
+        .find(|column_set| column_set.id.is_none());
+    let mut fields = vec![format_spreadsheet_column_set_for_moxel(
+        default_set,
+        column_count,
+        None,
+    )];
+
+    let additional_sets = spreadsheet
+        .column_sets
+        .iter()
+        .filter(|column_set| column_set.id.is_some())
+        .collect::<Vec<_>>();
+    let height = spreadsheet
+        .rows
+        .iter()
+        .map(|row| *row.expanded_indexes().end())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    fields.push(height.to_string());
+    fields.push(additional_sets.len().to_string());
+    for column_set in &additional_sets {
+        fields.push(format_spreadsheet_column_set_for_moxel(
+            Some(column_set),
+            column_count,
+            column_set.id.as_deref(),
+        ));
+    }
+
+    let mut row_pairs = Vec::<(usize, usize)>::new();
+    for row in &spreadsheet.rows {
+        let Some(columns_id) = row.columns_id.as_deref() else {
+            continue;
+        };
+        let Some(set_index) = additional_sets
+            .iter()
+            .position(|column_set| column_set.id.as_deref() == Some(columns_id))
+        else {
+            continue;
+        };
+        for row_index in row.expanded_indexes() {
+            row_pairs.push((row_index, set_index));
+        }
+    }
+    fields.push(row_pairs.len().to_string());
+    for (row_index, set_index) in row_pairs {
+        fields.push(row_index.to_string());
+        fields.push(set_index.to_string());
+    }
+
+    fields
+}
+
+fn format_spreadsheet_column_set_for_moxel(
+    column_set: Option<&SpreadsheetDocumentXmlColumnSet>,
+    fallback_size: usize,
+    id: Option<&str>,
+) -> String {
+    let declared_size = column_set
+        .map(|column_set| column_set.size)
+        .filter(|size| *size > 0)
+        .unwrap_or(fallback_size);
+    let size = declared_size
+        .max(
+            column_set
+                .into_iter()
+                .flat_map(|column_set| column_set.columns.iter().map(|column| column.index + 1))
+                .max()
+                .unwrap_or(1),
+        )
+        .max(1);
+    let synthesized;
+    let columns = if let Some(column_set) = column_set {
+        if column_set.columns.is_empty() {
+            synthesized = synthesize_spreadsheet_columns(size);
+            &synthesized
+        } else {
+            &column_set.columns
+        }
+    } else {
+        synthesized = synthesize_spreadsheet_columns(size);
+        &synthesized
+    };
+    let uuid = id.unwrap_or("00000000-0000-0000-0000-000000000000");
+    let mut fields = Vec::with_capacity(columns.len() * 2 + 4);
+    fields.push(size.to_string());
+    fields.push("0".to_string());
+    fields.push(uuid.to_string());
+    fields.push(columns.len().to_string());
+    for column in columns {
+        fields.push(column.index.to_string());
+        fields.push(column.format_index.max(1).to_string());
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn synthesize_spreadsheet_columns(size: usize) -> Vec<SpreadsheetDocumentXmlColumn> {
+    (0..size)
+        .map(|index| SpreadsheetDocumentXmlColumn {
+            index,
+            format_index: index + 1,
+        })
+        .collect()
+}
+
+fn format_spreadsheet_merges_for_moxel(merges: &[SpreadsheetDocumentXmlMerge]) -> String {
+    let mut fields = Vec::with_capacity(merges.len() + 1);
+    fields.push(merges.len().to_string());
+    for merge in merges {
+        let begin_column = merge.column.max(0);
+        let begin_row = merge.row.max(0);
+        let end_column = begin_column + merge.width.max(0);
+        let end_row = begin_row + merge.height.max(0);
+        fields.push(format!(
+            "{{{begin_column},{begin_row},{end_column},{end_row}}}"
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn format_spreadsheet_named_areas_for_moxel(areas: &[SpreadsheetDocumentXmlArea]) -> String {
+    let mut fields = Vec::with_capacity(areas.len() * 2 + 1);
+    fields.push(areas.len().to_string());
+    for area in areas {
+        fields.push(format_1c_string(&area.name));
+        fields.push(format!(
+            "{{1,{},0}}",
+            format_spreadsheet_area_bounds_for_moxel(area)
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn format_spreadsheet_area_bounds_for_moxel(area: &SpreadsheetDocumentXmlArea) -> String {
+    let area_type = spreadsheet_area_type_code(&area.area_type);
+    let columns_id = area
+        .columns_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("00000000-0000-0000-0000-000000000000");
+    format!(
+        "{{{area_type},{},{},{},{},{columns_id}}}",
+        area.begin_column.max(0),
+        area.begin_row.max(0),
+        area.end_column.max(area.begin_column).max(0),
+        area.end_row.max(area.begin_row).max(0)
+    )
+}
+
+fn spreadsheet_area_type_code(area_type: &str) -> &'static str {
+    match area_type {
+        "Rows" => "1",
+        "Columns" => "2",
+        _ => "3",
+    }
+}
+
+fn format_spreadsheet_print_settings_for_moxel(
+    settings: &SpreadsheetDocumentXmlPrintSettings,
+) -> String {
+    let pairs = [
+        (
+            0,
+            format_spreadsheet_print_number(settings.paper.unwrap_or(0)),
+        ),
+        (
+            1,
+            format_spreadsheet_print_number(
+                settings
+                    .page_orientation
+                    .as_deref()
+                    .map(spreadsheet_page_orientation_code)
+                    .unwrap_or(1),
+            ),
+        ),
+        (
+            2,
+            format_spreadsheet_print_number(settings.scale.unwrap_or(100)),
+        ),
+        (
+            3,
+            format_spreadsheet_print_number(bool_to_usize(settings.collate.unwrap_or(true))),
+        ),
+        (
+            4,
+            format_spreadsheet_print_number(settings.copies.unwrap_or(1)),
+        ),
+        (
+            5,
+            format_spreadsheet_print_number(settings.per_page.unwrap_or(1)),
+        ),
+        (
+            6,
+            format_spreadsheet_print_number(settings.top_margin.unwrap_or(0)),
+        ),
+        (
+            7,
+            format_spreadsheet_print_number(settings.left_margin.unwrap_or(0)),
+        ),
+        (
+            8,
+            format_spreadsheet_print_number(settings.bottom_margin.unwrap_or(0)),
+        ),
+        (
+            9,
+            format_spreadsheet_print_number(settings.right_margin.unwrap_or(0)),
+        ),
+        (
+            10,
+            format_spreadsheet_print_number(settings.header_size.unwrap_or(0)),
+        ),
+        (
+            11,
+            format_spreadsheet_print_number(settings.footer_size.unwrap_or(0)),
+        ),
+        (
+            12,
+            format_spreadsheet_print_number(bool_to_usize(settings.fit_to_page.unwrap_or(false))),
+        ),
+        (
+            13,
+            format_spreadsheet_print_number(bool_to_usize(
+                settings.black_and_white.unwrap_or(false),
+            )),
+        ),
+        (
+            14,
+            format_spreadsheet_print_string(settings.printer_name.as_deref().unwrap_or("")),
+        ),
+        (
+            15,
+            format_spreadsheet_print_number(settings.paper_source.unwrap_or(0)),
+        ),
+        (
+            16,
+            format_spreadsheet_print_number(settings.page_width.unwrap_or(0)),
+        ),
+        (
+            17,
+            format_spreadsheet_print_number(settings.page_height.unwrap_or(0)),
+        ),
+    ];
+    let mut fields = Vec::with_capacity(pairs.len() * 2 + 2);
+    fields.push("0".to_string());
+    fields.push(pairs.len().to_string());
+    for (key, value) in pairs {
+        fields.push(key.to_string());
+        fields.push(value);
+    }
+    format!("{{{{{}}}}}", fields.join(","))
+}
+
+fn format_spreadsheet_print_number(value: usize) -> String {
+    format!(r#"{{"N",{value}}}"#)
+}
+
+fn format_spreadsheet_print_string(value: &str) -> String {
+    format!(r#"{{"S",{}}}"#, format_1c_string(value))
+}
+
+fn spreadsheet_page_orientation_code(value: &str) -> usize {
+    match value {
+        "Landscape" => 2,
+        _ => 1,
+    }
+}
+
+fn bool_to_usize(value: bool) -> usize {
+    if value { 1 } else { 0 }
+}
+
+fn format_spreadsheet_formats_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
+) -> Vec<String> {
+    if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
+        return Vec::new();
+    }
+    let source_format_count = spreadsheet
+        .formats
+        .len()
+        .max(spreadsheet.default_format_index.unwrap_or(0))
+        .max(column_format_slots);
+    let body_format_count = source_format_count.saturating_sub(column_format_slots);
+    let column_placeholder_count = column_format_slots.max(1);
+    let count = body_format_count + column_placeholder_count;
+    let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
+    let mut format_fields = Vec::with_capacity(count + 1);
+    format_fields.push(count.to_string());
+    for global_index in column_format_slots + 1..=source_format_count {
+        format_fields.push(format_spreadsheet_format_index_for_moxel(
+            spreadsheet,
+            global_index,
+            &mut style_refs,
+        ));
+    }
+    for global_index in 1..=column_placeholder_count {
+        format_fields.push(format_spreadsheet_format_index_for_moxel(
+            spreadsheet,
+            global_index,
+            &mut style_refs,
+        ));
+    }
+    let mut fields = style_refs
+        .iter()
+        .map(format_spreadsheet_style_ref_slot_for_moxel)
+        .collect::<Vec<_>>();
+    fields.push(format!("{{{}}}", format_fields.join(",")));
+    fields
+}
+
+fn format_spreadsheet_format_index_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    global_index: usize,
+    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+) -> String {
+    spreadsheet
+        .formats
+        .get(global_index.saturating_sub(1))
+        .and_then(|format| format_spreadsheet_format_for_moxel(format, style_refs))
+        .unwrap_or_else(spreadsheet_empty_format_for_moxel)
+}
+
+fn spreadsheet_empty_format_for_moxel() -> String {
+    "{1,0}".to_string()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SpreadsheetStyleRefSlot {
+    DirectColor(u32),
+    SystemStyle(i32),
+    WebColor(u32),
+}
+
+fn format_spreadsheet_format_for_moxel(
+    format: &SpreadsheetDocumentXmlFormat,
+    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+) -> Option<String> {
+    let mut values = Vec::<(u8, usize)>::new();
+    push_spreadsheet_format_value(&mut values, 0, format.font);
+    if let Some(border) = format.border {
+        for bit in [1, 2, 3, 4] {
+            push_spreadsheet_format_value(&mut values, bit, Some(border));
+        }
+    } else {
+        push_spreadsheet_format_value(&mut values, 1, format.left_border);
+        push_spreadsheet_format_value(&mut values, 2, format.top_border);
+        push_spreadsheet_format_value(&mut values, 3, format.right_border);
+        push_spreadsheet_format_value(&mut values, 4, format.bottom_border);
+    }
+    push_spreadsheet_format_value(&mut values, 6, format.height);
+    push_spreadsheet_format_value(
+        &mut values,
+        5,
+        format
+            .border_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+    );
+    push_spreadsheet_format_value(&mut values, 7, format.width);
+    push_spreadsheet_format_value(
+        &mut values,
+        8,
+        format
+            .horizontal_alignment
+            .as_deref()
+            .and_then(spreadsheet_horizontal_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        9,
+        format
+            .vertical_alignment
+            .as_deref()
+            .and_then(spreadsheet_vertical_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        10,
+        format
+            .text_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        11,
+        format
+            .back_color
+            .as_deref()
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        14,
+        format
+            .text_placement
+            .as_deref()
+            .and_then(spreadsheet_text_placement_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        15,
+        format
+            .fill_type
+            .as_deref()
+            .and_then(spreadsheet_fill_type_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        16,
+        format.protection.map(spreadsheet_protection_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        19,
+        format
+            .details_use
+            .as_deref()
+            .and_then(spreadsheet_details_use_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        20,
+        format.by_selected_columns.map(bool_to_usize),
+    );
+    push_spreadsheet_format_value(&mut values, 26, format.hyper_link.map(bool_to_usize));
+    push_spreadsheet_format_value(&mut values, 30, format.indent);
+    push_spreadsheet_format_value(&mut values, 31, format.auto_indent);
+    if format.mask.as_deref() == Some("") {
+        push_spreadsheet_format_value(&mut values, 34, Some(0));
+    }
+    push_spreadsheet_format_value(&mut values, 35, format.pic_index);
+    push_spreadsheet_format_value(
+        &mut values,
+        36,
+        format
+            .picture_size_mode
+            .as_deref()
+            .and_then(spreadsheet_picture_size_mode_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        37,
+        format
+            .pic_horizontal_alignment
+            .as_deref()
+            .and_then(spreadsheet_picture_alignment_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        38,
+        format
+            .pic_vertical_alignment
+            .as_deref()
+            .and_then(spreadsheet_picture_alignment_code),
+    );
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by_key(|(bit, _)| *bit);
+    let flags = values
+        .iter()
+        .fold(0u64, |acc, (bit, _)| acc | (1u64 << bit));
+    let mut fields = Vec::with_capacity(values.len() + 1);
+    fields.push(flags.to_string());
+    fields.extend(values.into_iter().map(|(_, value)| value.to_string()));
+    Some(format!("{{{}}}", fields.join(",")))
+}
+
+fn push_spreadsheet_format_value(values: &mut Vec<(u8, usize)>, bit: u8, value: Option<usize>) {
+    if let Some(value) = value {
+        values.push((bit, value));
+    }
+}
+
+fn spreadsheet_style_ref_index(
+    value: &str,
+    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+) -> Option<usize> {
+    let slot = spreadsheet_style_ref_slot(value)?;
+    if let Some(index) = style_refs.iter().position(|existing| existing == &slot) {
+        return Some(index);
+    }
+    let index = style_refs.len();
+    style_refs.push(slot);
+    Some(index)
+}
+
+fn spreadsheet_style_ref_slot(value: &str) -> Option<SpreadsheetStyleRefSlot> {
+    if let Some(color) = spreadsheet_direct_color_code(value) {
+        return Some(SpreadsheetStyleRefSlot::DirectColor(color));
+    }
+    if let Some(code) = spreadsheet_system_style_code(value) {
+        return Some(SpreadsheetStyleRefSlot::SystemStyle(code));
+    }
+    spreadsheet_web_color_code(value).map(SpreadsheetStyleRefSlot::WebColor)
+}
+
+fn format_spreadsheet_style_ref_slot_for_moxel(slot: &SpreadsheetStyleRefSlot) -> String {
+    match slot {
+        SpreadsheetStyleRefSlot::DirectColor(value) => format!("{{3,0,{{{value}}}}}"),
+        SpreadsheetStyleRefSlot::SystemStyle(value) => format!("{{3,3,{{{value}}}}}"),
+        SpreadsheetStyleRefSlot::WebColor(value) => format!("{{3,2,{{{value}}}}}"),
+    }
+}
+
+fn spreadsheet_direct_color_code(value: &str) -> Option<u32> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let red = u32::from_str_radix(&hex[0..2], 16).ok()?;
+    let green = u32::from_str_radix(&hex[2..4], 16).ok()?;
+    let blue = u32::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(red | (green << 8) | (blue << 16))
+}
+
+fn spreadsheet_system_style_code(value: &str) -> Option<i32> {
+    match value {
+        "style:FieldBackColor" => Some(-10),
+        "style:ButtonBackColor" => Some(-7),
+        "style:ReportLineColor" => Some(-28),
+        _ => None,
+    }
+}
+
+fn spreadsheet_web_color_code(value: &str) -> Option<u32> {
+    match value {
+        "d3p1:Crimson" => Some(21),
+        "d3p1:Gainsboro" => Some(48),
+        "d3p1:LemonChiffon" => Some(64),
+        "d3p1:LightYellow" => Some(79),
+        "d3p1:PaleGoldenrod" => Some(108),
+        "d3p1:RoyalBlue" => Some(121),
+        _ => None,
+    }
+}
+
+fn spreadsheet_horizontal_alignment_code(value: &str) -> Option<usize> {
+    match value {
+        "Left" => Some(0),
+        "Right" => Some(2),
+        "Center" => Some(6),
+        _ => None,
+    }
+}
+
+fn spreadsheet_vertical_alignment_code(value: &str) -> Option<usize> {
+    match value {
+        "Top" => Some(0),
+        "Center" => Some(24),
+        _ => None,
+    }
+}
+
+fn spreadsheet_text_placement_code(value: &str) -> Option<usize> {
+    match value {
+        "Auto" => Some(0),
+        "Block" => Some(2),
+        "Wrap" => Some(3),
+        _ => None,
+    }
+}
+
+fn spreadsheet_fill_type_code(value: &str) -> Option<usize> {
+    match value {
+        "Text" => Some(0),
+        "Parameter" => Some(1),
+        "Template" => Some(2),
+        _ => None,
+    }
+}
+
+fn spreadsheet_details_use_code(value: &str) -> Option<usize> {
+    match value {
+        "Cell" => Some(0),
+        "Row" => Some(1),
+        _ => None,
+    }
+}
+
+fn spreadsheet_protection_code(value: bool) -> usize {
+    if value { 0 } else { 1 }
+}
+
+fn spreadsheet_picture_size_mode_code(value: &str) -> Option<usize> {
+    match value {
+        "Proportionally" => Some(6),
+        _ => None,
+    }
+}
+
+fn spreadsheet_picture_alignment_code(value: &str) -> Option<usize> {
+    match value {
+        "Center" => Some(2),
+        _ => None,
+    }
+}
+
+fn format_spreadsheet_lines_for_moxel(lines: &[SpreadsheetDocumentXmlLine]) -> Vec<String> {
+    lines
+        .iter()
+        .filter(|line| line.line_type.ends_with("SpreadsheetDocumentCellLineType"))
+        .filter_map(|line| spreadsheet_line_style_code(&line.style))
+        .map(|code| format!("{{3,3,{{{code}}}}}"))
+        .collect()
+}
+
+fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
+    match value {
+        "None" => Some(-1),
+        "Solid" => Some(-3),
+        "Dotted" => Some(-10),
+        _ => None,
+    }
+}
+
+fn format_spreadsheet_drawings_for_moxel(
+    drawings: &[SpreadsheetDocumentXmlDrawing],
+) -> Vec<String> {
+    drawings
+        .iter()
+        .filter_map(format_spreadsheet_drawing_for_moxel)
+        .collect()
+}
+
+fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing) -> Option<String> {
+    if drawing.picture_size != "Stretch" {
+        return None;
+    }
+    let auto_size = if drawing.auto_size { 0 } else { 1 };
+    Some(format!(
+        "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
+        drawing.format_index,
+        drawing.begin_column.max(0),
+        drawing.begin_row.max(0),
+        drawing.begin_column_offset.max(0),
+        drawing.begin_row_offset.max(0),
+        drawing.end_column.max(drawing.begin_column).max(0),
+        drawing.end_row.max(drawing.begin_row).max(0),
+        drawing.end_column_offset.max(0),
+        drawing.end_row_offset.max(0),
+        drawing.z_order,
+        drawing.picture_index
+    ))
+}
+
+fn format_spreadsheet_pictures_for_moxel(
+    pictures: &[SpreadsheetDocumentXmlPicture],
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut fields = Vec::with_capacity(pictures.len() + 1);
+    fields.push(pictures.len().to_string());
+    for picture in pictures {
+        fields.push(format_spreadsheet_picture_for_moxel(picture, source)?);
+    }
+    Ok(format!("{{{}}}", fields.join(",")))
+}
+
+fn format_spreadsheet_picture_for_moxel(
+    picture: &SpreadsheetDocumentXmlPicture,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(ref_name) = picture
+        .ref_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(format!("{{4,{}}}", picture.index));
+    };
+    if let Some(reference) = spreadsheet_standard_picture_ref(ref_name) {
+        return Ok(format!("{{4,{},{{{reference}}}}}", picture.index));
+    }
+    let reference = if let Some(name) = ref_name.strip_prefix("v8ui:") {
+        format!("CommonPicture.{name}")
+    } else {
+        ref_name.to_string()
+    };
+    let source = source.ok_or_else(|| {
+        anyhow!("SpreadsheetDocument picture {ref_name} requires --source-root to resolve CommonPicture UUID")
+    })?;
+    let uuid = source.resolve_common_picture_uuid(&reference)?;
+    Ok(format!("{{4,{},{{0,{uuid}}}}}", picture.index))
+}
+
+fn spreadsheet_standard_picture_ref(ref_name: &str) -> Option<String> {
+    match ref_name {
+        "v8ui:Print" | "StdPicture.Print" => Some("-13".to_string()),
+        "v8ui:InputFieldCalculator" | "StdPicture.InputFieldCalculator" => Some("-6".to_string()),
+        "v8ui:Information" | "StdPicture.Information" => {
+            Some(format!("0,{STD_PICTURE_INFORMATION_UUID}"))
+        }
+        "v8ui:SaveFile" | "StdPicture.SaveFile" => Some(format!("0,{STD_PICTURE_SAVE_FILE_UUID}")),
+        _ => None,
+    }
+}
+
+fn format_spreadsheet_fonts_for_moxel(fonts: &[SpreadsheetDocumentXmlFont]) -> Vec<String> {
+    fonts
+        .iter()
+        .filter_map(format_spreadsheet_font_for_moxel)
+        .collect()
+}
+
+fn format_spreadsheet_font_for_moxel(font: &SpreadsheetDocumentXmlFont) -> Option<String> {
+    match font.kind.as_str() {
+        "Absolute" => {
+            let face_name = font.face_name.as_deref().unwrap_or("Arial");
+            let height = font.height.unwrap_or(8) * 10;
+            let weight = spreadsheet_font_weight(font.bold);
+            let scale = font.scale.unwrap_or(100);
+            Some(format!(
+                "{{7,0,575,{height},{},{},{},{weight},0,0,0,0,0,0,0,0,{},1,{scale}}}",
+                bool_to_usize(font.italic),
+                bool_to_usize(font.underline),
+                bool_to_usize(font.strikeout),
+                format_1c_string(face_name)
+            ))
+        }
+        "StyleItem" => {
+            let ref_code = spreadsheet_font_ref_code(font.ref_name.as_deref()?)?;
+            let weight = spreadsheet_font_weight(font.bold);
+            Some(format!(
+                "{{7,2,60,{{{ref_code}}},{weight},{},{},{},1,100}}",
+                bool_to_usize(font.italic),
+                bool_to_usize(font.underline),
+                bool_to_usize(font.strikeout)
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn spreadsheet_font_weight(bold: bool) -> usize {
+    if bold { 700 } else { 400 }
+}
+
+fn spreadsheet_font_ref_code(ref_name: &str) -> Option<i32> {
+    match ref_name {
+        "style:TextFont" => Some(-20),
+        "style:NormalTextFont" => Some(-31),
+        "style:LargeTextFont" => Some(-32),
+        _ => None,
+    }
+}
+
+pub fn pack_form_body_blob_from_module_text(
+    base_blob: &[u8],
+    module_text: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
+    let container = FormBodyContainer::parse(&plain)?;
+    let module_text = std::str::from_utf8(module_text)
+        .context("Form module text is not valid UTF-8")?
+        .trim_start_matches('\u{feff}');
+    plain.replace_range(container.module_range, &format_1c_string(module_text));
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
+    let inflated = inflate_raw(blob).context("failed to inflate Form body blob")?;
+    let plain = String::from_utf8(inflated).context("Form body blob is not valid UTF-8")?;
+    let container = FormBodyContainer::parse(&plain)?;
+    let layout = plain[container.layout_range.clone()].trim().to_string();
+    let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())
+        .context("Form body module text field is not a quoted string")?;
+    Ok(ParsedFormBodyBlob {
+        layout,
+        module_text,
+        trailing_fields: container.trailing_fields,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct FormBodyContainer {
+    layout_range: Range<usize>,
+    module_range: Range<usize>,
+    trailing_fields: usize,
+}
+
+impl FormBodyContainer {
+    fn parse(plain: &str) -> Result<Self> {
+        let body_start = plain
+            .find('{')
+            .ok_or_else(|| anyhow!("Form body has no braced payload"))?;
+        let fields = scan_braced_fields(plain, body_start)?;
+        if fields.first().map(|range| plain[range.clone()].trim()) != Some("4") {
+            return Err(anyhow!("Form body does not start with type marker 4"));
+        }
+        let layout_range = fields
+            .get(1)
+            .ok_or_else(|| anyhow!("Form body has no layout field"))?
+            .clone();
+        validate_form_body_layout(plain[layout_range.clone()].trim())?;
+        let module_range = fields
+            .get(2)
+            .ok_or_else(|| anyhow!("Form body has no module text field"))?
+            .clone();
+        if parse_1c_quoted_string(plain[module_range.clone()].trim()).is_err() {
+            return Err(anyhow!(
+                "Form body module text field is not a quoted string"
+            ));
+        }
+        Ok(Self {
+            layout_range,
+            module_range,
+            trailing_fields: fields.len().saturating_sub(3),
+        })
+    }
+}
+
+fn validate_form_body_layout(layout: &str) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !fields.first().is_some_and(|range| {
+        layout[range.clone()]
+            .trim()
+            .chars()
+            .all(|ch| ch.is_ascii_digit())
+    }) {
+        return Err(anyhow!(
+            "Form body layout field does not start with a numeric marker"
+        ));
+    }
+    Ok(())
+}
+
+pub fn pack_role_rights_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let rights = parse_role_rights_xml(xml)?;
+    let inflated = inflate_raw(base_blob).context("failed to inflate base Role rights blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base Role rights blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base Role rights body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("10") {
+        return Err(anyhow!(
+            "base Role rights body does not start with type marker 10"
+        ));
+    }
+    let objects_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("base Role rights body has no object rights field"))?
+        .clone();
+    let set_for_new_objects_range = fields
+        .get(4)
+        .ok_or_else(|| anyhow!("base Role rights body has no setForNewObjects field"))?
+        .clone();
+    let mut replacements = role_right_value_replacements(&plain, objects_range, &rights.objects)?;
+    replacements.push((
+        set_for_new_objects_range,
+        if rights.set_for_new_objects { "1" } else { "0" }.to_string(),
+    ));
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_command_interface_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let entries = parse_command_interface_xml(xml)?;
+    let inflated =
+        inflate_raw(base_blob).context("failed to inflate base CommandInterface blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base CommandInterface blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base CommandInterface body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("7") {
+        return Err(anyhow!(
+            "base CommandInterface body does not start with type marker 7"
+        ));
+    }
+    let count_range = fields
+        .get(2)
+        .ok_or_else(|| anyhow!("base CommandInterface body has no command count"))?;
+    let count = plain[count_range.clone()]
+        .trim()
+        .parse::<usize>()
+        .context("invalid base CommandInterface command count")?;
+    if count != entries.len() {
+        return Err(anyhow!(
+            "CommandInterface.xml command count {} does not match base blob command count {}",
+            entries.len(),
+            count
+        ));
+    }
+    let required_fields = 3 + count * 2;
+    if fields.len() < required_fields {
+        return Err(anyhow!(
+            "base CommandInterface body has {} fields, expected at least {}",
+            fields.len(),
+            required_fields
+        ));
+    }
+
+    let mut replacements = Vec::with_capacity(count);
+    for (index, entry) in entries.iter().enumerate() {
+        let common_range = fields[3 + index * 2 + 1].clone();
+        let common = if entry.common { "1" } else { "0" };
+        replacements.push((
+            common_range,
+            format!("{{{{0,{{{{0,{{{{\"B\",{common}}}}},0}}}}}}}}"),
+        ));
+    }
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_exchange_plan_content_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+    source: &MetadataSourceContext,
+) -> Result<PackedRawDeflatedBlob> {
+    let items = parse_exchange_plan_content_xml(xml)?;
+    if !base_blob.is_empty() {
+        let inflated =
+            inflate_raw(base_blob).context("failed to inflate base ExchangePlanContent blob")?;
+        let plain = String::from_utf8(inflated)
+            .context("base ExchangePlanContent blob is not valid UTF-8")?;
+        let body_start = plain
+            .find('{')
+            .ok_or_else(|| anyhow!("base ExchangePlanContent body has no braced payload"))?;
+        let fields = scan_braced_fields(&plain, body_start)?;
+        if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+            return Err(anyhow!(
+                "base ExchangePlanContent body does not start with type marker 2"
+            ));
+        }
+    }
+
+    let mut plain = format!("{{2,{}", items.len());
+    for item in items {
+        let uuid = source
+            .resolve_metadata_reference_uuid(&item.metadata)
+            .with_context(|| format!("failed to resolve ExchangePlanContent {}", item.metadata))?;
+        let auto_record = if item.auto_record { "1" } else { "0" };
+        plain.push(',');
+        plain.push_str(&uuid);
+        plain.push(',');
+        plain.push_str(auto_record);
+    }
+    plain.push('}');
+
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_predefined_data_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let items = parse_predefined_data_xml(xml)?;
+    let by_id = flatten_predefined_xml_items(&items)?;
+    let inflated = inflate_raw(base_blob).context("failed to inflate base PredefinedData blob")?;
+    let mut plain =
+        String::from_utf8(inflated).context("base PredefinedData blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base PredefinedData body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if !matches!(
+        fields.first().map(|range| plain[range.clone()].trim()),
+        Some("0" | "1")
+    ) {
+        return Err(anyhow!(
+            "base PredefinedData body does not start with type marker 0 or 1"
+        ));
+    }
+    let table_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("base PredefinedData body has no table field"))?
+        .clone();
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    let mut seen = BTreeSet::<String>::new();
+    collect_predefined_replacements(&plain, table_range, &by_id, &mut seen, &mut replacements)?;
+    let missing = by_id
+        .keys()
+        .filter(|id| !seen.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "PredefinedData XML contains items missing in base blob: {}",
+            missing.join(", ")
+        ));
+    }
+
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_business_process_flowchart_blob_from_xml(
+    base_blob: &[u8],
+    xml: &[u8],
+) -> Result<PackedRawDeflatedBlob> {
+    let items = parse_flowchart_xml(xml)?;
+    let by_id = items
+        .into_iter()
+        .map(|item| (item.id.clone(), item))
+        .collect::<BTreeMap<_, _>>();
+    let inflated =
+        inflate_raw(base_blob).context("failed to inflate base BusinessProcess Flowchart blob")?;
+    let mut plain = String::from_utf8(inflated)
+        .context("base BusinessProcess Flowchart blob is not valid UTF-8")?;
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("base BusinessProcess Flowchart body has no braced payload"))?;
+    let fields = scan_braced_fields(&plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("5") {
+        return Err(anyhow!(
+            "base BusinessProcess Flowchart body does not start with type marker 5"
+        ));
+    }
+    let item_count = plain[fields
+        .get(2)
+        .ok_or_else(|| anyhow!("base BusinessProcess Flowchart has no item count"))?
+        .clone()]
+    .trim()
+    .parse::<usize>()
+    .context("invalid BusinessProcess Flowchart item count")?;
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    let mut seen = BTreeSet::<String>::new();
+    let mut index = 3usize;
+    for _ in 0..item_count {
+        let code_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("base BusinessProcess Flowchart item has no code"))?
+            .clone();
+        let code = plain[code_range].trim().to_string();
+        let body_range = fields
+            .get(index + 1)
+            .ok_or_else(|| anyhow!("base BusinessProcess Flowchart item has no body"))?
+            .clone();
+        collect_flowchart_item_replacements(
+            &plain,
+            &code,
+            body_range,
+            &by_id,
+            &mut seen,
+            &mut replacements,
+        )?;
+        index += 2;
+    }
+    let missing = by_id
+        .keys()
+        .filter(|id| !seen.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "Flowchart.xml contains items missing in base blob: {}",
+            missing.join(", ")
+        ));
+    }
+
+    replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+    for (range, replacement) in replacements {
+        plain.replace_range(range, &replacement);
+    }
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+fn role_right_value_replacements(
+    plain: &str,
+    objects_range: Range<usize>,
+    objects: &[RoleObjectRightsXml],
+) -> Result<Vec<(Range<usize>, String)>> {
+    let object_fields = scan_braced_fields(plain, objects_range.start)?;
+    let base_count_range = object_fields
+        .first()
+        .ok_or_else(|| anyhow!("base Role object rights field is empty"))?
+        .clone();
+    let base_count = plain[base_count_range]
+        .trim()
+        .parse::<usize>()
+        .context("invalid base Role object rights count")?;
+    if base_count != objects.len() {
+        return Err(anyhow!(
+            "Role Rights.xml object count {} does not match base blob object count {}",
+            objects.len(),
+            base_count
+        ));
+    }
+    if object_fields.len() != base_count + 1 {
+        return Err(anyhow!(
+            "base Role object rights field count {} does not match declared count {}",
+            object_fields.len().saturating_sub(1),
+            base_count
+        ));
+    }
+
+    let mut replacements = Vec::new();
+    for (object_index, object) in objects.iter().enumerate() {
+        let entry_range = object_fields[object_index + 1].clone();
+        let entry_fields = scan_braced_fields(plain, entry_range.start)?;
+        let rights_range = entry_fields.get(1).ok_or_else(|| {
+            anyhow!("base Role object rights entry {object_index} has no rights payload")
+        })?;
+        replacements.extend(role_object_right_value_replacements(
+            plain,
+            rights_range.clone(),
+            object,
+        )?);
+    }
+    Ok(replacements)
+}
+
+fn role_object_right_value_replacements(
+    plain: &str,
+    rights_range: Range<usize>,
+    object: &RoleObjectRightsXml,
+) -> Result<Vec<(Range<usize>, String)>> {
+    let fields = scan_braced_fields(plain, rights_range.start)?;
+    let marker = fields
+        .first()
+        .map(|range| plain[range.clone()].trim())
+        .ok_or_else(|| anyhow!("base Role rights payload is empty"))?;
+    let (start, count) = match marker {
+        "0" => (1usize, (fields.len().saturating_sub(1)) / 2),
+        "1" => {
+            let count_range = fields
+                .get(1)
+                .ok_or_else(|| anyhow!("base Role restricted rights payload has no count"))?;
+            let count = plain[count_range.clone()]
+                .trim()
+                .parse::<usize>()
+                .context("invalid base Role restricted rights count")?;
+            (2usize, count)
+        }
+        _ => return Err(anyhow!("unsupported base Role rights marker {marker}")),
+    };
+    if object.rights.len() != count {
+        return Err(anyhow!(
+            "Role Rights.xml object {} right count {} does not match base blob right count {}",
+            object.name,
+            object.rights.len(),
+            count
+        ));
+    }
+    let required_fields = start + count * 2;
+    if fields.len() < required_fields {
+        return Err(anyhow!(
+            "base Role rights payload has {} fields, expected at least {}",
+            fields.len(),
+            required_fields
+        ));
+    }
+    let mut replacements = Vec::with_capacity(count);
+    for (right_index, right) in object.rights.iter().enumerate() {
+        let value_range = fields[start + right_index * 2 + 1].clone();
+        replacements.push((
+            value_range,
+            if right.value { "1" } else { "-1" }.to_string(),
+        ));
+    }
+    Ok(replacements)
+}
+
+fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut set_for_new_objects = None::<bool>;
+    let mut objects = Vec::<RoleObjectRightsXml>::new();
+    let mut current_object = None::<RoleObjectRightsXml>;
+    let mut current_right = None::<RoleRightXml>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "object" && path_ends_with(&path, &["Rights"]) {
+                    current_object = Some(RoleObjectRightsXml {
+                        name: String::new(),
+                        rights: Vec::new(),
+                    });
+                } else if local == "right" && path_ends_with(&path, &["Rights", "object"]) {
+                    current_right = Some(RoleRightXml {
+                        name: String::new(),
+                        value: false,
+                    });
+                }
+                if matches!(local.as_str(), "setForNewObjects" | "name" | "value") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "setForNewObjects" {
+                    set_for_new_objects = Some(false);
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["Rights", "setForNewObjects"])
+                    || path_ends_with(&path, &["Rights", "object", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "value"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["Rights", "setForNewObjects"])
+                    || path_ends_with(&path, &["Rights", "object", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "name"])
+                    || path_ends_with(&path, &["Rights", "object", "right", "value"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "setForNewObjects"
+                        if path_ends_with(&path, &["Rights", "setForNewObjects"]) =>
+                    {
+                        set_for_new_objects = Some(parse_xml_bool_text(
+                            "Role/setForNewObjects",
+                            text_value.trim(),
+                        )?);
+                    }
+                    "name" if path_ends_with(&path, &["Rights", "object", "name"]) => {
+                        if let Some(object) = current_object.as_mut() {
+                            object.name = text_value.clone();
+                        }
+                    }
+                    "name" if path_ends_with(&path, &["Rights", "object", "right", "name"]) => {
+                        if let Some(right) = current_right.as_mut() {
+                            right.name = text_value.clone();
+                        }
+                    }
+                    "value" if path_ends_with(&path, &["Rights", "object", "right", "value"]) => {
+                        if let Some(right) = current_right.as_mut() {
+                            right.value =
+                                parse_xml_bool_text("Role/right/value", text_value.trim())?;
+                        }
+                    }
+                    "right" if path_ends_with(&path, &["Rights", "object", "right"]) => {
+                        let right = current_right.take().ok_or_else(|| {
+                            anyhow!("Rights.xml ended right without active right")
+                        })?;
+                        if right.name.is_empty() {
+                            return Err(anyhow!("Rights.xml contains right without name"));
+                        }
+                        if let Some(object) = current_object.as_mut() {
+                            object.rights.push(right);
+                        }
+                    }
+                    "object" if path_ends_with(&path, &["Rights", "object"]) => {
+                        let object = current_object.take().ok_or_else(|| {
+                            anyhow!("Rights.xml ended object without active object")
+                        })?;
+                        if object.name.is_empty() {
+                            return Err(anyhow!("Rights.xml contains object without name"));
+                        }
+                        objects.push(object);
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "setForNewObjects" | "name" | "value") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(RoleRightsXml {
+        set_for_new_objects: set_for_new_objects
+            .ok_or_else(|| anyhow!("Rights.xml has no setForNewObjects"))?,
+        objects,
+    })
+}
+
+fn parse_command_interface_xml(xml: &[u8]) -> Result<Vec<CommandInterfaceXmlEntry>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut entries = Vec::<CommandInterfaceXmlEntry>::new();
+    let mut current = None::<CommandInterfaceXmlEntry>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command"
+                    && path_ends_with(&path, &["CommandInterface", "CommandsVisibility"])
+                {
+                    let name = xml_attr_value(&event, "name").ok_or_else(|| {
+                        anyhow!("CommandInterface Command element has no name attribute")
+                    })?;
+                    current = Some(CommandInterfaceXmlEntry {
+                        name,
+                        common: false,
+                    });
+                }
+                if local == "Common" {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(
+                    &path,
+                    &[
+                        "CommandInterface",
+                        "CommandsVisibility",
+                        "Command",
+                        "Visibility",
+                        "Common",
+                    ],
+                ) {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(
+                    &path,
+                    &[
+                        "CommandInterface",
+                        "CommandsVisibility",
+                        "Command",
+                        "Visibility",
+                        "Common",
+                    ],
+                ) {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "Common"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "CommandInterface",
+                                "CommandsVisibility",
+                                "Command",
+                                "Visibility",
+                                "Common",
+                            ],
+                        ) =>
+                    {
+                        if let Some(entry) = current.as_mut() {
+                            entry.common = parse_xml_bool_text(
+                                "CommandInterface/Command/Visibility/Common",
+                                text_value.trim(),
+                            )?;
+                        }
+                    }
+                    "Command"
+                        if path_ends_with(
+                            &path,
+                            &["CommandInterface", "CommandsVisibility", "Command"],
+                        ) =>
+                    {
+                        let entry = current.take().ok_or_else(|| {
+                            anyhow!("CommandInterface ended Command without active command")
+                        })?;
+                        entries.push(entry);
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if local == "Common" {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(entries)
+}
+
+fn parse_exchange_plan_content_xml(xml: &[u8]) -> Result<Vec<ExchangePlanContentXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut items = Vec::<ExchangePlanContentXmlItem>::new();
+    let mut metadata = None::<String>;
+    let mut auto_record = None::<bool>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["ExchangePlanContent"]) && local == "Item" {
+                    metadata = None;
+                    auto_record = None;
+                }
+                if matches!(local.as_str(), "Metadata" | "AutoRecord") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["ExchangePlanContent", "Item", "Metadata"])
+                    || path_ends_with(&path, &["ExchangePlanContent", "Item", "AutoRecord"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["ExchangePlanContent", "Item", "Metadata"])
+                    || path_ends_with(&path, &["ExchangePlanContent", "Item", "AutoRecord"])
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "Metadata"
+                        if path_ends_with(&path, &["ExchangePlanContent", "Item", "Metadata"]) =>
+                    {
+                        metadata = Some(text_value.trim().to_string());
+                    }
+                    "AutoRecord"
+                        if path_ends_with(
+                            &path,
+                            &["ExchangePlanContent", "Item", "AutoRecord"],
+                        ) =>
+                    {
+                        auto_record =
+                            Some(parse_exchange_plan_auto_record_text(text_value.trim())?);
+                    }
+                    "Item" if path_ends_with(&path, &["ExchangePlanContent", "Item"]) => {
+                        items.push(ExchangePlanContentXmlItem {
+                            metadata: metadata.take().ok_or_else(|| {
+                                anyhow!("ExchangePlanContent Item has no Metadata")
+                            })?,
+                            auto_record: auto_record.take().ok_or_else(|| {
+                                anyhow!("ExchangePlanContent Item has no AutoRecord")
+                            })?,
+                        });
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "Metadata" | "AutoRecord") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(items)
+}
+
+fn parse_exchange_plan_auto_record_text(value: &str) -> Result<bool> {
+    match value {
+        "Deny" => Ok(false),
+        "Auto" => Ok(true),
+        _ => Err(anyhow!("invalid ExchangePlanContent AutoRecord: {value}")),
+    }
+}
+
+fn flatten_predefined_xml_items(
+    items: &[PredefinedDataXmlItem],
+) -> Result<BTreeMap<String, PredefinedDataXmlItem>> {
+    let mut by_id = BTreeMap::new();
+    flatten_predefined_xml_items_into(items, &mut by_id)?;
+    Ok(by_id)
+}
+
+fn flatten_predefined_xml_items_into(
+    items: &[PredefinedDataXmlItem],
+    by_id: &mut BTreeMap<String, PredefinedDataXmlItem>,
+) -> Result<()> {
+    for item in items {
+        if by_id.insert(item.id.clone(), item.clone()).is_some() {
+            return Err(anyhow!("duplicate PredefinedData item id {}", item.id));
+        }
+        flatten_predefined_xml_items_into(&item.children, by_id)?;
+    }
+    Ok(())
+}
+
+fn collect_predefined_replacements(
+    plain: &str,
+    table_range: Range<usize>,
+    by_id: &BTreeMap<String, PredefinedDataXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let table_fields = scan_wrapped_braced_fields(plain, table_range)?;
+    for field in table_fields {
+        if !range_starts_with_brace(plain, &field) {
+            continue;
+        }
+        let rowset_fields = scan_wrapped_braced_fields(plain, field)?;
+        if rowset_fields
+            .first()
+            .map(|range| plain[range.clone()].trim())
+            != Some("2")
+        {
+            continue;
+        }
+        for child_field in rowset_fields {
+            if range_starts_with_brace(plain, &child_field)
+                && scan_wrapped_braced_fields(plain, child_field.clone())
+                    .ok()
+                    .and_then(|fields| {
+                        fields
+                            .first()
+                            .map(|range| plain[range.clone()].trim() == "1")
+                    })
+                    == Some(true)
+            {
+                collect_predefined_children_replacements(
+                    plain,
+                    child_field,
+                    by_id,
+                    seen,
+                    replacements,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_predefined_children_replacements(
+    plain: &str,
+    children_range: Range<usize>,
+    by_id: &BTreeMap<String, PredefinedDataXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let fields = scan_wrapped_braced_fields(plain, children_range)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("1") {
+        return Ok(());
+    }
+    let count = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("PredefinedData children list has no count"))?
+        .clone();
+    let count = plain[count]
+        .trim()
+        .parse::<usize>()
+        .context("invalid PredefinedData children count")?;
+    for item_range in fields.into_iter().skip(2).take(count) {
+        collect_predefined_item_replacements(plain, item_range, by_id, seen, replacements)?;
+    }
+    Ok(())
+}
+
+fn collect_predefined_item_replacements(
+    plain: &str,
+    item_range: Range<usize>,
+    by_id: &BTreeMap<String, PredefinedDataXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let fields = scan_wrapped_braced_fields(plain, item_range)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+        return Ok(());
+    }
+    let value_count = fields
+        .get(2)
+        .ok_or_else(|| anyhow!("PredefinedData item has no value count"))?;
+    let value_count = plain[value_count.clone()]
+        .trim()
+        .parse::<usize>()
+        .context("invalid PredefinedData item value count")?;
+    let value_start = 3usize;
+    let after_values = value_start + value_count;
+    if fields.len() < after_values {
+        return Err(anyhow!(
+            "PredefinedData item has {} fields, expected at least {}",
+            fields.len(),
+            after_values
+        ));
+    }
+    let id = parse_predefined_uuid_value_from_plain(plain, fields[value_start].clone())?;
+    if let Some(item) = by_id.get(&id) {
+        seen.insert(id);
+        let is_folder_range = fields[value_start + 1].clone();
+        if parse_predefined_bool_value_from_plain(plain, is_folder_range.clone()).is_some() {
+            replacements.push((
+                is_folder_range,
+                format_predefined_bool_value(item.is_folder),
+            ));
+        }
+        let has_parent_ref = fields
+            .get(value_start + 2)
+            .and_then(|range| scan_wrapped_braced_fields(plain, range.clone()).ok())
+            .and_then(|fields| {
+                fields
+                    .first()
+                    .map(|range| plain[range.clone()].trim() == r##""#""##)
+            })
+            .unwrap_or(false);
+        let name_offset = if has_parent_ref {
+            value_start + 3
+        } else {
+            value_start + 2
+        };
+        push_predefined_string_replacement(
+            plain,
+            fields.get(name_offset).cloned(),
+            &item.name,
+            replacements,
+        );
+        push_predefined_string_replacement(
+            plain,
+            fields.get(name_offset + 1).cloned(),
+            &item.code,
+            replacements,
+        );
+        push_predefined_string_replacement(
+            plain,
+            fields.get(name_offset + 2).cloned(),
+            &item.description,
+            replacements,
+        );
+    }
+    if fields
+        .get(after_values)
+        .is_some_and(|range| plain[range.clone()].trim() == "1")
+        && let Some(children_range) = fields.get(after_values + 1)
+    {
+        collect_predefined_children_replacements(
+            plain,
+            children_range.clone(),
+            by_id,
+            seen,
+            replacements,
+        )?;
+    }
+    Ok(())
+}
+
+fn push_predefined_string_replacement(
+    plain: &str,
+    range: Option<Range<usize>>,
+    value: &str,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) {
+    let Some(range) = range else {
+        return;
+    };
+    if parse_predefined_string_value_from_plain(plain, range.clone()).is_some() {
+        replacements.push((range, format_predefined_string_value(value)));
+    }
+}
+
+fn scan_wrapped_braced_fields(plain: &str, range: Range<usize>) -> Result<Vec<Range<usize>>> {
+    let mut range = trim_ascii_ws_range(plain, range);
+    let mut fields = scan_braced_fields(plain, range.start)?;
+    while fields.len() == 1 && range_starts_with_brace(plain, &fields[0]) {
+        range = fields[0].clone();
+        fields = scan_braced_fields(plain, range.start)?;
+    }
+    Ok(fields)
+}
+
+fn range_starts_with_brace(plain: &str, range: &Range<usize>) -> bool {
+    plain[range.clone()].trim_start().starts_with('{')
+}
+
+fn parse_predefined_uuid_value_from_plain(plain: &str, range: Range<usize>) -> Result<String> {
+    let fields = scan_wrapped_braced_fields(plain, range)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some(r##""#""##) {
+        return Err(anyhow!("PredefinedData uuid value has unexpected marker"));
+    }
+    let ref_fields = scan_wrapped_braced_fields(
+        plain,
+        fields
+            .get(2)
+            .ok_or_else(|| anyhow!("PredefinedData uuid value has no ref payload"))?
+            .clone(),
+    )?;
+    let uuid = plain[ref_fields
+        .get(1)
+        .ok_or_else(|| anyhow!("PredefinedData uuid ref has no uuid"))?
+        .clone()]
+    .trim();
+    normalize_uuid_text(uuid)
+}
+
+fn parse_predefined_bool_value_from_plain(plain: &str, range: Range<usize>) -> Option<bool> {
+    let fields = scan_wrapped_braced_fields(plain, range).ok()?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some(r#""B""#) {
+        return None;
+    }
+    match plain[fields.get(1)?.clone()].trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_predefined_string_value_from_plain(plain: &str, range: Range<usize>) -> Option<String> {
+    let fields = scan_wrapped_braced_fields(plain, range).ok()?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some(r#""S""#) {
+        return None;
+    }
+    fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(plain[range.clone()].trim()).ok())
+}
+
+fn format_predefined_bool_value(value: bool) -> String {
+    format!(r#"{{{{"B",{}}}}}"#, if value { "1" } else { "0" })
+}
+
+fn format_predefined_string_value(value: &str) -> String {
+    format!(r#"{{{{"S",{}}}}}"#, format_1c_string(value))
+}
+
+fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut stack = Vec::<PredefinedDataXmlItem>::new();
+    let mut roots = Vec::<PredefinedDataXmlItem>::new();
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Item"
+                    && (path_ends_with(&path, &["PredefinedData"])
+                        || path_ends_with(&path, &["PredefinedData", "Item", "ChildItems"])
+                        || path.last().map(String::as_str) == Some("ChildItems"))
+                {
+                    let id = xml_attr_value(&event, "id")
+                        .ok_or_else(|| anyhow!("PredefinedData Item has no id attribute"))
+                        .and_then(|value| normalize_uuid_text(&value))?;
+                    stack.push(PredefinedDataXmlItem {
+                        id,
+                        name: String::new(),
+                        code: String::new(),
+                        description: String::new(),
+                        is_folder: false,
+                        children: Vec::new(),
+                    });
+                }
+                if matches!(local.as_str(), "Name" | "Code" | "Description" | "IsFolder") {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if is_predefined_item_property_path(&path) {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if is_predefined_item_property_path(&path) {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "Name" | "Code" | "Description" | "IsFolder"
+                        if is_predefined_item_property_path(&path) =>
+                    {
+                        let item = stack
+                            .last_mut()
+                            .ok_or_else(|| anyhow!("PredefinedData property outside Item"))?;
+                        match local.as_str() {
+                            "Name" => item.name = text_value.trim().to_string(),
+                            "Code" => item.code = text_value.trim().to_string(),
+                            "Description" => item.description = text_value.trim().to_string(),
+                            "IsFolder" => {
+                                item.is_folder = parse_xml_bool_text(
+                                    "PredefinedData/Item/IsFolder",
+                                    text_value.trim(),
+                                )?;
+                            }
+                            _ => {}
+                        }
+                    }
+                    "Item" if path.last().map(String::as_str) == Some("Item") => {
+                        let item = stack.pop().ok_or_else(|| {
+                            anyhow!("PredefinedData ended Item without active item")
+                        })?;
+                        if let Some(parent) = stack.last_mut() {
+                            parent.children.push(item);
+                        } else {
+                            roots.push(item);
+                        }
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(local.as_str(), "Name" | "Code" | "Description" | "IsFolder") {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(roots)
+}
+
+fn is_predefined_item_property_path(path: &[String]) -> bool {
+    matches!(
+        path.last().map(String::as_str),
+        Some("Name" | "Code" | "Description" | "IsFolder")
+    ) && path.iter().any(|part| part == "Item")
+}
+
+fn collect_flowchart_item_replacements(
+    plain: &str,
+    code: &str,
+    body_range: Range<usize>,
+    by_id: &BTreeMap<String, FlowchartXmlItem>,
+    seen: &mut BTreeSet<String>,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let fields = scan_wrapped_braced_fields(plain, body_range)?;
+    let base_range = fields
+        .first()
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no base field"))?
+        .clone();
+    let (id, name_range, tab_order_range) = flowchart_base_ranges(plain, code, base_range)?;
+    let Some(item) = by_id.get(&id) else {
+        return Ok(());
+    };
+    seen.insert(id);
+    push_1c_string_replacement(plain, Some(name_range), &item.name, replacements);
+    replacements.push((tab_order_range, item.tab_order.clone()));
+
+    match code {
+        "2" => patch_flowchart_events(
+            plain,
+            fields.get(3).cloned(),
+            item,
+            &["BeforeStart"],
+            replacements,
+        )?,
+        "3" => patch_flowchart_events(
+            plain,
+            fields.get(3).cloned(),
+            item,
+            &["OnComplete"],
+            replacements,
+        )?,
+        "4" => patch_flowchart_events(
+            plain,
+            fields.get(3).cloned(),
+            item,
+            &["ConditionCheck"],
+            replacements,
+        )?,
+        "5" => {
+            if let Some(explanation) = item.explanation.as_deref() {
+                push_1c_string_replacement(
+                    plain,
+                    fields.get(3).cloned(),
+                    explanation,
+                    replacements,
+                );
+            }
+            patch_flowchart_events(
+                plain,
+                fields.get(5).cloned(),
+                item,
+                &[
+                    "InteractiveActivationProcessing",
+                    "BeforeCreateTasks",
+                    "OnCreateTask",
+                    "OnExecute",
+                    "CheckExecutionProcessing",
+                    "BeforeExecute",
+                    "BeforeExecuteInteractively",
+                ],
+                replacements,
+            )?;
+            if let Some(task_description) = item.task_description.as_deref() {
+                push_1c_string_replacement(
+                    plain,
+                    fields.get(7).cloned(),
+                    task_description,
+                    replacements,
+                );
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn flowchart_base_ranges(
+    plain: &str,
+    code: &str,
+    base_range: Range<usize>,
+) -> Result<(String, Range<usize>, Range<usize>)> {
+    let head_fields = scan_wrapped_braced_fields(plain, base_range)?;
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+        scan_wrapped_braced_fields(
+            plain,
+            head_fields
+                .first()
+                .ok_or_else(|| anyhow!("BusinessProcess Flowchart typed item has no base"))?
+                .clone(),
+        )?
+    } else {
+        head_fields
+    };
+    let id = plain[base_fields
+        .get(1)
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no id"))?
+        .clone()]
+    .trim()
+    .to_string();
+    let name_range = base_fields
+        .get(3)
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no name"))?
+        .clone();
+    let tab_order_range = base_fields
+        .get(4)
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart item has no tab order"))?
+        .clone();
+    Ok((id, name_range, tab_order_range))
+}
+
+fn patch_flowchart_events(
+    plain: &str,
+    events_range: Option<Range<usize>>,
+    item: &FlowchartXmlItem,
+    event_names: &[&str],
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    let Some(events_range) = events_range else {
+        return Ok(());
+    };
+    let fields = scan_wrapped_braced_fields(plain, events_range)?;
+    let count = plain[fields
+        .first()
+        .ok_or_else(|| anyhow!("BusinessProcess Flowchart events has no count"))?
+        .clone()]
+    .trim()
+    .parse::<usize>()
+    .context("invalid BusinessProcess Flowchart event count")?;
+    for event_range in fields.into_iter().skip(1).take(count) {
+        let event_fields = scan_wrapped_braced_fields(plain, event_range)?;
+        let index = plain[event_fields
+            .first()
+            .ok_or_else(|| anyhow!("BusinessProcess Flowchart event has no index"))?
+            .clone()]
+        .trim()
+        .parse::<usize>()
+        .context("invalid BusinessProcess Flowchart event index")?;
+        let Some(name) = event_names.get(index) else {
+            continue;
+        };
+        let Some(handler) = item.events.get(*name) else {
+            continue;
+        };
+        let handler = handler.as_deref().unwrap_or("");
+        push_1c_string_replacement(plain, event_fields.get(1).cloned(), handler, replacements);
+    }
+    Ok(())
+}
+
+fn push_1c_string_replacement(
+    plain: &str,
+    range: Option<Range<usize>>,
+    value: &str,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) {
+    let Some(range) = range else {
+        return;
+    };
+    if parse_1c_quoted_string(plain[range.clone()].trim()).is_ok() {
+        replacements.push((range, format_1c_string(value)));
+    }
+}
+
+fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut items = Vec::<FlowchartXmlItem>::new();
+    let mut current = None::<FlowchartXmlItem>;
+    let mut current_event = None::<String>;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if is_flowchart_item_tag(&local)
+                    && path_ends_with(&path, &["GraphicalSchema", "Items"])
+                {
+                    let id = xml_attr_value(&event, "id")
+                        .ok_or_else(|| anyhow!("Flowchart item has no id attribute"))?;
+                    current = Some(FlowchartXmlItem {
+                        id,
+                        name: String::new(),
+                        tab_order: String::new(),
+                        explanation: None,
+                        task_description: None,
+                        events: BTreeMap::new(),
+                    });
+                }
+                if local == "Event" {
+                    current_event = xml_attr_value(&event, "name");
+                    text_value.clear();
+                } else if is_flowchart_text_property(&local) {
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Event"
+                    && let Some(item) = current.as_mut()
+                    && let Some(name) = xml_attr_value(&event, "name")
+                {
+                    item.events.insert(name, None);
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if current.is_some()
+                    && (path
+                        .last()
+                        .is_some_and(|part| is_flowchart_text_property(part))
+                        || path.last().map(String::as_str) == Some("Event"))
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if current.is_some()
+                    && (path
+                        .last()
+                        .is_some_and(|part| is_flowchart_text_property(part))
+                        || path.last().map(String::as_str) == Some("Event"))
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if let Some(item) = current.as_mut() {
+                    match local.as_str() {
+                        "Name" if path_ends_with(&path, &["Properties", "Name"]) => {
+                            item.name = text_value.trim().to_string();
+                        }
+                        "TabOrder" if path_ends_with(&path, &["Properties", "TabOrder"]) => {
+                            item.tab_order = text_value.trim().to_string();
+                        }
+                        "Explanation" if path_ends_with(&path, &["Properties", "Explanation"]) => {
+                            item.explanation = Some(text_value.trim().to_string());
+                        }
+                        "TaskDescription"
+                            if path_ends_with(&path, &["Properties", "TaskDescription"]) =>
+                        {
+                            item.task_description = Some(text_value.trim().to_string());
+                        }
+                        "Event" => {
+                            if let Some(name) = current_event.take() {
+                                let handler = if text_value.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(text_value.trim().to_string())
+                                };
+                                item.events.insert(name, handler);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if is_flowchart_item_tag(&local) {
+                    if let Some(item) = current.take() {
+                        items.push(item);
+                    }
+                }
+                let _ = path.pop();
+                if local == "Event" || is_flowchart_text_property(&local) {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(items)
+}
+
+fn is_flowchart_item_tag(value: &str) -> bool {
+    matches!(
+        value,
+        "Decoration" | "ConnectionLine" | "Start" | "Completion" | "Condition" | "Activity"
+    )
+}
+
+fn is_flowchart_text_property(value: &str) -> bool {
+    matches!(
+        value,
+        "Name" | "TabOrder" | "Explanation" | "TaskDescription"
+    )
+}
+
+fn parse_xml_bool_text(name: &str, value: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(anyhow!("{name} must be true or false, got {value}")),
+    }
+}
+
+pub fn pack_base64_payload_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    let payload = encode_base64(bytes);
+    let plain = format!("{{#base64:{payload}}}").into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPictureBlob> {
+    let payload = encode_base64(bytes);
+    let plain = format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedExtPictureBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn parse_ext_picture_file_name_from_xml(xml: &[u8]) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut file_name = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(xml_local_name(event.local_name().as_ref()));
+            }
+            Ok(Event::Text(event)) => {
+                if path_ends_with(&path, &["Picture", "Abs"]) {
+                    let value = event.xml_content()?;
+                    let value = unescape(value.as_ref())?;
+                    file_name
+                        .get_or_insert_with(String::new)
+                        .push_str(value.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path_ends_with(&path, &["Picture", "Abs"]) {
+                    file_name
+                        .get_or_insert_with(String::new)
+                        .push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Picture", "Abs"]) {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    file_name.get_or_insert_with(String::new).push_str(&value);
+                }
+            }
+            Ok(Event::End(_)) => {
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    let file_name = file_name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("ExtPicture Picture/xr:Abs is missing"))?;
+    if file_name.contains('/') || file_name.contains('\\') || file_name == "." || file_name == ".."
+    {
+        return Err(anyhow!("unsupported ExtPicture file name: {file_name}"));
+    }
+    Ok(file_name)
+}
+
+pub fn pack_help_blob_from_parts(
+    pages: &[(String, Vec<u8>)],
+    files: &[(String, Vec<u8>)],
+) -> Result<PackedHelpBlob> {
+    if pages.is_empty() {
+        return Err(anyhow!("at least one Help page is required"));
+    }
+    let mut fields = Vec::with_capacity(2 + pages.len() * 2 + 1 + files.len() * 3);
+    fields.push("5".to_string());
+    fields.push(pages.len().to_string());
+    for (page, content) in pages {
+        fields.push(format_1c_string(page));
+        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+    }
+    fields.push(files.len().to_string());
+    for (file_name, content) in files {
+        fields.push(format_1c_string(file_name));
+        fields.push("1".to_string());
+        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+    }
+    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedHelpBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+pub fn parse_help_pages_from_xml(xml: &[u8]) -> Result<Vec<String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut pages = Vec::<String>::new();
+    let mut page_text = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["Help"]) && local == "Page" {
+                    page_text = Some(String::new());
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(event)) => {
+                if path_ends_with(&path, &["Help", "Page"])
+                    && let Some(value) = page_text.as_mut()
+                {
+                    let text = event.xml_content()?;
+                    let text = unescape(text.as_ref())?;
+                    value.push_str(text.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path_ends_with(&path, &["Help", "Page"])
+                    && let Some(value) = page_text.as_mut()
+                {
+                    value.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Help", "Page"])
+                    && let Some(value) = page_text.as_mut()
+                {
+                    let text = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    value.push_str(&text);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Page" && path_ends_with(&path, &["Help", "Page"]) {
+                    let page = page_text.take().unwrap_or_default().trim().to_string();
+                    if !page.is_empty() {
+                        pages.push(page);
+                    }
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(pages)
+}
+
+pub fn parse_template_type_from_xml(xml: &[u8]) -> Result<Option<String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(xml_local_name(event.local_name().as_ref()));
+            }
+            Ok(Event::Text(event)) => {
+                if path_ends_with(&path, &["Properties", "TemplateType"]) {
+                    let value = event.xml_content()?;
+                    let value = unescape(value.as_ref())?;
+                    text.get_or_insert_with(String::new)
+                        .push_str(value.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if path_ends_with(&path, &["Properties", "TemplateType"]) {
+                    text.get_or_insert_with(String::new)
+                        .push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Properties", "TemplateType"]) {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.get_or_insert_with(String::new).push_str(&value);
+                }
+            }
+            Ok(Event::End(_)) => {
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(text.map(|value| value.trim().to_string()))
+}
+
+#[derive(Debug, Clone)]
+struct ScheduleXmlProperties {
+    begin_date: String,
+    end_date: String,
+    begin_time: String,
+    end_time: String,
+    completion_time: String,
+    completion_interval: String,
+    repeat_period_in_day: String,
+    repeat_pause: String,
+    week_day_in_month: String,
+    day_in_month: String,
+    week_days: Vec<String>,
+    months: Vec<String>,
+    weeks_period: String,
+    days_repeat_period: String,
+}
+
+fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut attrs = None::<BTreeMap<String, String>>;
+    let mut text_target = None::<String>;
+    let mut text_value = String::new();
+    let mut week_days = None::<Vec<String>>;
+    let mut months = None::<Vec<String>>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["JobSchedule"]) && local == "Schedule" {
+                    attrs = Some(xml_attrs_map(&event));
+                } else if path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    && (local == "WeekDays" || local == "Months")
+                {
+                    text_target = Some(local.clone());
+                    text_value.clear();
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) => {
+                if text_target.is_some() {
+                    let text = text.xml_content()?;
+                    let text = unescape(text.as_ref())?;
+                    text_value.push_str(text.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if text_target.is_some() {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if text_target.is_some() {
+                    let text = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text_value.push_str(&text);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if text_target.as_deref() == Some(local.as_str()) {
+                    let values = parse_schedule_number_text_list(&text_value)?;
+                    if local == "WeekDays" {
+                        week_days = Some(values);
+                    } else if local == "Months" {
+                        months = Some(values);
+                    }
+                    text_target = None;
+                    text_value.clear();
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    let attrs = attrs.ok_or_else(|| anyhow!("JobSchedule/Schedule element is missing"))?;
+    Ok(ScheduleXmlProperties {
+        begin_date: required_schedule_attr(&attrs, "BeginDate")?,
+        end_date: required_schedule_attr(&attrs, "EndDate")?,
+        begin_time: required_schedule_attr(&attrs, "BeginTime")?,
+        end_time: required_schedule_attr(&attrs, "EndTime")?,
+        completion_time: required_schedule_attr(&attrs, "CompletionTime")?,
+        completion_interval: required_schedule_number_attr(&attrs, "CompletionInterval")?,
+        repeat_period_in_day: required_schedule_number_attr(&attrs, "RepeatPeriodInDay")?,
+        repeat_pause: required_schedule_number_attr(&attrs, "RepeatPause")?,
+        week_day_in_month: required_schedule_number_attr(&attrs, "WeekDayInMonth")?,
+        day_in_month: required_schedule_number_attr(&attrs, "DayInMonth")?,
+        week_days: week_days.unwrap_or_default(),
+        months: months.unwrap_or_default(),
+        weeks_period: required_schedule_number_attr(&attrs, "WeeksPeriod")?,
+        days_repeat_period: required_schedule_number_attr(&attrs, "DaysRepeatPeriod")?,
+    })
+}
+
+fn required_schedule_attr(attrs: &BTreeMap<String, String>, name: &str) -> Result<String> {
+    attrs
+        .get(name)
+        .cloned()
+        .ok_or_else(|| anyhow!("JobSchedule/Schedule @{name} is missing"))
+}
+
+fn required_schedule_number_attr(attrs: &BTreeMap<String, String>, name: &str) -> Result<String> {
+    let value = required_schedule_attr(attrs, name)?;
+    validate_schedule_number(&value)?;
+    Ok(value)
+}
+
+fn parse_schedule_number_text_list(text: &str) -> Result<Vec<String>> {
+    text.split_whitespace()
+        .map(|value| {
+            validate_schedule_number(value)?;
+            Ok(value.to_string())
+        })
+        .collect()
+}
+
+fn validate_schedule_number(value: &str) -> Result<()> {
+    if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
+        Ok(())
+    } else {
+        Err(anyhow!("invalid schedule number: {value}"))
+    }
+}
+
+fn format_schedule_date(value: &str) -> Result<String> {
+    let mut parts = value.split('-');
+    let year = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule date: {value}"))?;
+    let month = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule date: {value}"))?;
+    let day = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule date: {value}"))?;
+    if parts.next().is_some()
+        || year.len() != 4
+        || month.len() != 2
+        || day.len() != 2
+        || !year
+            .chars()
+            .chain(month.chars())
+            .chain(day.chars())
+            .all(|ch| ch.is_ascii_digit())
+    {
+        return Err(anyhow!("invalid schedule date: {value}"));
+    }
+    Ok(format!("{year}{month}{day}000000"))
+}
+
+fn format_schedule_time(value: &str) -> Result<String> {
+    let mut parts = value.split(':');
+    let hour = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule time: {value}"))?;
+    let minute = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule time: {value}"))?;
+    let second = parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid schedule time: {value}"))?;
+    if parts.next().is_some()
+        || hour.len() != 2
+        || minute.len() != 2
+        || second.len() != 2
+        || !hour
+            .chars()
+            .chain(minute.chars())
+            .chain(second.chars())
+            .all(|ch| ch.is_ascii_digit())
+    {
+        return Err(anyhow!("invalid schedule time: {value}"));
+    }
+    Ok(format!("00010101{hour}{minute}{second}"))
 }
 
 #[derive(Debug, Clone)]
@@ -1336,26 +5832,49 @@ pub fn patch_versions_blob_bytes(
     changes: &[String],
     include_standard_entries: bool,
 ) -> Result<PatchedVersionsBlob> {
+    patch_versions_blob_bytes_inner(input, changes, include_standard_entries, false)
+}
+
+pub fn patch_versions_blob_bytes_allowing_additions(
+    input: &[u8],
+    changes: &[String],
+    include_standard_entries: bool,
+) -> Result<PatchedVersionsBlob> {
+    patch_versions_blob_bytes_inner(input, changes, include_standard_entries, true)
+}
+
+fn patch_versions_blob_bytes_inner(
+    input: &[u8],
+    changes: &[String],
+    include_standard_entries: bool,
+    allow_missing_changes: bool,
+) -> Result<PatchedVersionsBlob> {
     let plain = inflate_raw(input).context("failed to inflate versions blob")?;
     let mut text = String::from_utf8(plain).context("versions blob is not valid UTF-8")?;
 
     let mut replacements = Vec::new();
     replacements.push(replace_header_uuid(&mut text)?);
 
-    let mut names = Vec::new();
     if include_standard_entries {
-        names.extend([
-            "root".to_string(),
-            "version".to_string(),
-            "versions".to_string(),
-        ]);
+        for name in ["root", "version", "versions"] {
+            if let Some(replacement) = replace_named_uuid_optional(&mut text, name)? {
+                replacements.push(replacement);
+            }
+        }
     }
+    let mut names = Vec::new();
     names.extend(changes.iter().cloned());
     names.sort();
     names.dedup();
 
     for name in names {
-        replacements.push(replace_named_uuid(&mut text, &name)?);
+        match replace_named_uuid_optional(&mut text, &name)? {
+            Some(replacement) => replacements.push(replacement),
+            None if allow_missing_changes => {
+                replacements.push(append_named_uuid(&mut text, &name)?)
+            }
+            None => return Err(anyhow!("versions entry not found: {name}")),
+        }
     }
 
     let plain = text.into_bytes();
@@ -2499,6 +7018,15 @@ fn scan_1c_quoted_string_end(text: &str, start: usize) -> Result<usize> {
     Err(anyhow!("unterminated 1C string at byte {start}"))
 }
 
+fn parse_1c_quoted_string(text: &str) -> Result<String> {
+    let text = text.trim();
+    let end = scan_1c_quoted_string_end(text, 0)?;
+    if end != text.len() {
+        return Err(anyhow!("unexpected trailing data after 1C string"));
+    }
+    Ok(text[1..end - 1].replace("\"\"", "\""))
+}
+
 fn scan_balanced_braces(text: &str, start: usize) -> Result<usize> {
     let bytes = text.as_bytes();
     if bytes.get(start) != Some(&b'{') {
@@ -2756,7 +7284,6 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
     }
 }
 
-#[cfg(test)]
 fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'static str)> {
     let prefix = reference.split_once('.')?.0;
     match prefix {
@@ -3094,6 +7621,29 @@ fn deflate_raw(input: &[u8]) -> Result<Vec<u8>> {
     encoder.finish().context("failed to finish deflate stream")
 }
 
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        output.push(ALPHABET[(first >> 2) as usize] as char);
+        output.push(ALPHABET[(((first & 0b0000_0011) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[(((second & 0b0000_1111) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(third & 0b0011_1111) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+    output
+}
+
 fn parse_hex_u32(bytes: &[u8]) -> Result<u32> {
     let text = std::str::from_utf8(bytes)?;
     Ok(u32::from_str_radix(text, 16)?)
@@ -3126,6 +7676,7 @@ fn replace_header_uuid(text: &mut String) -> Result<VersionReplacement> {
     replace_uuid_at(text, uuid_start, "<generation>")
 }
 
+#[cfg(test)]
 fn replace_named_uuid(text: &mut String, name: &str) -> Result<VersionReplacement> {
     let marker = format!("\"{name}\",");
     let marker_start = text
@@ -3133,6 +7684,56 @@ fn replace_named_uuid(text: &mut String, name: &str) -> Result<VersionReplacemen
         .ok_or_else(|| anyhow!("versions entry not found: {name}"))?;
     let uuid_start = marker_start + marker.len();
     replace_uuid_at(text, uuid_start, name)
+}
+
+fn replace_named_uuid_optional(
+    text: &mut String,
+    name: &str,
+) -> Result<Option<VersionReplacement>> {
+    let marker = format!("\"{name}\",");
+    let Some(marker_start) = text.find(&marker) else {
+        return Ok(None);
+    };
+    let uuid_start = marker_start + marker.len();
+    replace_uuid_at(text, uuid_start, name).map(Some)
+}
+
+fn append_named_uuid(text: &mut String, name: &str) -> Result<VersionReplacement> {
+    if name.contains('"') || name.contains('\r') || name.contains('\n') {
+        return Err(anyhow!("unsupported versions entry name: {name}"));
+    }
+    increment_versions_entry_count(text)?;
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("versions list closing brace not found"))?;
+    let new_uuid = Uuid::new_v4().hyphenated().to_string();
+    text.insert_str(insert_at, &format!(",\"{name}\",{new_uuid}"));
+    Ok(VersionReplacement {
+        name: name.to_string(),
+        old_uuid: String::new(),
+        new_uuid,
+    })
+}
+
+fn increment_versions_entry_count(text: &mut String) -> Result<()> {
+    let header_start = text
+        .find("{1,")
+        .ok_or_else(|| anyhow!("versions header count marker not found"))?;
+    let count_start = header_start + "{1,".len();
+    let count_end = text[count_start..]
+        .find(',')
+        .map(|offset| count_start + offset)
+        .ok_or_else(|| anyhow!("versions header count end not found"))?;
+    let count = text[count_start..count_end]
+        .parse::<usize>()
+        .with_context(|| {
+            format!(
+                "invalid versions entry count: {}",
+                &text[count_start..count_end]
+            )
+        })?;
+    text.replace_range(count_start..count_end, &(count + 1).to_string());
+    Ok(())
 }
 
 fn replace_uuid_at(text: &mut String, uuid_start: usize, name: &str) -> Result<VersionReplacement> {
@@ -3318,6 +7919,36 @@ mod tests {
         assert_eq!(properties.synonyms.len(), 1);
         assert_eq!(properties.synonyms[0].lang, "ru");
         assert_eq!(properties.synonyms[0].content, "Current user");
+    }
+
+    #[test]
+    fn parses_configuration_xml_properties() {
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Configuration uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>DemoApp</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>Demo app</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Configuration comment</Comment>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#;
+
+        let properties = super::parse_simple_metadata_xml_properties(xml).unwrap();
+
+        assert_eq!(properties.kind, "Configuration");
+        assert_eq!(properties.uuid, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa");
+        assert_eq!(properties.name, "DemoApp");
+        assert_eq!(properties.comment, "Configuration comment");
+        assert_eq!(properties.synonyms.len(), 1);
+        assert_eq!(properties.synonyms[0].lang, "en");
+        assert_eq!(properties.synonyms[0].content, "Demo app");
     }
 
     #[test]
@@ -4468,6 +9099,1059 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert!(inflated.contains("{1,c59e11f3-6bcb-404a-9d76-1416c12be354}"));
         assert!(inflated.contains("{\"Pattern\",{\"#\",cccccccc-cccc-4ccc-cccc-cccccccccccc}}"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_style_body_xml_with_standard_and_style_item_refs() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-style-body-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("StyleItems"))?;
+        std::fs::write(
+            root.join("StyleItems/ErrorBackColor.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+	<StyleItem uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+		<Properties>
+			<Name>ErrorBackColor</Name>
+		</Properties>
+	</StyleItem>
+</MetaDataObject>
+"#,
+        )?;
+        std::fs::write(
+            root.join("StyleItems/StrikeFont.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+	<StyleItem uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">
+		<Properties>
+			<Name>StrikeFont</Name>
+		</Properties>
+	</StyleItem>
+</MetaDataObject>
+"#,
+        )?;
+        let source = MetadataSourceContext::new(root.clone());
+        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
+<Style xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" version="2.21">
+	<Item name="FormBackColor">
+		<Color>web:Cream</Color>
+	</Item>
+	<Item name="ControlBorder">
+		<Border ref="style:ControlBorder"/>
+	</Item>
+	<Item name="TextFont">
+		<Font ref="style:TextFont" kind="StyleItem"/>
+	</Item>
+	<Item name="StyleItem.ErrorBackColor">
+		<Color>#FFC8C8</Color>
+	</Item>
+	<Item name="StyleItem.StrikeFont">
+		<Font ref="style:TextFont" kind="StyleItem" bold="false" italic="false" underline="false" strikeout="true"/>
+	</Item>
+</Style>
+"##;
+
+        let packed = super::pack_style_body_blob_from_xml(xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.starts_with("{2,5,"));
+        assert!(text.contains("{{-1},0,{4,2,{20},2}}"));
+        assert!(text.contains("{{-18},2,{3,1,{-18},0,0,0}}"));
+        assert!(text.contains("{{-20},1,{8,2,0,{-20},1,100}}"));
+        assert!(text.contains("{{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0,{4,0,{13158655},0}}"));
+        assert!(text.contains(
+            "{{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,{8,2,0,{-20},400,0,0,1,1,100}}"
+        ));
+        assert!(text.ends_with(",{0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_scheduled_job_schedule_xml() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<JobSchedule xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" version="2.17">
+	<Schedule BeginDate="0001-01-01" EndDate="0001-01-01" BeginTime="08:00:00" EndTime="17:00:00" CompletionTime="00:00:00" CompletionInterval="0" RepeatPeriodInDay="60" RepeatPause="0" WeekDayInMonth="0" DayInMonth="1" WeeksPeriod="1" DaysRepeatPeriod="0">
+		<ent:WeekDays>6 7</ent:WeekDays>
+		<ent:Months>1 2 3 4 5 6 7 8 9 10 11 12</ent:Months>
+	</Schedule>
+</JobSchedule>
+"#;
+
+        let packed = super::pack_schedule_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_raw_deflated_blob_from_bytes() -> anyhow::Result<()> {
+        let bytes = b"<?xml version=\"1.0\"?><Definition><Item name=\"A\"/></Definition>";
+
+        let packed = super::pack_raw_deflated_blob_from_bytes(bytes)?;
+
+        assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
+        assert_eq!(packed.plain_bytes, bytes.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_simple_spreadsheet_document_xml() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>3</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+			<c>
+				<i>2</i>
+				<c>
+					<f>0</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.starts_with("MOXCEL\0"));
+        assert!(text.contains(r#"{16,0,{1,1,{"ru","Hello"}},0}"#));
+        assert!(text.contains(r#"{16,0,{1,1,{"","Name"}},0}"#));
+        assert!(text.contains(r#"2,{16,0,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_detail_parameter_cells() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>3</f>
+					<parameter>Name</parameter>
+					<detailParameter>Version</detailParameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{24,2,"Version",{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_column_sets_and_row_columns_id() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>2</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>4</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>5</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            "{2,0,00000000-0000-0000-0000-000000000000,2,0,3,1,4},2,1,{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,5},1,1,0"
+        ));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_empty_row_ranges() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>1</index>
+		<indexTo>3</indexTo>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(",1,0,0,2,0,0,3,0,0,"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_merges() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>4</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<merge>
+		<r>1</r>
+		<c>2</c>
+		<h>3</h>
+		<w>1</w>
+	</merge>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{1,{2,1,3,4}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_named_and_print_areas() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<columns>
+		<size>5</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<namedItem xsi:type="NamedItemCells">
+		<name>Header</name>
+		<area>
+			<type>Rectangle</type>
+			<beginRow>1</beginRow>
+			<endRow>3</endRow>
+			<beginColumn>2</beginColumn>
+			<endColumn>4</endColumn>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+		</area>
+	</namedItem>
+	<printArea>
+		<type>Rows</type>
+		<beginRow>5</beginRow>
+		<endRow>7</endRow>
+		<beginColumn>0</beginColumn>
+		<endColumn>4</endColumn>
+	</printArea>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(
+            text.contains(r#"{1,"Header",{1,{3,2,1,4,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0}}"#)
+        );
+        assert!(text.contains("{1,0,5,4,7,00000000-0000-0000-0000-000000000000}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_print_settings() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<printSettings>
+		<pageOrientation>Landscape</pageOrientation>
+		<scale>80</scale>
+		<collate>true</collate>
+		<copies>2</copies>
+		<perPage>1</perPage>
+		<topMargin>1000</topMargin>
+		<leftMargin>1100</leftMargin>
+		<bottomMargin>1200</bottomMargin>
+		<rightMargin>1300</rightMargin>
+		<headerSize>140</headerSize>
+		<footerSize>150</footerSize>
+		<fitToPage>false</fitToPage>
+		<blackAndWhite>true</blackAndWhite>
+		<printerName>Printer "A"</printerName>
+		<paper>9</paper>
+		<paperSource>7</paperSource>
+		<pageWidth>210</pageWidth>
+		<pageHeight>297</pageHeight>
+	</printSettings>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            r#"{{0,18,0,{"N",9},1,{"N",2},2,{"N",80},3,{"N",1},4,{"N",2},5,{"N",1},6,{"N",1000},7,{"N",1100},8,{"N",1200},9,{"N",1300},10,{"N",140},11,{"N",150},12,{"N",0},13,{"N",1},14,{"S","Printer ""A"""},15,{"N",7},16,{"N",210},17,{"N",297}}}"#
+        ));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_basic_formats() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+		<fillType>Parameter</fillType>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{33024,6,1},{128,72}}"#));
+        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_format_colors() -> anyhow::Result<()> {
+        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<format>
+		<width>72</width>
+		<textColor>#009646</textColor>
+		<backColor>style:ButtonBackColor</backColor>
+	</format>
+</document>
+"##;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{3,0,{4625920}},{3,3,{-7}},{1,{3200,72,0,1}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_fonts() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<font faceName="Arial" height="8" bold="true" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/>
+	<font ref="style:NormalTextFont" bold="true" italic="false" underline="true" strikeout="false" kind="StyleItem"/>
+	<format>
+		<font>1</font>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{1,{1,1}}"));
+        assert!(text.contains(r#"{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,"Arial",1,100}"#));
+        assert!(text.contains("{7,2,60,{-31},700,0,1,0,1,100}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_lines() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<line width="1" gap="false">
+		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style>
+	</line>
+	<line width="1" gap="false">
+		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style>
+	</line>
+	<format>
+		<border>0</border>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{1,{30,0,0,0,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_empty_headers_and_footers() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<leftHeader>
+		<f>0</f>
+		<tfl/>
+	</leftHeader>
+	<centerHeader>
+		<f>0</f>
+		<tfl/>
+	</centerHeader>
+	<rightHeader>
+		<f>0</f>
+		<tfl/>
+	</rightHeader>
+	<leftFooter>
+		<f>0</f>
+		<tfl/>
+	</leftFooter>
+	<centerFooter>
+		<f>0</f>
+		<tfl/>
+	</centerFooter>
+	<rightFooter>
+		<f>0</f>
+		<tfl/>
+	</rightFooter>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text.matches("{16,0,{1,0},1,{1,{1,0},1}}").count(), 6);
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_picture_drawings() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<drawing>
+		<drawingType>Picture</drawingType>
+		<id>1</id>
+		<formatIndex>31</formatIndex>
+		<beginRow>1</beginRow>
+		<beginRowOffset>20</beginRowOffset>
+		<endRow>6</endRow>
+		<endRowOffset>88</endRowOffset>
+		<beginColumn>1</beginColumn>
+		<beginColumnOffset>24</beginColumnOffset>
+		<endColumn>20</endColumn>
+		<endColumnOffset>70</endColumnOffset>
+		<autoSize>true</autoSize>
+		<pictureSize>Stretch</pictureSize>
+		<zOrder>1</zOrder>
+		<pictureIndex>0</pictureIndex>
+	</drawing>
+	<picture>
+		<index>0</index>
+		<picture/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,0,1,1,0}"));
+        assert!(text.contains("{1,{4,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_picture_refs_with_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-spreadsheet-picture-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonPictures"))?;
+        std::fs::write(
+            root.join("CommonPictures").join("Logo.xml"),
+            br#"
+<MetaDataObject>
+  <CommonPicture uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Logo</Name>
+      <Synonym/>
+      <Comment/>
+    </Properties>
+  </CommonPicture>
+</MetaDataObject>
+"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root);
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<picture>
+		<index>0</index>
+		<picture ref="v8ui:Logo"/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml_with_source(xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{1,{4,0,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_standard_picture_refs() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<picture>
+		<index>0</index>
+		<picture ref="v8ui:Print"/>
+	</picture>
+	<picture>
+		<index>1</index>
+		<picture ref="v8ui:InputFieldCalculator"/>
+	</picture>
+	<picture>
+		<index>2</index>
+		<picture ref="v8ui:Information"/>
+	</picture>
+	<picture>
+		<index>3</index>
+		<picture ref="v8ui:SaveFile"/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{4,{4,0,{-13}},{4,1,{-6}"));
+        assert!(text.contains(&format!(
+            "{{4,2,{{0,{}}}}}",
+            super::STD_PICTURE_INFORMATION_UUID
+        )));
+        assert!(text.contains(&format!(
+            "{{4,3,{{0,{}}}}}",
+            super::STD_PICTURE_SAVE_FILE_UUID
+        )));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_module_text_preserving_base_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let parsed = super::parse_form_body_blob(&base)?;
+        assert_eq!(parsed.layout, "{7,{\"layout\"}}");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing_fields, 1);
+
+        let packed = super::pack_form_body_blob_from_module_text(
+            &base,
+            b"\xEF\xBB\xBFProcedure Run()\r\n\tMessage(\"Hi\");\r\nEndProcedure\r\n",
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{4,{7,{\"layout\"}},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{3,{\"picture\"},\"payload\"}}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_form_body_blob() -> anyhow::Result<()> {
+        let base = super::deflate_raw(b"{5,{\"not a form\"},\"module\"}")?;
+        let error = super::parse_form_body_blob(&base).unwrap_err();
+
+        assert!(error.to_string().contains("type marker 4"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_xml_preserving_base_identifiers() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,11111111-1111-4111-8111-111111111111,1,22222222-2222-4222-8222-222222222222,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,33333333-3333-4333-8333-333333333333,-1,0}}},{0},4294967295,0,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>true</setForNewObjects>
+	<object>
+		<name>Catalog.Products</name>
+		<right><name>Read</name><value>false</value></right>
+		<right><name>Update</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices</name>
+		<right>
+			<name>Read</name>
+			<value>true</value>
+			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
+		</right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(text.contains("11111111-1111-4111-8111-111111111111,-1"));
+        assert!(text.contains("22222222-2222-4222-8222-222222222222,1"));
+        assert!(text.contains("33333333-3333-4333-8333-333333333333,1"));
+        assert!(text.ends_with(",4294967295,1,0,4294967295}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_command_interface_xml_preserving_command_refs() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{7,1,2,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{{0,{{0,{{\"B\",0}},0}}}},{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="Catalog.Products.StandardCommand.OpenList">
+			<Visibility><xr:Common>true</xr:Common></Visibility>
+		</Command>
+		<Command name="100:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+			<Visibility><xr:Common>false</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#;
+
+        let packed = super::pack_command_interface_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(
+            text.contains("{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{{0,{{0,{{\"B\",1}},0}}}}")
+        );
+        assert!(
+            text.contains("{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",0}},0}}}}")
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_exchange_plan_content_xml_with_metadata_refs() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-module-blob-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::create_dir_all(root.join("InformationRegisters"))?;
+        std::fs::write(
+            root.join("Catalogs/Customers.xml"),
+            br#"<MetaDataObject><Catalog uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"><Properties><Name>Customers</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        std::fs::write(
+            root.join("InformationRegisters/Prices.xml"),
+            br#"<MetaDataObject><InformationRegister uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc"><Properties><Name>Prices</Name></Properties></InformationRegister></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(b"{2,0}")?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<ExchangePlanContent xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Item>
+		<Metadata>Catalog.Customers</Metadata>
+		<AutoRecord>Deny</AutoRecord>
+	</Item>
+	<Item>
+		<Metadata>InformationRegister.Prices</Metadata>
+		<AutoRecord>Auto</AutoRecord>
+	</Item>
+</ExchangePlanContent>
+"#;
+
+        let packed = super::pack_exchange_plan_content_blob_from_xml(&base, xml, &source)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,1}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_predefined_data_xml_preserving_base_shape() -> anyhow::Result<()> {
+        let type_uuid = "ae135932-4f94-44df-92c1-c91f15a92848";
+        let folder_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let item_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let base_plain = format!(
+            "{{0,{{1,{{7}},{{2,{{1,1,{{2,0,5,{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Элементы\"}},{{\"S\",\"\"}},1,{{1,1,{{2,1,7,{{\"#\",{type_uuid},{{1,{folder_uuid}}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Folder\"}},{{\"S\",\"F\"}},{{\"S\",\"Folder description\"}},{{\"N\",0}},1,{{1,1,{{2,2,7,{{\"#\",{type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Item\"}},{{\"S\",\"I\"}},{{\"S\",\"Item description\"}},{{\"N\",0}},0}}}}}}}}}}}}}},-1,3}}}}"
+        );
+        let base = super::deflate_raw(base_plain.as_bytes())?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<PredefinedData xmlns="http://v8.1c.ru/8.3/xcf/predef" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CatalogPredefinedItems" version="2.20">
+	<Item id="{folder_uuid}">
+		<Name>NewFolder</Name>
+		<Code>NF</Code>
+		<Description>New folder description</Description>
+		<IsFolder>true</IsFolder>
+		<ChildItems>
+			<Item id="{item_uuid}">
+				<Name>NewItem</Name>
+				<Code>NI</Code>
+				<Description>New item description</Description>
+				<IsFolder>false</IsFolder>
+			</Item>
+		</ChildItems>
+	</Item>
+</PredefinedData>
+"#
+        );
+
+        let packed = super::pack_predefined_data_blob_from_xml(&base, xml.as_bytes())?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{{"S","NewFolder"}}"#));
+        assert!(text.contains(r#"{{"S","NF"}}"#));
+        assert!(text.contains(r#"{{"S","New folder description"}}"#));
+        assert!(text.contains(r#"{{"S","NewItem"}}"#));
+        assert!(text.contains(r#"{{"S","NI"}}"#));
+        assert!(text.contains(r#"{{"S","New item description"}}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_flowchart_xml_preserving_base_shape() -> anyhow::Result<()> {
+        let start_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let done_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let style = "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+        let line_style =
+            "{7,{3,0,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,1,0,0,0,0}";
+        let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+        let start_head = format!("{{{{4,1,{{1,0}},\"Start\",1}},4,{start_uuid},0}}");
+        let completion_head = format!("{{{{4,3,{{1,0}},\"Done\",3}},4,{done_uuid},0}}");
+        let line_head = "{4,2,{1,0},\"Line\",2}";
+        let start_geometry = format!("{{{style},5,10,20,50,60}}");
+        let completion_geometry = format!("{{{style},5,70,80,110,120}}");
+        let start_shape = format!("{{{{{start_geometry},1}}}}");
+        let completion_shape = format!("{{{{{completion_geometry},1}}}}");
+        let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
+        let line_shape = format!("{{{line_geometry}}}");
+        let start_item = format!("{{{start_head},2,{start_shape},{{1,{{0,\"BeforeStart\"}}}}}}");
+        let line_item = format!("{{{line_head},3,1,0,3,0,{line_shape}}}");
+        let completion_item =
+            format!("{{{completion_head},2,{completion_shape},{{1,{{0,\"OnDone\"}}}}}}");
+        let base_plain = format!(
+            "{{5,{{{{1,{style},1,20,20}}}},3,2,{start_item},1,{line_item},3,{completion_item},4}}"
+        );
+        let base = super::deflate_raw(base_plain.as_bytes())?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme" version="2.20">
+	<Items>
+		<Start id="1" uuid="{start_uuid}">
+			<Properties>
+				<Name>StartRenamed</Name>
+				<TabOrder>11</TabOrder>
+			</Properties>
+			<Events>
+				<Event name="BeforeStart">BeforeStartRenamed</Event>
+			</Events>
+		</Start>
+		<ConnectionLine id="2">
+			<Properties>
+				<Name>LineRenamed</Name>
+				<TabOrder>12</TabOrder>
+			</Properties>
+		</ConnectionLine>
+		<Completion id="3" uuid="{done_uuid}">
+			<Properties>
+				<Name>DoneRenamed</Name>
+				<TabOrder>13</TabOrder>
+			</Properties>
+			<Events>
+				<Event name="OnComplete">OnDoneRenamed</Event>
+			</Events>
+		</Completion>
+	</Items>
+</GraphicalSchema>
+"#
+        );
+
+        let packed = super::pack_business_process_flowchart_blob_from_xml(&base, xml.as_bytes())?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#""StartRenamed",11"#));
+        assert!(text.contains(r#""BeforeStartRenamed""#));
+        assert!(text.contains(r#""LineRenamed",12"#));
+        assert!(text.contains(r#""DoneRenamed",13"#));
+        assert!(text.contains(r#""OnDoneRenamed""#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_base64_payload_blob_from_bytes() -> anyhow::Result<()> {
+        let packed = super::pack_base64_payload_blob_from_bytes(b"PK\x03\x04")?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text, "{#base64:UEsDBA==}");
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_help_blob_from_pages_and_files() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Page>ru</Page>
+</Help>
+"#;
+        let pages = super::parse_help_pages_from_xml(xml)?;
+
+        assert_eq!(pages, vec!["ru"]);
+        let packed = super::pack_help_blob_from_parts(
+            &[("ru".to_string(), b"<html></html>".to_vec())],
+            &[("shot.png".to_string(), b"\x89PNG\r\n\x1a\n".to_vec())],
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,{#base64:iVBORw0KGgo=}}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_ext_picture_blob_from_xml_referenced_bytes() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<ExtPicture xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.17">
+	<Picture>
+		<xr:Abs>Picture.zip</xr:Abs>
+		<xr:LoadTransparent>false</xr:LoadTransparent>
+	</Picture>
+</ExtPicture>
+"#;
+
+        assert_eq!(
+            super::parse_ext_picture_file_name_from_xml(xml)?,
+            "Picture.zip"
+        );
+        let packed = super::pack_ext_picture_blob_from_bytes(b"PK\x03\x04")?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text, "{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_template_type_from_metadata_xml() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+	<CommonTemplate uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+		<Properties>
+			<Name>SharedText</Name>
+			<TemplateType>TextDocument</TemplateType>
+		</Properties>
+	</CommonTemplate>
+</MetaDataObject>
+"#;
+
+        assert_eq!(
+            super::parse_template_type_from_xml(xml)?,
+            Some("TextDocument".to_string())
+        );
 
         Ok(())
     }
@@ -6370,5 +12054,67 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(super::is_uuid_text(&header.new_uuid));
         assert!(super::is_uuid_text(&root.new_uuid));
         assert!(super::is_uuid_text(&file.new_uuid));
+    }
+
+    #[test]
+    fn patches_versions_blob_without_standard_entries() -> anyhow::Result<()> {
+        let text = "\u{feff}{1,2,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"file.0\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\"file.1\",cccccccc-cccc-4ccc-cccc-cccccccccccc}";
+        let input = super::deflate_raw(text.as_bytes())?;
+
+        let patched = super::patch_versions_blob_bytes(&input, &["file.0".to_string()], true)?;
+        let plain = super::inflate_raw(&patched.blob)?;
+        let output = String::from_utf8(plain)?;
+
+        assert_eq!(output.len(), text.len());
+        assert_eq!(
+            patched
+                .replacements
+                .iter()
+                .map(|replacement| replacement.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["<generation>", "file.0"]
+        );
+        assert!(output.contains("\"file.1\",cccccccc-cccc-4ccc-cccc-cccccccccccc"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn versions_blob_patch_still_requires_changed_entries() -> anyhow::Result<()> {
+        let text = "\u{feff}{1,1,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"file.0\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}";
+        let input = super::deflate_raw(text.as_bytes())?;
+
+        let error =
+            super::patch_versions_blob_bytes(&input, &["missing.0".to_string()], true).unwrap_err();
+
+        assert_eq!(error.to_string(), "versions entry not found: missing.0");
+
+        Ok(())
+    }
+
+    #[test]
+    fn versions_blob_patch_can_add_missing_changed_entries() -> anyhow::Result<()> {
+        let text = "\u{feff}{1,1,\"\",aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\"file.0\",bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}";
+        let input = super::deflate_raw(text.as_bytes())?;
+
+        let patched = super::patch_versions_blob_bytes_allowing_additions(
+            &input,
+            &["file.5".to_string()],
+            true,
+        )?;
+        let plain = super::inflate_raw(&patched.blob)?;
+        let output = String::from_utf8(plain)?;
+        let addition = patched
+            .replacements
+            .iter()
+            .find(|replacement| replacement.name == "file.5")
+            .expect("missing added version replacement");
+
+        assert!(output.starts_with("\u{feff}{1,2,"));
+        assert_eq!(addition.old_uuid, "");
+        assert!(super::is_uuid_text(&addition.new_uuid));
+        assert!(output.contains(&format!("\"file.5\",{}", addition.new_uuid)));
+
+        Ok(())
     }
 }

@@ -4,30 +4,33 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
+use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
-    MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs, MssqlDeltaImportArgs,
-    MssqlStageAccountingRegisterObjectArgs, MssqlStageAccumulationRegisterObjectArgs,
-    MssqlStageBotObjectArgs, MssqlStageBusinessProcessObjectArgs,
-    MssqlStageCalculationRegisterObjectArgs, MssqlStageCatalogObjectArgs,
-    MssqlStageChartOfAccountsObjectArgs, MssqlStageChartOfCalculationRegistersObjectArgs,
-    MssqlStageChartOfCalculationTypesObjectArgs, MssqlStageChartOfCharacteristicTypesObjectArgs,
-    MssqlStageCommandGroupObjectArgs, MssqlStageCommonAttributeObjectArgs,
-    MssqlStageCommonCommandObjectArgs, MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs,
-    MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
-    MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
-    MssqlStageCommonPictureObjectArgs, MssqlStageCommonTemplateObjectArgs,
-    MssqlStageConstantObjectArgs, MssqlStageDataProcessorObjectArgs,
-    MssqlStageDefinedTypeObjectArgs, MssqlStageDocumentJournalObjectArgs,
-    MssqlStageDocumentNumeratorObjectArgs, MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs,
-    MssqlStageEventSubscriptionObjectArgs, MssqlStageExchangePlanObjectArgs,
-    MssqlStageFilterCriteriaObjectArgs, MssqlStageFunctionalOptionObjectArgs,
-    MssqlStageFunctionalOptionsParameterObjectArgs, MssqlStageHTTPServiceObjectArgs,
-    MssqlStageInformationRegisterObjectArgs, MssqlStageIntegrationServiceObjectArgs,
-    MssqlStageLanguageObjectArgs, MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs,
-    MssqlStageRoleObjectArgs, MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
+    MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs,
+    MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
+    MssqlStageAccumulationRegisterObjectArgs, MssqlStageBotObjectArgs,
+    MssqlStageBusinessProcessObjectArgs, MssqlStageCalculationRegisterObjectArgs,
+    MssqlStageCatalogObjectArgs, MssqlStageChartOfAccountsObjectArgs,
+    MssqlStageChartOfCalculationRegistersObjectArgs, MssqlStageChartOfCalculationTypesObjectArgs,
+    MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageCommandGroupObjectArgs,
+    MssqlStageCommonAttributeObjectArgs, MssqlStageCommonCommandObjectArgs,
+    MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs, MssqlStageCommonModuleMetadataArgs,
+    MssqlStageCommonModuleObjectArgs, MssqlStageCommonModuleObjectsArgs,
+    MssqlStageCommonModulesArgs, MssqlStageCommonPictureObjectArgs,
+    MssqlStageCommonTemplateObjectArgs, MssqlStageConstantObjectArgs,
+    MssqlStageDataProcessorObjectArgs, MssqlStageDefinedTypeObjectArgs,
+    MssqlStageDocumentJournalObjectArgs, MssqlStageDocumentNumeratorObjectArgs,
+    MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs, MssqlStageEventSubscriptionObjectArgs,
+    MssqlStageExchangePlanObjectArgs, MssqlStageFilterCriteriaObjectArgs,
+    MssqlStageFunctionalOptionObjectArgs, MssqlStageFunctionalOptionsParameterObjectArgs,
+    MssqlStageHTTPServiceObjectArgs, MssqlStageInformationRegisterObjectArgs,
+    MssqlStageIntegrationServiceObjectArgs, MssqlStageLanguageObjectArgs,
+    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs,
+    MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
     MssqlStageSessionParameterObjectArgs, MssqlStageSettingsStorageObjectArgs,
     MssqlStageSourceCommonModuleObjectsArgs, MssqlStageSourceMetadataObjectsArgs,
     MssqlStageSourceObjectsArgs, MssqlStageStyleItemObjectArgs, MssqlStageStyleObjectArgs,
@@ -37,12 +40,21 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, pack_common_module_metadata_blob_from_xml, pack_module_blob_bytes,
-    pack_simple_metadata_blob_from_xml_with_source, parse_common_module_xml_properties,
-    parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
+    VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
+    pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
+    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_module_text,
+    pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
+    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
+    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
 };
 use crate::parallel;
 use crate::source::scan_sources;
+use crate::source_audit::{SourceLoadCoverageAuditReport, audit_source_load_coverage};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
@@ -51,6 +63,54 @@ pub struct MssqlCompareReport {
     pub same: bool,
     pub summary: MssqlCompareSummary,
     pub differences: Vec<MssqlDifference>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlSourceParityAuditReport {
+    pub database: String,
+    pub source_root: PathBuf,
+    pub path_prefixes: Vec<String>,
+    pub source_coverage: SourceLoadCoverageAuditReport,
+    pub selected_metadata_xml_files: usize,
+    pub selected_common_module_xml_files: usize,
+    pub prepared_metadata_objects: usize,
+    pub prepared_common_modules: usize,
+    pub prepared_metadata_body_rows: usize,
+    pub prepared_total_config_rows: usize,
+    pub prepare_failures: Vec<MssqlSourceParityPrepareFailure>,
+    pub prepare_failure_summary: Vec<MssqlSourceParityFailureSummary>,
+    pub versions_blob: Option<GeneratedBlobReport>,
+    pub version_patch_category: Option<String>,
+    pub version_patch_error: Option<String>,
+    pub version_replacements: Vec<VersionReplacement>,
+    pub batches: Vec<MssqlSourceParityBatchReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlSourceParityPrepareFailure {
+    pub kind: String,
+    pub path: String,
+    pub category: String,
+    pub config_file_name: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceParityFailureSummary {
+    pub category: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceParityBatchReport {
+    pub index: usize,
+    pub metadata_objects: usize,
+    pub common_modules: usize,
+    pub staged_rows: usize,
+    pub running_staged_rows: usize,
+    pub include_stable_rows: bool,
+    pub include_versions_row: bool,
+    pub expected_total_rows: usize,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -269,6 +329,14 @@ pub struct StagedMetadataObjectReport {
     pub properties: SimpleMetadataXmlProperties,
     pub metadata_plain_bytes: usize,
     pub metadata_blob: GeneratedBlobReport,
+    pub body_rows: Vec<StagedMetadataBodyReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StagedMetadataBodyReport {
+    pub body_id: String,
+    pub path: PathBuf,
+    pub blob: GeneratedBlobReport,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -350,6 +418,50 @@ struct PreparedMetadataObjectStage {
     metadata_plain_bytes: usize,
     metadata_blob: Vec<u8>,
     metadata_blob_sha256: String,
+    body_rows: Vec<PreparedMetadataBodyStage>,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedMetadataBodyStage {
+    body_id: String,
+    path: PathBuf,
+    blob: Vec<u8>,
+    blob_sha256: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct NestedCommandModuleSource {
+    command_id: String,
+    command_name: String,
+    body_path: PathBuf,
+}
+
+fn staged_metadata_object_report(
+    object: PreparedMetadataObjectStage,
+) -> StagedMetadataObjectReport {
+    StagedMetadataObjectReport {
+        object_id: object.object_id,
+        kind: object.kind,
+        xml: object.xml,
+        properties: object.properties,
+        metadata_plain_bytes: object.metadata_plain_bytes,
+        metadata_blob: GeneratedBlobReport {
+            bytes: object.metadata_blob.len(),
+            sha256: object.metadata_blob_sha256,
+        },
+        body_rows: object
+            .body_rows
+            .into_iter()
+            .map(|body| StagedMetadataBodyReport {
+                body_id: body.body_id,
+                path: body.path,
+                blob: GeneratedBlobReport {
+                    bytes: body.blob.len(),
+                    sha256: body.blob_sha256,
+                },
+            })
+            .collect(),
+    }
 }
 
 pub fn compare_databases(args: &MssqlCompareArgs) -> Result<MssqlCompareReport> {
@@ -371,6 +483,223 @@ fn require_non_lab_confirmation(allowed: bool, action: &str) -> Result<()> {
 pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(report)?;
     fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
+}
+
+pub fn audit_source_parity(
+    args: &MssqlAuditSourceParityArgs,
+) -> Result<MssqlSourceParityAuditReport> {
+    let source_coverage = audit_source_load_coverage(&args.source_root)?;
+    let manifest = scan_sources(&args.source_root)?;
+    let metadata_xmls = filter_source_paths_by_prefix(
+        source_metadata_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
+    let common_module_xmls = filter_source_paths_by_prefix(
+        source_common_module_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
+    if metadata_xmls.is_empty() && common_module_xmls.is_empty() {
+        return Err(anyhow!(
+            "no supported root XML objects or common modules found under {}",
+            args.source_root.display()
+        ));
+    }
+
+    let source = MetadataSourceContext::new(args.source_root.clone());
+    let metadata_results = parallel::install(|| {
+        metadata_xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_metadata_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    Some(&source),
+                )
+                .map_err(|error| {
+                    source_parity_prepare_failure(
+                        "metadata_object",
+                        source_relative_path(&args.source_root, xml),
+                        error,
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+    })?;
+    let common_module_results = parallel::install(|| {
+        common_module_xmls
+            .par_iter()
+            .map(|xml| {
+                prepare_common_module_object_stage(
+                    &args.sqlcmd,
+                    &args.server,
+                    &args.database,
+                    xml.clone(),
+                    None,
+                )
+                .map_err(|error| {
+                    source_parity_prepare_failure(
+                        "common_module",
+                        source_relative_path(&args.source_root, xml),
+                        error,
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut metadata_objects = Vec::new();
+    let mut common_modules = Vec::new();
+    let mut prepare_failures = Vec::new();
+    for result in metadata_results {
+        match result {
+            Ok(object) => metadata_objects.push(object),
+            Err(error) => prepare_failures.push(error),
+        }
+    }
+    for result in common_module_results {
+        match result {
+            Ok(module) => common_modules.push(module),
+            Err(error) => prepare_failures.push(error),
+        }
+    }
+    prepare_failures.sort_by(|left, right| {
+        left.kind
+            .cmp(&right.kind)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let prepare_failure_summary = source_parity_failure_summary(&prepare_failures);
+
+    ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
+    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let changes = source_stage_change_ids(&metadata_objects, &common_modules);
+    let (versions_blob_report, version_replacements, version_patch_category, version_patch_error) =
+        match patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true) {
+            Ok(patched_versions) => (
+                GeneratedBlobReport {
+                    bytes: patched_versions.blob.len(),
+                    sha256: patched_versions.output_sha256,
+                },
+                patched_versions.replacements,
+                None,
+                None,
+            ),
+            Err(error) => (
+                GeneratedBlobReport {
+                    bytes: versions_blob.len(),
+                    sha256: hex_sha256(&versions_blob),
+                },
+                Vec::new(),
+                Some(classify_version_patch_error(&error.to_string())),
+                Some(error.to_string()),
+            ),
+        };
+
+    let batch_size = args.batch_size.unwrap_or(500).max(1);
+    let batches =
+        build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size);
+    let batch_reports = source_stage_batch_reports(&batches);
+    let prepared_metadata_body_rows = metadata_objects
+        .iter()
+        .map(|object| object.body_rows.len())
+        .sum::<usize>();
+    let prepared_total_config_rows =
+        metadata_objects.len() + prepared_metadata_body_rows + common_modules.len() * 2;
+
+    Ok(MssqlSourceParityAuditReport {
+        database: args.database.clone(),
+        source_root: source_coverage.root.clone(),
+        path_prefixes: args.path_prefix.clone(),
+        source_coverage,
+        selected_metadata_xml_files: metadata_xmls.len(),
+        selected_common_module_xml_files: common_module_xmls.len(),
+        prepared_metadata_objects: metadata_objects.len(),
+        prepared_common_modules: common_modules.len(),
+        prepared_metadata_body_rows,
+        prepared_total_config_rows,
+        prepare_failures,
+        prepare_failure_summary,
+        versions_blob: Some(versions_blob_report),
+        version_patch_category,
+        version_patch_error,
+        version_replacements,
+        batches: batch_reports,
+    })
+}
+
+fn source_parity_prepare_failure(
+    kind: &str,
+    path: String,
+    error: anyhow::Error,
+) -> MssqlSourceParityPrepareFailure {
+    let message = error.to_string();
+    let (category, config_file_name) = classify_source_parity_error(&message);
+    MssqlSourceParityPrepareFailure {
+        kind: kind.to_string(),
+        path,
+        category,
+        config_file_name,
+        message,
+    }
+}
+
+fn source_parity_failure_summary(
+    failures: &[MssqlSourceParityPrepareFailure],
+) -> Vec<MssqlSourceParityFailureSummary> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for failure in failures {
+        *counts.entry(failure.category.clone()).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(category, count)| MssqlSourceParityFailureSummary { category, count })
+        .collect()
+}
+
+fn classify_source_parity_error(message: &str) -> (String, Option<String>) {
+    if let Some(file_name) = message.strip_prefix("Config row not found: ") {
+        return (
+            "missing_config_row".to_string(),
+            Some(file_name.trim().to_string()),
+        );
+    }
+    if message.starts_with("sqlcmd failed:") {
+        return ("sql_error".to_string(), None);
+    }
+    if message.contains("does not contain JSON array")
+        || message.contains("failed to parse Config blob JSON")
+    {
+        return ("sql_protocol_error".to_string(), None);
+    }
+    if message.starts_with("failed to read") || message.contains(": failed to read") {
+        return ("source_io_error".to_string(), None);
+    }
+    if message.starts_with("failed to parse") || message.contains(": failed to parse") {
+        return ("source_parse_error".to_string(), None);
+    }
+    if message.starts_with("unsupported ") || message.contains(": unsupported ") {
+        return ("unsupported_source".to_string(), None);
+    }
+    if message.starts_with("failed to pack") || message.contains(": failed to pack") {
+        return ("pack_error".to_string(), None);
+    }
+    if message.starts_with("XML metadata uuid ") {
+        return ("metadata_uuid_mismatch".to_string(), None);
+    }
+    ("other".to_string(), None)
+}
+
+fn classify_version_patch_error(message: &str) -> String {
+    if message.starts_with("versions entry not found:") {
+        "unsupported_versions_shape".to_string()
+    } else if message.starts_with("failed to parse") || message.contains(": failed to parse") {
+        "versions_parse_error".to_string()
+    } else {
+        "versions_patch_error".to_string()
+    }
 }
 
 pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
@@ -872,9 +1201,13 @@ pub fn stage_metadata_objects(
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = prepared
         .iter()
-        .map(|object| object.object_id.clone())
+        .flat_map(|object| {
+            std::iter::once(object.object_id.clone())
+                .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
+        })
         .collect::<Vec<_>>();
-    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+    let patched_versions =
+        patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
     let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let script = args.script_output.clone().unwrap_or_else(|| {
@@ -894,17 +1227,7 @@ pub fn stage_metadata_objects(
     let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let objects = prepared
         .into_iter()
-        .map(|object| StagedMetadataObjectReport {
-            object_id: object.object_id,
-            kind: object.kind,
-            xml: object.xml,
-            properties: object.properties,
-            metadata_plain_bytes: object.metadata_plain_bytes,
-            metadata_blob: GeneratedBlobReport {
-                bytes: object.metadata_blob.len(),
-                sha256: object.metadata_blob_sha256,
-            },
-        })
+        .map(staged_metadata_object_report)
         .collect();
 
     Ok(StageMetadataObjectsReport {
@@ -929,7 +1252,7 @@ pub fn stage_source_metadata_objects(
     let xmls = manifest
         .files
         .iter()
-        .filter(|file| is_root_metadata_xml(&file.path))
+        .filter(|file| is_stage_metadata_xml(&file.path))
         .map(|file| args.source_root.join(&file.path))
         .collect::<Vec<_>>();
     let stage_args = MssqlStageMetadataObjectsArgs {
@@ -979,8 +1302,16 @@ pub fn stage_source_objects(
     }
 
     let manifest = scan_sources(&args.source_root)?;
-    let metadata_xmls = source_metadata_xmls(&manifest, &args.source_root);
-    let common_module_xmls = source_common_module_xmls(&manifest, &args.source_root);
+    let metadata_xmls = filter_source_paths_by_prefix(
+        source_metadata_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
+    let common_module_xmls = filter_source_paths_by_prefix(
+        source_common_module_xmls(&manifest, &args.source_root),
+        &args.source_root,
+        &args.path_prefix,
+    );
     if metadata_xmls.is_empty() && common_module_xmls.is_empty() {
         return Err(anyhow!(
             "no supported root XML objects or common modules found under {}",
@@ -1022,16 +1353,9 @@ pub fn stage_source_objects(
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
 
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
-    let changes = metadata_objects
-        .iter()
-        .map(|object| object.object_id.clone())
-        .chain(
-            common_modules
-                .iter()
-                .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()]),
-        )
-        .collect::<Vec<_>>();
-    let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
+    let changes = source_stage_change_ids(&metadata_objects, &common_modules);
+    let patched_versions =
+        patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
     let batches =
@@ -1041,6 +1365,7 @@ pub fn stage_source_objects(
     let mut running_rows = 0usize;
     let mut after = before.clone();
 
+    let batch_reports = source_stage_batch_reports(&batches);
     for (index, batch) in batches.iter().enumerate() {
         let script = batch_stage_script_path(
             args.script_output.as_ref(),
@@ -1052,20 +1377,17 @@ pub fn stage_source_objects(
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        let include_stable_rows = index == 0;
-        let include_versions_row = index + 1 == batches.len();
+        let batch_report = &batch_reports[index];
         running_rows += batch.row_count;
-        let expected_total_rows = running_rows
-            + if include_stable_rows { 2 } else { 0 }
-            + if include_versions_row { 1 } else { 0 };
+        debug_assert_eq!(running_rows, batch_report.running_staged_rows);
         let sql = build_stage_source_objects_sql(
             &args.database,
             &batch.metadata_objects,
             &batch.common_modules,
             &patched_versions.blob,
-            include_stable_rows,
-            include_versions_row,
-            expected_total_rows,
+            batch_report.include_stable_rows,
+            batch_report.include_versions_row,
+            batch_report.expected_total_rows,
         );
         fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
         run_sql_file(&args.sqlcmd, &args.server, &script)?;
@@ -1086,17 +1408,7 @@ pub fn stage_source_objects(
     });
     let metadata_objects = metadata_objects
         .into_iter()
-        .map(|object| StagedMetadataObjectReport {
-            object_id: object.object_id,
-            kind: object.kind,
-            xml: object.xml,
-            properties: object.properties,
-            metadata_plain_bytes: object.metadata_plain_bytes,
-            metadata_blob: GeneratedBlobReport {
-                bytes: object.metadata_blob.len(),
-                sha256: object.metadata_blob_sha256,
-            },
-        })
+        .map(staged_metadata_object_report)
         .collect();
     let common_modules = common_modules
         .into_iter()
@@ -1157,7 +1469,88 @@ fn is_root_metadata_xml(path: &str) -> bool {
         return false;
     }
     let parts = lower.split('/').collect::<Vec<_>>();
-    parts.len() == 2 && parts[0] != "commonmodules"
+    parts.len() == 2 && is_stage_root_metadata_collection(parts[0])
+}
+
+fn is_stage_root_metadata_collection(value: &str) -> bool {
+    matches!(
+        value,
+        "catalogs"
+            | "documents"
+            | "informationregisters"
+            | "accumulationregisters"
+            | "accountingregisters"
+            | "calculationregisters"
+            | "chartsofcharacteristictypes"
+            | "chartsofaccounts"
+            | "chartsofcalculationtypes"
+            | "chartsofcalculationregisters"
+            | "commonforms"
+            | "commonpictures"
+            | "commontemplates"
+            | "commonattributes"
+            | "commandgroups"
+            | "documentjournals"
+            | "reports"
+            | "dataprocessors"
+            | "enums"
+            | "exchangeplans"
+            | "eventsubscriptions"
+            | "filtercriteria"
+            | "functionaloptions"
+            | "functionaloptionsparameters"
+            | "httpservices"
+            | "languages"
+            | "scheduledjobs"
+            | "sessionparameters"
+            | "settingsstorages"
+            | "styleitems"
+            | "styles"
+            | "subsystems"
+            | "roles"
+            | "commoncommands"
+            | "businessprocesses"
+            | "bots"
+            | "definedtypes"
+            | "tasks"
+            | "constants"
+            | "documentnumerators"
+            | "integrationservices"
+            | "sequences"
+            | "webservices"
+            | "wsreferences"
+            | "xdtopackages"
+    )
+}
+
+fn is_template_metadata_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "templates"
+}
+
+fn is_form_metadata_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "forms"
+}
+
+fn is_stage_metadata_xml(path: &str) -> bool {
+    is_configuration_metadata_xml(path)
+        || is_root_metadata_xml(path)
+        || is_template_metadata_xml(path)
+        || is_form_metadata_xml(path)
+}
+
+fn is_configuration_metadata_xml(path: &str) -> bool {
+    path.replace('\\', "/")
+        .eq_ignore_ascii_case("Configuration.xml")
 }
 
 fn is_root_common_module_xml(path: &str) -> bool {
@@ -1823,6 +2216,15 @@ fn prepare_metadata_object_stage(
             object_id
         ));
     }
+    let body_rows = prepare_metadata_body_rows(
+        sqlcmd,
+        server,
+        database,
+        &xml_path,
+        &xml,
+        &packed_metadata.properties,
+        source,
+    )?;
 
     Ok(PreparedMetadataObjectStage {
         object_id,
@@ -1832,7 +2234,968 @@ fn prepare_metadata_object_stage(
         metadata_plain_bytes: packed_metadata.plain_bytes,
         metadata_blob: packed_metadata.blob,
         metadata_blob_sha256: packed_metadata.output_sha256,
+        body_rows,
     })
+}
+
+fn prepare_metadata_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let mut rows = match properties.kind.as_str() {
+        "Style" => prepare_style_body_row(sqlcmd, server, database, xml_path, properties, source),
+        "ScheduledJob" => {
+            prepare_scheduled_job_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        "XDTOPackage" => prepare_raw_deflated_body_row(
+            sqlcmd,
+            server,
+            database,
+            infer_xdto_package_body_path(xml_path),
+            properties,
+            "XDTOPackage body",
+        ),
+        "WSReference" => prepare_raw_deflated_body_row(
+            sqlcmd,
+            server,
+            database,
+            infer_ws_reference_definition_path(xml_path),
+            properties,
+            "WSReference definition",
+        ),
+        "CommonTemplate" | "Template" => {
+            prepare_template_body_row(sqlcmd, server, database, xml_path, xml, properties, source)
+        }
+        "CommonPicture" => {
+            prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        "Configuration" => {
+            prepare_configuration_asset_body_rows(sqlcmd, server, database, xml_path, properties)
+        }
+        "BusinessProcess" => prepare_business_process_flowchart_body_row(
+            sqlcmd, server, database, xml_path, properties,
+        ),
+        "Catalog" | "ChartOfCharacteristicTypes" => {
+            prepare_predefined_data_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        "ExchangePlan" => prepare_exchange_plan_content_body_row(
+            sqlcmd, server, database, xml_path, properties, source,
+        ),
+        "Form" | "CommonForm" => {
+            prepare_form_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        "Role" => prepare_role_rights_body_row(sqlcmd, server, database, xml_path, properties),
+        _ => Ok(Vec::new()),
+    }?;
+    rows.extend(prepare_object_help_body_row(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
+    rows.extend(prepare_object_module_body_rows(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
+    rows.extend(prepare_nested_command_module_body_rows(
+        sqlcmd, server, database, xml_path, xml, properties,
+    )?);
+    rows.extend(prepare_command_interface_body_row(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
+    Ok(rows)
+}
+
+fn prepare_style_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_style_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let source = source.ok_or_else(|| {
+        anyhow!(
+            "source root is required to stage Style body {}",
+            body_path.display()
+        )
+    })?;
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read Style body XML {}", body_path.display()))?;
+    let packed = pack_style_body_blob_from_xml(&xml, Some(source))
+        .with_context(|| format!("failed to pack Style body {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_scheduled_job_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_scheduled_job_schedule_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read JobSchedule XML {}", body_path.display()))?;
+    let packed = pack_schedule_blob_from_xml(&xml)
+        .with_context(|| format!("failed to pack JobSchedule {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_raw_deflated_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    body_path: PathBuf,
+    properties: &SimpleMetadataXmlProperties,
+    label: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path)
+        .with_context(|| format!("failed to read {label} {}", body_path.display()))?;
+    let packed = pack_raw_deflated_blob_from_bytes(&bytes)
+        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(template_type) = parse_template_type_from_xml(xml)? else {
+        return Ok(Vec::new());
+    };
+    match template_type.as_str() {
+        "DataCompositionAppearanceTemplate"
+        | "DataCompositionSchema"
+        | "GraphicalSchema"
+        | "TextDocument" => {
+            let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type)
+            else {
+                return Ok(Vec::new());
+            };
+            prepare_raw_deflated_body_row(
+                sqlcmd,
+                server,
+                database,
+                body_path,
+                properties,
+                "Template body",
+            )
+        }
+        "HTMLDocument" => {
+            prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        "SpreadsheetDocument" => prepare_spreadsheet_template_body_row(
+            sqlcmd, server, database, xml_path, properties, source,
+        ),
+        "AddIn" | "BinaryData" => {
+            prepare_binary_template_body_row(sqlcmd, server, database, xml_path, properties)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn prepare_spreadsheet_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_spreadsheet_template_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read SpreadsheetDocument Template body {}",
+            body_path.display()
+        )
+    })?;
+    let packed =
+        pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, source).with_context(|| {
+            format!(
+                "failed to pack SpreadsheetDocument Template body {}",
+                body_path.display()
+            )
+        })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_html_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_html_template_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    prepare_help_blob_body_row(
+        sqlcmd,
+        server,
+        database,
+        body_id,
+        body_path,
+        "HTML Template",
+    )
+}
+
+fn prepare_binary_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_binary_template_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read binary Template body {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_base64_payload_blob_from_bytes(&bytes).with_context(|| {
+        format!(
+            "failed to pack binary Template body {}",
+            body_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_common_picture_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_common_picture_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read ExtPicture XML {}", body_path.display()))?;
+    let file_name = parse_ext_picture_file_name_from_xml(&xml)
+        .with_context(|| format!("failed to parse ExtPicture XML {}", body_path.display()))?;
+    let picture_path = body_path.with_extension("").join(&file_name);
+    let picture = fs::read(&picture_path)
+        .with_context(|| format!("failed to read ExtPicture file {}", picture_path.display()))?;
+    let packed = pack_ext_picture_blob_from_bytes(&picture)
+        .with_context(|| format!("failed to pack ExtPicture {}", picture_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_asset_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let mut rows = Vec::new();
+    rows.extend(prepare_configuration_ext_picture_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "Splash.xml"),
+        "2",
+    )?);
+    rows.extend(prepare_configuration_binary_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
+        "4",
+    )?);
+    rows.extend(prepare_configuration_ext_picture_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
+        "c",
+    )?);
+    Ok(rows)
+}
+
+fn prepare_configuration_ext_picture_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration ExtPicture {}",
+            body_path.display()
+        )
+    })?;
+    let file_name = parse_ext_picture_file_name_from_xml(&xml).with_context(|| {
+        format!(
+            "failed to parse Configuration ExtPicture {}",
+            body_path.display()
+        )
+    })?;
+    let picture_path = body_path.with_extension("").join(&file_name);
+    let picture = fs::read(&picture_path).with_context(|| {
+        format!(
+            "failed to read Configuration ExtPicture file {}",
+            picture_path.display()
+        )
+    })?;
+    let packed = pack_ext_picture_blob_from_bytes(&picture).with_context(|| {
+        format!(
+            "failed to pack Configuration ExtPicture {}",
+            picture_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_binary_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let blob = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration binary {}",
+            body_path.display()
+        )
+    })?;
+    let blob_sha256 = hex_sha256(&blob);
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob,
+        blob_sha256,
+    }])
+}
+
+fn prepare_exchange_plan_content_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_exchange_plan_content_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let source = source.ok_or_else(|| {
+        anyhow!(
+            "source root is required to stage ExchangePlan Content.xml {}",
+            body_path.display()
+        )
+    })?;
+    let body_id = format!("{}.1", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read ExchangePlan Content {}",
+            body_path.display()
+        )
+    })?;
+    let packed =
+        pack_exchange_plan_content_blob_from_xml(&base_body, &xml, source).with_context(|| {
+            format!(
+                "failed to pack ExchangePlan Content {}",
+                body_path.display()
+            )
+        })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_predefined_data_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(suffix) = predefined_data_body_suffix(&properties.kind) else {
+        return Ok(Vec::new());
+    };
+    let body_path = infer_predefined_data_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read PredefinedData {}", body_path.display()))?;
+    let packed = pack_predefined_data_blob_from_xml(&base_body, &xml)
+        .with_context(|| format!("failed to pack PredefinedData {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_business_process_flowchart_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_business_process_flowchart_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.7", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read BusinessProcess Flowchart {}",
+            body_path.display()
+        )
+    })?;
+    let packed =
+        pack_business_process_flowchart_blob_from_xml(&base_body, &xml).with_context(|| {
+            format!(
+                "failed to pack BusinessProcess Flowchart {}",
+                body_path.display()
+            )
+        })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_form_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let module_path = infer_form_module_body_path(xml_path);
+    if !module_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let module_text = fs::read(&module_path)
+        .with_context(|| format!("failed to read Form module {}", module_path.display()))?;
+    let packed = pack_form_body_blob_from_module_text(&base_body, &module_text)
+        .with_context(|| format!("failed to pack Form body {}", module_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: module_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_role_rights_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_role_rights_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
+    let packed = pack_role_rights_blob_from_xml(&base_body, &xml)
+        .with_context(|| format!("failed to pack Role rights {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_command_interface_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(suffix) = command_interface_body_suffix(&properties.kind) else {
+        return Ok(Vec::new());
+    };
+    let body_path = infer_command_interface_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read CommandInterface XML {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_command_interface_blob_from_xml(&base_body, &xml)
+        .with_context(|| format!("failed to pack CommandInterface {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_object_help_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_object_help_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = infer_help_body_id(properties);
+    prepare_help_blob_body_row(sqlcmd, server, database, body_id, body_path, "Help")
+}
+
+fn prepare_help_blob_body_row(
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
+    body_id: String,
+    body_path: PathBuf,
+    label: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read {label} XML {}", body_path.display()))?;
+    let page_names = parse_help_pages_from_xml(&xml)
+        .with_context(|| format!("failed to parse {label} XML {}", body_path.display()))?;
+    let help_dir = body_path.with_extension("");
+    let mut pages = Vec::with_capacity(page_names.len());
+    for page in page_names {
+        if page.contains('/') || page.contains('\\') || page == "." || page == ".." {
+            return Err(anyhow!("unsupported {label} page name: {page}"));
+        }
+        let page_path = help_dir.join(format!("{page}.html"));
+        let content = fs::read(&page_path)
+            .with_context(|| format!("failed to read {label} page {}", page_path.display()))?;
+        pages.push((page, content));
+    }
+    let mut files = Vec::<(String, Vec<u8>)>::new();
+    let files_dir = help_dir.join("_files");
+    if files_dir.exists() {
+        for entry in fs::read_dir(&files_dir)
+            .with_context(|| format!("failed to read {label} files dir {}", files_dir.display()))?
+        {
+            let entry = entry
+                .with_context(|| format!("failed to read entry in {}", files_dir.display()))?;
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("failed to stat {}", entry.path().display()))?;
+            if !file_type.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let content = fs::read(entry.path()).with_context(|| {
+                format!("failed to read {label} file {}", entry.path().display())
+            })?;
+            files.push((file_name, content));
+        }
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    let packed = pack_help_blob_from_parts(&pages, &files)
+        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
+    let suffix = if matches!(properties.kind.as_str(), "Form" | "CommonForm") {
+        "1"
+    } else {
+        "5"
+    };
+    format!("{}.{}", properties.uuid, suffix)
+}
+
+fn prepare_object_module_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let mut rows = Vec::new();
+    for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
+        let body_path = if properties.kind == "Configuration" {
+            infer_configuration_module_body_path(xml_path, file_name)
+        } else {
+            infer_object_module_body_path(xml_path, file_name)
+        };
+        if !body_path.exists() {
+            continue;
+        }
+        let body_id = format!("{}.{}", properties.uuid, suffix);
+        let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+        let text = fs::read(&body_path)
+            .with_context(|| format!("failed to read module body {}", body_path.display()))?;
+        let packed = pack_module_blob_bytes(&text, Some(&base_body), None)
+            .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
+        rows.push(PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        });
+    }
+    Ok(rows)
+}
+
+fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        "Bot" => &[("1", "Module.bsl")],
+        "Configuration" => &[
+            ("0", "OrdinaryApplicationModule.bsl"),
+            ("5", "ExternalConnectionModule.bsl"),
+            ("6", "ManagedApplicationModule.bsl"),
+            ("7", "SessionModule.bsl"),
+        ],
+        "CommonCommand" => &[("2", "CommandModule.bsl")],
+        "Constant" => &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")],
+        "SettingsStorage" => &[("8", "ManagerModule.bsl")],
+        "Sequence" => &[("0", "RecordSetModule.bsl")],
+        "Catalog" => &[("0", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
+        "Report" | "DataProcessor" | "Document" => {
+            &[("0", "ObjectModule.bsl"), ("2", "ManagerModule.bsl")]
+        }
+        "Enum" => &[("0", "ManagerModule.bsl")],
+        "ExchangePlan" => &[("2", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
+        "AccumulationRegister"
+        | "AccountingRegister"
+        | "CalculationRegister"
+        | "InformationRegister" => &[("1", "RecordSetModule.bsl"), ("2", "ManagerModule.bsl")],
+        "DocumentJournal" => &[("1", "ManagerModule.bsl")],
+        "Task" => &[("6", "ObjectModule.bsl"), ("7", "ManagerModule.bsl")],
+        "BusinessProcess" => &[("6", "ObjectModule.bsl"), ("8", "ManagerModule.bsl")],
+        "ChartOfCharacteristicTypes" => &[("15", "ObjectModule.bsl"), ("16", "ManagerModule.bsl")],
+        "HTTPService" | "WebService" => &[("0", "Module.bsl")],
+        "IntegrationService" => &[("0", "Module.bsl")],
+        _ => &[],
+    }
+}
+
+fn command_interface_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Subsystem" => Some("1"),
+        _ => None,
+    }
+}
+
+fn predefined_data_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Catalog" => Some("1c"),
+        "ChartOfCharacteristicTypes" => Some("7"),
+        _ => None,
+    }
+}
+
+fn prepare_nested_command_module_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let sources = nested_command_module_sources(xml_path, xml, properties)?;
+    let mut rows = Vec::with_capacity(sources.len());
+    for source in sources {
+        let body_id = format!("{}.2", source.command_id);
+        let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+        let text = fs::read(&source.body_path).with_context(|| {
+            format!(
+                "failed to read nested command module body {}",
+                source.body_path.display()
+            )
+        })?;
+        let packed = pack_module_blob_bytes(&text, Some(&base_body), None).with_context(|| {
+            format!(
+                "failed to pack nested command module body {}",
+                source.body_path.display()
+            )
+        })?;
+        rows.push(PreparedMetadataBodyStage {
+            body_id,
+            path: source.body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        });
+    }
+    Ok(rows)
+}
+
+fn nested_command_module_sources(
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<NestedCommandModuleSource>> {
+    if !metadata_kind_can_own_commands(&properties.kind) {
+        return Ok(Vec::new());
+    }
+    let commands_dir = xml_path.with_extension("").join("Commands");
+    if !commands_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let command_ids = parse_nested_command_ids_by_name(xml)?;
+    let mut sources = Vec::new();
+    for entry in fs::read_dir(&commands_dir)
+        .with_context(|| format!("failed to read Commands dir {}", commands_dir.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", commands_dir.display()))?;
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to stat {}", entry.path().display()))?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let command_name = entry.file_name().to_string_lossy().to_string();
+        let body_path = entry.path().join("Ext").join("CommandModule.bsl");
+        if !body_path.exists() {
+            continue;
+        }
+        let command_id = command_ids.get(&command_name).cloned().ok_or_else(|| {
+            anyhow!(
+                "nested command module {} has no matching Command named {} in {}",
+                body_path.display(),
+                command_name,
+                xml_path.display()
+            )
+        })?;
+        sources.push(NestedCommandModuleSource {
+            command_id,
+            command_name,
+            body_path,
+        });
+    }
+    sources.sort_by(|left, right| left.body_path.cmp(&right.body_path));
+    Ok(sources)
+}
+
+fn metadata_kind_can_own_commands(kind: &str) -> bool {
+    matches!(
+        kind,
+        "AccountingRegister"
+            | "AccumulationRegister"
+            | "BusinessProcess"
+            | "CalculationRegister"
+            | "Catalog"
+            | "ChartOfAccounts"
+            | "ChartOfCalculationTypes"
+            | "ChartOfCharacteristicTypes"
+            | "DataProcessor"
+            | "Document"
+            | "DocumentJournal"
+            | "Enum"
+            | "ExchangePlan"
+            | "InformationRegister"
+            | "Report"
+            | "SettingsStorage"
+            | "Task"
+    )
+}
+
+fn parse_nested_command_ids_by_name(xml: &[u8]) -> Result<BTreeMap<String, String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut commands = BTreeMap::<String, String>::new();
+    let mut pending_uuid = None::<String>;
+    let mut pending_name = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name_for_stage(event.local_name().as_ref());
+                if local == "Command" && pending_uuid.is_none() {
+                    pending_uuid = Some(command_xml_uuid(&event)?);
+                    pending_name = None;
+                } else if pending_uuid.is_some()
+                    && path_ends_with_for_stage(&path, &["Command", "Properties"])
+                    && local == "Name"
+                {
+                    pending_name = Some(String::new());
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(_)) => {}
+            Ok(Event::Text(text)) => {
+                if path_ends_with_for_stage(&path, &["Command", "Properties", "Name"]) {
+                    if let Some(name) = pending_name.as_mut() {
+                        name.push_str(text.xml_content()?.as_ref());
+                    }
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with_for_stage(&path, &["Command", "Properties", "Name"]) {
+                    if let Some(name) = pending_name.as_mut() {
+                        name.push_str(text.xml_content()?.as_ref());
+                    }
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name_for_stage(event.local_name().as_ref());
+                if local == "Command" {
+                    if let (Some(uuid), Some(name)) = (pending_uuid.take(), pending_name.take()) {
+                        commands.insert(name, uuid);
+                    }
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(commands)
+}
+
+fn command_xml_uuid(event: &BytesStart<'_>) -> Result<String> {
+    let value = xml_attr_value_for_stage(event, "uuid")
+        .ok_or_else(|| anyhow!("Command XML element has no uuid attribute"))?;
+    Ok(uuid::Uuid::parse_str(&value)
+        .with_context(|| format!("invalid Command uuid {value}"))?
+        .hyphenated()
+        .to_string())
+}
+
+fn xml_attr_value_for_stage(event: &BytesStart<'_>, name: &str) -> Option<String> {
+    event
+        .attributes()
+        .filter_map(Result::ok)
+        .find(|attr| attr.key.as_ref() == name.as_bytes())
+        .map(|attr| String::from_utf8_lossy(attr.value.as_ref()).to_string())
+}
+
+fn xml_local_name_for_stage(name: &[u8]) -> String {
+    String::from_utf8_lossy(name).to_string()
+}
+
+fn path_ends_with_for_stage(path: &[String], suffix: &[&str]) -> bool {
+    path.len() >= suffix.len()
+        && path[path.len() - suffix.len()..]
+            .iter()
+            .zip(suffix)
+            .all(|(left, right)| left == right)
 }
 
 fn prepare_common_module_object_stage(
@@ -2100,6 +3463,11 @@ fn ensure_unique_metadata_object_ids(objects: &[PreparedMetadataObjectStage]) ->
                 object.object_id
             ));
         }
+        for body in &object.body_rows {
+            if !seen.insert(body.body_id.as_str()) {
+                return Err(anyhow!("duplicate metadata body id: {}", body.body_id));
+            }
+        }
     }
     Ok(())
 }
@@ -2115,6 +3483,14 @@ fn ensure_unique_source_stage_ids(
                 "duplicate metadata object id in source tree stage: {}",
                 object.object_id
             ));
+        }
+        for body in &object.body_rows {
+            if !seen.insert(body.body_id.as_str()) {
+                return Err(anyhow!(
+                    "duplicate metadata body id in source tree stage: {}",
+                    body.body_id
+                ));
+            }
         }
     }
     for module in common_modules {
@@ -2141,7 +3517,7 @@ fn source_metadata_xmls(
     manifest
         .files
         .iter()
-        .filter(|file| is_root_metadata_xml(&file.path))
+        .filter(|file| is_stage_metadata_xml(&file.path))
         .map(|file| source_root.join(&file.path))
         .collect()
 }
@@ -2334,12 +3710,14 @@ fn fetch_config_blob(
 ) -> Result<Vec<u8>> {
     let sql = format!(
         "SET NOCOUNT ON; USE {db};\n\
-         SELECT FileName AS file_name,\n\
-                DataSize AS data_size,\n\
-                CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
-         FROM Config\n\
-         WHERE FileName = N'{file_name}' AND PartNo = 0\n\
-         FOR JSON PATH;",
+         SELECT COALESCE((\n\
+             SELECT FileName AS file_name,\n\
+                    DataSize AS data_size,\n\
+                    CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
+             FROM Config\n\
+             WHERE FileName = N'{file_name}' AND PartNo = 0\n\
+             FOR JSON PATH\n\
+         ), '[]');",
         db = quote_ident(database),
         file_name = quote_string(file_name),
     );
@@ -2886,7 +4264,11 @@ fn build_stage_metadata_objects_sql(
     versions_blob: &[u8],
 ) -> String {
     let versions_blob_hex = encode_hex(versions_blob);
-    let expected_total_rows = objects.len() + 3;
+    let body_row_count = objects
+        .iter()
+        .map(|object| object.body_rows.len())
+        .sum::<usize>();
+    let expected_total_rows = objects.len() + body_row_count + 3;
     let mut sql = format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -2915,6 +4297,10 @@ fn build_stage_metadata_objects_sql(
             metadata_blob_hex = metadata_blob_hex,
             error_number = error_number,
         ));
+        for (body_index, body) in object.body_rows.iter().enumerate() {
+            let body_error_number = 54501 + index * 10 + body_index;
+            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number);
+        }
     }
 
     sql.push_str(&format!(
@@ -2931,6 +4317,32 @@ fn build_stage_metadata_objects_sql(
     ));
 
     sql
+}
+
+fn push_insert_metadata_body_row_sql(
+    sql: &mut String,
+    body: &PreparedMetadataBodyStage,
+    body_error_number: usize,
+) {
+    let body_blob_hex = encode_hex(&body.blob);
+    sql.push_str(&format!(
+        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
+         FROM Config\n\
+         WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
+         DECLARE @metadata_body_rows_{body_error_number} int = @@ROWCOUNT;\n\
+         IF @metadata_body_rows_{body_error_number} = 0\n\
+         BEGIN\n\
+             INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+             VALUES (N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, {body_blob_len}, 0x{body_blob_hex}, 0);\n\
+             SET @metadata_body_rows_{body_error_number} = @@ROWCOUNT;\n\
+         END;\n\
+         IF @metadata_body_rows_{body_error_number} <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
+        body_id = quote_string(&body.body_id),
+        body_blob_len = body.blob.len(),
+        body_blob_hex = body_blob_hex,
+        body_error_number = body_error_number,
+    ));
 }
 
 fn build_stage_source_objects_sql(
@@ -2981,6 +4393,10 @@ fn build_stage_source_objects_sql(
             metadata_blob_hex = metadata_blob_hex,
             error_number = error_number,
         ));
+        for (body_index, body) in object.body_rows.iter().enumerate() {
+            let body_error_number = 55501 + index * 10 + body_index;
+            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number);
+        }
     }
 
     for (index, module) in common_modules.iter().enumerate() {
@@ -3073,7 +4489,7 @@ fn build_source_stage_batches(
         }
         match item {
             SourceStageItem::Metadata(object) => {
-                current.row_count += 1;
+                current.row_count += 1 + object.body_rows.len();
                 current.metadata_objects.push(object);
             }
             SourceStageItem::CommonModule(module) => {
@@ -3089,6 +4505,82 @@ fn build_source_stage_batches(
     }
 
     batches
+}
+
+fn source_stage_change_ids(
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+) -> Vec<String> {
+    metadata_objects
+        .iter()
+        .flat_map(|object| {
+            std::iter::once(object.object_id.clone())
+                .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
+        })
+        .chain(
+            common_modules
+                .iter()
+                .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()]),
+        )
+        .collect()
+}
+
+fn source_stage_batch_reports(batches: &[SourceStageBatch]) -> Vec<MssqlSourceParityBatchReport> {
+    let mut running_rows = 0usize;
+    batches
+        .iter()
+        .enumerate()
+        .map(|(index, batch)| {
+            running_rows += batch.row_count;
+            let include_stable_rows = index == 0;
+            let include_versions_row = index + 1 == batches.len();
+            let expected_total_rows = running_rows
+                + if include_stable_rows { 2 } else { 0 }
+                + if include_versions_row { 1 } else { 0 };
+            MssqlSourceParityBatchReport {
+                index,
+                metadata_objects: batch.metadata_objects.len(),
+                common_modules: batch.common_modules.len(),
+                staged_rows: batch.row_count,
+                running_staged_rows: running_rows,
+                include_stable_rows,
+                include_versions_row,
+                expected_total_rows,
+            }
+        })
+        .collect()
+}
+
+fn source_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn filter_source_paths_by_prefix(
+    paths: Vec<PathBuf>,
+    root: &Path,
+    prefixes: &[String],
+) -> Vec<PathBuf> {
+    if prefixes.is_empty() {
+        return paths;
+    }
+    let normalized_prefixes = prefixes
+        .iter()
+        .map(|prefix| prefix.replace('\\', "/").trim_matches('/').to_string())
+        .collect::<Vec<_>>();
+    paths
+        .into_iter()
+        .filter(|path| {
+            let relative = source_relative_path(root, path);
+            normalized_prefixes.iter().any(|prefix| {
+                relative == *prefix
+                    || relative == format!("{prefix}.xml")
+                    || relative.starts_with(&format!("{prefix}/"))
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -3161,6 +4653,128 @@ fn infer_common_module_text_path(xml: &Path) -> PathBuf {
         .join("Module.bsl")
 }
 
+fn infer_style_body_path(xml: &Path) -> PathBuf {
+    let style_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(style_name)
+        .join("Ext")
+        .join("Style.xml")
+}
+
+fn infer_common_picture_body_path(xml: &Path) -> PathBuf {
+    let picture_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(picture_name)
+        .join("Ext")
+        .join("Picture.xml")
+}
+
+fn infer_scheduled_job_schedule_path(xml: &Path) -> PathBuf {
+    let job_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(job_name)
+        .join("Ext")
+        .join("Schedule.xml")
+}
+
+fn infer_object_help_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Help.xml")
+}
+
+fn infer_object_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
+    xml.with_extension("").join("Ext").join(file_name)
+}
+
+fn infer_configuration_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join("Ext")
+        .join(file_name)
+}
+
+fn infer_configuration_ext_body_path(xml: &Path, file_name: &str) -> PathBuf {
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join("Ext")
+        .join(file_name)
+}
+
+fn infer_form_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Form.xml")
+}
+
+fn infer_form_module_body_path(xml: &Path) -> PathBuf {
+    infer_form_body_path(xml)
+        .with_extension("")
+        .join("Module.bsl")
+}
+
+fn infer_role_rights_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Rights.xml")
+}
+
+fn infer_command_interface_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("")
+        .join("Ext")
+        .join("CommandInterface.xml")
+}
+
+fn infer_exchange_plan_content_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Content.xml")
+}
+
+fn infer_predefined_data_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Predefined.xml")
+}
+
+fn infer_business_process_flowchart_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Flowchart.xml")
+}
+
+fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
+    let package_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(package_name)
+        .join("Ext")
+        .join("Package.bin")
+}
+
+fn infer_ws_reference_definition_path(xml: &Path) -> PathBuf {
+    let reference_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(reference_name)
+        .join("Ext")
+        .join("WSDefinition.xml")
+}
+
+fn infer_raw_deflated_template_body_path(xml: &Path, template_type: &str) -> Option<PathBuf> {
+    let file_name = match template_type {
+        "DataCompositionAppearanceTemplate" => "Template.xml",
+        "DataCompositionSchema" => "Template.xml",
+        "GraphicalSchema" => "Template.xml",
+        "TextDocument" => "Template.txt",
+        _ => return None,
+    };
+    Some(xml.with_extension("").join("Ext").join(file_name))
+}
+
+fn infer_binary_template_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Template.bin")
+}
+
+fn infer_html_template_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Template.xml")
+}
+
+fn infer_spreadsheet_template_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Template.xml")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -3221,18 +4835,50 @@ fn quote_string_path(path: &Path) -> String {
 mod tests {
     use super::{
         ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest, DeltaBundleManifest,
-        PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataObjectStage,
-        StorageBundleManifest, StorageTableManifest, TableShape, compare_shapes,
-        compare_storage_table_manifests, infer_common_module_text_path, is_root_common_module_xml,
-        is_root_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
-        source_common_module_xmls, source_metadata_xmls, validate_delta_manifest,
-        validate_storage_manifest,
+        PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataBodyStage,
+        PreparedMetadataObjectStage, StorageBundleManifest, StorageTableManifest, TableShape,
+        build_source_stage_batches, compare_shapes, compare_storage_table_manifests,
+        filter_source_paths_by_prefix, infer_common_module_text_path, is_root_common_module_xml,
+        is_root_metadata_xml, is_stage_metadata_xml, quote_ident, quote_string,
+        require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
+        source_stage_batch_reports, validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::path::PathBuf;
+
+    fn test_simple_metadata_properties(
+        kind: &str,
+        uuid: &str,
+        name: &str,
+    ) -> SimpleMetadataXmlProperties {
+        SimpleMetadataXmlProperties {
+            kind: kind.to_string(),
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        }
+    }
+
+    fn test_common_module_properties(uuid: &str, name: &str) -> CommonModuleXmlProperties {
+        CommonModuleXmlProperties {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            global: false,
+            client_managed_application: false,
+            server: true,
+            external_connection: false,
+            client_ordinary_application: false,
+            server_call: false,
+            privileged: false,
+            return_values_reuse: ReturnValuesReuse::DontUse,
+        }
+    }
 
     #[test]
     fn quotes_sql_identifier_and_string() {
@@ -3311,6 +4957,46 @@ mod tests {
                     object_hint: Some("CommonModules/Foo".to_string()),
                 },
                 SourceFile {
+                    path: "Ext/CommandInterface.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::MetadataXml,
+                    xml_root: Some("CommandInterface".to_string()),
+                    object_hint: Some("Ext".to_string()),
+                },
+                SourceFile {
+                    path: "Reports/Sales/Templates/Main.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("Reports/Sales".to_string()),
+                },
+                SourceFile {
+                    path: "Reports/Sales/Templates/Main/Ext/Template.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("document".to_string()),
+                    object_hint: Some("Reports/Sales".to_string()),
+                },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm/Ext/Form.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("Form".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
                     path: "Configuration.xml".to_string(),
                     size_bytes: 1,
                     sha256: "aa".to_string(),
@@ -3335,6 +5021,18 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(metadata, vec!["Bots/Notify.xml"]);
+        assert!(!is_root_metadata_xml("Ext/CommandInterface.xml"));
+        assert!(is_stage_metadata_xml("Reports/Sales/Templates/Main.xml"));
+        assert!(!is_stage_metadata_xml(
+            "Reports/Sales/Templates/Main/Ext/Template.xml"
+        ));
+        assert!(is_stage_metadata_xml(
+            "Catalogs/Products/Forms/ItemForm.xml"
+        ));
+        assert!(!is_stage_metadata_xml(
+            "Catalogs/Products/Forms/ItemForm/Ext/Form.xml"
+        ));
+        assert!(is_stage_metadata_xml("Configuration.xml"));
         assert_eq!(modules, vec!["CommonModules/Foo.xml"]);
     }
 
@@ -3392,6 +5090,46 @@ mod tests {
                     xml_root: Some("Style".to_string()),
                     object_hint: Some("Styles/Theme".to_string()),
                 },
+                SourceFile {
+                    path: "DataProcessors/Import/Templates/Schema.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("DataProcessors/Import".to_string()),
+                },
+                SourceFile {
+                    path: "DataProcessors/Import/Templates/Schema/Ext/Template.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Template,
+                    xml_root: Some("document".to_string()),
+                    object_hint: Some("DataProcessors/Import".to_string()),
+                },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("MetaDataObject".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
+                    path: "Catalogs/Products/Forms/ItemForm/Ext/Form.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::Form,
+                    xml_root: Some("Form".to_string()),
+                    object_hint: Some("Catalogs/Products".to_string()),
+                },
+                SourceFile {
+                    path: "Configuration.xml".to_string(),
+                    size_bytes: 1,
+                    sha256: "aa".to_string(),
+                    kind: SourceKind::ConfigurationRoot,
+                    xml_root: Some("Configuration".to_string()),
+                    object_hint: Some("Configuration".to_string()),
+                },
             ],
         };
 
@@ -3404,7 +5142,13 @@ mod tests {
                 .iter()
                 .map(|path| path.to_string_lossy().replace('\\', "/"))
                 .collect::<Vec<_>>(),
-            vec!["C:/sources/Bots/Notify.xml", "C:/sources/Styles/Theme.xml"]
+            vec![
+                "C:/sources/Bots/Notify.xml",
+                "C:/sources/Styles/Theme.xml",
+                "C:/sources/DataProcessors/Import/Templates/Schema.xml",
+                "C:/sources/Catalogs/Products/Forms/ItemForm.xml",
+                "C:/sources/Configuration.xml"
+            ]
         );
         assert_eq!(
             common_module_xmls
@@ -3619,6 +5363,521 @@ mod tests {
     }
 
     #[test]
+    fn infers_raw_deflated_metadata_body_paths() {
+        assert_eq!(
+            super::infer_common_picture_body_path(r"CommonPictures\Address.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonPictures\Address\Ext\Picture.xml")
+        );
+        assert_eq!(
+            super::infer_object_help_body_path(r"Catalogs\Products.xml".as_ref()),
+            std::path::PathBuf::from(r"Catalogs\Products\Ext\Help.xml")
+        );
+        assert_eq!(
+            super::infer_xdto_package_body_path(r"XDTOPackages\Exchange.xml".as_ref()),
+            std::path::PathBuf::from(r"XDTOPackages\Exchange\Ext\Package.bin")
+        );
+        assert_eq!(
+            super::infer_ws_reference_definition_path(r"WSReferences\UpdateFiles.xml".as_ref()),
+            std::path::PathBuf::from(r"WSReferences\UpdateFiles\Ext\WSDefinition.xml")
+        );
+    }
+
+    #[test]
+    fn infers_help_body_ids_for_objects_and_forms() {
+        let object = SimpleMetadataXmlProperties {
+            kind: "Catalog".to_string(),
+            uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            name: "Products".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+        let form = SimpleMetadataXmlProperties {
+            kind: "Form".to_string(),
+            uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+            name: "ItemForm".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+        let common_form = SimpleMetadataXmlProperties {
+            kind: "CommonForm".to_string(),
+            uuid: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+            name: "SharedForm".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+
+        assert_eq!(
+            super::infer_help_body_id(&object),
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5"
+        );
+        assert_eq!(
+            super::infer_help_body_id(&form),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.1"
+        );
+        assert_eq!(
+            super::infer_help_body_id(&common_form),
+            "cccccccc-cccc-4ccc-cccc-cccccccccccc.1"
+        );
+    }
+
+    #[test]
+    fn maps_object_module_body_suffixes_for_load() {
+        assert_eq!(
+            super::object_module_body_suffixes("Catalog"),
+            &[("0", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("InformationRegister"),
+            &[("1", "RecordSetModule.bsl"), ("2", "ManagerModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("Constant"),
+            &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("CommonCommand"),
+            &[("2", "CommandModule.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("IntegrationService"),
+            &[("0", "Module.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("HTTPService"),
+            &[("0", "Module.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("WebService"),
+            &[("0", "Module.bsl")]
+        );
+        assert_eq!(
+            super::object_module_body_suffixes("Configuration"),
+            &[
+                ("0", "OrdinaryApplicationModule.bsl"),
+                ("5", "ExternalConnectionModule.bsl"),
+                ("6", "ManagedApplicationModule.bsl"),
+                ("7", "SessionModule.bsl")
+            ]
+        );
+        assert!(super::object_module_body_suffixes("Role").is_empty());
+    }
+
+    #[test]
+    fn infers_object_module_body_paths() {
+        assert_eq!(
+            super::infer_object_module_body_path(
+                r"Catalogs\Products.xml".as_ref(),
+                "ObjectModule.bsl"
+            ),
+            std::path::PathBuf::from(r"Catalogs\Products\Ext\ObjectModule.bsl")
+        );
+        assert_eq!(
+            super::infer_object_module_body_path(
+                r"InformationRegisters\Prices.xml".as_ref(),
+                "RecordSetModule.bsl"
+            ),
+            std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
+        );
+        assert_eq!(
+            super::infer_configuration_module_body_path(
+                r"Configuration.xml".as_ref(),
+                "ManagedApplicationModule.bsl"
+            ),
+            std::path::PathBuf::from(r"Ext\ManagedApplicationModule.bsl")
+        );
+    }
+
+    #[test]
+    fn infers_configuration_ext_body_paths() {
+        assert_eq!(
+            super::infer_configuration_ext_body_path(r"Configuration.xml".as_ref(), "Splash.xml"),
+            std::path::PathBuf::from(r"Ext\Splash.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "ParentConfigurations.bin"
+            ),
+            std::path::PathBuf::from(r"Ext\ParentConfigurations.bin")
+        );
+    }
+
+    #[test]
+    fn infers_form_body_paths() {
+        assert_eq!(
+            super::infer_form_body_path(r"Catalogs\Products\Forms\ItemForm.xml".as_ref()),
+            std::path::PathBuf::from(r"Catalogs\Products\Forms\ItemForm\Ext\Form.xml")
+        );
+        assert_eq!(
+            super::infer_form_module_body_path(r"CommonForms\SharedForm.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonForms\SharedForm\Ext\Form\Module.bsl")
+        );
+    }
+
+    #[test]
+    fn infers_role_rights_body_path() {
+        assert_eq!(
+            super::infer_role_rights_body_path(r"Roles\Editor.xml".as_ref()),
+            std::path::PathBuf::from(r"Roles\Editor\Ext\Rights.xml")
+        );
+    }
+
+    #[test]
+    fn reports_source_stage_batch_accounting() {
+        let metadata_objects = vec![
+            PreparedMetadataObjectStage {
+                object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                kind: "Catalog".to_string(),
+                xml: PathBuf::from("Catalogs/A.xml"),
+                properties: test_simple_metadata_properties(
+                    "Catalog",
+                    "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                    "A",
+                ),
+                metadata_plain_bytes: 1,
+                metadata_blob: vec![1],
+                metadata_blob_sha256: "aa".to_string(),
+                body_rows: vec![
+                    PreparedMetadataBodyStage {
+                        body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                        path: PathBuf::from("Catalogs/A/Ext/Predefined.xml"),
+                        blob: vec![2],
+                        blob_sha256: "bb".to_string(),
+                    },
+                    PreparedMetadataBodyStage {
+                        body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1".to_string(),
+                        path: PathBuf::from("Catalogs/A/Ext/Help.xml"),
+                        blob: vec![3],
+                        blob_sha256: "cc".to_string(),
+                    },
+                ],
+            },
+            PreparedMetadataObjectStage {
+                object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                kind: "Enum".to_string(),
+                xml: PathBuf::from("Enums/B.xml"),
+                properties: test_simple_metadata_properties(
+                    "Enum",
+                    "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+                    "B",
+                ),
+                metadata_plain_bytes: 1,
+                metadata_blob: vec![4],
+                metadata_blob_sha256: "dd".to_string(),
+                body_rows: Vec::new(),
+            },
+        ];
+        let common_modules = vec![PreparedCommonModuleObjectStage {
+            module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+            module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+            xml: PathBuf::from("CommonModules/C.xml"),
+            text: PathBuf::from("CommonModules/C/Ext/Module.bsl"),
+            properties: test_common_module_properties("cccccccc-cccc-4ccc-cccc-cccccccccccc", "C"),
+            metadata_plain_bytes: 1,
+            metadata_blob: vec![5],
+            metadata_blob_sha256: "ee".to_string(),
+            text_bytes: 1,
+            module_blob: vec![6],
+            module_blob_sha256: "ff".to_string(),
+        }];
+
+        let batches = build_source_stage_batches(metadata_objects, common_modules, 2);
+        let reports = source_stage_batch_reports(&batches);
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].metadata_objects, 1);
+        assert_eq!(reports[0].common_modules, 1);
+        assert_eq!(reports[0].staged_rows, 5);
+        assert_eq!(reports[0].running_staged_rows, 5);
+        assert!(reports[0].include_stable_rows);
+        assert!(!reports[0].include_versions_row);
+        assert_eq!(reports[0].expected_total_rows, 7);
+        assert_eq!(reports[1].metadata_objects, 1);
+        assert_eq!(reports[1].common_modules, 0);
+        assert_eq!(reports[1].staged_rows, 1);
+        assert_eq!(reports[1].running_staged_rows, 6);
+        assert!(!reports[1].include_stable_rows);
+        assert!(reports[1].include_versions_row);
+        assert_eq!(reports[1].expected_total_rows, 7);
+    }
+
+    #[test]
+    fn filters_source_paths_by_prefix() {
+        let root = PathBuf::from(r"C:\sources");
+        let paths = vec![
+            PathBuf::from(r"C:\sources\Catalogs\Products.xml"),
+            PathBuf::from(r"C:\sources\Catalogs\Products\Forms\ItemForm.xml"),
+            PathBuf::from(r"C:\sources\Catalogs\Services.xml"),
+            PathBuf::from(r"C:\sources\CommonModules\Utils.xml"),
+        ];
+
+        let filtered = filter_source_paths_by_prefix(
+            paths,
+            &root,
+            &[
+                "Catalogs/Products".to_string(),
+                r"CommonModules\Utils".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .collect::<Vec<_>>(),
+            vec![
+                "C:/sources/Catalogs/Products.xml",
+                "C:/sources/Catalogs/Products/Forms/ItemForm.xml",
+                "C:/sources/CommonModules/Utils.xml"
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_source_parity_prepare_failures() {
+        let (category, config_file_name) =
+            super::classify_source_parity_error("Config row not found: object-id.5");
+        assert_eq!(category, "missing_config_row");
+        assert_eq!(config_file_name.as_deref(), Some("object-id.5"));
+
+        let (category, config_file_name) = super::classify_source_parity_error(
+            "failed to pack Role rights Roles/Admin/Ext/Rights.xml",
+        );
+        assert_eq!(category, "pack_error");
+        assert_eq!(config_file_name, None);
+
+        let (category, _) =
+            super::classify_source_parity_error("unsupported Help page name: ../bad");
+        assert_eq!(category, "unsupported_source");
+
+        assert_eq!(
+            super::classify_version_patch_error("versions entry not found: root"),
+            "unsupported_versions_shape"
+        );
+    }
+
+    #[test]
+    fn summarizes_source_parity_prepare_failures_by_category() {
+        let failures = vec![
+            super::MssqlSourceParityPrepareFailure {
+                kind: "metadata_object".to_string(),
+                path: "Catalogs/A.xml".to_string(),
+                category: "missing_config_row".to_string(),
+                config_file_name: Some("a.0".to_string()),
+                message: "Config row not found: a.0".to_string(),
+            },
+            super::MssqlSourceParityPrepareFailure {
+                kind: "metadata_object".to_string(),
+                path: "Catalogs/B.xml".to_string(),
+                category: "missing_config_row".to_string(),
+                config_file_name: Some("b.0".to_string()),
+                message: "Config row not found: b.0".to_string(),
+            },
+            super::MssqlSourceParityPrepareFailure {
+                kind: "common_module".to_string(),
+                path: "CommonModules/C.xml".to_string(),
+                category: "pack_error".to_string(),
+                config_file_name: None,
+                message: "failed to pack module".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            super::source_parity_failure_summary(&failures),
+            vec![
+                super::MssqlSourceParityFailureSummary {
+                    category: "missing_config_row".to_string(),
+                    count: 2,
+                },
+                super::MssqlSourceParityFailureSummary {
+                    category: "pack_error".to_string(),
+                    count: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn infers_command_interface_body_path_and_suffix() {
+        assert_eq!(
+            super::infer_command_interface_body_path(r"Subsystems\Admin.xml".as_ref()),
+            std::path::PathBuf::from(r"Subsystems\Admin\Ext\CommandInterface.xml")
+        );
+        assert_eq!(super::command_interface_body_suffix("Subsystem"), Some("1"));
+        assert_eq!(super::command_interface_body_suffix("Catalog"), None);
+    }
+
+    #[test]
+    fn infers_exchange_plan_content_body_path() {
+        assert_eq!(
+            super::infer_exchange_plan_content_body_path(r"ExchangePlans\Sync.xml".as_ref()),
+            std::path::PathBuf::from(r"ExchangePlans\Sync\Ext\Content.xml")
+        );
+    }
+
+    #[test]
+    fn infers_predefined_data_body_path_and_suffix() {
+        assert_eq!(
+            super::infer_predefined_data_body_path(r"Catalogs\Products.xml".as_ref()),
+            std::path::PathBuf::from(r"Catalogs\Products\Ext\Predefined.xml")
+        );
+        assert_eq!(super::predefined_data_body_suffix("Catalog"), Some("1c"));
+        assert_eq!(
+            super::predefined_data_body_suffix("ChartOfCharacteristicTypes"),
+            Some("7")
+        );
+        assert_eq!(super::predefined_data_body_suffix("Document"), None);
+    }
+
+    #[test]
+    fn infers_business_process_flowchart_body_path() {
+        assert_eq!(
+            super::infer_business_process_flowchart_body_path(
+                r"BusinessProcesses\Approval.xml".as_ref()
+            ),
+            std::path::PathBuf::from(r"BusinessProcesses\Approval\Ext\Flowchart.xml")
+        );
+    }
+
+    #[test]
+    fn finds_nested_command_module_sources_from_owner_xml() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-nested-command-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let xml_path = root.join("DataProcessors/Scanning.xml");
+        let module_path =
+            root.join("DataProcessors/Scanning/Commands/ScanSheet/Ext/CommandModule.bsl");
+        std::fs::create_dir_all(module_path.parent().unwrap()).unwrap();
+        std::fs::write(&module_path, "Procedure Run()\nEndProcedure\n").unwrap();
+
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Scanning</Name>
+    </Properties>
+    <ChildObjects>
+      <Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+        <Properties>
+          <Name>ScanSheet</Name>
+        </Properties>
+      </Command>
+    </ChildObjects>
+  </DataProcessor>
+</MetaDataObject>
+"#;
+        std::fs::create_dir_all(xml_path.parent().unwrap()).unwrap();
+        std::fs::write(&xml_path, xml).unwrap();
+        let properties = SimpleMetadataXmlProperties {
+            kind: "DataProcessor".to_string(),
+            uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            name: "Scanning".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+
+        let sources = super::nested_command_module_sources(&xml_path, xml, &properties).unwrap();
+
+        assert_eq!(
+            sources,
+            vec![super::NestedCommandModuleSource {
+                command_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                command_name: "ScanSheet".to_string(),
+                body_path: module_path,
+            }]
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parses_nested_command_ids_by_name() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Task uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <ChildObjects>
+      <Command uuid="BBBBBBBB-BBBB-4BBB-BBBB-BBBBBBBBBBBB">
+        <Properties>
+          <Name>ВсеЗадачи</Name>
+        </Properties>
+      </Command>
+    </ChildObjects>
+  </Task>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let commands = super::parse_nested_command_ids_by_name(xml).unwrap();
+
+        assert_eq!(
+            commands.get("ВсеЗадачи").map(String::as_str),
+            Some("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb")
+        );
+    }
+
+    #[test]
+    fn infers_raw_deflated_template_body_paths() {
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"CommonTemplates\SharedText.xml".as_ref(),
+                "TextDocument"
+            ),
+            Some(std::path::PathBuf::from(
+                r"CommonTemplates\SharedText\Ext\Template.txt"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"DataProcessors\ImportData\Templates\Schema.xml".as_ref(),
+                "DataCompositionSchema"
+            ),
+            Some(std::path::PathBuf::from(
+                r"DataProcessors\ImportData\Templates\Schema\Ext\Template.xml"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"CommonTemplates\ReportAppearance.xml".as_ref(),
+                "DataCompositionAppearanceTemplate"
+            ),
+            Some(std::path::PathBuf::from(
+                r"CommonTemplates\ReportAppearance\Ext\Template.xml"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"DataProcessors\Routes\Templates\RouteSchema.xml".as_ref(),
+                "GraphicalSchema"
+            ),
+            Some(std::path::PathBuf::from(
+                r"DataProcessors\Routes\Templates\RouteSchema\Ext\Template.xml"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"CommonTemplates\Table.xml".as_ref(),
+                "SpreadsheetDocument"
+            ),
+            None
+        );
+        assert_eq!(
+            super::infer_spreadsheet_template_body_path(r"CommonTemplates\Table.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonTemplates\Table\Ext\Template.xml")
+        );
+        assert_eq!(
+            super::infer_binary_template_body_path(r"CommonTemplates\Archive.xml".as_ref()),
+            std::path::PathBuf::from(r"CommonTemplates\Archive\Ext\Template.bin")
+        );
+        assert_eq!(
+            super::infer_html_template_body_path(
+                r"Catalogs\Products\Templates\Description.xml".as_ref()
+            ),
+            std::path::PathBuf::from(r"Catalogs\Products\Templates\Description\Ext\Template.xml")
+        );
+    }
+
+    #[test]
     fn defaults_stage_script_path_with_sanitized_parts() {
         let path = super::default_stage_script_path("Test Db]", "common modules/2");
 
@@ -3678,6 +5937,7 @@ mod tests {
             metadata_plain_bytes: 12,
             metadata_blob: vec![0x01, 0x23, 0x45],
             metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: Vec::new(),
         }];
 
         let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xAA, 0xBB]);
@@ -3688,6 +5948,125 @@ mod tests {
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xAABB"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 4"));
+    }
+
+    #[test]
+    fn builds_metadata_object_stage_sql_with_body_rows() {
+        let prepared = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "Style".to_string(),
+            xml: PathBuf::from("Styles/Main.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "Style".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "Main".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: vec![PreparedMetadataBodyStage {
+                body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                path: PathBuf::from("Styles/Main/Ext/Style.xml"),
+                blob: vec![0xAA, 0xBB, 0xCC],
+                blob_sha256: "feedface".to_string(),
+            }],
+        }];
+
+        let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xDD, 0xEE]);
+
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
+        assert!(sql.contains("0x012345"));
+        assert!(sql.contains("0xAABBCC"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_54501 int = @@ROWCOUNT"));
+        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, 0xAABBCC, 0);"));
+        assert!(sql.contains("IF @metadata_body_rows_54501 <> 1 THROW 54501"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+    }
+
+    #[test]
+    fn builds_source_tree_stage_sql_with_metadata_body_rows() {
+        let metadata = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "Style".to_string(),
+            xml: PathBuf::from("Styles/Main.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "Style".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "Main".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: vec![PreparedMetadataBodyStage {
+                body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                path: PathBuf::from("Styles/Main/Ext/Style.xml"),
+                blob: vec![0xAA, 0xBB, 0xCC],
+                blob_sha256: "feedface".to_string(),
+            }],
+        }];
+
+        let sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &metadata,
+            &[],
+            &[0xDD, 0xEE],
+            true,
+            true,
+            5,
+        );
+
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
+        assert!(sql.contains("0xAABBCC"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_55501 int = @@ROWCOUNT"));
+        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, 0xAABBCC, 0);"));
+        assert!(sql.contains("IF @metadata_body_rows_55501 <> 1 THROW 55501"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+    }
+
+    #[test]
+    fn builds_source_tree_stage_sql_with_scheduled_job_schedule_body_row() {
+        let metadata = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "ScheduledJob".to_string(),
+            xml: PathBuf::from("ScheduledJobs/LoadRates.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "ScheduledJob".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "LoadRates".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: vec![PreparedMetadataBodyStage {
+                body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                path: PathBuf::from("ScheduledJobs/LoadRates/Ext/Schedule.xml"),
+                blob: vec![0x10, 0x20, 0x30],
+                blob_sha256: "feedface".to_string(),
+            }],
+        }];
+
+        let sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &metadata,
+            &[],
+            &[0xDD, 0xEE],
+            true,
+            true,
+            5,
+        );
+
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
+        assert!(sql.contains("0x102030"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_55501 int = @@ROWCOUNT"));
+        assert!(sql.contains("IF @metadata_body_rows_55501 <> 1 THROW 55501"));
     }
 
     #[test]
@@ -3707,6 +6086,7 @@ mod tests {
                 metadata_plain_bytes: 12,
                 metadata_blob: vec![0x01, 0x23, 0x45],
                 metadata_blob_sha256: "deadbeef".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "abababab-abab-4aba-baba-abababababab".to_string(),
@@ -3724,6 +6104,7 @@ mod tests {
                 metadata_plain_bytes: 14,
                 metadata_blob: vec![0xAA, 0xBB, 0xCC],
                 metadata_blob_sha256: "abad1dea".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
@@ -3739,6 +6120,7 @@ mod tests {
                 metadata_plain_bytes: 10,
                 metadata_blob: vec![0xAB, 0xCD],
                 metadata_blob_sha256: "cafed00d".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
@@ -3754,6 +6136,7 @@ mod tests {
                 metadata_plain_bytes: 8,
                 metadata_blob: vec![0x11, 0x22, 0x33],
                 metadata_blob_sha256: "f00dbabe".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "dddddddd-dddd-4ddd-dddd-dddddddddddd".to_string(),
@@ -3769,6 +6152,7 @@ mod tests {
                 metadata_plain_bytes: 9,
                 metadata_blob: vec![0x44, 0x55, 0x66],
                 metadata_blob_sha256: "baadf00d".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee".to_string(),
@@ -3784,6 +6168,7 @@ mod tests {
                 metadata_plain_bytes: 11,
                 metadata_blob: vec![0x77, 0x88],
                 metadata_blob_sha256: "facefeed".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "ffffffff-ffff-4fff-ffff-ffffffffffff".to_string(),
@@ -3799,6 +6184,7 @@ mod tests {
                 metadata_plain_bytes: 13,
                 metadata_blob: vec![0x99, 0xAA],
                 metadata_blob_sha256: "decafbad".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "99999999-9999-4999-9999-999999999999".to_string(),
@@ -3814,6 +6200,7 @@ mod tests {
                 metadata_plain_bytes: 15,
                 metadata_blob: vec![0xDE, 0xAD, 0xBE, 0xEF],
                 metadata_blob_sha256: "b16b00b5".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "c39750ca-e33f-40c2-b830-119423d9a2ae".to_string(),
@@ -3829,6 +6216,7 @@ mod tests {
                 metadata_plain_bytes: 17,
                 metadata_blob: vec![0xC3, 0x97, 0x50, 0xCA],
                 metadata_blob_sha256: "0badc0de".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "ad083c26-7461-4e94-b524-0174242fbd91".to_string(),
@@ -3844,6 +6232,7 @@ mod tests {
                 metadata_plain_bytes: 21,
                 metadata_blob: vec![0x10, 0x20, 0x30, 0x40],
                 metadata_blob_sha256: "c0ffee00".to_string(),
+                body_rows: Vec::new(),
             },
         ];
 

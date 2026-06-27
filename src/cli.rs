@@ -17,6 +17,14 @@ pub enum Commands {
     Probe(ProbeArgs),
     /// Scan a 1C XML source tree and produce a deterministic manifest.
     Scan(ScanArgs),
+    /// Dry-run pack SpreadsheetDocument templates from a 1C XML source tree.
+    AuditSpreadsheetTemplates(AuditSpreadsheetTemplatesArgs),
+    /// Dry-run SpreadsheetDocument pack/extract/repack round-trip from a 1C XML source tree.
+    AuditSpreadsheetRoundtrip(AuditSpreadsheetRoundtripArgs),
+    /// Audit managed Form.xml source coverage and complexity.
+    AuditFormSources(AuditFormSourcesArgs),
+    /// Audit source-tree files that current SQL loader can or cannot consume.
+    AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Print the current compatibility matrix for implemented operations.
@@ -35,6 +43,8 @@ pub enum Commands {
     StorageMap(TraceAnalyzeArgs),
     /// Compare two SQL Server 1C databases by table shape and row counts.
     MssqlCompare(MssqlCompareArgs),
+    /// Dry-run source load parity against SQL base blobs without writing ConfigSave.
+    MssqlAuditSourceParity(MssqlAuditSourceParityArgs),
     /// Clone a SQL Server database with backup/restore.
     MssqlClone(MssqlCloneArgs),
     /// Export ConfigSave/Params storage tables to a native BCP bundle.
@@ -168,6 +178,42 @@ pub struct ProbeArgs {
 
 #[derive(Debug, Args)]
 pub struct ScanArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditSpreadsheetTemplatesArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditSpreadsheetRoundtripArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditFormSourcesArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditSourceLoadCoverageArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
@@ -317,6 +363,31 @@ pub struct MssqlCompareArgs {
     /// Right database name.
     #[arg(long)]
     pub right: String,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlAuditSourceParityArgs {
+    /// SQL Server name passed to sqlcmd -S.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// Baseline database name whose Config blobs are used for dry-run packing.
+    #[arg(long)]
+    pub database: String,
+    /// Root folder with XML sources to scan.
+    #[arg(long)]
+    pub source_root: PathBuf,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Optional maximum number of staged XML objects per SQL batch.
+    #[arg(long)]
+    pub batch_size: Option<usize>,
+    /// Optional source path prefix to audit. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
@@ -731,6 +802,9 @@ pub struct MssqlStageSourceObjectsArgs {
     /// Optional maximum number of staged XML objects per SQL batch.
     #[arg(long)]
     pub batch_size: Option<usize>,
+    /// Optional source path prefix to stage. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -2619,6 +2693,75 @@ mod tests {
 
     #[test]
     fn parses_source_tree_stage_commands() {
+        let audit = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-spreadsheet-templates",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\spreadsheet.json",
+        ]);
+        match audit.command {
+            Commands::AuditSpreadsheetTemplates(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\spreadsheet.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let roundtrip = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-spreadsheet-roundtrip",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\spreadsheet-roundtrip.json",
+        ]);
+        match roundtrip.command {
+            Commands::AuditSpreadsheetRoundtrip(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\spreadsheet-roundtrip.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let forms = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-form-sources",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\forms.json",
+        ]);
+        match forms.command {
+            Commands::AuditFormSources(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\forms.json")));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let load_coverage = Cli::parse_from([
+            "ibcmd-rs",
+            "audit-source-load-coverage",
+            r"C:\sources",
+            "-o",
+            r"C:\audit\load-coverage.json",
+        ]);
+        match load_coverage.command {
+            Commands::AuditSourceLoadCoverage(args) => {
+                assert_eq!(args.root, PathBuf::from(r"C:\sources"));
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\load-coverage.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
         let metadata = Cli::parse_from([
             "ibcmd-rs",
             "mssql-stage-source-metadata-objects",
@@ -2666,6 +2809,8 @@ mod tests {
             "TestDb",
             "--source-root",
             r"C:\sources",
+            "--path-prefix",
+            "Catalogs/Products",
             "--replace-config-save",
             "--allow-non-lab",
         ]);
@@ -2673,8 +2818,34 @@ mod tests {
             Commands::MssqlStageSourceObjects(args) => {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
+                assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let parity = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-audit-source-parity",
+            "--database",
+            "TestDb",
+            "--source-root",
+            r"C:\sources",
+            "--batch-size",
+            "2",
+            "--path-prefix",
+            "Catalogs/Products",
+            "-o",
+            r"C:\audit\parity.json",
+        ]);
+        match parity.command {
+            Commands::MssqlAuditSourceParity(args) => {
+                assert_eq!(args.database, "TestDb");
+                assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
+                assert_eq!(args.batch_size, Some(2));
+                assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
+                assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\parity.json")));
             }
             other => panic!("unexpected command: {other:?}"),
         }

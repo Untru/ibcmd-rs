@@ -10,8 +10,11 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::cli::MssqlDumpConfigArgs;
-use crate::module_blob::unpack_module_blob_text;
+use crate::module_blob::{parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
+
+const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
+const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
 
 #[derive(Debug, Serialize)]
 pub struct MssqlDumpConfigReport {
@@ -455,6 +458,9 @@ enum SourceAssetKind {
         field_refs: BTreeMap<String, String>,
     },
     Schedule,
+    StyleBody {
+        object_refs: BTreeMap<String, String>,
+    },
 }
 
 struct SourceAsset {
@@ -593,7 +599,11 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
     match template_type {
         "AddIn" => Some(("Template.bin", SourceAssetKind::InflatedBase64OrBinary)),
         "BinaryData" => Some(("Template.bin", SourceAssetKind::InflatedBase64OrBinary)),
+        "DataCompositionAppearanceTemplate" => {
+            Some(("Template.xml", SourceAssetKind::InflatedBinary))
+        }
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
+        "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
         "SpreadsheetDocument" => Some((
@@ -740,6 +750,16 @@ fn source_assets_from_metadata_blob_inner(
                 primary_path: object_path.join("Ext").join("Package.bin"),
                 kind: SourceAssetKind::InflatedBinary,
             }),
+            "Style" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("Style.xml"),
+                kind: SourceAssetKind::StyleBody {
+                    object_refs: object_refs.clone(),
+                },
+            }),
+            "WSReference" => Some(SourceAsset {
+                primary_path: object_path.join("Ext").join("WSDefinition.xml"),
+                kind: SourceAssetKind::InflatedBinary,
+            }),
             "Role"
                 if rows_by_file_name
                     .get(body_id.as_str())
@@ -793,6 +813,7 @@ fn source_assets_from_metadata_blob_inner(
         .map(|(body_id, _)| body_id.clone())
         .collect::<BTreeSet<_>>();
     let object_row_prefix = format!("{uuid}.");
+    let preferred_help_body_id = preferred_help_body_id(kind, uuid);
     for (body_id, body_row) in rows_by_file_name {
         if !body_id.starts_with(&object_row_prefix) || mapped_ids.contains(*body_id) {
             continue;
@@ -800,6 +821,11 @@ fn source_assets_from_metadata_blob_inner(
         if let Ok(help_bytes) = decode_hex(&body_row.binary_hex)
             && parse_help_blob_pages(&help_bytes).is_some()
         {
+            if rows_by_file_name.contains_key(preferred_help_body_id.as_str())
+                && *body_id != preferred_help_body_id
+            {
+                continue;
+            }
             assets.push((
                 (*body_id).to_string(),
                 SourceAsset {
@@ -827,6 +853,15 @@ fn source_assets_from_metadata_blob_inner(
     }
 
     Some(assets)
+}
+
+fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
+    let suffix = if matches!(kind, "Form" | "CommonForm") {
+        "1"
+    } else {
+        "5"
+    };
+    format!("{uuid}.{suffix}")
 }
 fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
     match &asset.kind {
@@ -866,6 +901,20 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             let xml = extract_schedule_xml(bytes).with_context(|| {
                 format!(
                     "failed to extract schedule from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::StyleBody { object_refs } => {
+            let xml = extract_style_body_xml(bytes, object_refs).with_context(|| {
+                format!(
+                    "failed to extract style body from source asset {}",
                     asset.primary_path.display()
                 )
             })?;
@@ -1794,8 +1843,12 @@ fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
         return Some("BinaryData");
     };
     let text = text.trim_start_matches('\u{feff}').trim_start();
-    if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
+    if text.starts_with("<?xml") && text.contains("data-composition-system/appearance-template") {
+        Some("DataCompositionAppearanceTemplate")
+    } else if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
         Some("DataCompositionSchema")
+    } else if text.starts_with("<?xml") && text.contains("8.3/xcf/scheme") {
+        Some("GraphicalSchema")
     } else if text.starts_with("<!DOCTYPE")
         || text.starts_with("<html")
         || text.starts_with("<?xml") && text.contains("<html")
@@ -3063,6 +3116,10 @@ fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
         "Picture.png"
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         "Picture.gif"
+    } else if bytes.starts_with(b"\xff\xd8\xff") {
+        "Picture.jpg"
+    } else if bytes.starts_with(b"BM") {
+        "Picture.bmp"
     } else if bytes.starts_with(b"\x00\x00\x01\x00") {
         "Picture.ico"
     } else if bytes.starts_with(b"PK\x03\x04") {
@@ -3716,22 +3773,194 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
 }
 
 fn extract_form_body_xml(bytes: &[u8]) -> Option<String> {
-    let inflated = inflate_raw_deflate(bytes).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}');
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "4" {
-        return None;
-    }
-    let form_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
-    if !form_fields
-        .first()
-        .is_some_and(|value| value.trim().chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return None;
-    }
+    let body = parse_form_body_blob(bytes).ok()?;
+    let form_fields = split_1c_braced_fields(&body.layout, 0)?;
+    let properties = extract_form_body_properties(&form_fields);
+    let events = extract_form_body_events(&form_fields);
+    let auto_command_bar = extract_form_auto_command_bar(&form_fields);
 
-    Some(format_form_body_xml())
+    Some(format_form_body_xml(
+        &properties,
+        auto_command_bar.as_ref(),
+        &events,
+    ))
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormBodyProperties {
+    window_opening_mode: Option<&'static str>,
+    group: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct FormBodyEvent {
+    name: String,
+    handler: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormAutoCommandBar {
+    id: String,
+    name: String,
+}
+
+fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
+    FormBodyProperties {
+        window_opening_mode: extract_form_window_opening_mode(fields),
+        group: extract_form_root_group(fields),
+    }
+}
+
+fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
+    match fields.get(2).map(|field| field.trim())? {
+        "0" => Some("DontBlock"),
+        "1" => Some("LockOwner"),
+        "2" => Some("LockWholeInterface"),
+        _ => None,
+    }
+}
+
+fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
+    match (
+        fields.get(17).map(|field| field.trim())?,
+        fields.get(12).map(|field| field.trim()),
+    ) {
+        ("0" | "1", _) => Some("Vertical"),
+        ("3", Some("2")) => Some("Horizontal"),
+        ("3", Some("0")) => Some("AlwaysHorizontal"),
+        _ => None,
+    }
+}
+
+fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
+    find_form_auto_command_bar(fields)
+}
+
+fn find_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        if let Some(command_bar) = parse_form_auto_command_bar_fields(&nested) {
+            return Some(command_bar);
+        }
+        if let Some(command_bar) = find_form_auto_command_bar(&nested) {
+            return Some(command_bar);
+        }
+    }
+    None
+}
+
+fn parse_form_auto_command_bar_fields(fields: &[&str]) -> Option<FormAutoCommandBar> {
+    if fields.first().map(|value| value.trim()) != Some("22") {
+        return None;
+    }
+    let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let id = identity.first()?.trim();
+    if id != "-1" {
+        return None;
+    }
+    let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    Some(FormAutoCommandBar {
+        id: id.to_string(),
+        name,
+    })
+}
+
+fn extract_form_body_events(fields: &[&str]) -> Vec<FormBodyEvent> {
+    let mut events = Vec::new();
+    let mut seen = BTreeSet::new();
+    collect_form_body_events(fields, &mut events, &mut seen);
+    events
+}
+
+fn collect_form_body_events(
+    fields: &[&str],
+    events: &mut Vec<FormBodyEvent>,
+    seen: &mut BTreeSet<(String, String)>,
+) {
+    for field in fields {
+        let field = field.trim();
+        if !field.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        for event in parse_form_body_event_fields(&nested) {
+            if seen.insert((event.name.clone(), event.handler.clone())) {
+                events.push(event);
+            }
+        }
+        collect_form_body_events(&nested, events, seen);
+    }
+}
+
+fn parse_form_body_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
+    let mut events = Vec::new();
+    for window in fields.windows(2) {
+        if let Some(event) = parse_form_body_event_pair(window[0], window[1]) {
+            events.push(event);
+        }
+    }
+    events
+}
+
+fn parse_form_body_event_pair(event_field: &str, handler_field: &str) -> Option<FormBodyEvent> {
+    let event = parse_form_event_identifier(event_field)?;
+    let (handler, _) = parse_1c_quoted_string_with_len(handler_field.trim())?;
+    let handler = handler.trim();
+    if handler.is_empty() || !is_probable_form_event_handler(handler) {
+        return None;
+    }
+    Some(FormBodyEvent {
+        name: event,
+        handler: handler.to_string(),
+    })
+}
+
+fn parse_form_event_identifier(field: &str) -> Option<String> {
+    let field = field.trim();
+    let identifier = parse_1c_quoted_string_with_len(field)
+        .map(|(value, _)| value)
+        .unwrap_or_else(|| field.to_string());
+    form_event_name_from_identifier(identifier.trim()).map(ToOwned::to_owned)
+}
+
+fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
+    match identifier {
+        "OnOpen" => Some("OnOpen"),
+        "BeforeClose" => Some("BeforeClose"),
+        "OnClose" => Some("OnClose"),
+        "OnCreateAtServer" => Some("OnCreateAtServer"),
+        "OnReadAtServer" => Some("OnReadAtServer"),
+        "BeforeWriteAtServer" => Some("BeforeWriteAtServer"),
+        "AfterWriteAtServer" => Some("AfterWriteAtServer"),
+        "ChoiceProcessing" => Some("ChoiceProcessing"),
+        "NotificationProcessing" => Some("NotificationProcessing"),
+        "ExternalEvent" => Some("ExternalEvent"),
+        "3ccc650e-f631-4cae-8e33-3eaac610b5f9" => Some("OnOpen"),
+        "1d632984-de3c-4b4b-ad9f-d69682a10182" => Some("ChoiceProcessing"),
+        "3699f6a3-9a2a-4c82-a775-6ff4824a08ca" => Some("NotificationProcessing"),
+        "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b" => Some("OnCreateAtServer"),
+        _ => None,
+    }
+}
+
+fn is_probable_form_event_handler(value: &str) -> bool {
+    if value.len() > 512 || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    value.chars().all(|ch| {
+        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
+    })
 }
 
 fn extract_form_item_assets(bytes: &[u8]) -> Vec<FormItemAsset> {
@@ -3874,14 +4103,47 @@ fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItemAsset> {
     deduped
 }
 
-fn format_form_body_xml() -> String {
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+fn format_form_body_xml(
+    properties: &FormBodyProperties,
+    auto_command_bar: Option<&FormAutoCommandBar>,
+    events: &[FormBodyEvent],
+) -> String {
+    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-</Form>\r\n"
-        .to_string()
+"
+    .to_string();
+    if let Some(window_opening_mode) = properties.window_opening_mode {
+        xml.push_str(&format!(
+            "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
+            escape_xml_text(window_opening_mode)
+        ));
+    }
+    if let Some(group) = properties.group {
+        xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if let Some(command_bar) = auto_command_bar {
+        xml.push_str(&format!(
+            "\t<AutoCommandBar name=\"{}\" id=\"{}\"/>\r\n",
+            escape_xml_text(&command_bar.name),
+            escape_xml_text(&command_bar.id)
+        ));
+    }
+    if !events.is_empty() {
+        xml.push_str("\t<Events>\r\n");
+        for event in events {
+            xml.push_str(&format!(
+                "\t\t<Event name=\"{}\">{}</Event>\r\n",
+                escape_xml_text(&event.name),
+                escape_xml_text(&event.handler)
+            ));
+        }
+        xml.push_str("\t</Events>\r\n");
+    }
+    xml.push_str("</Form>\r\n");
+    xml
 }
 
-fn extract_moxel_spreadsheet_xml(
+pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -4205,10 +4467,6 @@ fn parse_moxel_row_column_set_ids(
                 pair_mode = false;
                 break;
             };
-            if row_index == 0 {
-                pair_mode = false;
-                break;
-            }
             row_column_ids.insert(row_index, columns_id.clone());
         }
         if pair_mode {
@@ -4352,12 +4610,21 @@ fn parse_moxel_rows_by_scanning(fields: &[&str]) -> Vec<MoxelRow> {
     let mut rows = Vec::new();
     let mut index = 3usize;
     let mut expected_row_index = 0usize;
+    let mut next_contiguous_index = None;
     while index < fields.len() {
         if let Some((row, next_index)) =
             parse_moxel_row_at_for_scanning(fields, index, expected_row_index)
         {
+            if expected_row_index > 0
+                && is_moxel_compactable_empty_row(&row)
+                && next_contiguous_index != Some(index)
+            {
+                index += 1;
+                continue;
+            }
             rows.push(row);
             expected_row_index += 1;
+            next_contiguous_index = Some(next_index);
             index = next_index;
         } else {
             index += 1;
@@ -4415,11 +4682,14 @@ fn parse_moxel_row_at_for_scanning(
             format_offset: 1,
             cell_count_offset: 2,
             cells_offset: 3,
-            allow_empty: false,
+            allow_empty: true,
             validate_empty_prefix: false,
         },
     ) {
         return Some(row);
+    }
+    if expected_row_index != 0 {
+        return None;
     }
     parse_moxel_row_shape(
         fields,
@@ -4784,10 +5054,20 @@ fn parse_moxel_picture(text: &str, object_refs: &BTreeMap<String, String>) -> Op
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0))
         .and_then(|picture_ref| {
+            match picture_ref.first().map(|field| field.trim()) {
+                Some("-13") => return Some("v8ui:Print".to_string()),
+                Some("-6") => return Some("v8ui:InputFieldCalculator".to_string()),
+                _ => {}
+            }
             if picture_ref.first().map(|field| field.trim()) != Some("0") {
                 return None;
             }
             let uuid = parse_uuid_field(picture_ref.get(1)?.trim())?;
+            match uuid.as_str() {
+                STD_PICTURE_INFORMATION_UUID => return Some("v8ui:Information".to_string()),
+                STD_PICTURE_SAVE_FILE_UUID => return Some("v8ui:SaveFile".to_string()),
+                _ => {}
+            }
             object_refs
                 .get(&uuid)
                 .and_then(|reference| reference.strip_prefix("CommonPicture."))
@@ -6116,13 +6396,7 @@ fn form_module_body_paths(
 }
 
 fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
-    if fields.first()?.trim() != "4" {
-        return None;
-    }
-    let (module_text, _) = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?;
+    let module_text = parse_form_body_blob(blob).ok()?.module_text;
     if module_text.trim().is_empty() {
         return None;
     }
@@ -6362,10 +6636,12 @@ fn is_offset_inside_metadata_object_code(text: &str, offset: usize, code: u32) -
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
     let module_file = match (kind, suffix) {
         ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
+        ("Bot", "1") | ("IntegrationService", "0") => Some("Module.bsl"),
         ("CommonCommand", "2") => Some("CommandModule.bsl"),
         ("Constant", "0") => Some("ValueManagerModule.bsl"),
         ("Constant", "1") => Some("ManagerModule.bsl"),
         ("SettingsStorage", "8") => Some("ManagerModule.bsl"),
+        ("Sequence", "0") => Some("RecordSetModule.bsl"),
         ("Catalog", "0") => Some("ObjectModule.bsl"),
         ("Catalog", "3") => Some("ManagerModule.bsl"),
         ("Report", "0") => Some("ObjectModule.bsl"),
@@ -6467,6 +6743,12 @@ struct CommandGroupProperties {
 
 struct StyleItemProperties {
     item_type: &'static str,
+    value_xml: String,
+}
+
+struct StyleBodyItem {
+    name: String,
+    standard_order: Option<usize>,
     value_xml: String,
 }
 
@@ -6880,6 +7162,7 @@ fn metadata_source_for_text(
         0 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
             Some(("Language", "Languages"))
         }
+        0 if header_index == Some(1) => Some(("IntegrationService", "IntegrationServices")),
         1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
             Some(("EventSubscription", "EventSubscriptions"))
         }
@@ -6889,11 +7172,15 @@ fn metadata_source_for_text(
         1 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
             Some(("XDTOPackage", "XDTOPackages"))
         }
+        1 if header_index == Some(1) => Some(("Bot", "Bots")),
         2 if contains_wrapped_metadata_object_code(text, 9, uuid) => {
             Some(("CommonCommand", "CommonCommands"))
         }
         2 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
             Some(("HTTPService", "HTTPServices"))
+        }
+        2 if header_index == Some(2) && field_starts_with(fields.get(1), "{") => {
+            Some(("WSReference", "WSReferences"))
         }
         4 if header_index == Some(2) && field_is_quoted_string(fields.get(1)) => {
             Some(("WebService", "WebServices"))
@@ -6909,6 +7196,8 @@ fn metadata_source_for_text(
         }
         3 if header_index == Some(6) => Some(("CommandGroup", "CommandGroups")),
         3 if header_index == Some(3) => Some(("StyleItem", "StyleItems")),
+        3 if header_index == Some(1) && fields.len() == 2 => Some(("Style", "Styles")),
+        3 if header_index == Some(1) => Some(("DocumentNumerator", "DocumentNumerators")),
         2 if header_index == Some(1)
             && field_is_quoted_string(fields.get(2))
             && field_is_quoted_string(fields.get(3)) =>
@@ -6920,7 +7209,8 @@ fn metadata_source_for_text(
         }
         4 if header_index == Some(1) => Some(("CommonPicture", "CommonPictures")),
         5 => Some(("CommonAttribute", "CommonAttributes")),
-        6 => Some(("Role", "Roles")),
+        6 if header_index == Some(1) => Some(("Role", "Roles")),
+        6 => Some(("Sequence", "Sequences")),
         9 => Some(("CommonCommand", "CommonCommands")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
         16 => Some(("Constant", "Constants")),
@@ -6959,7 +7249,9 @@ fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> b
 }
 
 fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
-    contains_wrapped_metadata_object_code(text, 13, uuid)
+    parse_metadata_object_code(text) == Some(0)
+        && (contains_wrapped_metadata_object_code(text, 13, uuid)
+            || contains_wrapped_metadata_object_code(text, 14, uuid))
 }
 
 fn is_template_metadata_text(text: &str, uuid: &str) -> bool {
@@ -7239,6 +7531,255 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
     }
 }
 
+fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Result<String> {
+    let inflated = inflate_raw_deflate(bytes)?;
+    let text = String::from_utf8(inflated)?;
+    let mut items = parse_style_body_items(text.trim_start_matches('\u{feff}'), object_refs)
+        .context("failed to parse style body")?;
+    items.sort_by(|left, right| {
+        left.standard_order
+            .unwrap_or(usize::MAX)
+            .cmp(&right.standard_order.unwrap_or(usize::MAX))
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(format_style_body_xml(&items))
+}
+
+fn parse_style_body_items(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<StyleBodyItem>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let declared_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut items = Vec::new();
+    for field in fields.iter().skip(2) {
+        if field.trim() == "{0}" {
+            continue;
+        }
+        let entry = split_1c_braced_fields(field, 0)?;
+        let (name, standard_order) = style_body_item_name(entry.first()?, object_refs)?;
+        let value = entry.get(2)?;
+        let value_xml = match entry.get(1)?.trim() {
+            "0" => format!(
+                "<Color>{}</Color>",
+                escape_xml_text(&parse_style_body_color_value(value, object_refs)?)
+            ),
+            "1" => parse_style_body_font_xml(value, object_refs)?,
+            "2" => parse_style_body_border_xml(value, object_refs)?,
+            _ => return None,
+        };
+        items.push(StyleBodyItem {
+            name,
+            standard_order,
+            value_xml,
+        });
+    }
+    if items.len() != declared_count {
+        return None;
+    }
+    Some(items)
+}
+
+fn style_body_item_name(
+    key: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, Option<usize>)> {
+    let fields = split_1c_braced_fields(key, 0)?;
+    if fields.len() == 1 {
+        let code = fields.first()?.trim().parse::<i32>().ok()?;
+        let (order, name) = standard_style_item_for_code(code)?;
+        return Some((name.to_string(), Some(order)));
+    }
+    if fields.first()?.trim() == "0" {
+        let uuid = parse_uuid_field(fields.get(1)?.trim())?;
+        let name = object_refs
+            .get(&uuid)
+            .cloned()
+            .unwrap_or_else(|| format!("StyleItem.{uuid}"));
+        return Some((name, None));
+    }
+    None
+}
+
+fn style_body_ref_name(ref_value: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
+    let fields = split_1c_braced_fields(ref_value, 0)?;
+    if fields.len() == 1 {
+        let code = fields.first()?.trim().parse::<i32>().ok()?;
+        return standard_style_item_for_code(code).map(|(_, name)| format!("style:{name}"));
+    }
+    if fields.first()?.trim() == "0" {
+        let uuid = parse_uuid_field(fields.get(1)?.trim())?;
+        return object_refs
+            .get(&uuid)
+            .and_then(|reference| reference.strip_prefix("StyleItem."))
+            .map(|name| format!("style:{name}"));
+    }
+    None
+}
+
+fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
+    let name = match code {
+        -1 => "FormBackColor",
+        -11 => "FormTextColor",
+        -3 => "ButtonBackColor",
+        -15 => "ButtonTextColor",
+        -7 => "FieldBackColor",
+        -13 => "FieldTextColor",
+        -21 => "FieldSelectionBackColor",
+        -10 => "FieldSelectedTextColor",
+        -14 => "FieldAlternativeBackColor",
+        -23 => "ToolTipBackColor",
+        -24 => "ToolTipTextColor",
+        -16 => "SpecialTextColor",
+        -17 => "NegativeTextColor",
+        -22 => "BorderColor",
+        -25 => "ReportHeaderBackColor",
+        -26 => "ReportGroup1BackColor",
+        -27 => "ReportGroup2BackColor",
+        -28 => "ReportLineColor",
+        -18 => "ControlBorder",
+        -20 => "TextFont",
+        -30 => "SmallTextFont",
+        -31 => "NormalTextFont",
+        -32 => "LargeTextFont",
+        -33 => "ExtraLargeTextFont",
+        -34 => "ButtonBorderColor",
+        -35 => "TableHeaderBackColor",
+        -36 => "TableHeaderTextColor",
+        -37 => "TableFooterBackColor",
+        -38 => "TableFooterTextColor",
+        _ => return None,
+    };
+    let order = STANDARD_STYLE_ITEM_CODES
+        .iter()
+        .position(|item_code| *item_code == code)?;
+    Some((order, name))
+}
+
+const STANDARD_STYLE_ITEM_CODES: &[i32] = &[
+    -1, -11, -3, -15, -7, -13, -21, -10, -14, -23, -24, -16, -17, -22, -25, -26, -27, -28, -18,
+    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38,
+];
+
+fn parse_style_body_color_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let variant = fields.get(1)?.trim().parse::<i32>().ok()?;
+    let code_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+    let code = code_fields.first()?.trim().parse::<i32>().ok()?;
+    match variant {
+        0 => parse_moxel_direct_color(&code.to_string()),
+        2 => style_web_color_name(code).map(ToOwned::to_owned),
+        3 => style_body_ref_name(fields.get(2)?, object_refs),
+        _ => None,
+    }
+}
+
+fn parse_style_body_font_xml(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "8" {
+        return None;
+    }
+    let kind = fields.get(1).map(|field| field.trim()).unwrap_or("2");
+    let mut attrs = Vec::<(&str, String)>::new();
+    if kind == "2" {
+        let reference = fields
+            .get(3)
+            .and_then(|field| style_body_ref_name(field, object_refs))
+            .unwrap_or_else(|| "style:TextFont".to_string());
+        attrs.push(("ref", reference));
+        attrs.push(("kind", "StyleItem".to_string()));
+    } else {
+        attrs.push(("kind", "Absolute".to_string()));
+    }
+
+    let weight = fields
+        .get(4)
+        .and_then(|field| field.trim().parse::<i32>().ok())
+        .unwrap_or(400);
+    let bold = weight >= 700;
+    let italic = fields
+        .get(5)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    let underline = fields
+        .get(6)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    let strikeout = fields
+        .get(7)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    if bold || italic || underline || strikeout {
+        attrs.push(("bold", xml_bool(bold).to_string()));
+        attrs.push(("italic", xml_bool(italic).to_string()));
+        attrs.push(("underline", xml_bool(underline).to_string()));
+        attrs.push(("strikeout", xml_bool(strikeout).to_string()));
+    }
+    if let Some(scale) = fields.get(9).map(|field| field.trim())
+        && scale != "100"
+    {
+        attrs.push(("scale", scale.to_string()));
+    }
+
+    Some(format_empty_style_body_value("Font", &attrs))
+}
+
+fn parse_style_body_border_xml(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "3" {
+        return None;
+    }
+    let reference = fields
+        .get(2)
+        .and_then(|field| style_body_ref_name(field, object_refs))
+        .unwrap_or_else(|| "style:ControlBorder".to_string());
+    Some(format_empty_style_body_value(
+        "Border",
+        &[("ref", reference)],
+    ))
+}
+
+fn format_empty_style_body_value(element: &str, attrs: &[(&str, String)]) -> String {
+    let mut xml = format!("<{element}");
+    for (name, value) in attrs {
+        xml.push_str(&format!(" {name}=\"{}\"", escape_xml_text(value)));
+    }
+    xml.push_str("/>");
+    xml
+}
+
+fn format_style_body_xml(items: &[StyleBodyItem]) -> String {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
+    );
+    for item in items {
+        xml.push_str(&format!(
+            "\t<Item name=\"{}\">\r\n\t\t{}\r\n\t</Item>\r\n",
+            escape_xml_text(&item.name),
+            item.value_xml
+        ));
+    }
+    xml.push_str("</Style>\r\n");
+    xml
+}
+
 fn parse_style_color_value(value: &str) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != r##""#""## {
@@ -7268,17 +7809,23 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
         44 => Some("web:FireBrick"),
+        45 => Some("web:FloralWhite"),
         46 => Some("web:ForestGreen"),
         48 => Some("web:Gainsboro"),
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
         67 => Some("web:LightCyan"),
+        68 => Some("web:LightGoldenRod"),
+        69 => Some("web:LightGoldenRodYellow"),
+        71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
+        97 => Some("web:MintCream"),
         98 => Some("web:MistyRose"),
         119 => Some("web:Red"),
+        120 => Some("web:RosyBrown"),
         128 => Some("web:Silver"),
         130 => Some("web:SlateBlue"),
         134 => Some("web:SteelBlue"),
@@ -7292,8 +7839,29 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
 
 fn style_system_color_name(code: i32) -> Option<&'static str> {
     match code {
-        -3 => Some("style:FormTextColor"),
+        -1 => Some("style:FormBackColor"),
+        -11 => Some("style:FormTextColor"),
+        -3 => Some("style:ButtonBackColor"),
+        -15 => Some("style:ButtonTextColor"),
+        -7 => Some("style:FieldBackColor"),
+        -13 => Some("style:FieldTextColor"),
+        -21 => Some("style:FieldSelectionBackColor"),
+        -10 => Some("style:FieldSelectedTextColor"),
+        -14 => Some("style:FieldAlternativeBackColor"),
+        -23 => Some("style:ToolTipBackColor"),
+        -24 => Some("style:ToolTipTextColor"),
         -16 => Some("style:SpecialTextColor"),
+        -17 => Some("style:NegativeTextColor"),
+        -22 => Some("style:BorderColor"),
+        -25 => Some("style:ReportHeaderBackColor"),
+        -26 => Some("style:ReportGroup1BackColor"),
+        -27 => Some("style:ReportGroup2BackColor"),
+        -28 => Some("style:ReportLineColor"),
+        -34 => Some("style:ButtonBorderColor"),
+        -35 => Some("style:TableHeaderBackColor"),
+        -36 => Some("style:TableHeaderTextColor"),
+        -37 => Some("style:TableFooterBackColor"),
+        -38 => Some("style:TableFooterTextColor"),
         -42 => Some("style:NavigationColor"),
         _ => None,
     }
@@ -8436,8 +9004,9 @@ mod tests {
     use std::io::Write;
 
     use crate::module_blob::{
-        ReturnValuesReuse, pack_module_blob_bytes, pack_simple_metadata_blob_from_xml,
-        parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
+        ReturnValuesReuse, pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml,
+        pack_simple_metadata_blob_from_xml, parse_common_module_xml_properties,
+        parse_simple_metadata_xml_properties,
     };
 
     #[test]
@@ -8754,6 +9323,27 @@ mod tests {
                 "UseFeature",
                 "1",
                 PathBuf::from("Constants/UseFeature/Ext/ManagerModule.bsl"),
+            ),
+            (
+                "Bot",
+                "Bots",
+                "Notify",
+                "1",
+                PathBuf::from("Bots/Notify/Ext/Module.bsl"),
+            ),
+            (
+                "IntegrationService",
+                "IntegrationServices",
+                "MessageExchange",
+                "0",
+                PathBuf::from("IntegrationServices/MessageExchange/Ext/Module.bsl"),
+            ),
+            (
+                "Sequence",
+                "Sequences",
+                "Documents",
+                "0",
+                PathBuf::from("Sequences/Documents/Ext/RecordSetModule.bsl"),
             ),
         ];
 
@@ -9450,7 +10040,7 @@ mod tests {
         );
         let owned_form_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{owned_form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}"
+                "{{1,\r\n{{0,\r\n{{14,\r\n{{3,\r\n{{1,0,{owned_form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}"
             )
             .as_bytes(),
         );
@@ -9573,6 +10163,7 @@ mod tests {
             fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml")).unwrap();
         assert!(form_xml.contains("<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\""));
         assert!(form_xml.contains("version=\"2.20\""));
+        assert!(!form_xml.contains("<Events>"));
         let body_row = dumped
             .rows
             .iter()
@@ -9588,6 +10179,52 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_form_events_to_body_xml() {
+        let form_body = deflate_for_test(
+            b"{4,{7,{0,\"OnOpen\",\"PriOtkrytii\"},{1,\"ChoiceProcessing\",\"ObrabotkaVybora\"},{2,\"NotAFormEvent\",\"Ignored\"},{3,\"OnClose\",\"\"}},\"\",{0}}",
+        );
+
+        let form_xml = extract_form_body_xml(&form_body).unwrap();
+
+        assert!(form_xml.contains("<Events>"));
+        assert!(form_xml.contains(r#"<Event name="OnOpen">PriOtkrytii</Event>"#));
+        assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ObrabotkaVybora</Event>"#));
+        assert!(!form_xml.contains("NotAFormEvent"));
+        assert!(!form_xml.contains(r#"<Event name="OnClose">"#));
+    }
+
+    #[test]
+    fn extracts_form_uuid_events_and_auto_command_bar_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1},{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body).unwrap();
+
+        assert!(form_xml.contains(r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#));
+        assert!(form_xml.contains(r#"<Event name="ChoiceProcessing">ОбработкаВыбора</Event>"#));
+        assert!(
+            form_xml
+                .contains(r#"<Event name="NotificationProcessing">ОбработкаОповещения</Event>"#)
+        );
+        assert!(
+            form_xml.contains(r#"<Event name="OnCreateAtServer">ПриСозданииНаСервере</Event>"#)
+        );
+    }
+
+    #[test]
+    fn extracts_form_top_level_properties_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,2,1,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body).unwrap();
+
+        assert!(form_xml.contains("<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>"));
+        assert!(form_xml.contains("<Group>Horizontal</Group>"));
     }
 
     #[test]
@@ -10051,6 +10688,73 @@ mod tests {
     }
 
     #[test]
+    fn prefers_new_object_help_suffix_when_legacy_help_blob_remains() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let legacy_help = deflate_for_test(b"{5,1,\"ru\",{#base64:b2xk}}");
+        let current_help = deflate_for_test(b"{5,1,\"ru\",{#base64:bmV3}}");
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.1"),
+                part_no: 0,
+                data_size: legacy_help.len() as i64,
+                binary_hex: encode_hex_for_test(&legacy_help),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.5"),
+                part_no: 0,
+                data_size: current_help.len() as i64,
+                binary_hex: encode_hex_for_test(&current_help),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("Catalogs/Products/Ext/Help/ru.html")).unwrap(),
+            b"new"
+        );
+        assert_eq!(
+            dumped
+                .rows
+                .iter()
+                .find(|row| row.file_name == format!("{uuid}.1"))
+                .unwrap()
+                .source_asset_path,
+            None
+        );
+        assert_eq!(
+            dumped
+                .rows
+                .iter()
+                .find(|row| row.file_name == format!("{uuid}.5"))
+                .unwrap()
+                .source_asset_path
+                .as_deref(),
+            Some("Catalogs/Products/Ext/Help.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn writes_predefined_data_to_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -10384,6 +11088,44 @@ mod tests {
     }
 
     #[test]
+    fn detects_data_composition_appearance_template_body() {
+        let body = deflate_for_test(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<AppearanceTemplate xmlns="http://v8.1c.ru/8.1/data-composition-system/appearance-template">
+	<dcscor:item xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core"/>
+</AppearanceTemplate>
+"#,
+        );
+
+        assert_eq!(
+            infer_template_type_from_body(&body),
+            Some("DataCompositionAppearanceTemplate")
+        );
+        let (path, kind) = template_body_source_asset("DataCompositionAppearanceTemplate").unwrap();
+        assert_eq!(path, "Template.xml");
+        assert!(matches!(kind, SourceAssetKind::InflatedBinary));
+    }
+
+    #[test]
+    fn detects_graphical_schema_template_body() {
+        let body = deflate_for_test(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme" version="2.21">
+	<Items/>
+</GraphicalSchema>
+"#,
+        );
+
+        assert_eq!(
+            infer_template_type_from_body(&body),
+            Some("GraphicalSchema")
+        );
+        let (path, kind) = template_body_source_asset("GraphicalSchema").unwrap();
+        assert_eq!(path, "Template.xml");
+        assert!(matches!(kind, SourceAssetKind::InflatedBinary));
+    }
+
+    #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let object_refs = BTreeMap::from([(
             "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
@@ -10537,6 +11279,422 @@ mod tests {
     }
 
     #[test]
+    fn formats_moxel_standard_print_picture_ref() {
+        let picture = parse_moxel_picture("{4,0,{-13}}", &BTreeMap::new()).unwrap();
+
+        assert_eq!(picture.index, 0);
+        assert_eq!(picture.ref_name.as_deref(), Some("v8ui:Print"));
+    }
+
+    #[test]
+    fn formats_moxel_standard_picture_refs() {
+        let cases = [
+            ("{4,0,{-13}}", "v8ui:Print"),
+            ("{4,1,{-6}}", "v8ui:InputFieldCalculator"),
+            (
+                "{4,2,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9}}",
+                "v8ui:Information",
+            ),
+            (
+                "{4,3,{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1}}",
+                "v8ui:SaveFile",
+            ),
+        ];
+
+        for (text, expected_ref) in cases {
+            let picture = parse_moxel_picture(text, &BTreeMap::new()).unwrap();
+            assert_eq!(picture.ref_name.as_deref(), Some(expected_ref));
+        }
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_global_format_indexes() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>3</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>2</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>2</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<formatIndex>5</formatIndex>
+			<c>
+				<c>
+					<f>6</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>40</width>
+	</format>
+	<format>
+		<width>50</width>
+	</format>
+	<format>
+		<width>60</width>
+	</format>
+	<format>
+		<fillType>Parameter</fillType>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+	</format>
+	<format>
+		<verticalAlignment>Center</verticalAlignment>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<formatIndex>5</formatIndex>"));
+        assert!(extracted.contains("<f>6</f>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_text_entity_spacing() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>CatalogRef &quot;ReportsKinds&quot; -&amp;nbsp;the report type</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(
+            extracted.contains("CatalogRef &quot;ReportsKinds&quot; -&amp;nbsp;the report type")
+        );
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_empty_sheet() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>0</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<templateMode>true</templateMode>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<vgRows>0</vgRows>
+	<format>
+		<width>72</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<empty>true</empty>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_row_columns_id() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>2</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>2</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>4</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>First</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<formatIndex>4</formatIndex>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<c>
+				<c>
+					<f>5</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+	<format>
+		<width>30</width>
+	</format>
+	<format>
+		<width>40</width>
+	</format>
+	<format>
+		<width>50</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_row_zero_columns_id() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<c>
+				<c>
+					<f>2</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_multiple_row_columns_id_from_zero() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<c>
+				<c>
+					<f>2</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>First</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>
+			<c>
+				<c>
+					<f>2</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Second</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+        assert!(extracted.contains("<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>"));
+    }
+
+    #[test]
     fn formats_moxel_receipt_columns_headers_style_font_and_default_format() {
         let object_refs = BTreeMap::from([(
             "757b547b-b79c-459a-a64a-eef19a09a38f".to_string(),
@@ -10655,6 +11813,47 @@ mod tests {
             row_column_ids.get(&12).map(String::as_str),
             Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9")
         );
+    }
+
+    #[test]
+    fn formats_moxel_row_column_ids_accept_row_zero_pair_mapping() {
+        let additional_sets = vec![
+            MoxelColumnSet {
+                id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                size: 1,
+                columns: vec![],
+            },
+            MoxelColumnSet {
+                id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
+                size: 1,
+                columns: vec![],
+            },
+        ];
+        let fields = ["2", "0", "0", "1", "1", "0"];
+        let row_column_ids = parse_moxel_row_column_set_ids(&fields, 0, &additional_sets).unwrap();
+
+        assert_eq!(
+            row_column_ids.get(&0).map(String::as_str),
+            Some("5c3926f2-4223-4ca7-a6a7-7160301c991d")
+        );
+        assert_eq!(
+            row_column_ids.get(&1).map(String::as_str),
+            Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9")
+        );
+    }
+
+    #[test]
+    fn formats_moxel_scanning_does_not_treat_column_mapping_as_empty_row() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{0},{0},0,1,1,5,{16,2,{1,1,{\"ru\",\"Hello\"}},0},{10,0,00000000-0000-0000-0000-000000000000,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,1,{10,0,cab491a9-17d5-47b2-96fc-7a31b2075a1c,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,0,0,{0}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(xml.matches("<rowsItem>").count(), 1);
+        assert!(xml.contains("<index>0</index>"));
+        assert!(!xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
     }
 
     #[test]
@@ -11583,6 +12782,27 @@ mod tests {
             .relative_path,
             PathBuf::from("Tasks").join("Task.xml")
         );
+
+        let catalog_uuid = "66666666-6666-4666-8666-666666666666";
+        let catalog_form_uuid = "77777777-7777-4777-8777-777777777777";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{catalog_form_uuid},{catalog_form_uuid},1,{{1,{{1,9,{{-13}},510405d3-2a0c-4fea-960a-7fee59b32f,{{14,25,1183c14f-f814-49c6-9233-a3c26b3f64cf}}}}}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        assert_eq!(
+            extract_metadata_source_xml(
+                &catalog_blob,
+                catalog_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap()
+            .relative_path,
+            PathBuf::from("Catalogs").join("Products.xml")
+        );
     }
 
     #[test]
@@ -12024,6 +13244,210 @@ mod tests {
     }
 
     #[test]
+    fn extracts_sfc_metadata_family_xml_from_blob_shapes() {
+        let cases = vec![
+            (
+                "66666666-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{0,\r\n{3,\r\n{1,0,66666666-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"MessageExchange\",{1,\"en\",\"Message exchange\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\"\"},0}",
+                ),
+                "IntegrationService",
+                PathBuf::from("IntegrationServices").join("MessageExchange.xml"),
+            ),
+            (
+                "77777777-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{1,\r\n{3,\r\n{1,0,77777777-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"NotifyUsers\",{1,\"en\",\"Notify users\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},0,{4,0,{0},\"\",-1,-1,1,0,\"\"}},0}",
+                ),
+                "Bot",
+                PathBuf::from("Bots").join("NotifyUsers.xml"),
+            ),
+            (
+                "88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{2,\r\n{\"https://example.invalid/ws?wsdl\",0},\r\n{3,\r\n{1,0,88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"UpdateFiles\",{1,\"en\",\"Update files\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222},0}",
+                ),
+                "WSReference",
+                PathBuf::from("WSReferences").join("UpdateFiles.xml"),
+            ),
+            (
+                "99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{3,\r\n{3,\r\n{1,0,99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"Main\",{1,\"en\",\"Main\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n},0}",
+                ),
+                "Style",
+                PathBuf::from("Styles").join("Main.xml"),
+            ),
+            (
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                deflate_for_test(
+                    b"{1,\r\n{3,\r\n{3,\r\n{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},\"CashDocuments\",{1,\"en\",\"Cash documents\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},1,11,1,1,0},0}",
+                ),
+                "DocumentNumerator",
+                PathBuf::from("DocumentNumerators").join("CashDocuments.xml"),
+            ),
+            (
+                "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                deflate_for_test(
+                    b"{1,\r\n{6,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{0,\r\n{3,\r\n{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},\"CompanyDocuments\",{1,\"en\",\"Company documents\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n},{0}},0}",
+                ),
+                "Sequence",
+                PathBuf::from("Sequences").join("CompanyDocuments.xml"),
+            ),
+        ];
+
+        for (uuid, blob, expected_kind, expected_path) in cases {
+            let extracted = extract_metadata_source_xml(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+
+            assert_eq!(extracted.relative_path, expected_path);
+            assert_eq!(properties.kind, expected_kind);
+            assert_eq!(properties.uuid, uuid);
+        }
+    }
+
+    #[test]
+    fn writes_ws_reference_body_asset_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let ws_uuid = "88888888-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let ws_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{\"https://example.invalid/ws?wsdl\",0}},\r\n{{3,\r\n{{1,0,{ws_uuid}}},\"UpdateFiles\",{{1,\"en\",\"Update files\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222}},0}}"
+            )
+            .as_bytes(),
+        );
+        let ws_body = deflate_for_test(b"<definitions/>");
+        let rows = vec![
+            ConfigRow {
+                file_name: ws_uuid.to_string(),
+                part_no: 0,
+                data_size: ws_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&ws_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{ws_uuid}.0"),
+                part_no: 0,
+                data_size: ws_body.len() as i64,
+                binary_hex: encode_hex_for_test(&ws_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("WSReferences/UpdateFiles/Ext/WSDefinition.xml")).unwrap(),
+            "<definitions/>"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_style_body_xml_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let style_uuid = "99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let color_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let font_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let style_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{3,\r\n{{3,\r\n{{1,0,{style_uuid}}},\"Main\",{{1,\"en\",\"Main\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let color_metadata = deflate_for_test(
+            format!(
+                "{{1,{{3,0,{{\"#\",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{{3,2,{{37}}}}}},{{3,{{1,0,{color_uuid}}},\"ErrorBackColor\",{{1,\"en\",\"Error back color\"}},\"\"}}}},0}}"
+            )
+            .as_bytes(),
+        );
+        let font_metadata = deflate_for_test(
+            format!(
+                "{{1,{{3,1,{{\"#\",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{{7,2,60,{{-31}},700,0,0,0,1,100}},0}},{{3,{{1,0,{font_uuid}}},\"StrikeFont\",{{1,\"en\",\"Strike font\"}},\"\"}}}},0}}"
+            )
+            .as_bytes(),
+        );
+        let style_body = deflate_for_test(
+            format!(
+                "{{2,5,{{{{-1}},0,{{4,2,{{20}},2}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{8,2,0,{{-20}},1,100}}}},{{{{0,{color_uuid}}},0,{{4,0,{{13158655}},0}}}},{{{{0,{font_uuid}}},1,{{8,2,60,{{-20}},400,0,0,1,1,100}}}},{{0}}}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: style_uuid.to_string(),
+                part_no: 0,
+                data_size: style_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&style_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{style_uuid}.0"),
+                part_no: 0,
+                data_size: style_body.len() as i64,
+                binary_hex: encode_hex_for_test(&style_body),
+            },
+            ConfigRow {
+                file_name: color_uuid.to_string(),
+                part_no: 0,
+                data_size: color_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&color_metadata),
+            },
+            ConfigRow {
+                file_name: font_uuid.to_string(),
+                part_no: 0,
+                data_size: font_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&font_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("Styles/Main/Ext/Style.xml")).unwrap();
+        assert!(xml.contains("<Style "));
+        assert!(xml.contains("<Item name=\"FormBackColor\">"));
+        assert!(xml.contains("<Color>web:Cream</Color>"));
+        assert!(xml.contains("<Item name=\"ControlBorder\">"));
+        assert!(xml.contains("<Border ref=\"style:ControlBorder\"/>"));
+        assert!(xml.contains("<Item name=\"TextFont\">"));
+        assert!(xml.contains("<Font ref=\"style:TextFont\" kind=\"StyleItem\"/>"));
+        assert!(xml.contains("<Item name=\"StyleItem.ErrorBackColor\">"));
+        assert!(xml.contains("<Color>#FFC8C8</Color>"));
+        assert!(xml.contains("<Item name=\"StyleItem.StrikeFont\">"));
+        assert!(xml.contains(
+            "<Font ref=\"style:TextFont\" kind=\"StyleItem\" bold=\"false\" italic=\"false\" underline=\"false\" strikeout=\"true\"/>"
+        ));
+
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{style_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Styles/Main/Ext/Style.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn extracts_defined_type_xml_from_metadata_blob() {
         let uuid = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
         let blob = deflate_for_test(
@@ -12337,6 +13761,11 @@ mod tests {
         );
         assert_eq!(ext_picture_file_name(b"GIF87apayload"), "Picture.gif");
         assert_eq!(ext_picture_file_name(b"GIF89apayload"), "Picture.gif");
+        assert_eq!(
+            ext_picture_file_name(b"\xff\xd8\xff\xe0payload"),
+            "Picture.jpg"
+        );
+        assert_eq!(ext_picture_file_name(b"BMpayload"), "Picture.bmp");
         assert_eq!(
             ext_picture_file_name(b"\x00\x00\x01\x00payload"),
             "Picture.ico"
