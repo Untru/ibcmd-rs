@@ -1124,6 +1124,7 @@ struct MoxelFont {
 struct MoxelLine {
     style: &'static str,
     line_type: &'static str,
+    width: usize,
 }
 
 struct MoxelDrawing {
@@ -4565,14 +4566,39 @@ fn parse_moxel_lines(
             MoxelLine {
                 style: "None",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
             },
             MoxelLine {
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
             },
             MoxelLine {
                 style: "None",
                 line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+                width: 1,
+            },
+        ];
+    }
+    if lines.len() >= 3
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && lines.get(2).is_some_and(|line| line.style == "Dotted")
+        && shift_default_line_styles
+        && used_indexes.len() == 2
+        && used_indexes.contains(&0)
+        && used_indexes.contains(&1)
+    {
+        return vec![
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 2,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
             },
         ];
     }
@@ -4588,10 +4614,12 @@ fn parse_moxel_lines(
             MoxelLine {
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
             },
             MoxelLine {
                 style: "Dotted",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
             },
         ];
     }
@@ -4604,6 +4632,7 @@ fn parse_moxel_lines(
         return vec![MoxelLine {
             style: "Solid",
             line_type: "v8ui:SpreadsheetDocumentCellLineType",
+            width: 1,
         }];
     }
     if !lines.is_empty() {
@@ -4612,6 +4641,7 @@ fn parse_moxel_lines(
     vec![MoxelLine {
         style: "Solid",
         line_type: "v8ui:SpreadsheetDocumentCellLineType",
+        width: 1,
     }]
 }
 
@@ -5130,6 +5160,7 @@ fn parse_moxel_style_ref_slot(
     match fields.get(1)?.trim() {
         "3" => match payload.first()?.trim() {
             "-1" | "-3" => Some(None),
+            "-10" => Some(Some("style:FieldBackColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
             "-28" => Some(Some("style:ReportLineColor".to_string())),
             "0" => {
@@ -5138,6 +5169,10 @@ fn parse_moxel_style_ref_slot(
             }
             _ => None,
         },
+        "2" => payload
+            .first()
+            .and_then(|value| parse_moxel_web_color(value.trim()))
+            .map(Some),
         "0" => payload
             .first()
             .and_then(|value| parse_moxel_style_color(value.trim()))
@@ -5153,18 +5188,30 @@ fn parse_moxel_embedded_style_refs(
     let Some(fields) = split_1c_braced_fields(text, 0) else {
         return Vec::new();
     };
-    if fields.len() < 3 || fields.first().map(|field| field.trim()) != Some("3") {
+    if fields.len() < 3
+        || fields.get(1).map(|field| field.trim()) != Some("1")
+        || !matches!(fields.first().map(|field| field.trim()), Some("3"))
+    {
+        return Vec::new();
+    }
+    let container_kind = fields.first().map(|field| field.trim());
+    if fields
+        .get(2)
+        .and_then(|field| parse_moxel_embedded_style_ref(field, container_kind, object_refs))
+        .is_none()
+    {
         return Vec::new();
     }
     fields
         .iter()
         .skip(2)
-        .filter_map(|field| parse_moxel_embedded_style_ref(field, object_refs))
+        .filter_map(|field| parse_moxel_embedded_style_ref(field, container_kind, object_refs))
         .collect()
 }
 
 fn parse_moxel_embedded_style_ref(
     text: &str,
+    container_kind: Option<&str>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<String>> {
     let fields = split_1c_braced_fields(text, 0)?;
@@ -5172,7 +5219,12 @@ fn parse_moxel_embedded_style_ref(
         return None;
     }
     let uuid = parse_uuid_field(fields.get(6)?.trim())?;
-    Some(moxel_style_ref_for_uuid(&uuid, object_refs))
+    Some(moxel_embedded_style_ref_for_uuid(
+        &uuid,
+        container_kind,
+        fields.get(4).map(|field| field.trim()),
+        object_refs,
+    ))
 }
 
 fn moxel_style_ref_for_uuid(uuid: &str, object_refs: &BTreeMap<String, String>) -> Option<String> {
@@ -5183,6 +5235,33 @@ fn moxel_style_ref_for_uuid(uuid: &str, object_refs: &BTreeMap<String, String>) 
             .and_then(|reference| reference.strip_prefix("StyleItem."))
             .map(|name| format!("style:{name}")),
     }
+}
+
+fn moxel_embedded_style_ref_for_uuid(
+    uuid: &str,
+    container_kind: Option<&str>,
+    kind: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    match (uuid, container_kind, kind) {
+        ("f527dc88-1d39-40b3-bcbb-d98b690ead68", _, Some("2")) => {
+            Some("style:FieldBackColor".to_string())
+        }
+        _ => moxel_style_ref_for_uuid(uuid, object_refs),
+    }
+}
+
+fn parse_moxel_web_color(value: &str) -> Option<String> {
+    let name = match value.parse::<u32>().ok()? {
+        21 => "Crimson",
+        48 => "Gainsboro",
+        64 => "LemonChiffon",
+        79 => "LightYellow",
+        108 => "PaleGoldenrod",
+        121 => "RoyalBlue",
+        _ => return None,
+    };
+    Some(format!("d3p1:{name}"))
 }
 
 fn parse_moxel_style_color(value: &str) -> Option<String> {
@@ -5246,6 +5325,7 @@ fn moxel_fill_type(value: usize) -> Option<&'static str> {
 
 fn moxel_details_use(value: usize) -> Option<&'static str> {
     match value {
+        0 => Some("Cell"),
         1 => Some("Row"),
         _ => None,
     }
@@ -5319,6 +5399,7 @@ fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
     Some(MoxelLine {
         style,
         line_type: "v8ui:SpreadsheetDocumentCellLineType",
+        width: 1,
     })
 }
 
@@ -5731,7 +5812,10 @@ fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
 }
 
 fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
-    xml.push_str("\t<line width=\"1\" gap=\"false\">\r\n");
+    xml.push_str(&format!(
+        "\t<line width=\"{}\" gap=\"false\">\r\n",
+        line.width
+    ));
     xml.push_str(&format!(
         "\t\t<v8ui:style xsi:type=\"{}\">{}</v8ui:style>\r\n",
         line.line_type, line.style
@@ -10479,6 +10563,53 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].style, "Solid");
         assert_eq!(lines[1].style, "Dotted");
+        assert_eq!(lines[0].width, 1);
+        assert_eq!(lines[1].width, 1);
+    }
+
+    #[test]
+    fn formats_moxel_shifts_three_default_line_styles_to_two_solid_widths() {
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(1),
+                ..MoxelFormat::default()
+            },
+        ];
+        let lines = parse_moxel_lines(&["{3,3,{-1}}", "{3,3,{-3}}", "{3,3,{-10}}"], &formats, true);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].style, "Solid");
+        assert_eq!(lines[0].width, 2);
+        assert_eq!(lines[1].style, "Solid");
+        assert_eq!(lines[1].width, 1);
+    }
+
+    #[test]
+    fn formats_moxel_web_colors_embedded_styles_and_details_use() {
+        let style_refs = parse_moxel_style_refs(
+            &[
+                "{3,1,{4,0,{0},1,2,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+                "{3,3,{-1}}",
+                "{3,3,{-3}}",
+                "{3,3,{-10}}",
+                "{3,2,{121}}",
+                "{3,2,{21}}",
+            ],
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(style_refs[0].as_deref(), Some("style:FieldBackColor"));
+        assert_eq!(style_refs[1], None);
+        assert_eq!(style_refs[2], None);
+        assert_eq!(style_refs[3].as_deref(), Some("style:FieldBackColor"));
+        assert_eq!(style_refs[4].as_deref(), Some("d3p1:RoyalBlue"));
+        assert_eq!(style_refs[5].as_deref(), Some("d3p1:Crimson"));
+        assert_eq!(moxel_details_use(0), Some("Cell"));
+        assert_eq!(moxel_details_use(1), Some("Row"));
     }
 
     #[test]
