@@ -2077,11 +2077,36 @@ fn prepare_template_body_row(
                 "Template body",
             )
         }
+        "HTMLDocument" => {
+            prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties)
+        }
         "AddIn" | "BinaryData" => {
             prepare_binary_template_body_row(sqlcmd, server, database, xml_path, properties)
         }
         _ => Ok(Vec::new()),
     }
+}
+
+fn prepare_html_template_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let body_path = infer_html_template_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    prepare_help_blob_body_row(
+        sqlcmd,
+        server,
+        database,
+        body_id,
+        body_path,
+        "HTML Template",
+    )
 }
 
 fn prepare_binary_template_body_row(
@@ -2453,27 +2478,38 @@ fn prepare_object_help_body_row(
         return Ok(Vec::new());
     }
     let body_id = infer_help_body_id(properties);
+    prepare_help_blob_body_row(sqlcmd, server, database, body_id, body_path, "Help")
+}
+
+fn prepare_help_blob_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    body_id: String,
+    body_path: PathBuf,
+    label: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
     let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
-        .with_context(|| format!("failed to read Help XML {}", body_path.display()))?;
+        .with_context(|| format!("failed to read {label} XML {}", body_path.display()))?;
     let page_names = parse_help_pages_from_xml(&xml)
-        .with_context(|| format!("failed to parse Help XML {}", body_path.display()))?;
+        .with_context(|| format!("failed to parse {label} XML {}", body_path.display()))?;
     let help_dir = body_path.with_extension("");
     let mut pages = Vec::with_capacity(page_names.len());
     for page in page_names {
         if page.contains('/') || page.contains('\\') || page == "." || page == ".." {
-            return Err(anyhow!("unsupported Help page name: {page}"));
+            return Err(anyhow!("unsupported {label} page name: {page}"));
         }
         let page_path = help_dir.join(format!("{page}.html"));
         let content = fs::read(&page_path)
-            .with_context(|| format!("failed to read Help page {}", page_path.display()))?;
+            .with_context(|| format!("failed to read {label} page {}", page_path.display()))?;
         pages.push((page, content));
     }
     let mut files = Vec::<(String, Vec<u8>)>::new();
     let files_dir = help_dir.join("_files");
     if files_dir.exists() {
         for entry in fs::read_dir(&files_dir)
-            .with_context(|| format!("failed to read Help files dir {}", files_dir.display()))?
+            .with_context(|| format!("failed to read {label} files dir {}", files_dir.display()))?
         {
             let entry = entry
                 .with_context(|| format!("failed to read entry in {}", files_dir.display()))?;
@@ -2484,14 +2520,15 @@ fn prepare_object_help_body_row(
                 continue;
             }
             let file_name = entry.file_name().to_string_lossy().to_string();
-            let content = fs::read(entry.path())
-                .with_context(|| format!("failed to read Help file {}", entry.path().display()))?;
+            let content = fs::read(entry.path()).with_context(|| {
+                format!("failed to read {label} file {}", entry.path().display())
+            })?;
             files.push((file_name, content));
         }
         files.sort_by(|left, right| left.0.cmp(&right.0));
     }
     let packed = pack_help_blob_from_parts(&pages, &files)
-        .with_context(|| format!("failed to pack Help {}", body_path.display()))?;
+        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -4237,6 +4274,10 @@ fn infer_binary_template_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Template.bin")
 }
 
+fn infer_html_template_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("").join("Ext").join("Template.xml")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -5060,6 +5101,12 @@ mod tests {
         assert_eq!(
             super::infer_binary_template_body_path(r"CommonTemplates\Archive.xml".as_ref()),
             std::path::PathBuf::from(r"CommonTemplates\Archive\Ext\Template.bin")
+        );
+        assert_eq!(
+            super::infer_html_template_body_path(
+                r"Catalogs\Products\Templates\Description.xml".as_ref()
+            ),
+            std::path::PathBuf::from(r"Catalogs\Products\Templates\Description\Ext\Template.xml")
         );
     }
 
