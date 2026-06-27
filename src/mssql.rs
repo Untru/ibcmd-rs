@@ -2113,7 +2113,7 @@ fn prepare_object_help_body_row(
     if !body_path.exists() {
         return Ok(Vec::new());
     }
-    let body_id = format!("{}.5", properties.uuid);
+    let body_id = infer_help_body_id(properties);
     let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read Help XML {}", body_path.display()))?;
@@ -2159,6 +2159,11 @@ fn prepare_object_help_body_row(
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
     }])
+}
+
+fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
+    let suffix = if properties.kind == "Form" { "1" } else { "5" };
+    format!("{}.{}", properties.uuid, suffix)
 }
 
 fn prepare_common_module_object_stage(
@@ -4087,6 +4092,33 @@ mod tests {
         assert_eq!(
             super::infer_ws_reference_definition_path(r"WSReferences\UpdateFiles.xml".as_ref()),
             std::path::PathBuf::from(r"WSReferences\UpdateFiles\Ext\WSDefinition.xml")
+        );
+    }
+
+    #[test]
+    fn infers_help_body_ids_for_objects_and_forms() {
+        let object = SimpleMetadataXmlProperties {
+            kind: "Catalog".to_string(),
+            uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            name: "Products".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+        let form = SimpleMetadataXmlProperties {
+            kind: "Form".to_string(),
+            uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+            name: "ItemForm".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+        };
+
+        assert_eq!(
+            super::infer_help_body_id(&object),
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5"
+        );
+        assert_eq!(
+            super::infer_help_body_id(&form),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.1"
         );
     }
 
