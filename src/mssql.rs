@@ -38,8 +38,9 @@ use crate::cli::{
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, pack_common_module_metadata_blob_from_xml, pack_module_blob_bytes,
-    pack_simple_metadata_blob_from_xml_with_source, parse_common_module_xml_properties,
-    parse_simple_metadata_xml_properties, patch_versions_blob_bytes,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
+    patch_versions_blob_bytes,
 };
 use crate::parallel;
 use crate::source::scan_sources;
@@ -269,6 +270,14 @@ pub struct StagedMetadataObjectReport {
     pub properties: SimpleMetadataXmlProperties,
     pub metadata_plain_bytes: usize,
     pub metadata_blob: GeneratedBlobReport,
+    pub body_rows: Vec<StagedMetadataBodyReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StagedMetadataBodyReport {
+    pub body_id: String,
+    pub path: PathBuf,
+    pub blob: GeneratedBlobReport,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -350,6 +359,43 @@ struct PreparedMetadataObjectStage {
     metadata_plain_bytes: usize,
     metadata_blob: Vec<u8>,
     metadata_blob_sha256: String,
+    body_rows: Vec<PreparedMetadataBodyStage>,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedMetadataBodyStage {
+    body_id: String,
+    path: PathBuf,
+    blob: Vec<u8>,
+    blob_sha256: String,
+}
+
+fn staged_metadata_object_report(
+    object: PreparedMetadataObjectStage,
+) -> StagedMetadataObjectReport {
+    StagedMetadataObjectReport {
+        object_id: object.object_id,
+        kind: object.kind,
+        xml: object.xml,
+        properties: object.properties,
+        metadata_plain_bytes: object.metadata_plain_bytes,
+        metadata_blob: GeneratedBlobReport {
+            bytes: object.metadata_blob.len(),
+            sha256: object.metadata_blob_sha256,
+        },
+        body_rows: object
+            .body_rows
+            .into_iter()
+            .map(|body| StagedMetadataBodyReport {
+                body_id: body.body_id,
+                path: body.path,
+                blob: GeneratedBlobReport {
+                    bytes: body.blob.len(),
+                    sha256: body.blob_sha256,
+                },
+            })
+            .collect(),
+    }
 }
 
 pub fn compare_databases(args: &MssqlCompareArgs) -> Result<MssqlCompareReport> {
@@ -850,7 +896,10 @@ pub fn stage_metadata_objects(
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = prepared
         .iter()
-        .map(|object| object.object_id.clone())
+        .flat_map(|object| {
+            std::iter::once(object.object_id.clone())
+                .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
+        })
         .collect::<Vec<_>>();
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
@@ -872,17 +921,7 @@ pub fn stage_metadata_objects(
     let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
     let objects = prepared
         .into_iter()
-        .map(|object| StagedMetadataObjectReport {
-            object_id: object.object_id,
-            kind: object.kind,
-            xml: object.xml,
-            properties: object.properties,
-            metadata_plain_bytes: object.metadata_plain_bytes,
-            metadata_blob: GeneratedBlobReport {
-                bytes: object.metadata_blob.len(),
-                sha256: object.metadata_blob_sha256,
-            },
-        })
+        .map(staged_metadata_object_report)
         .collect();
 
     Ok(StageMetadataObjectsReport {
@@ -1002,7 +1041,10 @@ pub fn stage_source_objects(
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = metadata_objects
         .iter()
-        .map(|object| object.object_id.clone())
+        .flat_map(|object| {
+            std::iter::once(object.object_id.clone())
+                .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
+        })
         .chain(
             common_modules
                 .iter()
@@ -1064,17 +1106,7 @@ pub fn stage_source_objects(
     });
     let metadata_objects = metadata_objects
         .into_iter()
-        .map(|object| StagedMetadataObjectReport {
-            object_id: object.object_id,
-            kind: object.kind,
-            xml: object.xml,
-            properties: object.properties,
-            metadata_plain_bytes: object.metadata_plain_bytes,
-            metadata_blob: GeneratedBlobReport {
-                bytes: object.metadata_blob.len(),
-                sha256: object.metadata_blob_sha256,
-            },
-        })
+        .map(staged_metadata_object_report)
         .collect();
     let common_modules = common_modules
         .into_iter()
@@ -1801,6 +1833,14 @@ fn prepare_metadata_object_stage(
             object_id
         ));
     }
+    let body_rows = prepare_metadata_body_rows(
+        sqlcmd,
+        server,
+        database,
+        &xml_path,
+        &packed_metadata.properties,
+        source,
+    )?;
 
     Ok(PreparedMetadataObjectStage {
         object_id,
@@ -1810,7 +1850,47 @@ fn prepare_metadata_object_stage(
         metadata_plain_bytes: packed_metadata.plain_bytes,
         metadata_blob: packed_metadata.blob,
         metadata_blob_sha256: packed_metadata.output_sha256,
+        body_rows,
     })
+}
+
+fn prepare_metadata_body_rows(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if properties.kind != "Style" {
+        return Ok(Vec::new());
+    }
+    let style_body_path = infer_style_body_path(xml_path);
+    if !style_body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let source = source.ok_or_else(|| {
+        anyhow!(
+            "source root is required to stage Style body {}",
+            style_body_path.display()
+        )
+    })?;
+    let body_id = format!("{}.0", properties.uuid);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&style_body_path).with_context(|| {
+        format!(
+            "failed to read Style body XML {}",
+            style_body_path.display()
+        )
+    })?;
+    let packed = pack_style_body_blob_from_xml(&xml, Some(source))
+        .with_context(|| format!("failed to pack Style body {}", style_body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: style_body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
 }
 
 fn prepare_common_module_object_stage(
@@ -2078,6 +2158,11 @@ fn ensure_unique_metadata_object_ids(objects: &[PreparedMetadataObjectStage]) ->
                 object.object_id
             ));
         }
+        for body in &object.body_rows {
+            if !seen.insert(body.body_id.as_str()) {
+                return Err(anyhow!("duplicate metadata body id: {}", body.body_id));
+            }
+        }
     }
     Ok(())
 }
@@ -2093,6 +2178,14 @@ fn ensure_unique_source_stage_ids(
                 "duplicate metadata object id in source tree stage: {}",
                 object.object_id
             ));
+        }
+        for body in &object.body_rows {
+            if !seen.insert(body.body_id.as_str()) {
+                return Err(anyhow!(
+                    "duplicate metadata body id in source tree stage: {}",
+                    body.body_id
+                ));
+            }
         }
     }
     for module in common_modules {
@@ -2834,7 +2927,11 @@ fn build_stage_metadata_objects_sql(
     versions_blob: &[u8],
 ) -> String {
     let versions_blob_hex = encode_hex(versions_blob);
-    let expected_total_rows = objects.len() + 3;
+    let body_row_count = objects
+        .iter()
+        .map(|object| object.body_rows.len())
+        .sum::<usize>();
+    let expected_total_rows = objects.len() + body_row_count + 3;
     let mut sql = format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -2863,6 +2960,21 @@ fn build_stage_metadata_objects_sql(
             metadata_blob_hex = metadata_blob_hex,
             error_number = error_number,
         ));
+        for (body_index, body) in object.body_rows.iter().enumerate() {
+            let body_blob_hex = encode_hex(&body.blob);
+            let body_error_number = 54501 + index * 10 + body_index;
+            sql.push_str(&format!(
+                "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+                 SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
+                 FROM Config\n\
+                 WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
+                 IF @@ROWCOUNT <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
+                body_id = quote_string(&body.body_id),
+                body_blob_len = body.blob.len(),
+                body_blob_hex = body_blob_hex,
+                body_error_number = body_error_number,
+            ));
+        }
     }
 
     sql.push_str(&format!(
@@ -2929,6 +3041,21 @@ fn build_stage_source_objects_sql(
             metadata_blob_hex = metadata_blob_hex,
             error_number = error_number,
         ));
+        for (body_index, body) in object.body_rows.iter().enumerate() {
+            let body_blob_hex = encode_hex(&body.blob);
+            let body_error_number = 55501 + index * 10 + body_index;
+            sql.push_str(&format!(
+                "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+                 SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
+                 FROM Config\n\
+                 WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
+                 IF @@ROWCOUNT <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
+                body_id = quote_string(&body.body_id),
+                body_blob_len = body.blob.len(),
+                body_blob_hex = body_blob_hex,
+                body_error_number = body_error_number,
+            ));
+        }
     }
 
     for (index, module) in common_modules.iter().enumerate() {
@@ -3021,7 +3148,7 @@ fn build_source_stage_batches(
         }
         match item {
             SourceStageItem::Metadata(object) => {
-                current.row_count += 1;
+                current.row_count += 1 + object.body_rows.len();
                 current.metadata_objects.push(object);
             }
             SourceStageItem::CommonModule(module) => {
@@ -3109,6 +3236,15 @@ fn infer_common_module_text_path(xml: &Path) -> PathBuf {
         .join("Module.bsl")
 }
 
+fn infer_style_body_path(xml: &Path) -> PathBuf {
+    let style_name = xml.file_stem().unwrap_or_default();
+    xml.parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(style_name)
+        .join("Ext")
+        .join("Style.xml")
+}
+
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -3169,12 +3305,12 @@ fn quote_string_path(path: &Path) -> String {
 mod tests {
     use super::{
         ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest, DeltaBundleManifest,
-        PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataObjectStage,
-        StorageBundleManifest, StorageTableManifest, TableShape, compare_shapes,
-        compare_storage_table_manifests, infer_common_module_text_path, is_root_common_module_xml,
-        is_root_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
-        source_common_module_xmls, source_metadata_xmls, validate_delta_manifest,
-        validate_storage_manifest,
+        PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataBodyStage,
+        PreparedMetadataObjectStage, StorageBundleManifest, StorageTableManifest, TableShape,
+        compare_shapes, compare_storage_table_manifests, infer_common_module_text_path,
+        is_root_common_module_xml, is_root_metadata_xml, quote_ident, quote_string,
+        require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
+        validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
@@ -3594,6 +3730,7 @@ mod tests {
             metadata_plain_bytes: 12,
             metadata_blob: vec![0x01, 0x23, 0x45],
             metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: Vec::new(),
         }];
 
         let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xAA, 0xBB]);
@@ -3604,6 +3741,80 @@ mod tests {
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xAABB"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 4"));
+    }
+
+    #[test]
+    fn builds_metadata_object_stage_sql_with_body_rows() {
+        let prepared = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "Style".to_string(),
+            xml: PathBuf::from("Styles/Main.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "Style".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "Main".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: vec![PreparedMetadataBodyStage {
+                body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                path: PathBuf::from("Styles/Main/Ext/Style.xml"),
+                blob: vec![0xAA, 0xBB, 0xCC],
+                blob_sha256: "feedface".to_string(),
+            }],
+        }];
+
+        let sql = super::build_stage_metadata_objects_sql("TestDb", &prepared, &[0xDD, 0xEE]);
+
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
+        assert!(sql.contains("0x012345"));
+        assert!(sql.contains("0xAABBCC"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 54501"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
+    }
+
+    #[test]
+    fn builds_source_tree_stage_sql_with_metadata_body_rows() {
+        let metadata = vec![PreparedMetadataObjectStage {
+            object_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            kind: "Style".to_string(),
+            xml: PathBuf::from("Styles/Main.xml"),
+            properties: SimpleMetadataXmlProperties {
+                kind: "Style".to_string(),
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "Main".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 12,
+            metadata_blob: vec![0x01, 0x23, 0x45],
+            metadata_blob_sha256: "deadbeef".to_string(),
+            body_rows: vec![PreparedMetadataBodyStage {
+                body_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string(),
+                path: PathBuf::from("Styles/Main/Ext/Style.xml"),
+                blob: vec![0xAA, 0xBB, 0xCC],
+                blob_sha256: "feedface".to_string(),
+            }],
+        }];
+
+        let sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &metadata,
+            &[],
+            &[0xDD, 0xEE],
+            true,
+            true,
+            5,
+        );
+
+        assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
+        assert!(sql.contains("0xAABBCC"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 1 THROW 55501"));
+        assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
     #[test]
@@ -3623,6 +3834,7 @@ mod tests {
                 metadata_plain_bytes: 12,
                 metadata_blob: vec![0x01, 0x23, 0x45],
                 metadata_blob_sha256: "deadbeef".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "abababab-abab-4aba-baba-abababababab".to_string(),
@@ -3640,6 +3852,7 @@ mod tests {
                 metadata_plain_bytes: 14,
                 metadata_blob: vec![0xAA, 0xBB, 0xCC],
                 metadata_blob_sha256: "abad1dea".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
@@ -3655,6 +3868,7 @@ mod tests {
                 metadata_plain_bytes: 10,
                 metadata_blob: vec![0xAB, 0xCD],
                 metadata_blob_sha256: "cafed00d".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
@@ -3670,6 +3884,7 @@ mod tests {
                 metadata_plain_bytes: 8,
                 metadata_blob: vec![0x11, 0x22, 0x33],
                 metadata_blob_sha256: "f00dbabe".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "dddddddd-dddd-4ddd-dddd-dddddddddddd".to_string(),
@@ -3685,6 +3900,7 @@ mod tests {
                 metadata_plain_bytes: 9,
                 metadata_blob: vec![0x44, 0x55, 0x66],
                 metadata_blob_sha256: "baadf00d".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee".to_string(),
@@ -3700,6 +3916,7 @@ mod tests {
                 metadata_plain_bytes: 11,
                 metadata_blob: vec![0x77, 0x88],
                 metadata_blob_sha256: "facefeed".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "ffffffff-ffff-4fff-ffff-ffffffffffff".to_string(),
@@ -3715,6 +3932,7 @@ mod tests {
                 metadata_plain_bytes: 13,
                 metadata_blob: vec![0x99, 0xAA],
                 metadata_blob_sha256: "decafbad".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "99999999-9999-4999-9999-999999999999".to_string(),
@@ -3730,6 +3948,7 @@ mod tests {
                 metadata_plain_bytes: 15,
                 metadata_blob: vec![0xDE, 0xAD, 0xBE, 0xEF],
                 metadata_blob_sha256: "b16b00b5".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "c39750ca-e33f-40c2-b830-119423d9a2ae".to_string(),
@@ -3745,6 +3964,7 @@ mod tests {
                 metadata_plain_bytes: 17,
                 metadata_blob: vec![0xC3, 0x97, 0x50, 0xCA],
                 metadata_blob_sha256: "0badc0de".to_string(),
+                body_rows: Vec::new(),
             },
             PreparedMetadataObjectStage {
                 object_id: "ad083c26-7461-4e94-b524-0174242fbd91".to_string(),
@@ -3760,6 +3980,7 @@ mod tests {
                 metadata_plain_bytes: 21,
                 metadata_blob: vec![0x10, 0x20, 0x30, 0x40],
                 metadata_blob_sha256: "c0ffee00".to_string(),
+                body_rows: Vec::new(),
             },
         ];
 

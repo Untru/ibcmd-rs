@@ -121,6 +121,13 @@ pub struct PackedSimpleMetadataBlob {
 }
 
 #[derive(Debug, Clone)]
+pub struct PackedStyleBodyBlob {
+    pub blob: Vec<u8>,
+    pub plain_bytes: usize,
+    pub output_sha256: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
 }
@@ -179,6 +186,28 @@ impl MetadataSourceContext {
         if properties.kind != "CommandGroup" {
             return Err(anyhow!(
                 "expected CommandGroup XML at {}, got {}",
+                path.display(),
+                properties.kind
+            ));
+        }
+        Ok(properties.uuid)
+    }
+
+    fn resolve_style_item_uuid(&self, reference: &str) -> Result<String> {
+        let name = reference
+            .trim()
+            .strip_prefix("StyleItem.")
+            .ok_or_else(|| anyhow!("unsupported StyleItem reference: {reference}"))?;
+        let path = self
+            .source_root
+            .join("StyleItems")
+            .join(format!("{name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read StyleItem XML {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)?;
+        if properties.kind != "StyleItem" {
+            return Err(anyhow!(
+                "expected StyleItem XML at {}, got {}",
                 path.display(),
                 properties.kind
             ));
@@ -432,6 +461,350 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+pub fn pack_style_body_blob_from_xml(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedStyleBodyBlob> {
+    let items = parse_style_body_xml_items(xml)?;
+    let mut fields = Vec::with_capacity(items.len() + 3);
+    fields.push("2".to_string());
+    fields.push(items.len().to_string());
+    for item in &items {
+        fields.push(format_style_body_item(item, source)?);
+    }
+    fields.push("{0}".to_string());
+    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+
+    Ok(PackedStyleBodyBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct StyleBodyXmlItem {
+    name: String,
+    value: StyleBodyXmlValue,
+}
+
+#[derive(Debug, Clone)]
+enum StyleBodyXmlValue {
+    Color(String),
+    Font(BTreeMap<String, String>),
+    Border(BTreeMap<String, String>),
+}
+
+fn parse_style_body_xml_items(xml: &[u8]) -> Result<Vec<StyleBodyXmlItem>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut items = Vec::<StyleBodyXmlItem>::new();
+    let mut item_name = None::<String>;
+    let mut color_text = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["Style"]) && local == "Item" {
+                    item_name = xml_attr_value(&event, "name");
+                    color_text = None;
+                } else if path_ends_with(&path, &["Style", "Item"]) && local == "Color" {
+                    color_text = Some(String::new());
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["Style", "Item"]) {
+                    if local == "Font" {
+                        let name = item_name
+                            .clone()
+                            .ok_or_else(|| anyhow!("Style Item name is missing"))?;
+                        items.push(StyleBodyXmlItem {
+                            name,
+                            value: StyleBodyXmlValue::Font(xml_attrs_map(&event)),
+                        });
+                    } else if local == "Border" {
+                        let name = item_name
+                            .clone()
+                            .ok_or_else(|| anyhow!("Style Item name is missing"))?;
+                        items.push(StyleBodyXmlItem {
+                            name,
+                            value: StyleBodyXmlValue::Border(xml_attrs_map(&event)),
+                        });
+                    }
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["Style", "Item", "Color"])
+                    && let Some(value) = color_text.as_mut()
+                {
+                    let text = text.xml_content()?;
+                    let text = unescape(text.as_ref())?;
+                    value.push_str(text.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["Style", "Item", "Color"])
+                    && let Some(value) = color_text.as_mut()
+                {
+                    value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if path_ends_with(&path, &["Style", "Item", "Color"])
+                    && let Some(value) = color_text.as_mut()
+                {
+                    let text = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    value.push_str(&text);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Color" && path_ends_with(&path, &["Style", "Item", "Color"]) {
+                    let name = item_name
+                        .clone()
+                        .ok_or_else(|| anyhow!("Style Item name is missing"))?;
+                    let value = color_text.take().unwrap_or_default();
+                    items.push(StyleBodyXmlItem {
+                        name,
+                        value: StyleBodyXmlValue::Color(value.trim().to_string()),
+                    });
+                } else if local == "Item" && path_ends_with(&path, &["Style", "Item"]) {
+                    item_name = None;
+                    color_text = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(items)
+}
+
+fn xml_attrs_map(event: &BytesStart<'_>) -> BTreeMap<String, String> {
+    event
+        .attributes()
+        .with_checks(false)
+        .filter_map(|attr| attr.ok())
+        .filter_map(|attr| {
+            let name = String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
+            let value = attr.unescape_value().ok().map(|value| value.into_owned())?;
+            Some((name, value))
+        })
+        .collect()
+}
+
+fn format_style_body_item(
+    item: &StyleBodyXmlItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let key = style_body_key_for_name(&item.name, source)?;
+    let (kind, value) = match &item.value {
+        StyleBodyXmlValue::Color(value) => ("0", format_style_body_color_value(value, source)?),
+        StyleBodyXmlValue::Font(attrs) => ("1", format_style_body_font_value(attrs, source)?),
+        StyleBodyXmlValue::Border(attrs) => ("2", format_style_body_border_value(attrs, source)?),
+    };
+    Ok(format!("{{{key},{kind},{value}}}"))
+}
+
+fn style_body_key_for_name(name: &str, source: Option<&MetadataSourceContext>) -> Result<String> {
+    if let Some(code) = style_body_standard_code_for_name(name) {
+        return Ok(format!("{{{code}}}"));
+    }
+    if name.starts_with("StyleItem.") {
+        let source = source.ok_or_else(|| {
+            anyhow!("source root is required to resolve Style body reference {name}")
+        })?;
+        let uuid = source.resolve_style_item_uuid(name)?;
+        return Ok(format!("{{0,{uuid}}}"));
+    }
+    Err(anyhow!("unsupported Style Item name: {name}"))
+}
+
+fn style_body_ref_key(reference: &str, source: Option<&MetadataSourceContext>) -> Result<String> {
+    let reference = reference.trim();
+    let name = reference
+        .strip_prefix("style:")
+        .ok_or_else(|| anyhow!("unsupported Style reference: {reference}"))?;
+    if style_body_standard_code_for_name(name).is_some() || name.starts_with("StyleItem.") {
+        return style_body_key_for_name(name, source);
+    }
+    style_body_key_for_name(&format!("StyleItem.{name}"), source)
+}
+
+fn format_style_body_color_value(
+    value: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value = value.trim();
+    if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() != 6 {
+            return Err(anyhow!("unsupported Style color literal: {value}"));
+        }
+        let red = u32::from_str_radix(&hex[0..2], 16)?;
+        let green = u32::from_str_radix(&hex[2..4], 16)?;
+        let blue = u32::from_str_radix(&hex[4..6], 16)?;
+        let packed = red | (green << 8) | (blue << 16);
+        return Ok(format!("{{4,0,{{{packed}}},0}}"));
+    }
+    if let Some(name) = value.strip_prefix("web:") {
+        let code = style_body_web_color_code(name)
+            .ok_or_else(|| anyhow!("unsupported Style web color: {value}"))?;
+        return Ok(format!("{{4,2,{{{code}}},2}}"));
+    }
+    if value.starts_with("style:") {
+        let key = style_body_ref_key(value, source)?;
+        return Ok(format!("{{4,3,{key},3}}"));
+    }
+    Err(anyhow!("unsupported Style color value: {value}"))
+}
+
+fn format_style_body_font_value(
+    attrs: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let reference = attrs
+        .get("ref")
+        .map(|value| style_body_ref_key(value, source))
+        .transpose()?
+        .unwrap_or_else(|| "{-20}".to_string());
+    let height = attrs
+        .get("height")
+        .map(|value| value.as_str())
+        .unwrap_or("0");
+    let bold = parse_optional_xml_bool(attrs.get("bold"))?;
+    let italic = parse_optional_xml_bool(attrs.get("italic"))?;
+    let underline = parse_optional_xml_bool(attrs.get("underline"))?;
+    let strikeout = parse_optional_xml_bool(attrs.get("strikeout"))?;
+    let scale = attrs
+        .get("scale")
+        .map(|value| value.as_str())
+        .unwrap_or("100");
+    if height == "0" && !bold && !italic && !underline && !strikeout && scale == "100" {
+        return Ok(format!("{{8,2,0,{reference},1,100}}"));
+    }
+    let weight = if bold { 700 } else { 400 };
+    Ok(format!(
+        "{{8,2,{height},{reference},{weight},{italic},{underline},{strikeout},1,{scale}}}",
+        italic = bool_code(italic),
+        underline = bool_code(underline),
+        strikeout = bool_code(strikeout),
+    ))
+}
+
+fn format_style_body_border_value(
+    attrs: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let reference = attrs
+        .get("ref")
+        .map(|value| style_body_ref_key(value, source))
+        .transpose()?
+        .unwrap_or_else(|| "{-18}".to_string());
+    Ok(format!("{{3,1,{reference},0,0,0}}"))
+}
+
+fn parse_optional_xml_bool(value: Option<&String>) -> Result<bool> {
+    match value.map(|value| value.as_str()) {
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        Some(value) => Err(anyhow!("invalid XML boolean: {value}")),
+        None => Ok(false),
+    }
+}
+
+fn bool_code(value: bool) -> u8 {
+    if value { 1 } else { 0 }
+}
+
+fn style_body_standard_code_for_name(name: &str) -> Option<i32> {
+    match name {
+        "FormBackColor" => Some(-1),
+        "FormTextColor" => Some(-11),
+        "ButtonBackColor" => Some(-3),
+        "ButtonTextColor" => Some(-15),
+        "FieldBackColor" => Some(-7),
+        "FieldTextColor" => Some(-13),
+        "FieldSelectionBackColor" => Some(-21),
+        "FieldSelectedTextColor" => Some(-10),
+        "FieldAlternativeBackColor" => Some(-14),
+        "ToolTipBackColor" => Some(-23),
+        "ToolTipTextColor" => Some(-24),
+        "SpecialTextColor" => Some(-16),
+        "NegativeTextColor" => Some(-17),
+        "BorderColor" => Some(-22),
+        "ReportHeaderBackColor" => Some(-25),
+        "ReportGroup1BackColor" => Some(-26),
+        "ReportGroup2BackColor" => Some(-27),
+        "ReportLineColor" => Some(-28),
+        "ControlBorder" => Some(-18),
+        "TextFont" => Some(-20),
+        "SmallTextFont" => Some(-30),
+        "NormalTextFont" => Some(-31),
+        "LargeTextFont" => Some(-32),
+        "ExtraLargeTextFont" => Some(-33),
+        "ButtonBorderColor" => Some(-34),
+        "TableHeaderBackColor" => Some(-35),
+        "TableHeaderTextColor" => Some(-36),
+        "TableFooterBackColor" => Some(-37),
+        "TableFooterTextColor" => Some(-38),
+        _ => None,
+    }
+}
+
+fn style_body_web_color_code(name: &str) -> Option<i32> {
+    match name {
+        "Black" => Some(8),
+        "Blue" => Some(10),
+        "Cream" => Some(20),
+        "DarkBlue" => Some(23),
+        "DarkRed" => Some(33),
+        "DarkSlateGray" => Some(37),
+        "FireBrick" => Some(44),
+        "FloralWhite" => Some(45),
+        "ForestGreen" => Some(46),
+        "Gainsboro" => Some(48),
+        "Gray" => Some(52),
+        "Green" => Some(53),
+        "HoneyDew" => Some(55),
+        "LightCyan" => Some(67),
+        "LightGoldenRod" => Some(68),
+        "LightGoldenRodYellow" => Some(69),
+        "LightGray" => Some(71),
+        "LightPink" => Some(72),
+        "LightYellow" => Some(79),
+        "Maroon" => Some(84),
+        "MintCream" => Some(97),
+        "MistyRose" => Some(98),
+        "Red" => Some(119),
+        "RosyBrown" => Some(120),
+        "Silver" => Some(128),
+        "SlateBlue" => Some(130),
+        "SteelBlue" => Some(134),
+        "Violet" => Some(140),
+        "VioletRed" => Some(141),
+        "WhiteSmoke" => Some(144),
+        "Yellow" => Some(145),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -4469,6 +4842,75 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("{1,c59e11f3-6bcb-404a-9d76-1416c12be354}"));
         assert!(inflated.contains("{\"Pattern\",{\"#\",cccccccc-cccc-4ccc-cccc-cccccccccccc}}"));
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_style_body_xml_with_standard_and_style_item_refs() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-style-body-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("StyleItems"))?;
+        std::fs::write(
+            root.join("StyleItems/ErrorBackColor.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+	<StyleItem uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+		<Properties>
+			<Name>ErrorBackColor</Name>
+		</Properties>
+	</StyleItem>
+</MetaDataObject>
+"#,
+        )?;
+        std::fs::write(
+            root.join("StyleItems/StrikeFont.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+	<StyleItem uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">
+		<Properties>
+			<Name>StrikeFont</Name>
+		</Properties>
+	</StyleItem>
+</MetaDataObject>
+"#,
+        )?;
+        let source = MetadataSourceContext::new(root.clone());
+        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
+<Style xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" version="2.21">
+	<Item name="FormBackColor">
+		<Color>web:Cream</Color>
+	</Item>
+	<Item name="ControlBorder">
+		<Border ref="style:ControlBorder"/>
+	</Item>
+	<Item name="TextFont">
+		<Font ref="style:TextFont" kind="StyleItem"/>
+	</Item>
+	<Item name="StyleItem.ErrorBackColor">
+		<Color>#FFC8C8</Color>
+	</Item>
+	<Item name="StyleItem.StrikeFont">
+		<Font ref="style:TextFont" kind="StyleItem" bold="false" italic="false" underline="false" strikeout="true"/>
+	</Item>
+</Style>
+"##;
+
+        let packed = super::pack_style_body_blob_from_xml(xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.starts_with("{2,5,"));
+        assert!(text.contains("{{-1},0,{4,2,{20},2}}"));
+        assert!(text.contains("{{-18},2,{3,1,{-18},0,0,0}}"));
+        assert!(text.contains("{{-20},1,{8,2,0,{-20},1,100}}"));
+        assert!(text.contains("{{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0,{4,0,{13158655},0}}"));
+        assert!(text.contains(
+            "{{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,{8,2,0,{-20},400,0,0,1,1,100}}"
+        ));
+        assert!(text.ends_with(",{0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
