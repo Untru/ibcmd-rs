@@ -2114,7 +2114,10 @@ fn prepare_template_body_row(
         return Ok(Vec::new());
     };
     match template_type.as_str() {
-        "DataCompositionAppearanceTemplate" | "DataCompositionSchema" | "TextDocument" => {
+        "DataCompositionAppearanceTemplate"
+        | "DataCompositionSchema"
+        | "GraphicalSchema"
+        | "TextDocument" => {
             let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type)
             else {
                 return Ok(Vec::new());
@@ -4316,6 +4319,7 @@ fn infer_raw_deflated_template_body_path(xml: &Path, template_type: &str) -> Opt
     let file_name = match template_type {
         "DataCompositionAppearanceTemplate" => "Template.xml",
         "DataCompositionSchema" => "Template.xml",
+        "GraphicalSchema" => "Template.xml",
         "TextDocument" => "Template.txt",
         _ => return None,
     };
@@ -5159,6 +5163,15 @@ mod tests {
             ),
             Some(std::path::PathBuf::from(
                 r"CommonTemplates\ReportAppearance\Ext\Template.xml"
+            ))
+        );
+        assert_eq!(
+            super::infer_raw_deflated_template_body_path(
+                r"DataProcessors\Routes\Templates\RouteSchema.xml".as_ref(),
+                "GraphicalSchema"
+            ),
+            Some(std::path::PathBuf::from(
+                r"DataProcessors\Routes\Templates\RouteSchema\Ext\Template.xml"
             ))
         );
         assert_eq!(

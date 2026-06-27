@@ -600,6 +600,7 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
             Some(("Template.xml", SourceAssetKind::InflatedBinary))
         }
         "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
+        "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
         "SpreadsheetDocument" => Some((
@@ -1828,6 +1829,8 @@ fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
         Some("DataCompositionAppearanceTemplate")
     } else if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
         Some("DataCompositionSchema")
+    } else if text.starts_with("<?xml") && text.contains("8.3/xcf/scheme") {
+        Some("GraphicalSchema")
     } else if text.starts_with("<!DOCTYPE")
         || text.starts_with("<html")
         || text.starts_with("<?xml") && text.contains("<html")
@@ -10743,6 +10746,25 @@ mod tests {
             Some("DataCompositionAppearanceTemplate")
         );
         let (path, kind) = template_body_source_asset("DataCompositionAppearanceTemplate").unwrap();
+        assert_eq!(path, "Template.xml");
+        assert!(matches!(kind, SourceAssetKind::InflatedBinary));
+    }
+
+    #[test]
+    fn detects_graphical_schema_template_body() {
+        let body = deflate_for_test(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme" version="2.21">
+	<Items/>
+</GraphicalSchema>
+"#,
+        );
+
+        assert_eq!(
+            infer_template_type_from_body(&body),
+            Some("GraphicalSchema")
+        );
+        let (path, kind) = template_body_source_asset("GraphicalSchema").unwrap();
         assert_eq!(path, "Template.xml");
         assert!(matches!(kind, SourceAssetKind::InflatedBinary));
     }
