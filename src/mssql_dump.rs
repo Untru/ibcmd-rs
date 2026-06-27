@@ -4167,7 +4167,7 @@ fn moxel_vertical_alignment(value: usize) -> Option<&'static str> {
 
 fn moxel_text_placement(value: usize) -> Option<&'static str> {
     match value {
-        0 => Some("Block"),
+        0 | 2 => Some("Block"),
         3 => Some("Wrap"),
         _ => None,
     }
@@ -8826,7 +8826,7 @@ mod tests {
             "StyleItem.ЦветШтампаЭП".to_string(),
         )]);
         let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},6,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},7,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{3221308845,1,1,1,2,139,6,2,2,0,0,0},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}}",
             &object_refs,
         )
         .unwrap();
@@ -8853,7 +8853,7 @@ mod tests {
             xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
             9
         );
-        assert_eq!(xml.matches("\t<format/>\r\n").count(), 2);
+        assert_eq!(xml.matches("\t<format/>\r\n").count(), 1);
         assert!(xml.contains("\t<format>\r\n\t\t<width>25</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>85</width>\r\n\t</format>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>226</width>\r\n\t</format>"));
@@ -8865,6 +8865,9 @@ mod tests {
         ));
         assert!(xml.contains(
             "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>90</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>1</font>\r\n\t\t<topBorder>1</topBorder>\r\n\t\t<rightBorder>1</rightBorder>\r\n\t\t<borderColor>style:ЦветШтампаЭП</borderColor>\r\n\t\t<width>139</width>\r\n\t\t<horizontalAlignment>Center</horizontalAlignment>\r\n\t\t<textColor>style:ЦветШтампаЭП</textColor>\r\n\t\t<textPlacement>Block</textPlacement>\r\n\t\t<protection>true</protection>\r\n\t\t<indent>0</indent>\r\n\t\t<autoIndent>0</autoIndent>\r\n\t</format>"
         ));
         assert!(xml.contains("\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"));
         let default_format_index_pos = xml
