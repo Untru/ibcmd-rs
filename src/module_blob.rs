@@ -6225,6 +6225,7 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
         tag,
         "UsualGroup"
             | "CommandBar"
+            | "ColumnGroup"
             | "Popup"
             | "ButtonGroup"
             | "Button"
@@ -6575,7 +6576,7 @@ fn path_ends_with_for_child_show_in_header(path: &[String], items: &[FormXmlChil
     };
     matches!(
         item.tag.as_str(),
-        "InputField" | "LabelField" | "CheckBoxField"
+        "InputField" | "LabelField" | "CheckBoxField" | "ColumnGroup"
     ) && path_ends_with(path, &[item.tag.as_str(), "ShowInHeader"])
 }
 
@@ -7208,6 +7209,7 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
         "Button"
             | "CommandBar"
             | "UsualGroup"
+            | "ColumnGroup"
             | "Popup"
             | "ButtonGroup"
             | "Table"
@@ -7238,15 +7240,17 @@ fn format_form_layout_new_top_level_item(
             command_uuids,
             source,
         ),
-        "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" => format_form_layout_new_child_item(
-            item,
-            item_uuid,
-            commands,
-            table_ids_by_name,
-            table_column_ids_by_name,
-            command_uuids,
-            source,
-        ),
+        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "ButtonGroup" => {
+            format_form_layout_new_child_item(
+                item,
+                item_uuid,
+                commands,
+                table_ids_by_name,
+                table_column_ids_by_name,
+                command_uuids,
+                source,
+            )
+        }
         "Table" => format_form_layout_new_child_item(
             item,
             item_uuid,
@@ -7292,15 +7296,17 @@ fn format_form_layout_new_child_item(
             command_uuids,
             source,
         ),
-        "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" => format_form_layout_new_group_item(
-            item,
-            item_uuid,
-            commands,
-            table_ids_by_name,
-            table_column_ids_by_name,
-            command_uuids,
-            source,
-        ),
+        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "ButtonGroup" => {
+            format_form_layout_new_group_item(
+                item,
+                item_uuid,
+                commands,
+                table_ids_by_name,
+                table_column_ids_by_name,
+                command_uuids,
+                source,
+            )
+        }
         "Table" => format_form_layout_new_table_item(
             item,
             item_uuid,
@@ -7530,6 +7536,7 @@ fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
         "Button"
             | "CommandBar"
             | "UsualGroup"
+            | "ColumnGroup"
             | "Popup"
             | "ButtonGroup"
             | "Table"
@@ -7556,6 +7563,7 @@ fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
     match tag {
         "CommandBar" => Some("0"),
         "Popup" => Some("1"),
+        "ColumnGroup" => Some("2"),
         "UsualGroup" => Some("5"),
         "ButtonGroup" => Some("6"),
         _ => None,
@@ -7569,6 +7577,16 @@ fn form_child_group_code(value: FormXmlGroup) -> Option<&'static str> {
         FormXmlGroup::AlwaysHorizontal => Some("2"),
         FormXmlGroup::HorizontalIfPossible => Some("3"),
         FormXmlGroup::InCell => Some("4"),
+    }
+}
+
+fn form_column_group_group_code(value: FormXmlGroup) -> Option<&'static str> {
+    match value {
+        FormXmlGroup::Horizontal => Some("0"),
+        FormXmlGroup::InCell => Some("2"),
+        FormXmlGroup::Vertical
+        | FormXmlGroup::AlwaysHorizontal
+        | FormXmlGroup::HorizontalIfPossible => None,
     }
 }
 
@@ -7872,6 +7890,14 @@ fn patch_form_layout_child_item_entry(
             if show_title { "1" } else { "0" }.to_string(),
         ));
     }
+    if item.tag == "ColumnGroup"
+        && (item.group.is_some() || item.show_in_header.is_some())
+        && let Some(options_range) = form_layout_column_group_options_range(text, fields)
+        && let Some(options) =
+            patch_form_layout_column_group_options(&text[options_range.clone()], item)?
+    {
+        replacements.push((options_range, options));
+    }
 
     replacements.sort_by_key(|(range, _)| range.start);
     for (range, replacement) in replacements.into_iter().rev() {
@@ -7937,6 +7963,50 @@ fn form_layout_usual_group_extended_options_range(
         .trim_start()
         .starts_with("{38")
         .then_some(range)
+}
+
+fn form_layout_column_group_options_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    if wrapper != "22" || fields.get(5).map(|range| text[range.clone()].trim()) != Some("2") {
+        return None;
+    }
+    let range = fields.get(20)?.clone();
+    text[range.clone()]
+        .trim_start()
+        .starts_with("{5")
+        .then_some(range)
+}
+
+fn patch_form_layout_column_group_options(
+    existing: &str,
+    item: &FormXmlChildItem,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("5") {
+        return Ok(None);
+    }
+    let mut replacements = Vec::<(usize, &'static str)>::new();
+    if let Some(group) = item.group
+        && let Some(code) = form_column_group_group_code(group)
+    {
+        replacements.push((1, code));
+    }
+    if let Some(show_in_header) = item.show_in_header {
+        replacements.push((3, if show_in_header { "1" } else { "0" }));
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    replacements.sort_by_key(|(index, _)| *index);
+    replacements.dedup_by_key(|(index, _)| *index);
+    for (index, value) in replacements.into_iter().rev() {
+        replace_braced_field(&mut text, index, value)?;
+    }
+    Ok(Some(text))
 }
 
 fn patch_form_layout_usual_group_extended_options(
@@ -8624,6 +8694,7 @@ fn form_layout_child_item_tag<'a>(
         "22" => match fields.get(5).map(|range| text[range.clone()].trim())? {
             "0" => Some("CommandBar"),
             "1" => Some("Popup"),
+            "2" => Some("ColumnGroup"),
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
             _ => None,
@@ -19313,6 +19384,43 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
             assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
             assert_eq!(&parsed.layout[input_fields[21].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_column_group_show_in_header() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let column_group = r#"{22,{140,22222222-2222-4222-8222-222222222222},0,0,0,2,"DebitAccountGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{5,1,1,0,3,{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{0},{"Pattern"},"",{1,0},0,1,2,2,2},0}"#;
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{column_group}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<ColumnGroup name="DebitAccountGroup" id="140">
+			<Group>InCell</Group>
+			<ShowInHeader>{value}</ShowInHeader>
+		</ColumnGroup>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let option_fields = super::scan_braced_fields(&parsed.layout, group_fields[20].start)?;
+
+            assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+            assert_eq!(&parsed.layout[group_fields[5].clone()], "2");
+            assert_eq!(&parsed.layout[option_fields[1].clone()], "2");
+            assert_eq!(&parsed.layout[option_fields[3].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
 

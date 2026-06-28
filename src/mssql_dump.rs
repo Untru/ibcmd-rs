@@ -4991,11 +4991,18 @@ fn parse_form_child_item(
     let extended_group_options = (tag == "UsualGroup")
         .then(|| parse_form_usual_group_extended_options(&fields))
         .flatten();
+    let column_group_options = (tag == "ColumnGroup")
+        .then(|| parse_form_column_group_options(&fields))
+        .flatten();
     Some(FormChildItem {
         tag,
         id: id.to_string(),
         name,
-        group: if tag == "UsualGroup" {
+        group: if tag == "ColumnGroup" {
+            column_group_options
+                .as_ref()
+                .and_then(|options| options.group)
+        } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.group)
@@ -5034,10 +5041,16 @@ fn parse_form_child_item(
                     .and_then(|field| parse_form_child_item_show_title(field))
             })
             .flatten(),
-        show_in_header: (matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
-            && form_input_field_layout_is_extended(&fields))
-        .then(|| parse_form_child_item_show_in_header(&fields))
-        .flatten(),
+        show_in_header: if tag == "ColumnGroup" {
+            column_group_options
+                .as_ref()
+                .and_then(|options| options.show_in_header)
+        } else {
+            (matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
+                && form_input_field_layout_is_extended(&fields))
+            .then(|| parse_form_child_item_show_in_header(&fields))
+            .flatten()
+        },
         read_only: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(14)
@@ -5250,6 +5263,27 @@ struct FormUsualGroupExtendedOptions {
     representation: Option<&'static str>,
 }
 
+struct FormColumnGroupOptions {
+    group: Option<&'static str>,
+    show_in_header: Option<bool>,
+}
+
+fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
+    let options = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    if options.first()?.trim() != "5" {
+        return None;
+    }
+    Some(FormColumnGroupOptions {
+        group: options
+            .get(1)
+            .and_then(|field| parse_form_column_group_group(field)),
+        show_in_header: options
+            .get(3)
+            .and_then(|field| parse_form_child_item_show_title(field))
+            .filter(|value| *value),
+    })
+}
+
 fn parse_form_usual_group_extended_options(
     fields: &[&str],
 ) -> Option<FormUsualGroupExtendedOptions> {
@@ -5339,6 +5373,14 @@ fn parse_form_child_item_group(field: &str) -> Option<&'static str> {
         "2" => Some("AlwaysHorizontal"),
         "3" => Some("HorizontalIfPossible"),
         "4" => Some("InCell"),
+        _ => None,
+    }
+}
+
+fn parse_form_column_group_group(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("Horizontal"),
+        "2" => Some("InCell"),
         _ => None,
     }
 }
@@ -5678,6 +5720,7 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
         "22" => match fields.get(5).map(|value| value.trim())? {
             "0" => Some("CommandBar"),
             "1" => Some("Popup"),
+            "2" => Some("ColumnGroup"),
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
             _ => None,
@@ -6510,7 +6553,9 @@ fn format_form_child_item_xml(
     if item.show_title == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
     }
-    if item.show_in_header == Some(false) {
+    if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
+        xml.push_str(&format!("{tab}\t<ShowInHeader>true</ShowInHeader>\r\n"));
+    } else if item.show_in_header == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
     }
     xml.push_str(&format_form_localized_section(
@@ -14645,6 +14690,31 @@ mod tests {
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<ShowInHeader>false</ShowInHeader>"));
+    }
+
+    #[test]
+    fn extracts_form_column_group_show_in_header_from_layout_code() {
+        let field = r#"{22,{140,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"DebitAccountGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{5,2,1,1,3,{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{0},{"Pattern"},"",{1,0},0,1,2,2,2},0}"#;
+
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "ColumnGroup");
+        assert_eq!(item.group, Some("InCell"));
+        assert_eq!(item.show_in_header, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains(r#"<ColumnGroup name="DebitAccountGroup" id="140">"#));
+        assert!(xml.contains("<Group>InCell</Group>"));
+        assert!(xml.contains("<ShowInHeader>true</ShowInHeader>"));
     }
 
     #[test]
