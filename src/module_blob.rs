@@ -92,6 +92,7 @@ struct FormXmlBodyProperties {
     attributes: Vec<FormXmlAttribute>,
     parameters_present: bool,
     parameters: Vec<FormXmlParameter>,
+    commands_present: bool,
     commands: Vec<FormXmlCommand>,
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
     child_items: Vec<FormXmlChildItem>,
@@ -3331,7 +3332,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             )?;
             plain.replace_range(container.layout_range, &layout);
         }
-        if !properties.commands.is_empty() {
+        if properties.commands_present {
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(commands_range) = container.trailing_ranges.get(2).cloned() {
                 let mut commands = plain[commands_range.clone()].trim().to_string();
@@ -3666,6 +3667,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if local == "Parameters" && path_ends_with(&path, &["Form"]) {
                     properties.parameters_present = true;
                 }
+                if local == "Commands" && path_ends_with(&path, &["Form"]) {
+                    properties.commands_present = true;
+                }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
                 }
@@ -3748,6 +3752,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "Parameters" && path_ends_with(&path, &["Form"]) {
                     properties.parameters_present = true;
+                }
+                if local == "Commands" && path_ends_with(&path, &["Form"]) {
+                    properties.commands_present = true;
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
@@ -6893,6 +6900,7 @@ fn patch_form_body_commands(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    retain_form_body_commands(text, commands)?;
     for command in commands {
         let patched = patch_form_body_command(text, command, source)?;
         if !patched {
@@ -6900,6 +6908,80 @@ fn patch_form_body_commands(
         }
     }
     Ok(())
+}
+
+fn retain_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> Result<()> {
+    let keep_ids = commands
+        .iter()
+        .map(|command| command.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let keep_names = commands
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(1) else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for range in fields.iter().skip(2) {
+        let entry = text[range.clone()].to_string();
+        match form_body_command_entry_identity(&entry)? {
+            Some((id, name))
+                if keep_ids.contains(id.as_str()) || keep_names.contains(name.as_str()) =>
+            {
+                entries.push(entry)
+            }
+            Some(_) => {}
+            None => entries.push(entry),
+        }
+    }
+    if entries.len() == count {
+        return Ok(());
+    }
+    let mut replacement = format!("{{0,{}", entries.len());
+    for entry in entries {
+        replacement.push(',');
+        replacement.push_str(&entry);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn form_body_command_entry_identity(text: &str) -> Result<Option<(String, String)>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+        return Ok(None);
+    }
+    let Some(identity_range) = fields.get(1) else {
+        return Ok(None);
+    };
+    let identity = scan_braced_fields(text, identity_range.start)?;
+    let Some(id) = identity
+        .first()
+        .map(|range| text[range.clone()].trim().to_string())
+        .filter(|id| !id.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(name) = fields
+        .get(2)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+    else {
+        return Ok(None);
+    };
+    Ok(Some((id, name)))
 }
 
 fn patch_form_command_interface(
@@ -15728,6 +15810,60 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_commands() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,2,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Keep\",{0},{0},0,0,0,\"KeepAction\",0,0,0,{0,0}},{11,{2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},\"Drop\",{0},{0},0,0,0,\"DropAction\",0,0,0,{0,0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Commands>
+		<Command name="Keep" id="1">
+			<Action>KeepActionNew</Action>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let commands_fields = super::scan_braced_fields(&parsed.trailing[2], 0)?;
+
+        assert_eq!(&parsed.trailing[2][commands_fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[2][commands_fields[1].clone()], "1");
+        assert!(parsed.trailing[2].contains(r#""Keep""#));
+        assert!(parsed.trailing[2].contains(r#""KeepActionNew""#));
+        assert!(!parsed.trailing[2].contains(r#""Drop""#));
+        assert!(!parsed.trailing[2].contains("DropAction"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_commands_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Drop\",{0},{0},0,0,0,\"DropAction\",0,0,0,{0,0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Commands/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
         Ok(())
     }
 
