@@ -3898,12 +3898,20 @@ struct FormBodyProperties {
     vertical_scroll: Option<&'static str>,
     conversations_representation: Option<&'static str>,
     show_command_bar: Option<bool>,
+    report_form_type: Option<&'static str>,
+    auto_show_state: Option<&'static str>,
+    report_result_view_mode: Option<&'static str>,
+    view_mode_application_on_set_report_result: Option<&'static str>,
 }
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
+const FORM_REPORT_FORM_TYPE_UUID: &str = "acbc2eeb-2efb-48e4-b78a-661fd09fcf80";
+const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048fd2df";
+const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
+    "874260df-7e23-4f02-9e10-5794914b5adf";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
 const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
@@ -4057,6 +4065,7 @@ struct FormChildItem {
 }
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
+    let report_form_type = extract_form_report_form_type(fields);
     FormBodyProperties {
         title: fields
             .get(10)
@@ -4080,6 +4089,11 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         vertical_scroll: extract_form_vertical_scroll(fields),
         conversations_representation: extract_form_conversations_representation(fields),
         show_command_bar: extract_form_show_command_bar(fields),
+        report_form_type,
+        auto_show_state: extract_form_auto_show_state(fields),
+        report_result_view_mode: extract_form_report_result_view_mode(fields),
+        view_mode_application_on_set_report_result:
+            extract_form_view_mode_application_on_set_report_result(fields),
     }
 }
 
@@ -4201,6 +4215,74 @@ fn extract_form_repost_on_write(fields: &[&str]) -> Option<bool> {
     }
 }
 
+fn extract_form_report_form_type(fields: &[&str]) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "7")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_REPORT_FORM_TYPE_UUID), Some("0")) => Some("Main"),
+        (Some(r##""#""##), Some(FORM_REPORT_FORM_TYPE_UUID), Some("1")) => Some("Settings"),
+        (Some(r##""#""##), Some(FORM_REPORT_FORM_TYPE_UUID), Some("2")) => Some("Variant"),
+        _ => None,
+    }
+}
+
+fn extract_form_auto_show_state(fields: &[&str]) -> Option<&'static str> {
+    extract_form_report_form_type(fields)?;
+    let value = form_root_property_bag_value(fields, "21")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("0")) => Some("Auto"),
+        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("1")) => {
+            Some("DontShow")
+        }
+        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("3")) => {
+            Some("ShowOnComposition")
+        }
+        _ => None,
+    }
+}
+
+fn extract_form_report_result_view_mode(fields: &[&str]) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "27")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("0")) => Some("Auto"),
+        (Some(r##""#""##), Some(FORM_REPORT_RESULT_VIEW_MODE_UUID), Some("1")) => Some("Default"),
+        _ => None,
+    }
+}
+
+fn extract_form_view_mode_application_on_set_report_result(
+    fields: &[&str],
+) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "29")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (
+            Some(r##""#""##),
+            Some(FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID),
+            Some("0"),
+        ) => Some("Auto"),
+        _ => None,
+    }
+}
+
 fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
     let value = form_root_property_bag_value(fields, "0")?;
     let value_fields = split_1c_braced_fields(value, 0)?;
@@ -4246,6 +4328,9 @@ fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
 }
 
 fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
+    if extract_form_report_form_type(fields).is_some() {
+        return None;
+    }
     let value = form_root_property_bag_value(fields, "21")?;
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
@@ -6584,6 +6669,30 @@ fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<ShowCommandBar>{}</ShowCommandBar>\r\n",
             if show_command_bar { "true" } else { "false" }
+        ));
+    }
+    if let Some(value) = properties.report_form_type {
+        xml.push_str(&format!(
+            "\t<ReportFormType>{}</ReportFormType>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.auto_show_state {
+        xml.push_str(&format!(
+            "\t<AutoShowState>{}</AutoShowState>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.report_result_view_mode {
+        xml.push_str(&format!(
+            "\t<ReportResultViewMode>{}</ReportResultViewMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.view_mode_application_on_set_report_result {
+        xml.push_str(&format!(
+            "\t<ViewModeApplicationOnSetReportResult>{}</ViewModeApplicationOnSetReportResult>\r\n",
+            escape_xml_text(value)
         ));
     }
     if let Some(command_bar) = auto_command_bar {
@@ -14439,6 +14548,40 @@ mod tests {
         assert!(form_xml.contains("<AutoTime>CurrentOrLast</AutoTime>"));
         assert!(form_xml.contains("<UsePostingMode>Regular</UsePostingMode>"));
         assert!(form_xml.contains("<RepostOnWrite>false</RepostOnWrite>"));
+    }
+
+    #[test]
+    fn extracts_report_form_options_auto_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,5,7,{"#",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,0},21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},23,{"N",0},27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,0},29,{"#",874260df-7e23-4f02-9e10-5794914b5adf,0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ReportFormType>Main</ReportFormType>"));
+        assert!(form_xml.contains("<AutoShowState>Auto</AutoShowState>"));
+        assert!(form_xml.contains("<ReportResultViewMode>Auto</ReportResultViewMode>"));
+        assert!(form_xml.contains(
+            "<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>"
+        ));
+        assert!(!form_xml.contains("<ConversationsRepresentation>"));
+    }
+
+    #[test]
+    fn extracts_report_form_options_variant_values_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,5,7,{"#",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,1},21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,3},23,{"N",1},27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,1},29,{"#",874260df-7e23-4f02-9e10-5794914b5adf,0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ReportFormType>Settings</ReportFormType>"));
+        assert!(form_xml.contains("<AutoShowState>ShowOnComposition</AutoShowState>"));
+        assert!(form_xml.contains("<ReportResultViewMode>Default</ReportResultViewMode>"));
+        assert!(form_xml.contains(
+            "<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>"
+        ));
+        assert!(!form_xml.contains("<ConversationsRepresentation>"));
     }
 
     #[test]

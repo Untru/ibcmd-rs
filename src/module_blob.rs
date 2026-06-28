@@ -98,6 +98,10 @@ struct FormXmlBodyProperties {
     vertical_scroll: Option<FormXmlVerticalScroll>,
     conversations_representation: Option<FormXmlConversationsRepresentation>,
     show_command_bar: Option<bool>,
+    report_form_type: Option<FormXmlReportFormType>,
+    auto_show_state: Option<FormXmlAutoShowState>,
+    report_result_view_mode: Option<FormXmlReportResultViewMode>,
+    view_mode_application_on_set_report_result: Option<FormXmlViewModeApplicationOnSetReportResult>,
     events_present: bool,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
@@ -331,6 +335,31 @@ enum FormXmlVerticalScroll {
 enum FormXmlConversationsRepresentation {
     DontShow,
     Show,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlReportFormType {
+    Main,
+    Settings,
+    Variant,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlAutoShowState {
+    Auto,
+    DontShow,
+    ShowOnComposition,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlReportResultViewMode {
+    Auto,
+    Default,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlViewModeApplicationOnSetReportResult {
+    Auto,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3478,6 +3507,12 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.vertical_scroll.is_some()
             || properties.conversations_representation.is_some()
             || properties.show_command_bar.is_some()
+            || properties.report_form_type.is_some()
+            || properties.auto_show_state.is_some()
+            || properties.report_result_view_mode.is_some()
+            || properties
+                .view_mode_application_on_set_report_result
+                .is_some()
             || properties.events_present
             || properties.auto_command_bar.is_some()
             || properties.child_items_present
@@ -3799,6 +3834,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
                         | "ShowCommandBar"
+                        | "ReportFormType"
+                        | "AutoShowState"
+                        | "ReportResultViewMode"
+                        | "ViewModeApplicationOnSetReportResult"
                         | "HorizontalAlign"
                         | "Autofill"
                         | "Event"
@@ -4048,6 +4087,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ReportFormType"])
+                    || path_ends_with(&path, &["Form", "AutoShowState"])
+                    || path_ends_with(&path, &["Form", "ReportResultViewMode"])
+                    || path_ends_with(&path, &["Form", "ViewModeApplicationOnSetReportResult"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
@@ -4444,6 +4487,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ReportFormType"])
+                    || path_ends_with(&path, &["Form", "AutoShowState"])
+                    || path_ends_with(&path, &["Form", "ReportResultViewMode"])
+                    || path_ends_with(&path, &["Form", "ViewModeApplicationOnSetReportResult"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
@@ -4870,6 +4917,31 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
                         properties.show_command_bar =
                             Some(parse_form_xml_bool("ShowCommandBar", text_value.trim())?);
+                    }
+                    "ReportFormType" if path_ends_with(&path, &["Form", "ReportFormType"]) => {
+                        properties.report_form_type =
+                            Some(parse_form_report_form_type_xml(text_value.trim())?);
+                    }
+                    "AutoShowState" if path_ends_with(&path, &["Form", "AutoShowState"]) => {
+                        properties.auto_show_state =
+                            Some(parse_form_auto_show_state_xml(text_value.trim())?);
+                    }
+                    "ReportResultViewMode"
+                        if path_ends_with(&path, &["Form", "ReportResultViewMode"]) =>
+                    {
+                        properties.report_result_view_mode =
+                            Some(parse_form_report_result_view_mode_xml(text_value.trim())?);
+                    }
+                    "ViewModeApplicationOnSetReportResult"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "ViewModeApplicationOnSetReportResult"],
+                        ) =>
+                    {
+                        properties.view_mode_application_on_set_report_result =
+                            Some(parse_form_view_mode_application_on_set_report_result_xml(
+                                text_value.trim(),
+                            )?);
                     }
                     "Autofill"
                         if path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"]) =>
@@ -7005,6 +7077,43 @@ fn parse_form_command_bar_location_xml(value: &str) -> Result<FormXmlCommandBarL
     }
 }
 
+fn parse_form_report_form_type_xml(value: &str) -> Result<FormXmlReportFormType> {
+    match value {
+        "Main" => Ok(FormXmlReportFormType::Main),
+        "Settings" => Ok(FormXmlReportFormType::Settings),
+        "Variant" => Ok(FormXmlReportFormType::Variant),
+        other => Err(anyhow!("unsupported Form ReportFormType: {other}")),
+    }
+}
+
+fn parse_form_auto_show_state_xml(value: &str) -> Result<FormXmlAutoShowState> {
+    match value {
+        "Auto" => Ok(FormXmlAutoShowState::Auto),
+        "DontShow" => Ok(FormXmlAutoShowState::DontShow),
+        "ShowOnComposition" => Ok(FormXmlAutoShowState::ShowOnComposition),
+        other => Err(anyhow!("unsupported Form AutoShowState: {other}")),
+    }
+}
+
+fn parse_form_report_result_view_mode_xml(value: &str) -> Result<FormXmlReportResultViewMode> {
+    match value {
+        "Auto" => Ok(FormXmlReportResultViewMode::Auto),
+        "Default" => Ok(FormXmlReportResultViewMode::Default),
+        other => Err(anyhow!("unsupported Form ReportResultViewMode: {other}")),
+    }
+}
+
+fn parse_form_view_mode_application_on_set_report_result_xml(
+    value: &str,
+) -> Result<FormXmlViewModeApplicationOnSetReportResult> {
+    match value {
+        "Auto" => Ok(FormXmlViewModeApplicationOnSetReportResult::Auto),
+        other => Err(anyhow!(
+            "unsupported Form ViewModeApplicationOnSetReportResult: {other}"
+        )),
+    }
+}
+
 fn parse_form_horizontal_align_xml(value: &str) -> Result<FormXmlHorizontalAlign> {
     match value {
         "Left" => Ok(FormXmlHorizontalAlign::Left),
@@ -7099,6 +7208,18 @@ fn patch_form_layout_properties(
     if let Some(show_command_bar) = properties.show_command_bar {
         replace_form_show_command_bar(layout, show_command_bar)?;
     }
+    if let Some(report_form_type) = properties.report_form_type {
+        replace_form_report_form_type(layout, report_form_type)?;
+    }
+    if let Some(auto_show_state) = properties.auto_show_state {
+        replace_form_auto_show_state(layout, auto_show_state)?;
+    }
+    if let Some(report_result_view_mode) = properties.report_result_view_mode {
+        replace_form_report_result_view_mode(layout, report_result_view_mode)?;
+    }
+    if let Some(value) = properties.view_mode_application_on_set_report_result {
+        replace_form_view_mode_application_on_set_report_result(layout, value)?;
+    }
     Ok(())
 }
 
@@ -7106,6 +7227,10 @@ const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050b
 const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
+const FORM_REPORT_FORM_TYPE_UUID: &str = "acbc2eeb-2efb-48e4-b78a-661fd09fcf80";
+const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048fd2df";
+const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
+    "874260df-7e23-4f02-9e10-5794914b5adf";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
 const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
@@ -7152,6 +7277,48 @@ fn replace_form_repost_on_write(layout: &mut String, value: bool) -> Result<()> 
     }
     layout.replace_range(range, if value { r#"{"B",1}"# } else { r#"{"B",0}"# });
     Ok(())
+}
+
+fn replace_form_report_form_type(layout: &mut String, value: FormXmlReportFormType) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "7",
+        FORM_REPORT_FORM_TYPE_UUID,
+        form_report_form_type_code(value),
+    )
+}
+
+fn replace_form_auto_show_state(layout: &mut String, value: FormXmlAutoShowState) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "21",
+        FORM_CONVERSATIONS_REPRESENTATION_UUID,
+        form_auto_show_state_code(value),
+    )
+}
+
+fn replace_form_report_result_view_mode(
+    layout: &mut String,
+    value: FormXmlReportResultViewMode,
+) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "27",
+        FORM_REPORT_RESULT_VIEW_MODE_UUID,
+        form_report_result_view_mode_code(value),
+    )
+}
+
+fn replace_form_view_mode_application_on_set_report_result(
+    layout: &mut String,
+    value: FormXmlViewModeApplicationOnSetReportResult,
+) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "29",
+        FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID,
+        form_view_mode_application_on_set_report_result_code(value),
+    )
 }
 
 fn replace_form_property_bag_enum(
@@ -7534,6 +7701,37 @@ fn form_conversations_representation_code(
     match value {
         FormXmlConversationsRepresentation::DontShow => "0",
         FormXmlConversationsRepresentation::Show => "1",
+    }
+}
+
+fn form_report_form_type_code(value: FormXmlReportFormType) -> &'static str {
+    match value {
+        FormXmlReportFormType::Main => "0",
+        FormXmlReportFormType::Settings => "1",
+        FormXmlReportFormType::Variant => "2",
+    }
+}
+
+fn form_auto_show_state_code(value: FormXmlAutoShowState) -> &'static str {
+    match value {
+        FormXmlAutoShowState::Auto => "0",
+        FormXmlAutoShowState::DontShow => "1",
+        FormXmlAutoShowState::ShowOnComposition => "3",
+    }
+}
+
+fn form_report_result_view_mode_code(value: FormXmlReportResultViewMode) -> &'static str {
+    match value {
+        FormXmlReportResultViewMode::Auto => "0",
+        FormXmlReportResultViewMode::Default => "1",
+    }
+}
+
+fn form_view_mode_application_on_set_report_result_code(
+    value: FormXmlViewModeApplicationOnSetReportResult,
+) -> &'static str {
+    match value {
+        FormXmlViewModeApplicationOnSetReportResult::Auto => "0",
     }
 }
 
@@ -18076,6 +18274,99 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             parsed.layout
         );
         assert!(parsed.layout.contains(r#"4,{"B",0}"#), "{}", parsed.layout);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_report_form_options_auto_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,5,7,{\"#\",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,1},21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},23,{\"N\",1},27,{\"#\",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,1},29,{\"#\",874260df-7e23-4f02-9e10-5794914b5adf,0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ReportFormType>Main</ReportFormType>
+	<AutoShowState>Auto</AutoShowState>
+	<ReportResultViewMode>Auto</ReportResultViewMode>
+	<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"7,{"#",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"29,{"#",874260df-7e23-4f02-9e10-5794914b5adf,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_report_form_options_variant_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,5,7,{\"#\",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,0},21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},23,{\"N\",0},27,{\"#\",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,0},29,{\"#\",874260df-7e23-4f02-9e10-5794914b5adf,0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ReportFormType>Variant</ReportFormType>
+	<AutoShowState>ShowOnComposition</AutoShowState>
+	<ReportResultViewMode>Default</ReportResultViewMode>
+	<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"7,{"#",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,2}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,3}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,1}"##),
+            "{}",
+            parsed.layout
+        );
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
