@@ -5789,7 +5789,7 @@ fn append_form_layout_top_level_child_item(
 fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
     matches!(
         item.tag.as_str(),
-        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "InputField"
     )
 }
 
@@ -5853,6 +5853,7 @@ fn format_form_layout_new_child_item(
             command_uuids,
             source,
         ),
+        "InputField" => Ok(format_form_layout_new_input_field_item(item, item_uuid)),
         _ => Ok(String::new()),
     }
 }
@@ -5888,8 +5889,8 @@ fn format_form_layout_new_button_item(
         })
         .unwrap_or_else(|| "{0}".to_string());
 
-    Ok(format!(
-        "{{34,{{{},{}}},0,0,0,{},{},{},{},{}}}",
+    let mut text = format!(
+        "{{34,{{{},{}}},0,0,0,{},{},{},{},{}",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
@@ -5897,7 +5898,23 @@ fn format_form_layout_new_button_item(
         item_type,
         command_ref,
         data_path_ref
-    ))
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,2,{},1,0,{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
 }
 
 fn format_form_layout_new_group_item(
@@ -5940,6 +5957,7 @@ fn format_form_layout_new_group_item(
         text.push(',');
         text.push_str(&child_text);
     }
+    text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
     Ok(text)
 }
@@ -5947,8 +5965,19 @@ fn format_form_layout_new_group_item(
 fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
     matches!(
         item.tag.as_str(),
-        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "InputField"
     )
+}
+
+fn format_form_layout_events_tail(events: &[FormXmlEvent]) -> String {
+    let mut text = String::new();
+    for event in events {
+        text.push(',');
+        text.push_str(&format_1c_string(&event.name));
+        text.push(',');
+        text.push_str(&format_1c_string(&event.handler));
+    }
+    text
 }
 
 fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
@@ -15085,6 +15114,65 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             parsed
                 .layout
                 .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_nested_input_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Main</v8:content>
+				</v8:item>
+			</Title>
+			<ChildItems>
+				<InputField name="Description" id="40">
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Description</v8:content>
+						</v8:item>
+					</Title>
+					<Events>
+						<Event name="OnChange">DescriptionOnChange</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[5].clone()], "5");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[input_fields[5].clone()], "2");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Description""#);
+        assert_eq!(
+            &parsed.layout[input_fields[9].clone()],
+            r#"{1,"en","Description"}"#
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnChange","DescriptionOnChange""#)
         );
 
         Ok(())
