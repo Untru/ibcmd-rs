@@ -4072,6 +4072,7 @@ struct FormChildItem {
     addition_source_item: Option<String>,
     title: Vec<(String, String)>,
     tooltip: Vec<(String, String)>,
+    extended_tooltip: Option<(String, String)>,
     events: Vec<FormBodyEvent>,
     data_path: Option<String>,
     command_name: Option<String>,
@@ -5786,6 +5787,7 @@ fn parse_form_child_item(
         },
         title: parse_form_child_item_title(wrapper, &fields),
         tooltip: parse_form_child_item_tooltip(wrapper, &fields),
+        extended_tooltip: parse_form_child_item_extended_tooltip(&fields),
         events: parse_form_child_item_event_fields(&fields),
         data_path,
         command_name: if tag == "Button" {
@@ -6357,6 +6359,22 @@ fn parse_form_child_item_tooltip(wrapper: &str, fields: &[&str]) -> Vec<(String,
             (!values.is_empty()).then_some(values)
         })
         .unwrap_or_default()
+}
+
+fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<(String, String)> {
+    fields.iter().find_map(|field| {
+        let nested = split_1c_braced_fields(field.trim(), 0)?;
+        if nested.first().map(|value| value.trim()) != Some("12") {
+            return None;
+        }
+        let identity = split_1c_braced_fields(nested.get(1)?.trim(), 0)?;
+        let id = identity.first()?.trim();
+        if id == "0" {
+            return None;
+        }
+        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
+        (!name.is_empty()).then(|| (name, id.to_string()))
+    })
 }
 
 fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
@@ -7300,6 +7318,13 @@ fn format_form_child_item_xml(
         &item.tooltip,
         indent + 1,
     ));
+    if let Some((name, id)) = &item.extended_tooltip {
+        xml.push_str(&format!(
+            "{tab}\t<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
+            escape_xml_text(name),
+            escape_xml_text(id)
+        ));
+    }
     if !item.events.is_empty() {
         xml.push_str(&format!("{tab}\t<Events>\r\n"));
         for event in &item.events {
@@ -15338,6 +15363,17 @@ mod tests {
             "{}",
             form_xml
         );
+        assert_eq!(
+            form_xml.matches("<ExtendedTooltip ").count(),
+            16,
+            "{}",
+            form_xml
+        );
+        assert!(
+            form_xml.contains(
+                r#"<ExtendedTooltip name="ОперандыПоказателейExtendedTooltip" id="88"/>"#
+            )
+        );
     }
 
     #[test]
@@ -15413,11 +15449,16 @@ mod tests {
         assert_eq!(item.item_type, Some("CommandBarButton"));
         assert_eq!(item.button_representation, Some("PictureAndText"));
         assert_eq!(item.default_button, Some(true));
+        assert_eq!(
+            item.extended_tooltip,
+            Some(("SaveExtendedTooltip".to_string(), "45".to_string()))
+        );
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<Type>CommandBarButton</Type>"));
         assert!(xml.contains("<Representation>PictureAndText</Representation>"));
         assert!(xml.contains("<DefaultButton>true</DefaultButton>"));
+        assert!(xml.contains(r#"<ExtendedTooltip name="SaveExtendedTooltip" id="45"/>"#));
     }
 
     #[test]
@@ -16717,6 +16758,7 @@ mod tests {
             addition_source_item: None,
             title: Vec::new(),
             tooltip: Vec::new(),
+            extended_tooltip: None,
             events: Vec::new(),
             data_path: Some("List".to_string()),
             command_name: None,
@@ -16769,6 +16811,7 @@ mod tests {
                     addition_source_item: Some("Rows".to_string()),
                     title: Vec::new(),
                     tooltip: Vec::new(),
+                    extended_tooltip: None,
                     events: Vec::new(),
                     data_path: None,
                     command_name: None,
@@ -16822,6 +16865,7 @@ mod tests {
                     addition_source_item: None,
                     title: Vec::new(),
                     tooltip: Vec::new(),
+                    extended_tooltip: None,
                     events: Vec::new(),
                     data_path: Some("List.Name".to_string()),
                     command_name: None,

@@ -273,11 +273,18 @@ struct FormXmlChildItem {
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
     tooltip: Vec<LocalizedString>,
+    extended_tooltip: Option<FormXmlExtendedTooltip>,
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
     data_path: Option<String>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlExtendedTooltip {
+    id: String,
+    name: String,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -4048,6 +4055,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with_for_child_events(&path, &current_child_items)
                 {
                     current_child_event_name = xml_attribute_value(&event, "name")?;
+                } else if local == "ExtendedTooltip"
+                    && path_ends_with_for_current_child_item(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -4096,6 +4108,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                } else if local == "ExtendedTooltip"
+                    && path_ends_with_for_current_child_item(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
                 } else if is_form_child_item_xml_tag(&local)
                     && (path.last().map(String::as_str) == Some("ChildItems")
                         || current_child_items.last().is_some_and(|item| {
@@ -6559,12 +6576,25 @@ fn parse_form_child_item_xml(
         addition_source_item: None,
         title: Vec::new(),
         tooltip: Vec::new(),
+        extended_tooltip: None,
         events: Vec::new(),
         command_name: None,
         data_path: None,
         child_items_present: false,
         child_items: Vec::new(),
     }))
+}
+
+fn parse_form_extended_tooltip_xml(
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlExtendedTooltip>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlExtendedTooltip { id, name }))
 }
 
 fn parse_nested_command_uuid_from_xml(xml: &[u8], command_name: &str) -> Result<String> {
@@ -6668,6 +6698,13 @@ fn path_ends_with_for_child_tooltip(path: &[String], items: &[FormXmlChildItem])
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "ToolTip"])
+}
+
+fn path_ends_with_for_current_child_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path.last().map(String::as_str) == Some(item.tag.as_str())
 }
 
 fn path_ends_with_for_child_events(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -9055,6 +9092,15 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((tooltip_range, format_1c_synonyms(&item.tooltip)));
     }
+    if let Some(extended_tooltip) = &item.extended_tooltip
+        && let Some(tooltip_range) = form_layout_child_item_extended_tooltip_range(text, fields)?
+        && let Some(tooltip) = patch_form_layout_child_item_extended_tooltip(
+            &text[tooltip_range.clone()],
+            extended_tooltip,
+        )?
+    {
+        replacements.push((tooltip_range, tooltip));
+    }
     if item.tag == "Button"
         && let Some(item_type) = &item.item_type
     {
@@ -10229,6 +10275,44 @@ fn form_layout_child_item_tooltip_range(
         let range = fields.get(*index)?.clone();
         scan_braced_fields(text, range.start).ok().map(|_| range)
     })
+}
+
+fn form_layout_child_item_extended_tooltip_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Result<Option<Range<usize>>> {
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let nested = scan_braced_fields(text, range.start)?;
+        if nested.first().map(|field| text[field.clone()].trim()) == Some("12") {
+            return Ok(Some(range.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn patch_form_layout_child_item_extended_tooltip(
+    existing: &str,
+    tooltip: &FormXmlExtendedTooltip,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("12") {
+        return Ok(None);
+    }
+    if let Some(identity_range) = fields.get(1).cloned() {
+        let mut identity = text[identity_range.clone()].to_string();
+        if scan_braced_fields(&identity, 0)?.get(1).is_some() {
+            replace_braced_field(&mut identity, 0, &tooltip.id)?;
+            text.replace_range(identity_range, &identity);
+        }
+    }
+    if fields.get(6).is_some() {
+        replace_braced_field(&mut text, 6, &format_1c_string(&tooltip.name))?;
+    }
+    Ok(Some(text))
 }
 
 fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &str) -> Result<bool> {
@@ -20618,6 +20702,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<Type>CommandBarButton</Type>
 			<Representation>PictureAndText</Representation>
 			<DefaultButton>true</DefaultButton>
+			<ExtendedTooltip name="SaveHelp" id="46"/>
 		</Button>
 	</ChildItems>
 </Form>
@@ -20631,6 +20716,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[button_fields[4].clone()], "0");
         assert_eq!(&parsed.layout[button_fields[10].clone()], "2");
         assert_eq!(&parsed.layout[button_fields[11].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains(r#"{12,{46,02023637-7868-4a5f-8576-835a76e0c9ba}"#)
+        );
+        assert!(parsed.layout.contains(r#""SaveHelp""#));
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
