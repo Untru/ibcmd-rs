@@ -5710,6 +5710,7 @@ fn patch_form_layout_child_item(
             commands,
             table_ids_by_name,
             table_column_ids_by_name,
+            command_uuids,
             source,
         )?;
         return Ok(true);
@@ -5944,7 +5945,10 @@ fn format_form_layout_new_group_item(
 }
 
 fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
-    matches!(item.tag.as_str(), "Button")
+    matches!(
+        item.tag.as_str(),
+        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+    )
 }
 
 fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
@@ -6012,6 +6016,7 @@ fn patch_form_layout_child_item_entry(
     commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
@@ -6080,7 +6085,113 @@ fn patch_form_layout_child_item_entry(
         text.replace_range(range, &replacement);
     }
     patch_form_layout_events(text, &item.events)?;
+    patch_form_layout_direct_child_items(
+        text,
+        item,
+        commands,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
     Ok(())
+}
+
+fn patch_form_layout_direct_child_items(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    for child in &item.child_items {
+        if !is_form_layout_creatable_nested_item(child) {
+            continue;
+        }
+        let _ = patch_or_append_form_layout_direct_child_item(
+            text,
+            child,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+    }
+    Ok(())
+}
+
+fn patch_or_append_form_layout_direct_child_item(
+    text: &mut String,
+    child: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("22") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(10).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() < 11 + count * 2 {
+        return Ok(false);
+    }
+
+    for index in 0..count {
+        let item_field_index = 12 + index * 2;
+        let Some(item_range) = fields.get(item_field_index).cloned() else {
+            return Ok(false);
+        };
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        if !form_layout_child_item_matches(text, &child_fields, child) {
+            continue;
+        }
+        let mut nested = text[item_range.clone()].to_string();
+        let nested_fields = scan_braced_fields(&nested, 0)?;
+        patch_form_layout_child_item_entry(
+            &mut nested,
+            &nested_fields,
+            child,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+        text.replace_range(item_range, &nested);
+        return Ok(true);
+    }
+
+    let child_uuid = Uuid::new_v4().hyphenated().to_string();
+    let child_text = format_form_layout_new_child_item(
+        child,
+        &child_uuid,
+        commands,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
+    let insert_at = if count == 0 {
+        count_range.end
+    } else {
+        fields
+            .get(10 + count * 2)
+            .map(|range| range.end)
+            .unwrap_or(count_range.end)
+    };
+    text.insert_str(insert_at, &format!(",{child_uuid},{child_text}"));
+    text.replace_range(count_range, &(count + 1).to_string());
+    Ok(true)
 }
 
 fn form_button_type_code(value: &str) -> Option<&'static str> {
@@ -14875,6 +14986,106 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_nested_group_tree() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<ButtonGroup name="MoreActions" id="22">
+					<ChildItems>
+						<Button name="HelpButton" id="44">
+							<Type>CommandBarButton</Type>
+							<CommandName>Form.StandardCommand.Help</CommandName>
+						</Button>
+					</ChildItems>
+				</ButtonGroup>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let command_bar_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_group_fields =
+            super::scan_braced_fields(&parsed.layout, command_bar_fields[12].start)?;
+        let button_fields =
+            super::scan_braced_fields(&parsed.layout, button_group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[command_bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[command_bar_fields[5].clone()], "0");
+        assert_eq!(&parsed.layout[command_bar_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[button_group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[button_group_fields[5].clone()], "6");
+        assert_eq!(&parsed.layout[button_group_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""HelpButton""#);
+        assert_eq!(&parsed.layout[button_fields[7].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_appends_button_to_existing_group() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{64,22222222-2222-4222-8222-222222222222},0,0,0,0,"Actions",{0},0,1,0}},"Old module",{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<Button name="HelpButton" id="44">
+					<Type>CommandBarButton</Type>
+					<CommandName>Form.StandardCommand.Help</CommandName>
+				</Button>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(
+            &parsed.layout[group_fields[1].clone()],
+            "{64,22222222-2222-4222-8222-222222222222}"
+        );
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[group_fields[11].clone()]
+        ));
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""HelpButton""#);
+        assert_eq!(&parsed.layout[button_fields[7].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
+        );
 
         Ok(())
     }
