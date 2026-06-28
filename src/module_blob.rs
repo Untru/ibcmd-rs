@@ -123,6 +123,12 @@ struct FormXmlCommand {
 struct FormXmlAttribute {
     id: String,
     name: String,
+    types: Vec<String>,
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
     main_attribute: Option<bool>,
     settings: Option<FormXmlDynamicListSettings>,
 }
@@ -3967,6 +3973,57 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
                     || path_ends_with(
@@ -4258,6 +4315,57 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
                     || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
                     || path_ends_with(
@@ -4585,6 +4693,99 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "Parameter" if path_ends_with(&path, &["Form", "Parameters", "Parameter"]) => {
                         if let Some(parameter) = current_parameter.take() {
                             properties.parameters.push(parameter);
+                        }
+                    }
+                    "Type"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Type", "Type"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                attribute.types.push(value.to_string());
+                            }
+                        }
+                    }
+                    "Length"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "StringQualifiers",
+                                "Length",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.string_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedLength"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "StringQualifiers",
+                                "AllowedLength",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.string_allowed_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Digits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "NumberQualifiers",
+                                "Digits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.number_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "FractionDigits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "NumberQualifiers",
+                                "FractionDigits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.number_fraction_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedSign"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "NumberQualifiers",
+                                "AllowedSign",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.number_allowed_sign = Some(text_value.trim().to_string());
                         }
                     }
                     "MainAttribute"
@@ -5197,6 +5398,12 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
     Ok(Some(FormXmlAttribute {
         id,
         name,
+        types: Vec::new(),
+        string_length: None,
+        string_allowed_length: None,
+        number_digits: None,
+        number_fraction_digits: None,
+        number_allowed_sign: None,
         main_attribute: None,
         settings: None,
     }))
@@ -6910,7 +7117,10 @@ fn patch_form_body_attributes(
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     for attribute in attributes {
-        let _ = patch_form_body_attribute(text, attribute, source)?;
+        let patched = patch_form_body_attribute(text, attribute, source)?;
+        if !patched {
+            let _ = append_form_body_attribute(text, attribute, source)?;
+        }
     }
     Ok(())
 }
@@ -6991,6 +7201,85 @@ fn patch_form_body_attribute_entry(
         text.replace_range(range, &replacement);
     }
     Ok(true)
+}
+
+fn append_form_body_attribute(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    if attribute.types.is_empty() {
+        return Ok(false);
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    match fields.first().map(|range| text[range.clone()].trim()) {
+        Some("0") if fields.len() == 1 => {
+            let entry = format_form_body_new_attribute(attribute, source)?;
+            *text = format!("{{4,1,{entry}}}");
+            Ok(true)
+        }
+        Some("4") => {
+            let Some(count_range) = fields.get(1).cloned() else {
+                return Ok(false);
+            };
+            let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+                return Ok(false);
+            };
+            if fields.len() != 2 + count {
+                return Ok(false);
+            }
+            let entry = format_form_body_new_attribute(attribute, source)?;
+            text.replace_range(count_range, &(count + 1).to_string());
+            let insert_at = text
+                .rfind('}')
+                .ok_or_else(|| anyhow!("Form attributes section is not closed"))?;
+            text.insert_str(insert_at, &format!(",{entry}"));
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn format_form_body_new_attribute(
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    Ok(format!(
+        "{{9,{{{}}},0,{},{},{},{},{},{},{},{},0,0,0,{},{}}}",
+        attribute.id,
+        format_1c_string(&attribute.name),
+        "{1,0}",
+        format_form_attribute_type_pattern(attribute, source)?,
+        r#"{0,{0,{"B",1},0}}"#,
+        r#"{0,{0,{"B",1},0}}"#,
+        "{0,0}",
+        "{0,0}",
+        if attribute.main_attribute == Some(true) {
+            "1"
+        } else {
+            "0"
+        },
+        "{0,0}",
+        "{0,0}"
+    ))
+}
+
+fn format_form_attribute_type_pattern(
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value_types = parse_metadata_type_pattern_elements(
+        "Form Attribute",
+        &attribute.types,
+        attribute.string_length.clone(),
+        attribute.string_allowed_length.clone(),
+        attribute.number_digits.clone(),
+        attribute.number_fraction_digits.clone(),
+        attribute.number_allowed_sign.clone(),
+        source,
+        true,
+    )?;
+    Ok(format_metadata_type_pattern(&value_types))
 }
 
 fn patch_form_dynamic_list_settings(
@@ -14743,6 +15032,55 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_attribute() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Attributes>
+		<Attribute name="Description" id="1">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+			<v8:StringQualifiers>
+				<v8:Length>80</v8:Length>
+				<v8:AllowedLength>Variable</v8:AllowedLength>
+			</v8:StringQualifiers>
+			<MainAttribute>true</MainAttribute>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let attributes_fields = super::scan_braced_fields(&parsed.trailing[0], 0)?;
+        let attribute_fields =
+            super::scan_braced_fields(&parsed.trailing[0], attributes_fields[2].start)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(&parsed.trailing[0][attributes_fields[0].clone()], "4");
+        assert_eq!(&parsed.trailing[0][attributes_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[0][attribute_fields[0].clone()], "9");
+        assert_eq!(&parsed.trailing[0][attribute_fields[1].clone()], "{1}");
+        assert_eq!(
+            &parsed.trailing[0][attribute_fields[3].clone()],
+            r#""Description""#
+        );
+        assert_eq!(&parsed.trailing[0][attribute_fields[10].clone()], "1");
+        assert!(
+            parsed.trailing[0].contains(r#""S",80"#),
+            "{}",
+            parsed.trailing[0]
+        );
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
         Ok(())
     }
 
