@@ -212,6 +212,8 @@ struct FormXmlChildItem {
     show_title: Option<bool>,
     read_only: Option<bool>,
     title_location: Option<FormXmlTitleLocation>,
+    edit_mode: Option<FormXmlEditMode>,
+    auto_edit_mode: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -271,6 +273,11 @@ enum FormXmlTitleLocation {
     None,
     Left,
     Top,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlEditMode {
+    EnterOnInput,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3692,6 +3699,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DefaultButton"
                         | "ReadOnly"
                         | "TitleLocation"
+                        | "EditMode"
+                        | "AutoEditMode"
                         | "Behavior"
                         | "Representation"
                         | "KeyParameter"
@@ -4104,6 +4113,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_read_only(&path, &current_child_items)
                     || path_ends_with_for_child_title_location(&path, &current_child_items)
+                    || path_ends_with_for_child_edit_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5465,6 +5476,23 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(parse_form_title_location_xml(text_value.trim())?);
                         }
                     }
+                    "EditMode"
+                        if path_ends_with_for_child_edit_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.edit_mode = Some(parse_form_edit_mode_xml(text_value.trim())?);
+                        }
+                    }
+                    "AutoEditMode"
+                        if path_ends_with_for_child_auto_edit_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_edit_mode = Some(parse_form_xml_bool(
+                                "ChildItem/AutoEditMode",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ShowTitle"
                         if path_ends_with_for_child_show_title(&path, &current_child_items) =>
                     {
@@ -5550,6 +5578,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DefaultButton"
                         | "ReadOnly"
                         | "TitleLocation"
+                        | "EditMode"
+                        | "AutoEditMode"
                         | "Behavior"
                         | "Representation"
                         | "lang"
@@ -5660,6 +5690,8 @@ fn parse_form_child_item_xml(
         show_title: None,
         read_only: None,
         title_location: None,
+        edit_mode: None,
+        auto_edit_mode: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5861,6 +5893,20 @@ fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChil
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
 }
 
+fn path_ends_with_for_child_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "EditMode"])
+}
+
+fn path_ends_with_for_child_auto_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoEditMode"])
+}
+
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -5973,6 +6019,13 @@ fn parse_form_title_location_xml(value: &str) -> Result<FormXmlTitleLocation> {
         other => Err(anyhow!(
             "unsupported Form InputField TitleLocation: {other}"
         )),
+    }
+}
+
+fn parse_form_edit_mode_xml(value: &str) -> Result<FormXmlEditMode> {
+    match value {
+        "EnterOnInput" => Ok(FormXmlEditMode::EnterOnInput),
+        other => Err(anyhow!("unsupported Form InputField EditMode: {other}")),
     }
 }
 
@@ -7000,6 +7053,13 @@ fn patch_form_layout_child_item_entry(
             form_input_field_title_location_code(title_location).to_string(),
         ));
     }
+    if item.tag == "InputField"
+        && form_layout_input_field_is_extended(fields)
+        && let Some(edit_mode) = form_input_field_edit_mode_code(item)
+        && let Some(edit_mode_range) = fields.get(26)
+    {
+        replacements.push((edit_mode_range.clone(), edit_mode.to_string()));
+    }
     if item.tag.ends_with("Addition")
         && let Some(item_type) = &item.item_type
         && let Some(type_code) = form_search_addition_type_code(item_type)
@@ -7421,6 +7481,15 @@ fn form_input_field_title_location_code(value: FormXmlTitleLocation) -> &'static
         FormXmlTitleLocation::None => "0",
         FormXmlTitleLocation::Left => "2",
         FormXmlTitleLocation::Top => "3",
+    }
+}
+
+fn form_input_field_edit_mode_code(item: &FormXmlChildItem) -> Option<&'static str> {
+    match (item.edit_mode, item.auto_edit_mode) {
+        (Some(FormXmlEditMode::EnterOnInput), Some(true)) => Some("2"),
+        (Some(FormXmlEditMode::EnterOnInput), None) => Some("2"),
+        (None, Some(true)) => Some("2"),
+        (None, None) | (_, Some(false)) => None,
     }
 }
 
@@ -17629,6 +17698,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[input_fields[7].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_edit_mode() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<EditMode>EnterOnInput</EditMode>
+			<AutoEditMode>true</AutoEditMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[26].clone()], "2");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())

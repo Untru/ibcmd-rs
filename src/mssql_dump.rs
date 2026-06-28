@@ -3995,6 +3995,8 @@ struct FormChildItem {
     show_title: Option<bool>,
     read_only: Option<bool>,
     title_location: Option<&'static str>,
+    edit_mode: Option<&'static str>,
+    auto_edit_mode: Option<bool>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
     title: Vec<(String, String)>,
@@ -5018,6 +5020,20 @@ fn parse_form_child_item(
         } else {
             None
         },
+        edit_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            fields
+                .get(26)
+                .and_then(|field| parse_form_input_field_edit_mode(field))
+        } else {
+            None
+        },
+        auto_edit_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            fields
+                .get(26)
+                .and_then(|field| parse_form_input_field_auto_edit_mode(field))
+        } else {
+            None
+        },
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(4)
@@ -5202,6 +5218,20 @@ fn parse_form_input_field_title_location(field: &str) -> Option<&'static str> {
         "0" => Some("None"),
         "2" => Some("Left"),
         "3" => Some("Top"),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_edit_mode(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "2" => Some("EnterOnInput"),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_auto_edit_mode(field: &str) -> Option<bool> {
+    match field.trim() {
+        "2" => Some(true),
         _ => None,
     }
 }
@@ -5877,6 +5907,15 @@ fn format_form_child_item_xml(
             "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
             escape_xml_text(title_location)
         ));
+    }
+    if let Some(edit_mode) = item.edit_mode {
+        xml.push_str(&format!(
+            "{tab}\t<EditMode>{}</EditMode>\r\n",
+            escape_xml_text(edit_mode)
+        ));
+    }
+    if item.auto_edit_mode == Some(true) {
+        xml.push_str(&format!("{tab}\t<AutoEditMode>true</AutoEditMode>\r\n"));
     }
     if let Some(group) = item.group {
         xml.push_str(&format!(
@@ -13540,6 +13579,28 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_enter_on_input_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Field",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.edit_mode, Some("EnterOnInput"));
+        assert_eq!(item.auto_edit_mode, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<EditMode>EnterOnInput</EditMode>"));
+        assert!(xml.contains("<AutoEditMode>true</AutoEditMode>"));
+    }
+
+    #[test]
     fn extracts_form_search_addition_type_from_layout_code() {
         let mut items = Vec::new();
         let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
@@ -13592,6 +13653,8 @@ mod tests {
             show_title: None,
             read_only: None,
             title_location: None,
+            edit_mode: None,
+            auto_edit_mode: None,
             item_type: None,
             addition_source_item: None,
             title: Vec::new(),
@@ -13611,6 +13674,8 @@ mod tests {
                     show_title: None,
                     read_only: None,
                     title_location: None,
+                    edit_mode: None,
+                    auto_edit_mode: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
                     title: Vec::new(),
@@ -13631,6 +13696,8 @@ mod tests {
                     show_title: None,
                     read_only: None,
                     title_location: None,
+                    edit_mode: None,
+                    auto_edit_mode: None,
                     item_type: None,
                     addition_source_item: None,
                     title: Vec::new(),
