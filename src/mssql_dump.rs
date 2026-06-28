@@ -8423,6 +8423,17 @@ enum ReturnValuesReuseValue {
     DuringSession,
 }
 
+struct CatalogProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
+struct GeneratedTypeEntry {
+    name: String,
+    category: &'static str,
+    type_id: String,
+    value_id: String,
+}
+
 struct ConstantProperties {
     value_type: ConstantValueType,
     use_standard_commands: bool,
@@ -8540,6 +8551,9 @@ fn parse_generated_type_entries_from_blob(
     if object_code == 57 {
         push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 3, "CatalogRef", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 5, "CatalogSelection", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 7, "CatalogList", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 34, "CatalogManager", &header.name);
     }
     let header_index = metadata_header_field_index(&fields, uuid);
 
@@ -8853,7 +8867,10 @@ fn extract_metadata_source_xml_with_refs(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let xml = if is_typed_metadata_source(kind) {
+    let xml = if kind == "Catalog" {
+        let catalog = parse_catalog_properties_from_text(text, uuid)?;
+        format_catalog_source_xml(&header, &catalog).into_bytes()
+    } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed).into_bytes()
     } else {
@@ -9073,6 +9090,78 @@ fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonM
         return_values_reuse: parse_return_values_reuse_flag(flags[6])?,
         server_call: parse_1c_bool_flag(flags[7])?,
     })
+}
+
+fn parse_catalog_properties_from_text(text: &str, uuid: &str) -> Option<CatalogProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("57") {
+        return None;
+    }
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("CatalogObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("CatalogRef.{}", header.name),
+        "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        5,
+        6,
+        &format!("CatalogSelection.{}", header.name),
+        "Selection",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        7,
+        8,
+        &format!("CatalogList.{}", header.name),
+        "List",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        34,
+        35,
+        &format!("CatalogManager.{}", header.name),
+        "Manager",
+    );
+    Some(CatalogProperties { generated_types })
+}
+
+fn push_generated_type_entry(
+    entries: &mut Vec<GeneratedTypeEntry>,
+    fields: &[&str],
+    type_index: usize,
+    value_index: usize,
+    name: &str,
+    category: &'static str,
+) {
+    let Some(type_id) = fields.get(type_index).copied().and_then(parse_uuid_field) else {
+        return;
+    };
+    let Some(value_id) = fields.get(value_index).copied().and_then(parse_uuid_field) else {
+        return;
+    };
+    entries.push(GeneratedTypeEntry {
+        name: name.to_string(),
+        category,
+        type_id,
+        value_id,
+    });
 }
 
 fn parse_1c_bool_flag(value: &str) -> Option<bool> {
@@ -9989,6 +10078,39 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
 \t</{kind}>\r\n\
 </MetaDataObject>"
     ));
+    xml
+}
+
+fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogProperties) -> String {
+    let mut xml = format_metadata_source_xml("Catalog", header);
+    if catalog.generated_types.is_empty() {
+        return xml;
+    }
+
+    let mut internal_info = String::from("\t\t<InternalInfo>\r\n");
+    for generated_type in &catalog.generated_types {
+        internal_info.push_str(&format!(
+            "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+            escape_xml_text(&generated_type.name),
+            escape_xml_text(generated_type.category),
+            escape_xml_text(&generated_type.type_id),
+            escape_xml_text(&generated_type.value_id)
+        ));
+    }
+    internal_info.push_str("\t\t</InternalInfo>\r\n");
+    xml = xml.replace(
+        "\t\t<Properties>",
+        &format!("{internal_info}\t\t<Properties>"),
+    );
+    if !xml.contains("xmlns:xr=") {
+        xml = xml.replace(
+            "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
+            "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\"",
+        );
+    }
     xml
 }
 
@@ -15803,6 +15925,72 @@ mod tests {
         assert_eq!(
             index.get(exchange_ref_type_id).map(String::as_str),
             Some("cfg:ExchangePlanRef.Sync")
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_generated_types_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<InternalInfo>"));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="CatalogObject.Products" category="Object">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="CatalogRef.Products" category="Ref">"#));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="CatalogSelection.Products" category="Selection">"#
+        ));
+        assert!(xml.contains(r#"<xr:GeneratedType name="CatalogList.Products" category="List">"#));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="CatalogManager.Products" category="Manager">"#)
+        );
+
+        let rows = vec![ConfigRow {
+            file_name: catalog_uuid.to_string(),
+            part_no: 0,
+            data_size: catalog_blob.len() as i64,
+            binary_hex: encode_hex_for_test(&catalog_blob),
+        }];
+        let index = build_metadata_type_index(&rows);
+        assert_eq!(
+            index.get(selection_type_id).map(String::as_str),
+            Some("cfg:CatalogSelection.Products")
+        );
+        assert_eq!(
+            index.get(list_type_id).map(String::as_str),
+            Some("cfg:CatalogList.Products")
+        );
+        assert_eq!(
+            index.get(manager_type_id).map(String::as_str),
+            Some("cfg:CatalogManager.Products")
         );
     }
 
