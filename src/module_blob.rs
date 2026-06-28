@@ -211,6 +211,7 @@ struct FormXmlChildItem {
     default_button: Option<bool>,
     show_title: Option<bool>,
     read_only: Option<bool>,
+    skip_on_input: Option<bool>,
     title_location: Option<FormXmlTitleLocation>,
     edit_mode: Option<FormXmlEditMode>,
     auto_edit_mode: Option<bool>,
@@ -3729,6 +3730,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ShowTitle"
                         | "DefaultButton"
                         | "ReadOnly"
+                        | "SkipOnInput"
                         | "TitleLocation"
                         | "EditMode"
                         | "AutoEditMode"
@@ -4163,6 +4165,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_read_only(&path, &current_child_items)
+                    || path_ends_with_for_child_skip_on_input(&path, &current_child_items)
                     || path_ends_with_for_child_title_location(&path, &current_child_items)
                     || path_ends_with_for_child_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_auto_edit_mode(&path, &current_child_items)
@@ -5544,6 +5547,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "SkipOnInput"
+                        if path_ends_with_for_child_skip_on_input(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.skip_on_input = Some(parse_form_xml_bool(
+                                "ChildItem/SkipOnInput",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "TitleLocation"
                         if path_ends_with_for_child_title_location(&path, &current_child_items) =>
                     {
@@ -5892,6 +5905,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ShowTitle"
                         | "DefaultButton"
                         | "ReadOnly"
+                        | "SkipOnInput"
                         | "TitleLocation"
                         | "EditMode"
                         | "AutoEditMode"
@@ -6024,6 +6038,7 @@ fn parse_form_child_item_xml(
         default_button: None,
         show_title: None,
         read_only: None,
+        skip_on_input: None,
         title_location: None,
         edit_mode: None,
         auto_edit_mode: None,
@@ -6241,6 +6256,13 @@ fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
+}
+
+fn path_ends_with_for_child_skip_on_input(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
 }
 
 fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7583,6 +7605,16 @@ fn patch_form_layout_child_item_entry(
         replacements.push((
             read_only_range.clone(),
             if read_only { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "InputField"
+        && let Some(skip_on_input) = item.skip_on_input
+        && form_layout_input_field_is_extended(fields)
+        && let Some(skip_on_input_range) = fields.get(15)
+    {
+        replacements.push((
+            skip_on_input_range.clone(),
+            if skip_on_input { "1" } else { "0" }.to_string(),
         ));
     }
     if item.tag == "InputField"
@@ -18425,6 +18457,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[input_fields[14].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_skip_on_input() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+            )?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<SkipOnInput>{value}</SkipOnInput>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[15].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
 
         Ok(())
     }

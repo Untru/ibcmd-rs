@@ -3994,6 +3994,7 @@ struct FormChildItem {
     default_button: Option<bool>,
     show_title: Option<bool>,
     read_only: Option<bool>,
+    skip_on_input: Option<bool>,
     title_location: Option<&'static str>,
     edit_mode: Option<&'static str>,
     auto_edit_mode: Option<bool>,
@@ -5035,6 +5036,13 @@ fn parse_form_child_item(
         } else {
             None
         },
+        skip_on_input: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            fields
+                .get(15)
+                .and_then(|field| parse_form_input_field_skip_on_input(field))
+        } else {
+            None
+        },
         title_location: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(7)
@@ -5376,6 +5384,14 @@ fn parse_form_input_field_edit_mode(field: &str) -> Option<&'static str> {
 fn parse_form_input_field_auto_edit_mode(field: &str) -> Option<bool> {
     match field.trim() {
         "2" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_skip_on_input(field: &str) -> Option<bool> {
+    match field.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
         _ => None,
     }
 }
@@ -6228,6 +6244,12 @@ fn format_form_child_item_xml(
     }
     if item.read_only == Some(true) {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
+    }
+    if let Some(skip_on_input) = item.skip_on_input {
+        xml.push_str(&format!(
+            "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
+            if skip_on_input { "true" } else { "false" }
+        ));
     }
     if let Some(title_location) = item.title_location {
         xml.push_str(&format!(
@@ -14008,6 +14030,33 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_skip_on_input_from_layout_code() {
+        for (code, expected) in [("0", false), ("1", true)] {
+            let item = parse_form_child_item(
+                &format!(
+                    r#"{{48,{{78,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"Author",1,0,{{1,0}},{{1,0}},{{0}},{{0}},1,0,{code},0,2,{{1,0}},{{1,0}},1,1,0,3,0}}"#
+                ),
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "InputField");
+            assert_eq!(item.skip_on_input, Some(expected));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains(&format!(
+                "<SkipOnInput>{}</SkipOnInput>",
+                if expected { "true" } else { "false" }
+            )));
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_title_location_from_layout_code() {
         for (code, expected) in [("0", "None"), ("2", "Left"), ("3", "Top"), ("4", "Right")] {
             let item = parse_form_child_item(
@@ -14921,6 +14970,7 @@ mod tests {
             default_button: None,
             show_title: None,
             read_only: None,
+            skip_on_input: None,
             title_location: None,
             edit_mode: None,
             auto_edit_mode: None,
@@ -14964,6 +15014,7 @@ mod tests {
                     default_button: None,
                     show_title: None,
                     read_only: None,
+                    skip_on_input: None,
                     title_location: None,
                     edit_mode: None,
                     auto_edit_mode: None,
@@ -15008,6 +15059,7 @@ mod tests {
                     default_button: None,
                     show_title: None,
                     read_only: None,
+                    skip_on_input: None,
                     title_location: None,
                     edit_mode: None,
                     auto_edit_mode: None,
