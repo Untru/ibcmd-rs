@@ -4085,6 +4085,9 @@ fn extract_form_auto_title(fields: &[&str]) -> Option<bool> {
 }
 
 fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
+    if form_root_uses_property_bag(fields) {
+        return None;
+    }
     match (
         fields.get(11).map(|field| field.trim())?,
         fields.get(13).map(|field| field.trim())?,
@@ -14119,6 +14122,18 @@ mod tests {
 
         assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
         assert!(form_xml.contains("<Customizable>false</Customizable>"));
+    }
+
+    #[test]
+    fn does_not_extract_form_auto_url_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,1,1,0,1,4,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Group>Vertical</Group>"));
+        assert!(!form_xml.contains("<AutoURL>"));
     }
 
     #[test]
