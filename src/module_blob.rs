@@ -5789,7 +5789,7 @@ fn append_form_layout_top_level_child_item(
 fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
     matches!(
         item.tag.as_str(),
-        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "InputField"
+        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "Table" | "InputField"
     )
 }
 
@@ -5813,6 +5813,15 @@ fn format_form_layout_new_top_level_item(
             source,
         ),
         "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "Table" => format_form_layout_new_child_item(
             item,
             item_uuid,
             commands,
@@ -5845,6 +5854,15 @@ fn format_form_layout_new_child_item(
             source,
         ),
         "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" => format_form_layout_new_group_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "Table" => format_form_layout_new_table_item(
             item,
             item_uuid,
             commands,
@@ -5917,6 +5935,49 @@ fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &
     text
 }
 
+fn format_form_layout_new_table_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let creatable_children = item
+        .child_items
+        .iter()
+        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .collect::<Vec<_>>();
+    let mut text = format!(
+        "{{73,{{{},{}}},0,1,0,{},0,0,0,{},{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        creatable_children.len()
+    );
+    for child in creatable_children {
+        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_text = format_form_layout_new_child_item(
+            child,
+            &child_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+        text.push(',');
+        text.push_str(&child_uuid);
+        text.push(',');
+        text.push_str(&child_text);
+    }
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
 fn format_form_layout_new_group_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
@@ -5965,7 +6026,7 @@ fn format_form_layout_new_group_item(
 fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
     matches!(
         item.tag.as_str(),
-        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "InputField"
+        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "Table" | "InputField"
     )
 }
 
@@ -6162,7 +6223,10 @@ fn patch_or_append_form_layout_direct_child_item(
     source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("22") {
+    if !matches!(
+        fields.first().map(|range| text[range.clone()].trim()),
+        Some("22" | "73")
+    ) {
         return Ok(false);
     }
     let Some(count_range) = fields.get(10).cloned() else {
@@ -15169,6 +15233,115 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             &parsed.layout[input_fields[9].clone()],
             r#"{1,"en","Description"}"#
         );
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnChange","DescriptionOnChange""#)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_with_input_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Rows</v8:content>
+				</v8:item>
+			</Title>
+			<Events>
+				<Event name="OnGetDataAtServer">RowsGetData</Event>
+			</Events>
+			<ChildItems>
+				<InputField name="Description" id="40">
+					<Events>
+						<Event name="OnChange">DescriptionOnChange</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[3].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[5].clone()], r#""Rows""#);
+        assert_eq!(
+            &parsed.layout[table_fields[9].clone()],
+            r#"{1,"en","Rows"}"#
+        );
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Description""#);
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnGetDataAtServer","RowsGetData""#)
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnChange","DescriptionOnChange""#)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_appends_input_field_to_existing_table() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},0}},"Old module",{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<ChildItems>
+				<InputField name="Description" id="40">
+					<Events>
+						<Event name="OnChange">DescriptionOnChange</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(
+            &parsed.layout[table_fields[1].clone()],
+            "{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}"
+        );
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[table_fields[11].clone()]
+        ));
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Description""#);
         assert!(
             parsed
                 .layout
