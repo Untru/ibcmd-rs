@@ -5334,12 +5334,17 @@ fn extract_form_child_items(
         .find(|attribute| attribute.main_attribute)
         .or_else(|| attributes.first())
         .map(|attribute| attribute.name.as_str());
+    let attribute_names_by_id = attributes
+        .iter()
+        .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+        .collect::<BTreeMap<_, _>>();
     let table_name_by_id = form_table_names_by_id(fields);
     let table_column_names_by_id = form_table_column_names_by_id(fields);
     parse_form_child_item_pairs(
         fields,
         main_data_path,
         None,
+        &attribute_names_by_id,
         &table_name_by_id,
         &table_column_names_by_id,
         commands,
@@ -5352,6 +5357,7 @@ fn parse_form_child_item_pairs(
     fields: &[&str],
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
@@ -5378,10 +5384,11 @@ fn parse_form_child_item_pairs(
                 complete = false;
                 break;
             };
-            if let Some(item) = parse_form_child_item(
+            if let Some(item) = parse_form_child_item_with_attrs(
                 field,
                 main_data_path,
                 parent_data_path,
+                attribute_names_by_id,
                 table_name_by_id,
                 table_column_names_by_id,
                 commands,
@@ -5471,10 +5478,33 @@ fn form_root_child_item_pairs_tail_start(fields: &[&str]) -> Option<usize> {
     None
 }
 
+#[cfg(test)]
 fn parse_form_child_item(
     field: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    parse_form_child_item_with_attrs(
+        field,
+        main_data_path,
+        parent_data_path,
+        &BTreeMap::new(),
+        table_name_by_id,
+        table_column_names_by_id,
+        commands,
+        object_refs,
+    )
+}
+
+fn parse_form_child_item_with_attrs(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
@@ -5496,20 +5526,36 @@ fn parse_form_child_item(
         id,
         main_data_path,
         parent_data_path,
+        attribute_names_by_id,
         table_name_by_id,
         table_column_names_by_id,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
-    let child_items = parse_form_child_item_pairs(
+    let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
         child_parent_data_path,
+        attribute_names_by_id,
         table_name_by_id,
         table_column_names_by_id,
         commands,
         object_refs,
     )
     .unwrap_or_default();
+    if tag == "TextDocumentField"
+        && let Some(context_menu) = parse_form_text_document_context_menu(
+            &fields,
+            main_data_path,
+            child_parent_data_path,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            commands,
+            object_refs,
+        )
+    {
+        child_items.push(context_menu);
+    }
     let extended_group_options = (tag == "UsualGroup")
         .then(|| parse_form_usual_group_extended_options(&fields))
         .flatten();
@@ -5608,7 +5654,9 @@ fn parse_form_child_item(
         } else {
             None
         },
-        title_location: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        title_location: if matches!(tag, "InputField" | "TextDocumentField")
+            && form_input_field_layout_is_extended(&fields)
+        {
             fields
                 .get(7)
                 .and_then(|field| parse_form_input_field_title_location(field))
@@ -5641,7 +5689,12 @@ fn parse_form_child_item(
         } else {
             None
         },
-        height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        height: if tag == "TextDocumentField" && form_input_field_layout_is_extended(&fields) {
+            fields
+                .get(23)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_height(&fields)
         } else if tag == "Pages" {
             fields
@@ -5805,6 +5858,31 @@ fn parse_form_child_item(
         },
         child_items,
     })
+}
+
+fn parse_form_text_document_context_menu(
+    fields: &[&str],
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    if fields.get(41).map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    parse_form_child_item_with_attrs(
+        fields.get(42)?,
+        main_data_path,
+        parent_data_path,
+        attribute_names_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        commands,
+        object_refs,
+    )
 }
 
 struct FormUsualGroupExtendedOptions {
@@ -6295,6 +6373,7 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "4" => Some("Page"),
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
+            "8" => Some("ContextMenu"),
             _ => None,
         },
         "34" => Some("Button"),
@@ -6305,6 +6384,7 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "1" => Some("LabelField"),
             "2" => Some("InputField"),
             "3" => Some("CheckBoxField"),
+            "7" => Some("TextDocumentField"),
             _ => None,
         },
         "6" => match fields.get(5).map(|value| value.trim())? {
@@ -6496,6 +6576,7 @@ fn parse_form_child_item_data_path(
     id: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
@@ -6504,11 +6585,31 @@ fn parse_form_child_item_data_path(
         "InputField" | "LabelField" | "CheckBoxField" => {
             parent_data_path.map(|parent| format!("{parent}.{name}"))
         }
+        "TextDocumentField" => fields
+            .get(11)
+            .and_then(|field| parse_form_attribute_data_path(field, name, attribute_names_by_id)),
         "Button" => fields.get(9).and_then(|field| {
             parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
         }),
         _ => table_name_by_id.get(id).cloned(),
     }
+}
+
+fn parse_form_attribute_data_path(
+    field: &str,
+    name: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    let ids = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let attribute_id = ids.first()?.trim();
+    attribute_names_by_id
+        .get(attribute_id)
+        .cloned()
+        .or_else(|| Some(name.to_string()))
 }
 
 fn parse_form_button_command_name(
@@ -15355,7 +15456,7 @@ mod tests {
     #[test]
     fn keeps_known_form_children_when_sibling_type_is_unknown() {
         let item = parse_form_child_item(
-            r#"{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"Page",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{22,{0},0,0,0,8,"ContextMenu",{1,0},{1,0}},2,11111111-1111-4111-8111-111111111111,{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"UnknownTextDocumentField",{1,0}},22222222-2222-4222-8222-222222222222,{22,{74,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"KnownGroup",{1,0},{1,0},0,1,0}}"#,
+            r#"{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"Page",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{22,{0},0,0,0,8,"ContextMenu",{1,0},{1,0}},2,11111111-1111-4111-8111-111111111111,{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,99,"UnknownField",{1,0}},22222222-2222-4222-8222-222222222222,{22,{74,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"KnownGroup",{1,0},{1,0},0,1,0}}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -15369,6 +15470,40 @@ mod tests {
         assert_eq!(item.child_items.len(), 1);
         assert_eq!(item.child_items[0].tag, "UsualGroup");
         assert_eq!(item.child_items[0].name, "KnownGroup");
+    }
+
+    #[test]
+    fn extracts_text_document_field_child_item() {
+        let mut attribute_names_by_id = BTreeMap::new();
+        attribute_names_by_id.insert("8".to_string(), "ProcedureText".to_string());
+
+        let item = parse_form_child_item_with_attrs(
+            r#"{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"ProcedureEditor",0,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{8,3,0,1,100},{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{5,50,3,1,1,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},1,0,0,1,0,{0,1,0}},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ProcedureChanged",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ProcedureEditorContextMenu",{1,0},{1,0},0,1,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{111,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ProcedureEditorExtendedTooltip",{1,0},{1,0},1,0,0,2,2},{0},0,0,0}"#,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "TextDocumentField");
+        assert_eq!(item.name, "ProcedureEditor");
+        assert_eq!(item.data_path.as_deref(), Some("ProcedureText"));
+        assert_eq!(item.title_location, Some("None"));
+        assert_eq!(item.height.as_deref(), Some("3"));
+        assert_eq!(
+            item.extended_tooltip,
+            Some((
+                "ProcedureEditorExtendedTooltip".to_string(),
+                "111".to_string()
+            ))
+        );
+        assert_eq!(item.events[0].name, "OnChange");
+        assert_eq!(item.events[0].handler, "ProcedureChanged");
+        assert_eq!(item.child_items[0].tag, "ContextMenu");
     }
 
     #[test]
@@ -15390,7 +15525,7 @@ mod tests {
         );
         assert_eq!(
             form_xml.matches("<ExtendedTooltip ").count(),
-            37,
+            41,
             "{}",
             form_xml
         );
@@ -15402,6 +15537,17 @@ mod tests {
         assert!(form_xml.contains(r#"<CommandBar name="КоманднаяПанельОператоры" id="40">"#));
         assert!(form_xml.contains(r#"<Button name="КнопкаПлюс" id="42">"#));
         assert!(form_xml.contains("<CommandName>Form.Command.КнопкаПлюс</CommandName>"));
+        assert!(
+            form_xml
+                .contains(r#"<TextDocumentField name="ПолеТекстовогоДокументаПроцедура" id="20">"#)
+        );
+        assert!(form_xml.contains("<DataPath>ПолеТекстовогоДокументаПроцедура</DataPath>"));
+        assert!(form_xml.contains(
+            r#"<ContextMenu name="ПолеТекстовогоДокументаПроцедураКонтекстноеМеню" id="21">"#
+        ));
+        assert!(form_xml.contains(
+            r#"<ExtendedTooltip name="ПолеТекстовогоДокументаПроцедураКонтекстноеМенюВставитьПоказателиExtendedTooltip" id="110"/>"#
+        ));
     }
 
     #[test]

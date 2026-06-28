@@ -3566,6 +3566,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             patch_form_layout_child_items(
                 &mut layout,
                 &properties.child_items,
+                &properties.attributes,
                 &properties.commands,
                 &form_command_uuids,
                 source,
@@ -6675,11 +6676,13 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "Pages"
             | "Page"
             | "ButtonGroup"
+            | "ContextMenu"
             | "Button"
             | "Table"
             | "InputField"
             | "LabelField"
             | "CheckBoxField"
+            | "TextDocumentField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -6851,7 +6854,8 @@ fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
+    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
+        && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
 }
 
 fn path_ends_with_for_child_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -6889,8 +6893,10 @@ fn path_ends_with_for_child_height(path: &[String], items: &[FormXmlChildItem]) 
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "InputField" | "Pages")
-        && path_ends_with(path, &[item.tag.as_str(), "Height"])
+    matches!(
+        item.tag.as_str(),
+        "InputField" | "TextDocumentField" | "Pages"
+    ) && path_ends_with(path, &[item.tag.as_str(), "Height"])
 }
 
 fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -8382,6 +8388,7 @@ fn form_layout_event_name_is_kept(name: &str, keep_identifiers: &[Vec<&str>]) ->
 fn patch_form_layout_child_items(
     layout: &mut String,
     items: &[FormXmlChildItem],
+    attributes: &[FormXmlAttribute],
     commands: &[FormXmlCommand],
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
@@ -8392,6 +8399,7 @@ fn patch_form_layout_child_items(
     }
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
     let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
+    let attribute_ids_by_name = form_attribute_ids_by_name(attributes);
     for item in items {
         if item.depth != 0 {
             continue;
@@ -8400,6 +8408,7 @@ fn patch_form_layout_child_items(
             layout,
             item,
             commands,
+            &attribute_ids_by_name,
             &table_ids_by_name,
             &table_column_ids_by_name,
             command_uuids,
@@ -8410,6 +8419,7 @@ fn patch_form_layout_child_items(
                 layout,
                 item,
                 commands,
+                &attribute_ids_by_name,
                 &table_ids_by_name,
                 &table_column_ids_by_name,
                 command_uuids,
@@ -8418,6 +8428,13 @@ fn patch_form_layout_child_items(
         }
     }
     Ok(())
+}
+
+fn form_attribute_ids_by_name(attributes: &[FormXmlAttribute]) -> BTreeMap<String, String> {
+    attributes
+        .iter()
+        .map(|attribute| (attribute.name.clone(), attribute.id.clone()))
+        .collect()
 }
 
 fn retain_form_layout_top_level_child_items(
@@ -8495,6 +8512,7 @@ fn patch_form_layout_child_item(
     text: &mut String,
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -8507,6 +8525,7 @@ fn patch_form_layout_child_item(
             &fields,
             item,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8524,6 +8543,7 @@ fn patch_form_layout_child_item(
             &mut nested,
             item,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8540,6 +8560,7 @@ fn append_form_layout_top_level_child_item(
     text: &mut String,
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -8572,6 +8593,7 @@ fn append_form_layout_top_level_child_item(
         item,
         &item_uuid,
         commands,
+        attribute_ids_by_name,
         table_ids_by_name,
         table_column_ids_by_name,
         command_uuids,
@@ -8596,9 +8618,11 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
             | "Pages"
             | "Page"
             | "ButtonGroup"
+            | "ContextMenu"
             | "Table"
             | "InputField"
             | "LabelField"
+            | "TextDocumentField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -8609,6 +8633,7 @@ fn format_form_layout_new_top_level_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -8619,16 +8644,18 @@ fn format_form_layout_new_top_level_item(
             item,
             item_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
             source,
         ),
         "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages" | "Page"
-        | "ButtonGroup" => format_form_layout_new_child_item(
+        | "ButtonGroup" | "ContextMenu" => format_form_layout_new_child_item(
             item,
             item_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8638,6 +8665,7 @@ fn format_form_layout_new_top_level_item(
             item,
             item_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8645,12 +8673,14 @@ fn format_form_layout_new_top_level_item(
         ),
         "InputField"
         | "LabelField"
+        | "TextDocumentField"
         | "SearchStringAddition"
         | "ViewStatusAddition"
         | "SearchControlAddition" => format_form_layout_new_child_item(
             item,
             item_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8664,6 +8694,7 @@ fn format_form_layout_new_child_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -8680,10 +8711,11 @@ fn format_form_layout_new_child_item(
             source,
         ),
         "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages" | "Page"
-        | "ButtonGroup" => format_form_layout_new_group_item(
+        | "ButtonGroup" | "ContextMenu" => format_form_layout_new_group_item(
             item,
             item_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8693,6 +8725,7 @@ fn format_form_layout_new_child_item(
             item,
             item_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8700,6 +8733,11 @@ fn format_form_layout_new_child_item(
         ),
         "InputField" => Ok(format_form_layout_new_input_field_item(item, item_uuid)),
         "LabelField" => Ok(format_form_layout_new_label_field_item(item, item_uuid)),
+        "TextDocumentField" => Ok(format_form_layout_new_text_document_field_item(
+            item,
+            item_uuid,
+            attribute_ids_by_name,
+        )),
         "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition" => Ok(
             format_form_layout_new_search_addition_item(item, item_uuid, table_ids_by_name),
         ),
@@ -8784,6 +8822,36 @@ fn format_form_layout_new_label_field_item(item: &FormXmlChildItem, item_uuid: &
     text
 }
 
+fn format_form_layout_new_text_document_field_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> String {
+    let title_location = item
+        .title_location
+        .map(form_input_field_title_location_code)
+        .unwrap_or("1");
+    let data_path = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| format_form_attribute_data_path(data_path, attribute_ids_by_name))
+        .unwrap_or_else(|| "{0}".to_string());
+    let height = item.height.as_deref().unwrap_or("0");
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,{},0",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        title_location,
+        format_1c_synonyms(&item.title),
+        data_path,
+        height
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
 fn format_form_layout_new_search_addition_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
@@ -8818,6 +8886,7 @@ fn format_form_layout_new_table_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -8844,6 +8913,7 @@ fn format_form_layout_new_table_item(
             child,
             &child_uuid,
             commands,
+            attribute_ids_by_name,
             &nested_table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8863,6 +8933,7 @@ fn format_form_layout_new_group_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -8897,6 +8968,7 @@ fn format_form_layout_new_group_item(
             child,
             &child_uuid,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -8923,9 +8995,11 @@ fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
             | "Pages"
             | "Page"
             | "ButtonGroup"
+            | "ContextMenu"
             | "Table"
             | "InputField"
             | "LabelField"
+            | "TextDocumentField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -8952,6 +9026,7 @@ fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
         "Page" => Some("4"),
         "UsualGroup" => Some("5"),
         "ButtonGroup" => Some("6"),
+        "ContextMenu" => Some("8"),
         _ => None,
     }
 }
@@ -9068,6 +9143,7 @@ fn patch_form_layout_child_item_entry(
     fields: &[Range<usize>],
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -9183,6 +9259,15 @@ fn patch_form_layout_child_item_entry(
             form_input_field_title_location_code(title_location).to_string(),
         ));
     }
+    if item.tag == "TextDocumentField"
+        && let Some(title_location) = item.title_location
+        && let Some(title_location_range) = fields.get(7)
+    {
+        replacements.push((
+            title_location_range.clone(),
+            form_input_field_title_location_code(title_location).to_string(),
+        ));
+    }
     if item.tag == "InputField"
         && form_layout_input_field_is_extended(fields)
         && let Some(edit_mode) = form_input_field_edit_mode_code(item)
@@ -9227,6 +9312,12 @@ fn patch_form_layout_child_item_entry(
     if item.tag == "Pages"
         && let Some(height) = &item.height
         && let Some(height_range) = fields.get(13)
+    {
+        replacements.push((height_range.clone(), height.to_string()));
+    }
+    if item.tag == "TextDocumentField"
+        && let Some(height) = &item.height
+        && let Some(height_range) = fields.get(23)
     {
         replacements.push((height_range.clone(), height.to_string()));
     }
@@ -9278,9 +9369,17 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((data_path_range.clone(), data_path_ref));
     }
+    if item.tag == "TextDocumentField"
+        && let Some(data_path) = &item.data_path
+        && let Some(data_path_range) = fields.get(11)
+        && let Some(data_path_ref) =
+            format_form_attribute_data_path(data_path, attribute_ids_by_name)
+    {
+        replacements.push((data_path_range.clone(), data_path_ref));
+    }
     if matches!(
         item.tag.as_str(),
-        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup"
+        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup" | "ContextMenu"
     ) && let Some(group) = item.group
         && form_layout_usual_group_extended_options_range(text, fields).is_none()
         && let Some(group_code) = form_child_group_code(group)
@@ -9316,7 +9415,7 @@ fn patch_form_layout_child_item_entry(
     }
     if matches!(
         item.tag.as_str(),
-        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup"
+        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup" | "ContextMenu"
     ) && let Some(show_title) = item.show_title
         && let Some(show_title_range) = fields.get(9)
     {
@@ -9343,6 +9442,7 @@ fn patch_form_layout_child_item_entry(
         text,
         item,
         commands,
+        attribute_ids_by_name,
         table_ids_by_name,
         table_column_ids_by_name,
         command_uuids,
@@ -9789,6 +9889,7 @@ fn patch_form_layout_direct_child_items(
     text: &mut String,
     item: &FormXmlChildItem,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -9805,6 +9906,7 @@ fn patch_form_layout_direct_child_items(
             text,
             child,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -9892,6 +9994,7 @@ fn patch_or_append_form_layout_direct_child_item(
     text: &mut String,
     child: &FormXmlChildItem,
     commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
     command_uuids: &BTreeMap<String, String>,
@@ -9924,6 +10027,7 @@ fn patch_or_append_form_layout_direct_child_item(
             &nested_fields,
             child,
             commands,
+            attribute_ids_by_name,
             table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
@@ -9938,6 +10042,7 @@ fn patch_or_append_form_layout_direct_child_item(
         child,
         &child_uuid,
         commands,
+        attribute_ids_by_name,
         table_ids_by_name,
         table_column_ids_by_name,
         command_uuids,
@@ -10146,6 +10251,14 @@ fn format_form_button_data_path(
     Some(format!("{{2,{{{table_id}}},{{{column_id}}}}}"))
 }
 
+fn format_form_attribute_data_path(
+    data_path: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> Option<String> {
+    let attribute_id = attribute_ids_by_name.get(data_path.trim())?;
+    Some(format!("{{1,{{{attribute_id}}}}}"))
+}
+
 fn format_form_button_command_reference(
     existing: &str,
     command_name: &str,
@@ -10194,6 +10307,7 @@ fn form_layout_child_item_tag<'a>(
             "4" => Some("Page"),
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
+            "8" => Some("ContextMenu"),
             _ => None,
         },
         "34" => Some("Button"),
@@ -10204,6 +10318,7 @@ fn form_layout_child_item_tag<'a>(
             "1" => Some("LabelField"),
             "2" => Some("InputField"),
             "3" => Some("CheckBoxField"),
+            "7" => Some("TextDocumentField"),
             _ => None,
         },
         "6" => match fields.get(5).map(|range| text[range.clone()].trim())? {
@@ -21559,6 +21674,43 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[options_fields[3].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_text_document_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+        )?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<TextDocumentField name="ProcedureEditor" id="20">
+			<DataPath>ProcedureText</DataPath>
+			<TitleLocation>None</TitleLocation>
+			<Height>5</Height>
+		</TextDocumentField>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="ProcedureText" id="8"/>
+	</Attributes>
+</Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let text_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+        assert_eq!(
+            &parsed.layout[text_fields[6].clone()],
+            r#""ProcedureEditor""#
+        );
+        assert_eq!(&parsed.layout[text_fields[7].clone()], "0");
+        assert_eq!(&parsed.layout[text_fields[11].clone()], "{1,{8}}");
+        assert_eq!(&parsed.layout[text_fields[23].clone()], "5");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
