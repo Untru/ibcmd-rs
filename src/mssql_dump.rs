@@ -5236,12 +5236,14 @@ fn parse_form_input_field_title_location(field: &str) -> Option<&'static str> {
         "0" => Some("None"),
         "2" => Some("Left"),
         "3" => Some("Top"),
+        "4" => Some("Right"),
         _ => None,
     }
 }
 
 fn parse_form_input_field_edit_mode(field: &str) -> Option<&'static str> {
     match field.trim() {
+        "0" => Some("Directly"),
         "2" => Some("EnterOnInput"),
         _ => None,
     }
@@ -13619,7 +13621,7 @@ mod tests {
 
     #[test]
     fn extracts_form_input_field_title_location_from_layout_code() {
-        for (code, expected) in [("0", "None"), ("2", "Left"), ("3", "Top")] {
+        for (code, expected) in [("0", "None"), ("2", "Left"), ("3", "Top"), ("4", "Right")] {
             let item = parse_form_child_item(
                 &format!(
                     r#"{{48,{{78,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"Field",{code},0,{{1,0}},{{1,0}},{{0}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0}}"#
@@ -13659,6 +13661,28 @@ mod tests {
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<EditMode>EnterOnInput</EditMode>"));
         assert!(xml.contains("<AutoEditMode>true</AutoEditMode>"));
+    }
+
+    #[test]
+    fn extracts_form_input_field_edit_mode_directly_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Field",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.edit_mode, Some("Directly"));
+        assert_eq!(item.auto_edit_mode, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<EditMode>Directly</EditMode>"));
+        assert!(!xml.contains("<AutoEditMode>"));
     }
 
     #[test]

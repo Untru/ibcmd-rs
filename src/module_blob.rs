@@ -276,10 +276,12 @@ enum FormXmlTitleLocation {
     None,
     Left,
     Top,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlEditMode {
+    Directly,
     EnterOnInput,
 }
 
@@ -6091,6 +6093,7 @@ fn parse_form_title_location_xml(value: &str) -> Result<FormXmlTitleLocation> {
         "None" => Ok(FormXmlTitleLocation::None),
         "Left" => Ok(FormXmlTitleLocation::Left),
         "Top" => Ok(FormXmlTitleLocation::Top),
+        "Right" => Ok(FormXmlTitleLocation::Right),
         other => Err(anyhow!(
             "unsupported Form InputField TitleLocation: {other}"
         )),
@@ -6099,6 +6102,7 @@ fn parse_form_title_location_xml(value: &str) -> Result<FormXmlTitleLocation> {
 
 fn parse_form_edit_mode_xml(value: &str) -> Result<FormXmlEditMode> {
     match value {
+        "Directly" => Ok(FormXmlEditMode::Directly),
         "EnterOnInput" => Ok(FormXmlEditMode::EnterOnInput),
         other => Err(anyhow!("unsupported Form InputField EditMode: {other}")),
     }
@@ -7602,15 +7606,17 @@ fn form_input_field_title_location_code(value: FormXmlTitleLocation) -> &'static
         FormXmlTitleLocation::None => "0",
         FormXmlTitleLocation::Left => "2",
         FormXmlTitleLocation::Top => "3",
+        FormXmlTitleLocation::Right => "4",
     }
 }
 
 fn form_input_field_edit_mode_code(item: &FormXmlChildItem) -> Option<&'static str> {
     match (item.edit_mode, item.auto_edit_mode) {
+        (Some(FormXmlEditMode::Directly), None) => Some("0"),
         (Some(FormXmlEditMode::EnterOnInput), Some(true)) => Some("2"),
         (Some(FormXmlEditMode::EnterOnInput), None) => Some("2"),
         (None, Some(true)) => Some("2"),
-        (None, None) | (_, Some(false)) => None,
+        (None, None) | (Some(FormXmlEditMode::Directly), Some(true)) | (_, Some(false)) => None,
     }
 }
 
@@ -17825,6 +17831,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_existing_input_field_title_location_right() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<TitleLocation>Right</TitleLocation>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[7].clone()], "4");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_input_field_edit_mode() -> anyhow::Result<()> {
         let base = super::deflate_raw(
             br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1}},"Old module",{0}}"#,
@@ -17847,6 +17880,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[input_fields[26].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_edit_mode_directly() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<EditMode>Directly</EditMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[26].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
