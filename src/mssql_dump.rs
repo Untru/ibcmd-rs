@@ -4008,6 +4008,7 @@ struct FormChildItem {
     choice_list_button: Option<bool>,
     spin_button: Option<bool>,
     quick_choice: Option<bool>,
+    choose_type: Option<bool>,
     auto_mark_incomplete: Option<bool>,
     choice_button_representation: Option<&'static str>,
     item_type: Option<&'static str>,
@@ -5102,6 +5103,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        choose_type: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_choose_type(&fields)
+        } else {
+            None
+        },
         auto_mark_incomplete: if tag == "InputField" && form_input_field_layout_is_extended(&fields)
         {
             parse_form_input_field_auto_mark_incomplete(&fields)
@@ -5419,6 +5425,14 @@ fn parse_form_input_field_quick_choice(fields: &[&str]) -> Option<bool> {
     match nested.get(23).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_choose_type(fields: &[&str]) -> Option<bool> {
+    let nested = form_input_field_extended_options(fields)?;
+    match nested.get(32).map(|field| field.trim())? {
+        "0" => Some(false),
         _ => None,
     }
 }
@@ -6182,6 +6196,9 @@ fn format_form_child_item_xml(
             "{tab}\t<QuickChoice>{}</QuickChoice>\r\n",
             if quick_choice { "true" } else { "false" }
         ));
+    }
+    if item.choose_type == Some(false) {
+        xml.push_str(&format!("{tab}\t<ChooseType>false</ChooseType>\r\n"));
     }
     if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
         xml.push_str(&format!(
@@ -14327,6 +14344,42 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_choose_type_from_layout_code() {
+        for (code, expected) in [("0", Some(false)), ("1", None)] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Field""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[32] = code.to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let field = format!("{{{}}}", input_fields.join(","));
+
+            let item = parse_form_child_item(
+                &field,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "InputField");
+            assert_eq!(item.choose_type, expected);
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert_eq!(
+                xml.contains("<ChooseType>false</ChooseType>"),
+                expected == Some(false)
+            );
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_auto_mark_incomplete_from_layout_code() {
         for (code, expected) in [("0", false), ("1", true)] {
             let mut input_fields = vec!["0".to_string(); 40];
@@ -14467,6 +14520,7 @@ mod tests {
             choice_list_button: None,
             spin_button: None,
             quick_choice: None,
+            choose_type: None,
             auto_mark_incomplete: None,
             choice_button_representation: None,
             item_type: None,
@@ -14501,6 +14555,7 @@ mod tests {
                     choice_list_button: None,
                     spin_button: None,
                     quick_choice: None,
+                    choose_type: None,
                     auto_mark_incomplete: None,
                     choice_button_representation: None,
                     item_type: Some("SearchStringRepresentation"),
@@ -14536,6 +14591,7 @@ mod tests {
                     choice_list_button: None,
                     spin_button: None,
                     quick_choice: None,
+                    choose_type: None,
                     auto_mark_incomplete: None,
                     choice_button_representation: None,
                     item_type: None,
