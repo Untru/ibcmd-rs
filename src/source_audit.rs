@@ -203,7 +203,9 @@ pub fn audit_source_load_coverage_from_manifest(
                 bytes: file.size_bytes,
                 reason: "full Form.xml body is not compiled by current loader".to_string(),
             });
-        } else if is_form_ext_non_module_file(&file.path) {
+        } else if is_form_ext_non_module_file(&file.path)
+            && !is_supported_form_item_asset_file(&file.path)
+        {
             ignored_form_ext_files += 1;
             ignored_form_ext_bytes += file.size_bytes;
             known_uncovered.push(SourceLoadCoverageItem {
@@ -476,6 +478,7 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower == "ext/mainsectioncommandinterface.xml"
         || lower == "ext/clientapplicationinterface.xml"
         || lower == "ext/standaloneconfigurationcontent.bin"
+        || is_supported_form_item_asset_file(&lower)
 }
 
 fn is_supported_additional_indexes_file(lower_path: &str) -> bool {
@@ -496,6 +499,26 @@ fn is_form_ext_non_module_file(path: &str) -> bool {
     lower.contains("/ext/form/")
         && !lower.ends_with("/ext/form/module.bsl")
         && !lower.ends_with("/ext/form.xml")
+}
+
+fn is_supported_form_item_asset_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.contains("/ext/form/items/") {
+        return false;
+    }
+    let Some(name) = lower.rsplit('/').next() else {
+        return false;
+    };
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        stem,
+        "picture" | "rowspicture" | "valuespicture" | "headerpicture"
+    ) && matches!(
+        extension,
+        "png" | "bmp" | "gif" | "svg" | "jpg" | "jpeg" | "ico"
+    )
 }
 
 fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &str) -> bool {
@@ -1324,13 +1347,13 @@ mod tests {
         assert_eq!(report.stage_entry_files, 4);
         assert_eq!(report.module_files, 6);
         assert_eq!(report.supported_module_files, 6);
-        assert_eq!(report.supported_ext_body_files, 8);
-        assert_eq!(report.potentially_stageable_body_files, 14);
+        assert_eq!(report.supported_ext_body_files, 9);
+        assert_eq!(report.potentially_stageable_body_files, 15);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);
-        assert_eq!(report.ignored_form_ext_files, 1);
-        assert_eq!(report.known_uncovered_files, 2);
+        assert_eq!(report.ignored_form_ext_files, 0);
+        assert_eq!(report.known_uncovered_files, 1);
         assert!(
             report
                 .top_known_uncovered

@@ -3194,10 +3194,10 @@ fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
     } else if bytes.starts_with(b"PK\x03\x04") {
         "Picture.zip"
     } else if let Ok(text) = std::str::from_utf8(bytes) {
-        let text = text.trim_start_matches('\u{feff}').trim_start();
-        if text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg") {
+        let trimmed = text.trim_start_matches('\u{feff}').trim_start();
+        if is_svg_text(text) {
             "Picture.svg"
-        } else if text.starts_with('<') {
+        } else if trimmed.starts_with('<') {
             "Picture.xml"
         } else {
             "Picture.txt"
@@ -3205,6 +3205,18 @@ fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
     } else {
         "Picture.bin"
     }
+}
+
+fn is_svg_content(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    is_svg_text(text)
+}
+
+fn is_svg_text(text: &str) -> bool {
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg")
 }
 
 fn extract_base64_payload(text: &str) -> Option<&str> {
@@ -4282,6 +4294,9 @@ fn is_form_item_picture_content(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"GIF87a")
         || bytes.starts_with(b"GIF89a")
         || bytes.starts_with(b"\x00\x00\x01\x00")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"BM")
+        || is_svg_content(bytes)
 }
 
 fn nearest_form_item_name(text: &str, marker_start: usize) -> Option<String> {
@@ -13331,6 +13346,20 @@ mod tests {
             .exists());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recognizes_form_item_picture_asset_formats() {
+        assert!(is_form_item_picture_content(b"\x89PNG\r\n\x1a\npayload"));
+        assert!(is_form_item_picture_content(b"GIF87apayload"));
+        assert!(is_form_item_picture_content(b"\x00\x00\x01\x00payload"));
+        assert!(is_form_item_picture_content(b"\xff\xd8\xff\xe0payload"));
+        assert!(is_form_item_picture_content(b"BMpayload"));
+        assert!(is_form_item_picture_content(b"<svg/>"));
+        assert!(is_form_item_picture_content(
+            b"<?xml version=\"1.0\"?><svg/>"
+        ));
+        assert!(!is_form_item_picture_content(b"plain text"));
     }
 
     #[test]

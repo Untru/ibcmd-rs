@@ -43,7 +43,7 @@ use crate::module_blob::{
     VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
     pack_help_blob_from_parts, pack_module_blob_bytes,
     pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
     pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
@@ -2931,11 +2931,13 @@ fn prepare_form_body_row(
     } else {
         None
     };
-    let packed = pack_form_body_blob_from_form_xml_with_source(
+    let form_item_assets_root = form_path.with_extension("").join("Items");
+    let packed = pack_form_body_blob_from_form_xml_with_source_and_assets(
         &base_body,
         &form_xml,
         module_text.as_deref(),
         source,
+        Some(&form_item_assets_root),
     )
     .with_context(|| format!("failed to pack Form body {}", form_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {

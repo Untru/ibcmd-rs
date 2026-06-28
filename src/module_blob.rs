@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
@@ -3271,6 +3271,22 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
     module_text: Option<&[u8]>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml_with_source_and_assets(
+        base_blob,
+        form_xml,
+        module_text,
+        source,
+        None,
+    )
+}
+
+pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+    form_item_assets_root: Option<&Path>,
+) -> Result<PackedRawDeflatedBlob> {
     let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
     let mut plain =
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
@@ -3347,6 +3363,9 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
             .trim_start_matches('\u{feff}');
         plain.replace_range(container.module_range, &format_1c_string(module_text));
     }
+    if let Some(form_item_assets_root) = form_item_assets_root {
+        patch_form_item_picture_assets(&mut plain, form_item_assets_root)?;
+    }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -3354,6 +3373,199 @@ pub fn pack_form_body_blob_from_form_xml_with_source(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Result<()> {
+    if !assets_root.is_dir() {
+        return Ok(());
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    let mut occurrences_by_item = BTreeMap::<String, usize>::new();
+    let mut offset = 0usize;
+    let prefix = "{#base64:";
+    while let Some(relative_start) = plain[offset..].find(prefix) {
+        let marker_start = offset + relative_start;
+        let payload_start = marker_start + prefix.len();
+        let Some(relative_end) = plain[payload_start..].find('}') else {
+            break;
+        };
+        let payload_end = payload_start + relative_end;
+        if let Some(current_content) = decode_base64_mime(&plain[payload_start..payload_end])
+            && is_form_item_picture_asset_content(&current_content)
+            && let Some(item_name) = nearest_form_item_asset_name(plain, marker_start)
+        {
+            let occurrence = occurrences_by_item.entry(item_name.clone()).or_insert(0);
+            let file_name = form_item_asset_file_name(&item_name, &current_content, *occurrence);
+            *occurrence += 1;
+            if let Some(path) = resolve_form_item_asset_path(assets_root, &item_name, &file_name) {
+                let content = fs::read(&path).with_context(|| {
+                    format!("failed to read Form item asset {}", path.display())
+                })?;
+                if is_form_item_picture_asset_content(&content) {
+                    replacements.push((payload_start..payload_end, encode_base64(&content)));
+                }
+            }
+        }
+        offset = payload_end + 1;
+    }
+
+    for (range, payload) in replacements.into_iter().rev() {
+        plain.replace_range(range, &payload);
+    }
+    Ok(())
+}
+
+fn resolve_form_item_asset_path(
+    assets_root: &Path,
+    item_name: &str,
+    file_name: &str,
+) -> Option<PathBuf> {
+    let item_dir = assets_root.join(sanitize_source_path_segment(item_name));
+    let exact = item_dir.join(file_name);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let stem = file_name
+        .split_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let entries = fs::read_dir(&item_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(candidate_stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if candidate_stem == stem {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn is_form_item_picture_asset_content(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"GIF87a")
+        || bytes.starts_with(b"GIF89a")
+        || bytes.starts_with(b"\x00\x00\x01\x00")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"BM")
+        || is_svg_content(bytes)
+}
+
+fn is_svg_content(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg")
+}
+
+fn nearest_form_item_asset_name(text: &str, marker_start: usize) -> Option<String> {
+    nearest_form_item_asset_name_in_window(text, marker_start, 4096)
+        .or_else(|| nearest_form_item_asset_name_in_window(text, marker_start, 12_288))
+}
+
+fn nearest_form_item_asset_name_in_window(
+    text: &str,
+    marker_start: usize,
+    window_size: usize,
+) -> Option<String> {
+    let mut window_start = marker_start.saturating_sub(window_size);
+    while window_start > 0 && !text.is_char_boundary(window_start) {
+        window_start -= 1;
+    }
+    let window = &text[window_start..marker_start];
+    let mut candidates = Vec::<String>::new();
+    let mut offset = 0usize;
+    while let Some(relative_quote) = window[offset..].find('"') {
+        let quote_start = offset + relative_quote;
+        let content_start = quote_start + 1;
+        let Some(relative_end) = window[content_start..].find('"') else {
+            break;
+        };
+        let quote_end = content_start + relative_end;
+        let value = &window[content_start..quote_end];
+        if is_probable_form_item_asset_name(value) {
+            candidates.push(value.to_string());
+        }
+        offset = quote_end + 1;
+    }
+    candidates.into_iter().rev().find(|value| {
+        value != "Picture"
+            && value != "RowsPicture"
+            && value != "ValuesPicture"
+            && value != "HeaderPicture"
+    })
+}
+
+fn is_probable_form_item_asset_name(value: &str) -> bool {
+    if value.is_empty() || value.len() > 160 || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    value.chars().all(|ch| {
+        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
+    })
+}
+
+fn form_item_asset_file_name(item_name: &str, content: &[u8], occurrence: usize) -> String {
+    let property_name = if item_name.contains("ИндексКартинки") {
+        if occurrence == 0 {
+            "HeaderPicture"
+        } else {
+            "ValuesPicture"
+        }
+    } else if item_name.contains("Авторегистрация") || item_name.ends_with("Пиктограмма")
+    {
+        "ValuesPicture"
+    } else if (item_name.starts_with("Дерево") || item_name.starts_with("Список"))
+        && !item_name.contains("КонтекстноеМеню")
+        && !item_name.contains("Добавить")
+        && !item_name.contains("Удалить")
+        && !item_name.contains("Показать")
+    {
+        "RowsPicture"
+    } else {
+        "Picture"
+    };
+    format!("{property_name}.{}", form_item_asset_extension(content))
+}
+
+fn form_item_asset_extension(content: &[u8]) -> &'static str {
+    if content.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "png"
+    } else if content.starts_with(b"GIF87a") || content.starts_with(b"GIF89a") {
+        "gif"
+    } else if content.starts_with(b"\xff\xd8\xff") {
+        "jpg"
+    } else if content.starts_with(b"BM") {
+        "bmp"
+    } else if content.starts_with(b"\x00\x00\x01\x00") {
+        "ico"
+    } else if is_svg_content(content) {
+        "svg"
+    } else {
+        "bin"
+    }
+}
+
+fn sanitize_source_path_segment(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+            output.push('_');
+        } else {
+            output.push(ch);
+        }
+    }
+    if output.trim().is_empty() {
+        "Unnamed".to_string()
+    } else {
+        output
+    }
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
@@ -11184,6 +11396,52 @@ fn encode_base64(bytes: &[u8]) -> String {
     output
 }
 
+fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
+    let values = input
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect::<Vec<_>>();
+    if values.len() % 4 != 0 {
+        return None;
+    }
+
+    let mut output = Vec::with_capacity(values.len() / 4 * 3);
+    for chunk in values.chunks(4) {
+        let mut decoded = [0u8; 4];
+        let mut padding = 0usize;
+        for (index, byte) in chunk.iter().copied().enumerate() {
+            if byte == b'=' {
+                padding += 1;
+                decoded[index] = 0;
+                continue;
+            }
+            if padding > 0 {
+                return None;
+            }
+            decoded[index] = base64_value(byte)?;
+        }
+        output.push((decoded[0] << 2) | (decoded[1] >> 4));
+        if padding < 2 {
+            output.push((decoded[1] << 4) | (decoded[2] >> 2));
+        }
+        if padding < 1 {
+            output.push((decoded[2] << 6) | decoded[3]);
+        }
+    }
+    Some(output)
+}
+
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
 fn parse_hex_u32(bytes: &[u8]) -> Result<u32> {
     let text = std::str::from_utf8(bytes)?;
     Ok(u32::from_str_radix(text, 16)?)
@@ -13436,6 +13694,40 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(packed.plain_bytes, text.len());
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_item_picture_assets_from_source_layout() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-item-assets-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let assets_root = root.join("Items");
+        std::fs::create_dir_all(assets_root.join("ДеревоТоваров"))?;
+        let new_png = b"\x89PNG\r\n\x1a\nnew";
+        std::fs::write(
+            assets_root.join("ДеревоТоваров").join("RowsPicture.png"),
+            new_png,
+        )?;
+        let base = super::deflate_raw(
+            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}}}}"
+                .as_bytes(),
+        )?;
+
+        let packed = super::pack_form_body_blob_from_form_xml_with_source_and_assets(
+            &base,
+            b"",
+            None,
+            None,
+            Some(&assets_root),
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(&format!("{{#base64:{}}}", super::encode_base64(new_png))));
+        assert!(!text.contains("{#base64:iVBORw0KGgo=}"));
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
