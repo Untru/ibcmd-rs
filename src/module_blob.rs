@@ -6028,6 +6028,9 @@ fn patch_form_layout_child_items(
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
     let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
     for item in items {
+        if item.depth != 0 {
+            continue;
+        }
         let patched = patch_form_layout_child_item(
             layout,
             item,
@@ -6037,7 +6040,7 @@ fn patch_form_layout_child_items(
             command_uuids,
             source,
         )?;
-        if !patched && item.depth == 0 {
+        if !patched {
             let _ = append_form_layout_top_level_child_item(
                 layout,
                 item,
@@ -16469,6 +16472,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<Events>
 				<Event name="OnGetDataAtServer">NewGetData</Event>
 			</Events>
+			<ChildItems/>
 		</Table>
 	</ChildItems>
 </Form>
@@ -17367,6 +17371,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
         assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
         assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_nested_child_does_not_patch_other_parent() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Left",0,0,0,{1,0},1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{48,{40,22222222-2222-4222-8222-222222222222},0,0,0,2,"OldLeft",1,0,{1,0}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{73,{26,33333333-3333-4333-8333-333333333333},0,1,0,"Rows",0,0,0,{1,0},0}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Left" id="25"/>
+		<Table name="Rows" id="26">
+			<ChildItems>
+				<InputField name="NewRows" id="40"/>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""OldLeft""#), "{}", parsed.layout);
+        assert!(parsed.layout.contains(r#""NewRows""#), "{}", parsed.layout);
 
         Ok(())
     }
