@@ -6671,6 +6671,7 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
         tag,
         "UsualGroup"
             | "CommandBar"
+            | "AutoCommandBar"
             | "ColumnGroup"
             | "Popup"
             | "Pages"
@@ -8612,6 +8613,7 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
         item.tag.as_str(),
         "Button"
             | "CommandBar"
+            | "AutoCommandBar"
             | "UsualGroup"
             | "ColumnGroup"
             | "Popup"
@@ -8650,8 +8652,8 @@ fn format_form_layout_new_top_level_item(
             command_uuids,
             source,
         ),
-        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages" | "Page"
-        | "ButtonGroup" | "ContextMenu" => format_form_layout_new_child_item(
+        "CommandBar" | "AutoCommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages"
+        | "Page" | "ButtonGroup" | "ContextMenu" => format_form_layout_new_child_item(
             item,
             item_uuid,
             commands,
@@ -8710,8 +8712,8 @@ fn format_form_layout_new_child_item(
             command_uuids,
             source,
         ),
-        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages" | "Page"
-        | "ButtonGroup" | "ContextMenu" => format_form_layout_new_group_item(
+        "CommandBar" | "AutoCommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages"
+        | "Page" | "ButtonGroup" | "ContextMenu" => format_form_layout_new_group_item(
             item,
             item_uuid,
             commands,
@@ -8989,6 +8991,7 @@ fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
         item.tag.as_str(),
         "Button"
             | "CommandBar"
+            | "AutoCommandBar"
             | "UsualGroup"
             | "ColumnGroup"
             | "Popup"
@@ -9020,6 +9023,7 @@ fn format_form_layout_events_tail(events: &[FormXmlEvent]) -> String {
 fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
     match tag {
         "CommandBar" => Some("0"),
+        "AutoCommandBar" => Some("9"),
         "Popup" => Some("1"),
         "ColumnGroup" => Some("2"),
         "Pages" => Some("3"),
@@ -9379,7 +9383,14 @@ fn patch_form_layout_child_item_entry(
     }
     if matches!(
         item.tag.as_str(),
-        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup" | "ContextMenu"
+        "CommandBar"
+            | "AutoCommandBar"
+            | "UsualGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
     ) && let Some(group) = item.group
         && form_layout_usual_group_extended_options_range(text, fields).is_none()
         && let Some(group_code) = form_child_group_code(group)
@@ -9415,7 +9426,14 @@ fn patch_form_layout_child_item_entry(
     }
     if matches!(
         item.tag.as_str(),
-        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup" | "ContextMenu"
+        "CommandBar"
+            | "AutoCommandBar"
+            | "UsualGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
     ) && let Some(show_title) = item.show_title
         && let Some(show_title_range) = fields.get(9)
     {
@@ -10301,6 +10319,7 @@ fn form_layout_child_item_tag<'a>(
     match wrapper {
         "22" => match fields.get(5).map(|range| text[range.clone()].trim())? {
             "0" => Some("CommandBar"),
+            "9" => Some("AutoCommandBar"),
             "1" => Some("Popup"),
             "2" => Some("ColumnGroup"),
             "3" => Some("Pages"),
@@ -23106,6 +23125,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             r#""SearchRows""#
         );
         assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_with_auto_command_bar() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<AutoCommandBar name="RowsBar" id="27"/>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[bar_fields[5].clone()], "9");
+        assert_eq!(&parsed.layout[bar_fields[6].clone()], r#""RowsBar""#);
 
         Ok(())
     }

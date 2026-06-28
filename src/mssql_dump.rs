@@ -5542,6 +5542,32 @@ fn parse_form_child_item_with_attrs(
         object_refs,
     )
     .unwrap_or_default();
+    if tag == "Table" {
+        append_form_table_service_child_items(
+            &mut child_items,
+            &fields,
+            main_data_path,
+            child_parent_data_path,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            commands,
+            object_refs,
+        );
+    } else if tag.ends_with("Addition") {
+        append_form_child_items_by_tag(
+            &mut child_items,
+            &fields,
+            &["ContextMenu"],
+            main_data_path,
+            child_parent_data_path,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            commands,
+            object_refs,
+        );
+    }
     if tag == "TextDocumentField"
         && let Some(context_menu) = parse_form_text_document_context_menu(
             &fields,
@@ -5858,6 +5884,85 @@ fn parse_form_child_item_with_attrs(
         },
         child_items,
     })
+}
+
+fn append_form_table_service_child_items(
+    child_items: &mut Vec<FormChildItem>,
+    fields: &[&str],
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) {
+    append_form_child_items_by_tag(
+        child_items,
+        fields,
+        &[
+            "ContextMenu",
+            "AutoCommandBar",
+            "SearchStringAddition",
+            "ViewStatusAddition",
+            "SearchControlAddition",
+        ],
+        main_data_path,
+        parent_data_path,
+        attribute_names_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        commands,
+        object_refs,
+    );
+}
+
+fn append_form_child_items_by_tag(
+    child_items: &mut Vec<FormChildItem>,
+    fields: &[&str],
+    tags: &[&str],
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) {
+    for field in fields {
+        let Some(item) = parse_form_child_item_with_attrs(
+            field,
+            main_data_path,
+            parent_data_path,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            commands,
+            object_refs,
+        ) else {
+            continue;
+        };
+        if !tags.contains(&item.tag) {
+            continue;
+        }
+        if child_items.iter().any(|existing| {
+            existing.tag == item.tag && (existing.id == item.id || existing.name == item.name)
+        }) {
+            continue;
+        }
+        child_items.push(item);
+    }
+}
+
+fn is_form_table_service_child_item(tag: &str) -> bool {
+    matches!(
+        tag,
+        "ContextMenu"
+            | "AutoCommandBar"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
 }
 
 fn parse_form_text_document_context_menu(
@@ -6374,6 +6479,7 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
             "8" => Some("ContextMenu"),
+            "9" => Some("AutoCommandBar"),
             _ => None,
         },
         "34" => Some("Button"),
@@ -7446,13 +7552,17 @@ fn format_form_child_item_xml(
     if item.tag == "Table" {
         let mut regular_children = Vec::new();
         for child in &item.child_items {
-            if child.tag.ends_with("Addition") {
-                xml.push_str(&format_form_child_item_xml(child, indent + 1, true));
+            if is_form_table_service_child_item(child.tag) {
+                xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
             } else {
                 regular_children.push(child.clone());
             }
         }
         xml.push_str(&format_form_child_items_xml(&regular_children, indent + 1));
+    } else if item.tag.ends_with("Addition") {
+        for child in &item.child_items {
+            xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+        }
     } else if !table_addition_child {
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
     }
@@ -15525,7 +15635,7 @@ mod tests {
         );
         assert_eq!(
             form_xml.matches("<ExtendedTooltip ").count(),
-            41,
+            52,
             "{}",
             form_xml
         );
@@ -15547,6 +15657,24 @@ mod tests {
         ));
         assert!(form_xml.contains(
             r#"<ExtendedTooltip name="ПолеТекстовогоДокументаПроцедураКонтекстноеМенюВставитьПоказателиExtendedTooltip" id="110"/>"#
+        ));
+        assert!(
+            form_xml
+                .contains(r#"<AutoCommandBar name="ОперандыДляРасчетовКоманднаяПанель" id="13">"#)
+        );
+        assert!(
+            form_xml.contains(r#"<Button name="ОперандыДляРасчетовВставитьПоказатели" id="158">"#)
+        );
+        assert!(form_xml.contains(
+            r#"<ExtendedTooltip name="ОперандыДляРасшифровокВставитьПоказателиExtendedTooltip" id="119"/>"#
+        ));
+        assert!(
+            form_xml.contains(
+                r#"<SearchStringAddition name="ОперандыДляРасчетовСтрокаПоиска" id="140">"#
+            )
+        );
+        assert!(form_xml.contains(
+            r#"<ContextMenu name="ОперандыДляРасчетовСтрокаПоискаКонтекстноеМеню" id="141">"#
         ));
     }
 
@@ -16880,6 +17008,65 @@ mod tests {
         assert!(xml.contains("<Type>ViewStatusRepresentation</Type>"));
         assert!(xml.contains("<SearchControlAddition"));
         assert!(xml.contains("<Type>SearchControl</Type>"));
+    }
+
+    #[test]
+    fn extracts_table_service_child_items_from_layout_fields() {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let commands = vec![FormCommand {
+            id: "15".to_string(),
+            reference_uuid: command_uuid.to_string(),
+            name: "Run".to_string(),
+            title: Vec::new(),
+            tooltip: Vec::new(),
+            action: String::new(),
+            functional_options: Vec::new(),
+            current_row_use: None,
+        }];
+        let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
+        let item = parse_form_child_item(
+            &format!(
+                r#"{{73,{{25,{form_uuid}}},0,1,0,"Rows",0,0,0,{{1,0}},0,1,{{22,{{26,{form_uuid}}},0,0,0,8,"RowsContext",{{1,0}},{{1,0}},0,1,0}},1,{{22,{{27,{form_uuid}}},0,0,0,9,"RowsBar",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{4,4,{{0}},4}},{{8,3,0,1,100}},{{0,0,0}},1,{{1,0,1,0}},1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{{34,{{28,{form_uuid}}},0,0,0,"RowsButton",{{1,0}},1,{{15,{command_uuid}}},{{0}},0,1,0,0,2,2,0,0,0,{{12,{{31,{form_uuid}}},0,0,0,0,"RowsButtonTip",{{1,0}},{{1,0}},1,0,0,2,2}}}}}},1,{{6,{{29,{form_uuid}}},0,0,0,0,"RowsSearch",{{1,0}},{{1,0}},1,1,0,1,{{1,0}},0,1,{{22,{{30,{form_uuid}}},0,0,0,8,"RowsSearchContext",{{1,0}},{{1,0}}}},0,0,{{25,0}},{{12,{{32,{form_uuid}}},0,0,0,0,"RowsSearchTip",{{1,0}},{{1,0}},1,0,0,2,2}}}}}}"#
+            ),
+            Some("RowsData"),
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &commands,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(
+            item.child_items
+                .iter()
+                .map(|child| child.tag)
+                .collect::<Vec<_>>(),
+            vec!["ContextMenu", "AutoCommandBar", "SearchStringAddition"]
+        );
+        assert_eq!(item.child_items[1].child_items[0].tag, "Button");
+        assert_eq!(
+            item.child_items[1].child_items[0].command_name.as_deref(),
+            Some("Form.Command.Run")
+        );
+        assert_eq!(item.child_items[2].child_items[0].tag, "ContextMenu");
+        assert_eq!(
+            item.child_items[2].extended_tooltip,
+            Some(("RowsSearchTip".to_string(), "32".to_string()))
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+
+        let context_at = xml.find("\t\t<ContextMenu").unwrap();
+        let bar_at = xml.find("\t\t<AutoCommandBar").unwrap();
+        let addition_at = xml.find("\t\t<SearchStringAddition").unwrap();
+        assert!(context_at < bar_at);
+        assert!(bar_at < addition_at);
+        assert!(xml.contains(r#"<Button name="RowsButton" id="28">"#));
+        assert!(xml.contains(r#"<ContextMenu name="RowsSearchContext" id="30">"#));
+        assert!(!xml.contains("\t\t<ChildItems>\r\n\t\t\t<SearchStringAddition"));
     }
 
     #[test]
