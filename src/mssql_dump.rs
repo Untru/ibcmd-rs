@@ -5580,6 +5580,19 @@ fn parse_form_child_item_with_attrs(
             commands,
             object_refs,
         );
+    } else if is_form_field_direct_service_parent(tag) {
+        append_form_child_items_by_tag(
+            &mut child_items,
+            &fields,
+            &["ContextMenu"],
+            main_data_path,
+            child_parent_data_path,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            commands,
+            object_refs,
+        );
     } else if tag.ends_with("Addition") {
         append_form_child_items_by_tag(
             &mut child_items,
@@ -5595,6 +5608,7 @@ fn parse_form_child_item_with_attrs(
         );
     }
     if tag == "TextDocumentField"
+        && child_items.iter().all(|item| item.tag != "ContextMenu")
         && let Some(context_menu) = parse_form_text_document_context_menu(
             &fields,
             main_data_path,
@@ -5910,6 +5924,13 @@ fn parse_form_child_item_with_attrs(
         },
         child_items,
     })
+}
+
+fn is_form_field_direct_service_parent(tag: &str) -> bool {
+    matches!(
+        tag,
+        "InputField" | "LabelField" | "CheckBoxField" | "TextDocumentField"
+    )
 }
 
 fn append_form_table_service_child_items(
@@ -7592,6 +7613,18 @@ fn format_form_child_item_xml(
     } else if item.tag.ends_with("Addition") {
         for child in &item.child_items {
             xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+        }
+    } else if is_form_field_direct_service_parent(item.tag) {
+        let mut regular_children = Vec::new();
+        for child in &item.child_items {
+            if child.tag == "ContextMenu" {
+                xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+            } else {
+                regular_children.push(child.clone());
+            }
+        }
+        if !table_addition_child {
+            xml.push_str(&format_form_child_items_xml(&regular_children, indent + 1));
         }
     } else if !table_addition_child {
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
@@ -15713,6 +15746,13 @@ mod tests {
             form_xml
                 .contains(r#"<ExtendedTooltip name="ПроверитьФормулуExtendedTooltip" id="77"/>"#)
         );
+        assert!(
+            form_xml.contains(r#"<ContextMenu name="ПотребительРасчетаКонтекстноеМеню" id="23">"#)
+        );
+        assert!(
+            form_xml
+                .contains(r#"<ContextMenu name="ОперандыДляРасчетовКодКонтекстноеМеню" id="15">"#)
+        );
     }
 
     #[test]
@@ -17006,6 +17046,48 @@ mod tests {
                 "<ChoiceButtonRepresentation>{expected}</ChoiceButtonRepresentation>"
             )));
         }
+    }
+
+    #[test]
+    fn extracts_field_context_menu_as_direct_child() {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut fields = vec!["0".to_string(); 43];
+        fields[0] = "48".to_string();
+        fields[1] = format!("{{22,{form_uuid}}}");
+        fields[5] = "2".to_string();
+        fields[6] = r#""Field""#.to_string();
+        fields[7] = "1".to_string();
+        fields[9] = "{1,0}".to_string();
+        fields[10] = "{1,0}".to_string();
+        fields[11] = "{0}".to_string();
+        fields[18] = "{1,0}".to_string();
+        fields[19] = "{1,0}".to_string();
+        fields[41] = "1".to_string();
+        fields[42] = format!(
+            r#"{{22,{{23,{form_uuid}}},0,0,0,8,"FieldContextMenu",{{1,0}},{{1,0}},0,1,0}}"#
+        );
+        let field = format!("{{{}}}", fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.child_items.len(), 1);
+        assert_eq!(item.child_items[0].tag, "ContextMenu");
+        assert_eq!(item.child_items[0].name, "FieldContextMenu");
+
+        let xml = format_form_child_items_xml(&[item], 1);
+
+        assert!(xml.contains(r#"<ContextMenu name="FieldContextMenu" id="23">"#));
+        assert!(!xml.contains("\t\t<ChildItems>\r\n\t\t\t<ContextMenu"));
     }
 
     #[test]

@@ -9544,6 +9544,16 @@ fn patch_form_layout_child_item_entry(
         command_uuids,
         source,
     )?;
+    patch_form_layout_single_child_items(
+        text,
+        item,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
     Ok(())
 }
 
@@ -10015,6 +10025,136 @@ fn patch_form_layout_direct_child_items(
         )?;
     }
     Ok(())
+}
+
+fn patch_form_layout_single_child_items(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    if item.child_items_present {
+        retain_form_layout_single_child_items(text, &item.child_items)?;
+    }
+    for child in &item.child_items {
+        if child.tag != "ContextMenu" {
+            continue;
+        }
+        let _ = patch_or_append_form_layout_single_child_item(
+            text,
+            child,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+    }
+    Ok(())
+}
+
+fn form_layout_single_child_item_slot(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<(Range<usize>, Option<Range<usize>>)> {
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("48") {
+        return None;
+    }
+    let count_range = fields.get(41)?.clone();
+    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
+    match count {
+        0 => Some((count_range, None)),
+        1 => fields
+            .get(42)
+            .cloned()
+            .map(|item_range| (count_range, Some(item_range))),
+        _ => None,
+    }
+}
+
+fn retain_form_layout_single_child_items(
+    text: &mut String,
+    children: &[FormXmlChildItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let Some((count_range, Some(item_range))) = form_layout_single_child_item_slot(text, &fields)
+    else {
+        return Ok(());
+    };
+    let item_text = text[item_range.clone()].to_string();
+    let item_fields = scan_braced_fields(&item_text, 0)?;
+    let is_known_item = item_fields
+        .first()
+        .and_then(|range| {
+            form_layout_child_item_tag(item_text[range.clone()].trim(), &item_text, &item_fields)
+        })
+        .is_some();
+    let keep = !is_known_item
+        || children
+            .iter()
+            .any(|child| form_layout_child_item_matches(&item_text, &item_fields, child));
+    if keep {
+        return Ok(());
+    }
+    text.replace_range(count_range.start..item_range.end, "0");
+    Ok(())
+}
+
+fn patch_or_append_form_layout_single_child_item(
+    text: &mut String,
+    child: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    let Some((count_range, item_range)) = form_layout_single_child_item_slot(text, &fields) else {
+        return Ok(false);
+    };
+    if let Some(item_range) = item_range {
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        if !form_layout_child_item_matches(text, &child_fields, child) {
+            return Ok(false);
+        }
+        let mut nested = text[item_range.clone()].to_string();
+        let nested_fields = scan_braced_fields(&nested, 0)?;
+        patch_form_layout_child_item_entry(
+            &mut nested,
+            &nested_fields,
+            child,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+        text.replace_range(item_range, &nested);
+        return Ok(true);
+    }
+
+    let child_uuid = Uuid::new_v4().hyphenated().to_string();
+    let child_text = format_form_layout_new_child_item(
+        child,
+        &child_uuid,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
+    text.insert_str(count_range.end, &format!(",{child_text}"));
+    text.replace_range(count_range, "1");
+    Ok(true)
 }
 
 fn retain_form_layout_direct_child_items(
@@ -19836,6 +19976,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[bar_fields[21].clone()], "1");
         assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
         assert_eq!(&parsed.layout[button_fields[5].clone()], r#""NewButton""#);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_context_menu() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "2".to_string();
+        field_parts[6] = r#""Field""#.to_string();
+        field_parts[7] = "1".to_string();
+        field_parts[9] = "{1,0}".to_string();
+        field_parts[10] = "{1,0}".to_string();
+        field_parts[11] = "{0}".to_string();
+        field_parts[18] = "{1,0}".to_string();
+        field_parts[19] = "{1,0}".to_string();
+        field_parts[41] = "1".to_string();
+        field_parts[42] =
+            format!(r#"{{22,{{23,{form_uuid}}},0,0,0,8,"OldMenu",{{1,0}},{{1,0}},0,1,0}}"#);
+        let field = format!("{{{}}}", field_parts.join(","));
+        let base_text = format!(
+            "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{field}}},\"Old module\",{{0}}}}"
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<InputField name="Field" id="22">
+			<ContextMenu name="NewMenu" id="23"/>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
+
+        assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
+        assert_eq!(&parsed.layout[context_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
+        assert!(!parsed.layout.contains("OldMenu"));
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
