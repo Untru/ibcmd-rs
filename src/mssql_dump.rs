@@ -7443,7 +7443,9 @@ fn format_form_child_item_xml(
             ));
         }
         if item.enable_start_drag == Some(true) {
-            xml.push_str(&format!("{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"));
+            xml.push_str(&format!(
+                "{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"
+            ));
         }
         if item.enable_drag == Some(true) {
             xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
@@ -15787,6 +15789,33 @@ mod tests {
     }
 
     #[test]
+    fn extracts_table_layout_properties() {
+        let mut attribute_names_by_id = BTreeMap::new();
+        attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+
+        let item = parse_form_child_item_with_attrs(
+            r#"{73,{25,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},0,{1,{6}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(item.data_path.as_deref(), Some("Rows"));
+        assert_eq!(item.table_representation, Some("List"));
+        assert_eq!(item.height_in_table_rows.as_deref(), Some("6"));
+        assert_eq!(item.row_selection_mode, Some("Cell"));
+        assert_eq!(item.enable_start_drag, Some(true));
+        assert_eq!(item.enable_drag, Some(true));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+    }
+
+    #[test]
     fn extracts_real_sfc_page_scroll_on_compress() {
         let form_body = fs::read(
             r"lab\sfc\verify\event_aliases_after_patch_20260628\Config\f1335af3-b387-4b08-b9f0-d742466fb011.0__part0.bin",
@@ -15814,6 +15843,15 @@ mod tests {
                 r#"<ExtendedTooltip name="ОперандыПоказателейExtendedTooltip" id="88"/>"#
             )
         );
+        assert!(form_xml.contains(r#"<Table name="ОперандыДляРасчетов" id="11">"#));
+        assert!(form_xml.contains("<DataPath>ОперандыДляРасчетов</DataPath>"));
+        assert!(form_xml.contains("<DataPath>ОперандыДляРасшифровок</DataPath>"));
+        assert!(form_xml.contains("<Representation>List</Representation>"));
+        assert!(form_xml.contains("<HeightInTableRows>6</HeightInTableRows>"));
+        assert!(form_xml.contains("<RowSelectionMode>Cell</RowSelectionMode>"));
+        assert!(form_xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
+        assert!(form_xml.contains("<EnableDrag>true</EnableDrag>"));
+        assert!(form_xml.contains("<FileDragMode>AsFile</FileDragMode>"));
         assert!(form_xml.contains(r#"<CommandBar name="КоманднаяПанельОператоры" id="40">"#));
         assert!(form_xml.contains(r#"<Button name="КнопкаПлюс" id="42">"#));
         assert!(form_xml.contains("<CommandName>Form.Command.КнопкаПлюс</CommandName>"));

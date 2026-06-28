@@ -3923,6 +3923,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Common"
                         | "CommandName"
                         | "DataPath"
+                        | "HeightInTableRows"
+                        | "RowSelectionMode"
+                        | "EnableStartDrag"
+                        | "EnableDrag"
+                        | "FileDragMode"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -5980,6 +5985,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         }
                     }
                     "Representation"
+                        if path_ends_with_for_child_table_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_representation = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Representation"
                         if path_ends_with_for_child_button_representation(
                             &path,
                             &current_child_items,
@@ -5988,6 +6003,59 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(item) = current_child_items.last_mut() {
                             item.button_representation =
                                 Some(parse_form_button_representation_xml(text_value.trim())?);
+                        }
+                    }
+                    "HeightInTableRows"
+                        if path_ends_with_for_child_height_in_table_rows(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.height_in_table_rows = Some(parse_form_dimension_xml(
+                                "ChildItem/HeightInTableRows",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "RowSelectionMode"
+                        if path_ends_with_for_child_row_selection_mode(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.row_selection_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "EnableStartDrag"
+                        if path_ends_with_for_child_enable_start_drag(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.enable_start_drag = Some(parse_form_xml_bool(
+                                "ChildItem/EnableStartDrag",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "EnableDrag"
+                        if path_ends_with_for_child_enable_drag(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.enable_drag = Some(parse_form_xml_bool(
+                                "ChildItem/EnableDrag",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "FileDragMode"
+                        if path_ends_with_for_child_file_drag_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.file_drag_mode = Some(text_value.trim().to_string());
                         }
                     }
                     "DefaultButton"
@@ -7188,6 +7256,57 @@ fn path_ends_with_for_child_data_path(path: &[String], items: &[FormXmlChildItem
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "DataPath"])
+}
+
+fn path_ends_with_for_child_table_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_height_in_table_rows(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HeightInTableRows"])
+}
+
+fn path_ends_with_for_child_row_selection_mode(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RowSelectionMode"])
+}
+
+fn path_ends_with_for_child_enable_start_drag(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "EnableStartDrag"])
+}
+
+fn path_ends_with_for_child_enable_drag(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "EnableDrag"])
+}
+
+fn path_ends_with_for_child_file_drag_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "FileDragMode"])
 }
 
 fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
@@ -9283,6 +9402,55 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((tooltip_range, tooltip));
     }
+    if item.tag == "Table" {
+        if let Some(representation) = &item.table_representation
+            && let Some(code) = form_table_representation_code(representation)
+            && let Some(representation_range) = fields.get(8)
+        {
+            replacements.push((representation_range.clone(), code.to_string()));
+        }
+        if let Some(data_path) = &item.data_path
+            && let Some(data_path_range) = fields.get(11)
+            && text[data_path_range.clone()].trim_start().starts_with('{')
+            && let Some(data_path_ref) =
+                format_form_attribute_data_path(data_path, attribute_ids_by_name)
+        {
+            replacements.push((data_path_range.clone(), data_path_ref));
+        }
+        if let Some(height) = &item.height_in_table_rows
+            && let Some(height_range) = fields.get(21)
+        {
+            replacements.push((height_range.clone(), height.to_string()));
+        }
+        if let Some(row_selection_mode) = &item.row_selection_mode
+            && let Some(code) = form_table_row_selection_mode_code(row_selection_mode)
+            && let Some(row_selection_range) = fields.get(24)
+        {
+            replacements.push((row_selection_range.clone(), code.to_string()));
+        }
+        if let Some(enable_start_drag) = item.enable_start_drag
+            && let Some(enable_start_drag_range) = fields.get(26)
+        {
+            replacements.push((
+                enable_start_drag_range.clone(),
+                if enable_start_drag { "1" } else { "0" }.to_string(),
+            ));
+        }
+        if let Some(enable_drag) = item.enable_drag
+            && let Some(enable_drag_range) = fields.get(29)
+        {
+            replacements.push((
+                enable_drag_range.clone(),
+                if enable_drag { "1" } else { "0" }.to_string(),
+            ));
+        }
+        if let Some(file_drag_mode) = &item.file_drag_mode
+            && let Some(code) = form_table_file_drag_mode_code(file_drag_mode)
+            && let Some(file_drag_range) = fields.get(30)
+        {
+            replacements.push((file_drag_range.clone(), code.to_string()));
+        }
+    }
     if item.tag == "Button"
         && let Some(item_type) = &item.item_type
     {
@@ -10350,6 +10518,27 @@ fn form_button_representation_code(value: FormXmlButtonRepresentation) -> &'stat
         FormXmlButtonRepresentation::Picture => "1",
         FormXmlButtonRepresentation::PictureAndText => "2",
         FormXmlButtonRepresentation::None => "3",
+    }
+}
+
+fn form_table_representation_code(value: &str) -> Option<&'static str> {
+    match value {
+        "List" => Some("1"),
+        _ => None,
+    }
+}
+
+fn form_table_row_selection_mode_code(value: &str) -> Option<&'static str> {
+    match value {
+        "Cell" => Some("1"),
+        _ => None,
+    }
+}
+
+fn form_table_file_drag_mode_code(value: &str) -> Option<&'static str> {
+    match value {
+        "AsFile" => Some("2"),
+        _ => None,
     }
 }
 
@@ -23327,6 +23516,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(r#""OnChange","DescriptionOnChange""#)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_table_layout_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},0,{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<Attributes>
+		<Attribute name="Rows" id="6">
+			<MainAttribute>true</MainAttribute>
+		</Attribute>
+	</Attributes>
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<Representation>List</Representation>
+			<HeightInTableRows>6</HeightInTableRows>
+			<RowSelectionMode>Cell</RowSelectionMode>
+			<EnableStartDrag>true</EnableStartDrag>
+			<EnableDrag>true</EnableDrag>
+			<FileDragMode>AsFile</FileDragMode>
+			<DataPath>Rows</DataPath>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[table_fields[8].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[11].clone()], "{1,{6}}");
+        assert_eq!(&parsed.layout[table_fields[21].clone()], "6");
+        assert_eq!(&parsed.layout[table_fields[24].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[26].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[29].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[30].clone()], "2");
 
         Ok(())
     }
