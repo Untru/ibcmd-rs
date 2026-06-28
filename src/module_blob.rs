@@ -205,6 +205,7 @@ struct FormXmlChildItem {
     id: String,
     name: String,
     group: Option<FormXmlGroup>,
+    show_title: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -3651,6 +3652,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Common"
                         | "CommandName"
                         | "DataPath"
+                        | "ShowTitle"
                         | "KeyParameter"
                         | "Type"
                         | "Length"
@@ -4055,6 +4057,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
+                    || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
@@ -4398,6 +4401,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
+                    || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
@@ -5357,6 +5361,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.group = Some(parse_form_group_xml(text_value.trim())?);
                         }
                     }
+                    "ShowTitle"
+                        if path_ends_with_for_child_show_title(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.show_title = Some(parse_form_xml_bool(
+                                "ChildItem/ShowTitle",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "Item"
                         if path_ends_with_for_child_addition_source_item(
                             &path,
@@ -5428,6 +5442,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Type"
                         | "CommandName"
                         | "DataPath"
+                        | "ShowTitle"
                         | "lang"
                         | "content"
                 ) {
@@ -5529,6 +5544,7 @@ fn parse_form_child_item_xml(
         id,
         name,
         group: None,
+        show_title: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5680,6 +5696,13 @@ fn path_ends_with_for_child_group(path: &[String], items: &[FormXmlChildItem]) -
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Group"])
+}
+
+fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ShowTitle"])
 }
 
 fn path_ends_with_for_child_addition_source_item(
@@ -6514,19 +6537,25 @@ fn format_form_layout_new_group_item(
 ) -> Result<String> {
     let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
     let group = item.group.and_then(form_child_group_code).unwrap_or("0");
+    let show_title = if item.show_title.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
     let creatable_children = item
         .child_items
         .iter()
         .filter(|child| is_form_layout_creatable_nested_item(child))
         .collect::<Vec<_>>();
     let mut text = format!(
-        "{{22,{{{},{}}},0,0,0,{},{},{},{},1,{}",
+        "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{}",
         item.id,
         item_uuid,
         group_type,
         format_1c_string(&item.name),
         format_1c_synonyms(&item.title),
         group,
+        show_title,
         creatable_children.len()
     );
     for child in creatable_children {
@@ -6724,6 +6753,17 @@ fn patch_form_layout_child_item_entry(
         && let Some(group_range) = fields.get(8)
     {
         replacements.push((group_range.clone(), group_code.to_string()));
+    }
+    if matches!(
+        item.tag.as_str(),
+        "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+    ) && let Some(show_title) = item.show_title
+        && let Some(show_title_range) = fields.get(9)
+    {
+        replacements.push((
+            show_title_range.clone(),
+            if show_title { "1" } else { "0" }.to_string(),
+        ));
     }
 
     replacements.sort_by_key(|(range, _)| range.start);
@@ -16746,6 +16786,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		</CommandBar>
 		<UsualGroup name="MainGroup" id="22">
 			<Group>Horizontal</Group>
+			<ShowTitle>false</ShowTitle>
 			<Title>
 				<v8:item>
 					<v8:lang>en</v8:lang>
@@ -16776,7 +16817,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             parsed
                 .layout
-                .contains(r#",5,"MainGroup",{1,"en","Main"},1,1,0}"#)
+                .contains(r#",5,"MainGroup",{1,"en","Main"},1,0,0}"#)
         );
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
@@ -16794,6 +16835,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<ChildItems>
 		<UsualGroup name="MainGroup" id="22">
 			<Group>HorizontalIfPossible</Group>
+			<ShowTitle>false</ShowTitle>
 		</UsualGroup>
 	</ChildItems>
 </Form>
@@ -16807,6 +16849,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
         assert_eq!(&parsed.layout[group_fields[5].clone()], "5");
         assert_eq!(&parsed.layout[group_fields[8].clone()], "3");
+        assert_eq!(&parsed.layout[group_fields[9].clone()], "0");
         assert_eq!(&parsed.layout[group_fields[10].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
 

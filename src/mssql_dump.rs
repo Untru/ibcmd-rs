@@ -3988,6 +3988,7 @@ struct FormChildItem {
     id: String,
     name: String,
     group: Option<&'static str>,
+    show_title: Option<bool>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
     title: Vec<(String, String)>,
@@ -4962,6 +4963,13 @@ fn parse_form_child_item(
                     .and_then(|field| parse_form_child_item_group(field))
             })
             .flatten(),
+        show_title: (tag == "UsualGroup")
+            .then(|| {
+                fields
+                    .get(9)
+                    .and_then(|field| parse_form_child_item_show_title(field))
+            })
+            .flatten(),
         item_type: if tag == "Button" {
             fields
                 .get(7)
@@ -5001,6 +5009,14 @@ fn parse_form_child_item_group(field: &str) -> Option<&'static str> {
         "2" => Some("AlwaysHorizontal"),
         "3" => Some("HorizontalIfPossible"),
         "4" => Some("InCell"),
+        _ => None,
+    }
+}
+
+fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
+    match field.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
         _ => None,
     }
 }
@@ -5671,6 +5687,9 @@ fn format_form_child_item_xml(
             "{tab}\t<Group>{}</Group>\r\n",
             escape_xml_text(group)
         ));
+    }
+    if item.show_title == Some(false) {
+        xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
     }
     xml.push_str(&format_form_localized_section(
         "Title",
@@ -13173,7 +13192,7 @@ mod tests {
     #[test]
     fn extracts_form_usual_group_group_from_layout_code() {
         let item = parse_form_child_item(
-            r#"{22,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0},3,1,0}"#,
+            r#"{22,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0},3,0,0}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -13187,6 +13206,7 @@ mod tests {
 
         assert!(xml.contains(r#"<UsualGroup name="MainGroup" id="22">"#));
         assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
+        assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
     }
 
     #[test]
@@ -13292,6 +13312,7 @@ mod tests {
             id: "25".to_string(),
             name: "Rows".to_string(),
             group: None,
+            show_title: None,
             item_type: None,
             addition_source_item: None,
             title: Vec::new(),
@@ -13304,6 +13325,7 @@ mod tests {
                     id: "26".to_string(),
                     name: "RowsSearch".to_string(),
                     group: None,
+                    show_title: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
                     title: Vec::new(),
@@ -13317,6 +13339,7 @@ mod tests {
                     id: "40".to_string(),
                     name: "Name".to_string(),
                     group: None,
+                    show_title: None,
                     item_type: None,
                     addition_source_item: None,
                     title: Vec::new(),
