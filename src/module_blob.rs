@@ -100,6 +100,7 @@ struct FormXmlBodyProperties {
     vertical_scroll: Option<FormXmlVerticalScroll>,
     conversations_representation: Option<FormXmlConversationsRepresentation>,
     show_command_bar: Option<bool>,
+    show_close_button: Option<bool>,
     report_result: Option<String>,
     details_data: Option<String>,
     report_form_type: Option<FormXmlReportFormType>,
@@ -3518,6 +3519,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.vertical_scroll.is_some()
             || properties.conversations_representation.is_some()
             || properties.show_command_bar.is_some()
+            || properties.show_close_button.is_some()
             || properties.report_result.is_some()
             || properties.details_data.is_some()
             || properties.report_form_type.is_some()
@@ -3849,6 +3851,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
                         | "ShowCommandBar"
+                        | "ShowCloseButton"
                         | "ReportResult"
                         | "DetailsData"
                         | "ReportFormType"
@@ -4106,6 +4109,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ShowCloseButton"])
                     || path_ends_with(&path, &["Form", "ReportResult"])
                     || path_ends_with(&path, &["Form", "DetailsData"])
                     || path_ends_with(&path, &["Form", "ReportFormType"])
@@ -4510,6 +4514,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ShowCloseButton"])
                     || path_ends_with(&path, &["Form", "ReportResult"])
                     || path_ends_with(&path, &["Form", "DetailsData"])
                     || path_ends_with(&path, &["Form", "ReportFormType"])
@@ -4954,6 +4959,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
                         properties.show_command_bar =
                             Some(parse_form_xml_bool("ShowCommandBar", text_value.trim())?);
+                    }
+                    "ShowCloseButton" if path_ends_with(&path, &["Form", "ShowCloseButton"]) => {
+                        properties.show_close_button =
+                            Some(parse_form_xml_bool("ShowCloseButton", text_value.trim())?);
                     }
                     "ReportResult" if path_ends_with(&path, &["Form", "ReportResult"]) => {
                         let value = text_value.trim();
@@ -7270,6 +7279,9 @@ fn patch_form_layout_properties(
     if let Some(show_command_bar) = properties.show_command_bar {
         replace_form_show_command_bar(layout, show_command_bar)?;
     }
+    if let Some(show_close_button) = properties.show_close_button {
+        replace_form_show_close_button(layout, show_close_button)?;
+    }
     if let Some(report_result) = &properties.report_result {
         replace_form_report_attribute_ref(
             layout,
@@ -7572,6 +7584,20 @@ fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScrol
     }
     for range in replacements.into_iter().rev() {
         layout.replace_range(range, code);
+    }
+    Ok(())
+}
+
+fn replace_form_show_close_button(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 18) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1") {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
     }
     Ok(())
 }
@@ -18265,6 +18291,44 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
 
         assert_eq!(&parsed.layout[fields[tail_start + 23].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_show_close_button_false() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowCloseButton>false</ShowCloseButton>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 18].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_true_text = base_text.replace("100,1,1,0,0,0,{59,0}", "100,1,0,0,0,0,{59,0}");
+        let base = super::deflate_raw(base_true_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowCloseButton>true</ShowCloseButton>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 18].clone()], "1");
 
         Ok(())
     }

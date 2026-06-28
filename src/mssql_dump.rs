@@ -3902,6 +3902,7 @@ struct FormBodyProperties {
     vertical_scroll: Option<&'static str>,
     conversations_representation: Option<&'static str>,
     show_command_bar: Option<bool>,
+    show_close_button: Option<bool>,
     report_result: Option<String>,
     details_data: Option<String>,
     report_form_type: Option<&'static str>,
@@ -4098,6 +4099,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         vertical_scroll: extract_form_vertical_scroll(fields),
         conversations_representation: extract_form_conversations_representation(fields),
         show_command_bar: extract_form_show_command_bar(fields),
+        show_close_button: extract_form_show_close_button(fields),
         report_result: None,
         details_data: None,
         report_form_type,
@@ -4412,6 +4414,14 @@ fn extract_form_show_command_bar(fields: &[&str]) -> Option<bool> {
         }
     } else {
         None
+    }
+}
+
+fn extract_form_show_close_button(fields: &[&str]) -> Option<bool> {
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    match fields.get(tail_start + 18).map(|field| field.trim())? {
+        "0" => Some(false),
+        _ => None,
     }
 }
 
@@ -6731,6 +6741,9 @@ fn format_form_body_xml(
             "\t<ShowCommandBar>{}</ShowCommandBar>\r\n",
             if show_command_bar { "true" } else { "false" }
         ));
+    }
+    if properties.show_close_button == Some(false) {
+        xml.push_str("\t<ShowCloseButton>false</ShowCloseButton>\r\n");
     }
     if let Some(value) = &properties.report_result {
         xml.push_str(&format!(
@@ -14520,6 +14533,17 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"));
+    }
+
+    #[test]
+    fn extracts_form_show_close_button_false_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,0,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ShowCloseButton>false</ShowCloseButton>"));
     }
 
     #[test]
