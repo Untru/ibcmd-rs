@@ -5789,7 +5789,17 @@ fn append_form_layout_top_level_child_item(
 fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
     matches!(
         item.tag.as_str(),
-        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "Table" | "InputField"
+        "Button"
+            | "CommandBar"
+            | "UsualGroup"
+            | "Popup"
+            | "ButtonGroup"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
     )
 }
 
@@ -5822,6 +5832,19 @@ fn format_form_layout_new_top_level_item(
             source,
         ),
         "Table" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "InputField"
+        | "LabelField"
+        | "SearchStringAddition"
+        | "ViewStatusAddition"
+        | "SearchControlAddition" => format_form_layout_new_child_item(
             item,
             item_uuid,
             commands,
@@ -5872,6 +5895,10 @@ fn format_form_layout_new_child_item(
             source,
         ),
         "InputField" => Ok(format_form_layout_new_input_field_item(item, item_uuid)),
+        "LabelField" => Ok(format_form_layout_new_label_field_item(item, item_uuid)),
+        "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition" => Ok(
+            format_form_layout_new_search_addition_item(item, item_uuid, table_ids_by_name),
+        ),
         _ => Ok(String::new()),
     }
 }
@@ -5935,6 +5962,49 @@ fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &
     text
 }
 
+fn format_form_layout_new_label_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,1,2,{},1,0,{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_search_addition_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    table_ids_by_name: &BTreeMap<String, String>,
+) -> String {
+    let type_code = item
+        .item_type
+        .as_deref()
+        .and_then(form_search_addition_type_code)
+        .unwrap_or_else(|| form_search_addition_default_type_code(&item.tag));
+    let source_ref = item
+        .addition_source_item
+        .as_deref()
+        .and_then(|source_item| table_ids_by_name.get(source_item))
+        .map(|source_id| format!("{{{source_id},{type_code}}}"))
+        .unwrap_or_else(|| "{0}".to_string());
+    let mut text = format!(
+        "{{6,{{{},{}}},0,0,0,{},{},{},{{1,0}},1,1,0,1,{{1,0}},0,0,0,0,0,{}",
+        item.id,
+        item_uuid,
+        type_code,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        source_ref
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
 fn format_form_layout_new_table_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
@@ -5944,6 +6014,8 @@ fn format_form_layout_new_table_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    let mut nested_table_ids_by_name = table_ids_by_name.clone();
+    nested_table_ids_by_name.insert(item.name.clone(), item.id.clone());
     let creatable_children = item
         .child_items
         .iter()
@@ -5963,7 +6035,7 @@ fn format_form_layout_new_table_item(
             child,
             &child_uuid,
             commands,
-            table_ids_by_name,
+            &nested_table_ids_by_name,
             table_column_ids_by_name,
             command_uuids,
             source,
@@ -6026,7 +6098,17 @@ fn format_form_layout_new_group_item(
 fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
     matches!(
         item.tag.as_str(),
-        "Button" | "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup" | "Table" | "InputField"
+        "Button"
+            | "CommandBar"
+            | "UsualGroup"
+            | "Popup"
+            | "ButtonGroup"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
     )
 }
 
@@ -6302,6 +6384,14 @@ fn form_search_addition_type_code(value: &str) -> Option<&'static str> {
         "ViewStatusRepresentation" => Some("1"),
         "SearchControl" => Some("2"),
         _ => None,
+    }
+}
+
+fn form_search_addition_default_type_code(tag: &str) -> &'static str {
+    match tag {
+        "ViewStatusAddition" => "1",
+        "SearchControlAddition" => "2",
+        _ => "0",
     }
 }
 
@@ -15347,6 +15437,92 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(r#""OnChange","DescriptionOnChange""#)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_nested_label_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<ChildItems>
+				<LabelField name="DescriptionLabel" id="41">
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Description</v8:content>
+						</v8:item>
+					</Title>
+				</LabelField>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let label_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[label_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[label_fields[4].clone()], "1");
+        assert_eq!(
+            &parsed.layout[label_fields[6].clone()],
+            r#""DescriptionLabel""#
+        );
+        assert_eq!(
+            &parsed.layout[label_fields[9].clone()],
+            r#"{1,"en","Description"}"#
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_with_search_addition() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<ChildItems>
+				<SearchStringAddition name="SearchRows" id="134">
+					<AdditionSource>
+						<Item>Rows</Item>
+						<Type>SearchStringRepresentation</Type>
+					</AdditionSource>
+				</SearchStringAddition>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
+        assert_eq!(&parsed.layout[addition_fields[5].clone()], "0");
+        assert_eq!(
+            &parsed.layout[addition_fields[6].clone()],
+            r#""SearchRows""#
+        );
+        assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
 
         Ok(())
     }
