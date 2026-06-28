@@ -3892,10 +3892,12 @@ struct FormBodyProperties {
     customizable: Option<bool>,
     command_bar_location: Option<&'static str>,
     vertical_scroll: Option<&'static str>,
+    conversations_representation: Option<&'static str>,
     show_command_bar: Option<bool>,
 }
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct FormBodyEvent {
@@ -4062,6 +4064,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         vertical_scroll: extract_form_vertical_scroll(fields),
+        conversations_representation: extract_form_conversations_representation(fields),
         show_command_bar: extract_form_show_command_bar(fields),
     }
 }
@@ -4172,6 +4175,22 @@ fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
         fields.get(tail_start + 15).map(|field| field.trim()),
     ) {
         (Some("2"), Some("2")) => Some("useIfNecessary"),
+        _ => None,
+    }
+}
+
+fn extract_form_conversations_representation(fields: &[&str]) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "21")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("0")) => {
+            Some("DontShow")
+        }
+        (Some(r##""#""##), Some(FORM_CONVERSATIONS_REPRESENTATION_UUID), Some("1")) => Some("Show"),
         _ => None,
     }
 }
@@ -6420,6 +6439,12 @@ fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<VerticalScroll>{}</VerticalScroll>\r\n",
             escape_xml_text(vertical_scroll)
+        ));
+    }
+    if let Some(conversations_representation) = properties.conversations_representation {
+        xml.push_str(&format!(
+            "\t<ConversationsRepresentation>{}</ConversationsRepresentation>\r\n",
+            escape_xml_text(conversations_representation)
         ));
     }
     if let Some(show_command_bar) = properties.show_command_bar {
@@ -14265,6 +14290,44 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(!form_xml.contains("<UseForFoldersAndItems>"));
+    }
+
+    #[test]
+    fn extracts_form_conversations_representation_show_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},24,{"B",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(
+            form_xml.contains("<ConversationsRepresentation>Show</ConversationsRepresentation>")
+        );
+    }
+
+    #[test]
+    fn extracts_form_conversations_representation_dont_show_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},24,{"B",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(
+            form_xml
+                .contains("<ConversationsRepresentation>DontShow</ConversationsRepresentation>")
+        );
+    }
+
+    #[test]
+    fn does_not_extract_form_conversations_representation_without_property_key() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,24,{"B",0},25,{"U"},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(!form_xml.contains("<ConversationsRepresentation>"));
     }
 
     #[test]

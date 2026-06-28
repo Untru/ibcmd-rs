@@ -92,6 +92,7 @@ struct FormXmlBodyProperties {
     customizable: Option<bool>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
     vertical_scroll: Option<FormXmlVerticalScroll>,
+    conversations_representation: Option<FormXmlConversationsRepresentation>,
     show_command_bar: Option<bool>,
     events_present: bool,
     events: Vec<FormXmlEvent>,
@@ -300,6 +301,12 @@ enum FormXmlUseForFoldersAndItems {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlVerticalScroll {
     UseIfNecessary,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlConversationsRepresentation {
+    DontShow,
+    Show,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3441,6 +3448,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.customizable.is_some()
             || properties.command_bar_location.is_some()
             || properties.vertical_scroll.is_some()
+            || properties.conversations_representation.is_some()
             || properties.show_command_bar.is_some()
             || properties.events_present
             || properties.auto_command_bar.is_some()
@@ -3757,6 +3765,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Customizable"
                         | "CommandBarLocation"
                         | "VerticalScroll"
+                        | "ConversationsRepresentation"
                         | "ShowCommandBar"
                         | "HorizontalAlign"
                         | "Autofill"
@@ -4001,6 +4010,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
+                    || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
@@ -4392,6 +4402,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
+                    || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
@@ -4790,6 +4801,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "VerticalScroll" if path_ends_with(&path, &["Form", "VerticalScroll"]) => {
                         properties.vertical_scroll =
                             Some(parse_form_vertical_scroll_xml(text_value.trim())?);
+                    }
+                    "ConversationsRepresentation"
+                        if path_ends_with(&path, &["Form", "ConversationsRepresentation"]) =>
+                    {
+                        properties.conversations_representation = Some(
+                            parse_form_conversations_representation_xml(text_value.trim())?,
+                        );
                     }
                     "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
                         properties.show_command_bar =
@@ -6787,6 +6805,18 @@ fn parse_form_vertical_scroll_xml(value: &str) -> Result<FormXmlVerticalScroll> 
     }
 }
 
+fn parse_form_conversations_representation_xml(
+    value: &str,
+) -> Result<FormXmlConversationsRepresentation> {
+    match value {
+        "DontShow" => Ok(FormXmlConversationsRepresentation::DontShow),
+        "Show" => Ok(FormXmlConversationsRepresentation::Show),
+        other => Err(anyhow!(
+            "unsupported Form ConversationsRepresentation: {other}"
+        )),
+    }
+}
+
 fn parse_form_auto_save_data_in_settings_xml(value: &str) -> Result<FormXmlAutoSaveDataInSettings> {
     match value {
         "Use" => Ok(FormXmlAutoSaveDataInSettings::Use),
@@ -6967,6 +6997,9 @@ fn patch_form_layout_properties(
     if let Some(vertical_scroll) = properties.vertical_scroll {
         replace_form_vertical_scroll(layout, vertical_scroll)?;
     }
+    if let Some(conversations_representation) = properties.conversations_representation {
+        replace_form_conversations_representation(layout, conversations_representation)?;
+    }
     if let Some(show_command_bar) = properties.show_command_bar {
         replace_form_show_command_bar(layout, show_command_bar)?;
     }
@@ -6974,6 +7007,7 @@ fn patch_form_layout_properties(
 }
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
 
 fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
@@ -7083,6 +7117,30 @@ fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScrol
     Ok(())
 }
 
+fn replace_form_conversations_representation(
+    layout: &mut String,
+    value: FormXmlConversationsRepresentation,
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "21") else {
+        return Ok(());
+    };
+    if !is_form_conversations_representation_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(
+        range,
+        &format!(
+            r##"{{"#",{FORM_CONVERSATIONS_REPRESENTATION_UUID},{}}}"##,
+            form_conversations_representation_code(value)
+        ),
+    );
+    Ok(())
+}
+
 fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool {
     fields
         .get(18)
@@ -7170,6 +7228,18 @@ fn is_form_use_for_folders_and_items_value(value: &str) -> bool {
         .is_some_and(|range| value[range.clone()].trim() == FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
 }
 
+fn is_form_conversations_representation_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "#")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| value[range.clone()].trim() == FORM_CONVERSATIONS_REPRESENTATION_UUID)
+}
+
 fn format_form_title_value(title: &[LocalizedString]) -> String {
     let mut output = format!("{{1,{}", title.len());
     for value in title {
@@ -7213,6 +7283,15 @@ fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &
 fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
     match value {
         FormXmlVerticalScroll::UseIfNecessary => "2",
+    }
+}
+
+fn form_conversations_representation_code(
+    value: FormXmlConversationsRepresentation,
+) -> &'static str {
+    match value {
+        FormXmlConversationsRepresentation::DontShow => "0",
+        FormXmlConversationsRepresentation::Show => "1",
     }
 }
 
@@ -17730,6 +17809,55 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(
             &parsed.layout[fields[20].clone()],
             r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_conversations_representation_show_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},24,{\"B\",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ConversationsRepresentation>Show</ConversationsRepresentation>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_conversations_representation_dont_show_property_bag()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},24,{\"B\",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ConversationsRepresentation>DontShow</ConversationsRepresentation>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0}"##
         );
         assert_eq!(parsed.module_text, "Old module");
 
