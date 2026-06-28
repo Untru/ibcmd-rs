@@ -86,6 +86,7 @@ struct FormXmlBodyProperties {
     auto_title: Option<bool>,
     group: Option<FormXmlGroup>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
+    events_present: bool,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
     attributes_present: bool,
@@ -3312,7 +3313,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.auto_title.is_some()
             || properties.group.is_some()
             || properties.command_bar_location.is_some()
-            || !properties.events.is_empty()
+            || properties.events_present
             || properties.auto_command_bar.is_some()
             || !properties.child_items.is_empty()
         {
@@ -3322,7 +3323,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             if let Some(auto_command_bar) = &properties.auto_command_bar {
                 let _ = patch_form_layout_auto_command_bar(&mut layout, auto_command_bar)?;
             }
-            patch_form_layout_events(&mut layout, &properties.events)?;
+            patch_form_layout_events(&mut layout, &properties.events, properties.events_present)?;
             patch_form_layout_child_items(
                 &mut layout,
                 &properties.child_items,
@@ -3661,6 +3662,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     current_event_name = Some(name);
                 }
+                if local == "Events" && path_ends_with(&path, &["Form"]) {
+                    properties.events_present = true;
+                }
                 if local == "Attributes" && path_ends_with(&path, &["Form"]) {
                     properties.attributes_present = true;
                 }
@@ -3747,6 +3751,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                if local == "Events" && path_ends_with(&path, &["Form"]) {
+                    properties.events_present = true;
+                }
                 if local == "Attributes" && path_ends_with(&path, &["Form"]) {
                     properties.attributes_present = true;
                 }
@@ -5879,12 +5886,78 @@ fn collect_form_command_uuids(text: &str, uuids: &mut BTreeMap<String, String>) 
     Ok(())
 }
 
-fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
+fn patch_form_layout_events(
+    layout: &mut String,
+    events: &[FormXmlEvent],
+    retain_missing: bool,
+) -> Result<()> {
+    if retain_missing {
+        retain_form_layout_events(layout, events)?;
+    }
     for event in events {
         let identifiers = form_event_layout_identifiers(&event.name);
         let _ = patch_form_layout_event(layout, &identifiers, &event.handler)?;
     }
     Ok(())
+}
+
+fn retain_form_layout_events(text: &mut String, events: &[FormXmlEvent]) -> Result<()> {
+    let keep_identifiers = events
+        .iter()
+        .map(|event| form_event_layout_identifiers(&event.name))
+        .collect::<Vec<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.is_empty() {
+        return Ok(());
+    }
+
+    let mut retained = Vec::with_capacity(fields.len());
+    let mut changed = false;
+    for (index, range) in fields.iter().enumerate() {
+        let field = text[range.clone()].to_string();
+        if index == 0 {
+            retained.push(field);
+            continue;
+        }
+        if !field.trim_start().starts_with('{') {
+            retained.push(field);
+            continue;
+        }
+        match form_layout_event_entry_name(&field)? {
+            Some(name) if !form_layout_event_name_is_kept(&name, &keep_identifiers) => {
+                changed = true;
+            }
+            _ => retained.push(field),
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+
+    *text = format!("{{{}}}", retained.join(","));
+    Ok(())
+}
+
+fn form_layout_event_entry_name(text: &str) -> Result<Option<String>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.len() < 3 {
+        return Ok(None);
+    }
+    if parse_1c_quoted_string(&text[fields[2].clone()]).is_err() {
+        return Ok(None);
+    }
+    Ok(fields.get(1).map(|range| {
+        parse_1c_quoted_string(&text[range.clone()])
+            .unwrap_or_else(|_| text[range.clone()].trim().to_string())
+    }))
+}
+
+fn form_layout_event_name_is_kept(name: &str, keep_identifiers: &[Vec<&str>]) -> bool {
+    keep_identifiers.iter().any(|identifiers| {
+        identifiers
+            .iter()
+            .any(|identifier| name.eq_ignore_ascii_case(identifier))
+    })
 }
 
 fn patch_form_layout_child_items(
@@ -6485,7 +6558,7 @@ fn patch_form_layout_child_item_entry(
     for (range, replacement) in replacements.into_iter().rev() {
         text.replace_range(range, &replacement);
     }
-    patch_form_layout_events(text, &item.events)?;
+    patch_form_layout_events(text, &item.events, false)?;
     patch_form_layout_direct_child_items(
         text,
         item,
@@ -15348,6 +15421,52 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_events() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="OnOpen">NewOpen</Event>
+	</Events>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"OnOpen\",\"NewOpen\""));
+        assert!(!parsed.layout.contains("ChoiceProcessing"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_events_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, "{7}");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
         Ok(())
     }
 
