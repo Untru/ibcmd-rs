@@ -96,6 +96,7 @@ struct FormXmlBodyProperties {
     commands_present: bool,
     commands: Vec<FormXmlCommand>,
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
+    child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
 }
 
@@ -3315,6 +3316,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.command_bar_location.is_some()
             || properties.events_present
             || properties.auto_command_bar.is_some()
+            || properties.child_items_present
             || !properties.child_items.is_empty()
         {
             let container = FormBodyContainer::parse(&plain)?;
@@ -3330,6 +3332,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 &properties.commands,
                 &form_command_uuids,
                 source,
+                properties.child_items_present,
             )?;
             plain.replace_range(container.layout_range, &layout);
         }
@@ -3674,6 +3677,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if local == "Commands" && path_ends_with(&path, &["Form"]) {
                     properties.commands_present = true;
                 }
+                if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
+                    properties.child_items_present = true;
+                }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
                 }
@@ -3762,6 +3768,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "Commands" && path_ends_with(&path, &["Form"]) {
                     properties.commands_present = true;
+                }
+                if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
+                    properties.child_items_present = true;
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
@@ -5966,7 +5975,11 @@ fn patch_form_layout_child_items(
     commands: &[FormXmlCommand],
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
+    retain_missing: bool,
 ) -> Result<()> {
+    if retain_missing {
+        retain_form_layout_top_level_child_items(layout, items)?;
+    }
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
     let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
     for item in items {
@@ -5991,6 +6004,77 @@ fn patch_form_layout_child_items(
             )?;
         }
     }
+    Ok(())
+}
+
+fn retain_form_layout_top_level_child_items(
+    text: &mut String,
+    items: &[FormXmlChildItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("59") {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count * 2 {
+        return Ok(());
+    }
+
+    let top_level_items = items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .collect::<Vec<_>>();
+    let mut retained = Vec::<(String, String)>::new();
+    let mut changed = false;
+
+    for index in 0..count {
+        let uuid_range = fields[2 + index * 2].clone();
+        let item_range = fields[3 + index * 2].clone();
+        let uuid = text[uuid_range].trim().to_string();
+        if !is_uuid_text(&uuid) {
+            return Ok(());
+        }
+        let item_text = text[item_range].to_string();
+        let item_fields = scan_braced_fields(&item_text, 0)?;
+        let is_known_item = item_fields
+            .first()
+            .and_then(|range| {
+                form_layout_child_item_tag(
+                    item_text[range.clone()].trim(),
+                    &item_text,
+                    &item_fields,
+                )
+            })
+            .is_some();
+        let keep = !is_known_item
+            || top_level_items
+                .iter()
+                .any(|item| form_layout_child_item_matches(&item_text, &item_fields, item));
+        if keep {
+            retained.push((uuid, item_text));
+        } else {
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    let mut replacement = format!("{{59,{}", retained.len());
+    for (uuid, item_text) in retained {
+        replacement.push(',');
+        replacement.push_str(&uuid);
+        replacement.push(',');
+        replacement.push_str(&item_text);
+    }
+    replacement.push('}');
+    *text = replacement;
     Ok(())
 }
 
@@ -16126,6 +16210,64 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_top_level_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{34,{44,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,"KeepButton",{0},1,{0},{0}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{73,{25,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,1,0,"DropTable",0,0,0,{1,0},1}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="KeepButton" id="44"></Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[0].clone()], "59");
+        assert_eq!(&parsed.layout[fields[1].clone()], "1");
+        assert!(parsed.layout.contains("KeepButton"));
+        assert!(!parsed.layout.contains("DropTable"));
+        assert!(
+            !parsed
+                .layout
+                .contains("cccccccc-cccc-4ccc-cccc-cccccccccccc")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("dddddddd-dddd-4ddd-dddd-dddddddddddd")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_child_items_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{34,{44,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,"DropButton",{0},1,{0},{0}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, "{59,0}");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }
