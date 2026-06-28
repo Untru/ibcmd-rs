@@ -188,6 +188,7 @@ struct FormXmlCommandInterfaceItem {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlChildItem {
     tag: String,
+    depth: usize,
     id: String,
     name: String,
     item_type: Option<String>,
@@ -3686,7 +3687,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             path.last().map(String::as_str) == Some(item.tag.as_str())
                         }))
                 {
-                    if let Some(item) = parse_form_child_item_xml(&local, &event)? {
+                    if let Some(mut item) = parse_form_child_item_xml(&local, &event)? {
+                        item.depth = current_child_items.len();
                         current_child_items.push(item);
                     }
                 } else if local == "item"
@@ -5214,6 +5216,7 @@ fn parse_form_child_item_xml(
     };
     Ok(Some(FormXmlChildItem {
         tag: tag.to_string(),
+        depth: 0,
         id,
         name,
         item_type: None,
@@ -5606,7 +5609,7 @@ fn patch_form_layout_child_items(
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
     let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
     for item in items {
-        let _ = patch_form_layout_child_item(
+        let patched = patch_form_layout_child_item(
             layout,
             item,
             commands,
@@ -5614,6 +5617,15 @@ fn patch_form_layout_child_items(
             &table_column_ids_by_name,
             source,
         )?;
+        if !patched {
+            let _ = append_form_layout_top_level_child_item(
+                layout,
+                item,
+                &table_ids_by_name,
+                &table_column_ids_by_name,
+                source,
+            )?;
+        }
     }
     Ok(())
 }
@@ -5658,6 +5670,107 @@ fn patch_form_layout_child_item(
         }
     }
     Ok(false)
+}
+
+fn append_form_layout_top_level_child_item(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    if item.depth != 0 || item.tag != "Button" {
+        return Ok(false);
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("59") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() != 2 + count * 2 {
+        return Ok(false);
+    }
+    for range in fields.iter().skip(2).step_by(2) {
+        if !is_uuid_text(text[range.clone()].trim()) {
+            return Ok(false);
+        }
+    }
+
+    let item_uuid = Uuid::new_v4().hyphenated().to_string();
+    let item_text = format_form_layout_new_button_item(
+        item,
+        &item_uuid,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        source,
+    )?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form layout root is not closed"))?;
+    text.insert_str(insert_at, &format!(",{item_uuid},{item_text}"));
+    Ok(true)
+}
+
+fn format_form_layout_new_button_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let item_type = item
+        .item_type
+        .as_deref()
+        .and_then(form_button_type_code)
+        .unwrap_or("0");
+    let command_ref = item
+        .command_name
+        .as_deref()
+        .map(|command_name| format_form_new_button_command_reference(command_name, source))
+        .transpose()?
+        .flatten()
+        .unwrap_or_else(|| "{0}".to_string());
+    let data_path_ref = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| {
+            format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
+        })
+        .unwrap_or_else(|| "{0}".to_string());
+
+    Ok(format!(
+        "{{34,{{{},{}}},0,0,0,{},{},{},{},{}}}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        item_type,
+        command_ref,
+        data_path_ref
+    ))
+}
+
+fn format_form_new_button_command_reference(
+    command_name: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    if let Some(uuid) = form_standard_command_uuid(command_name) {
+        return Ok(Some(format!("{{0,{uuid}}}")));
+    }
+    if command_name.strip_prefix("Form.Command.").is_some() {
+        return Ok(None);
+    }
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let uuid = source.resolve_command_reference_uuid(command_name)?;
+    Ok(Some(format!("{{0,{uuid}}}")))
 }
 
 fn form_layout_child_item_matches(
@@ -14278,6 +14391,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_top_level_button() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Button name="HelpButton" id="44">
+			<Type>Hyperlink</Type>
+			<CommandName>Form.StandardCommand.Help</CommandName>
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Help</v8:content>
+				</v8:item>
+			</Title>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[0].clone()], "59");
+        assert_eq!(&parsed.layout[fields[1].clone()], "1");
+        assert!(super::is_uuid_text(&parsed.layout[fields[2].clone()]));
+        assert!(parsed.layout.contains(r#"{34,{44,"#), "{}", parsed.layout);
+        assert!(parsed.layout.contains(r#""HelpButton""#));
+        assert!(parsed.layout.contains(r#"{1,"en","Help"}"#));
+        assert!(
+            parsed
+                .layout
+                .contains(",2,{0,39bb0fe9-771d-4dd5-8a6e-2d16984523af},{0}")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }
