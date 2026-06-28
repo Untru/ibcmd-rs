@@ -5366,11 +5366,19 @@ fn parse_form_child_item_pairs(
         let mut cursor = index + 1;
         let mut complete = true;
         for _ in 0..count {
+            let Some(uuid_field) = fields.get(cursor) else {
+                complete = false;
+                break;
+            };
+            if parse_non_zero_uuid(uuid_field.trim()).is_none() {
+                complete = false;
+                break;
+            }
             let Some(field) = fields.get(cursor + 1) else {
                 complete = false;
                 break;
             };
-            let Some(item) = parse_form_child_item(
+            if let Some(item) = parse_form_child_item(
                 field,
                 main_data_path,
                 parent_data_path,
@@ -5378,11 +5386,9 @@ fn parse_form_child_item_pairs(
                 table_column_names_by_id,
                 commands,
                 object_refs,
-            ) else {
-                complete = false;
-                break;
-            };
-            items.push(item);
+            ) {
+                items.push(item);
+            }
             cursor += 2;
         }
         if complete && items.len() > best.len() {
@@ -15347,6 +15353,25 @@ mod tests {
     }
 
     #[test]
+    fn keeps_known_form_children_when_sibling_type_is_unknown() {
+        let item = parse_form_child_item(
+            r#"{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"Page",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{22,{0},0,0,0,8,"ContextMenu",{1,0},{1,0}},2,11111111-1111-4111-8111-111111111111,{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"UnknownTextDocumentField",{1,0}},22222222-2222-4222-8222-222222222222,{22,{74,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"KnownGroup",{1,0},{1,0},0,1,0}}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Page");
+        assert_eq!(item.child_items.len(), 1);
+        assert_eq!(item.child_items[0].tag, "UsualGroup");
+        assert_eq!(item.child_items[0].name, "KnownGroup");
+    }
+
+    #[test]
     fn extracts_real_sfc_page_scroll_on_compress() {
         let form_body = fs::read(
             r"lab\sfc\verify\event_aliases_after_patch_20260628\Config\f1335af3-b387-4b08-b9f0-d742466fb011.0__part0.bin",
@@ -15365,7 +15390,7 @@ mod tests {
         );
         assert_eq!(
             form_xml.matches("<ExtendedTooltip ").count(),
-            16,
+            37,
             "{}",
             form_xml
         );
@@ -15374,6 +15399,9 @@ mod tests {
                 r#"<ExtendedTooltip name="ОперандыПоказателейExtendedTooltip" id="88"/>"#
             )
         );
+        assert!(form_xml.contains(r#"<CommandBar name="КоманднаяПанельОператоры" id="40">"#));
+        assert!(form_xml.contains(r#"<Button name="КнопкаПлюс" id="42">"#));
+        assert!(form_xml.contains("<CommandName>Form.Command.КнопкаПлюс</CommandName>"));
     }
 
     #[test]
