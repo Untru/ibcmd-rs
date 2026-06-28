@@ -3990,6 +3990,8 @@ struct FormChildItem {
     group: Option<&'static str>,
     behavior: Option<&'static str>,
     representation: Option<&'static str>,
+    button_representation: Option<&'static str>,
+    default_button: Option<bool>,
     show_title: Option<bool>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
@@ -4979,6 +4981,20 @@ fn parse_form_child_item(
         representation: extended_group_options
             .as_ref()
             .and_then(|options| options.representation),
+        button_representation: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(10)
+                .and_then(|field| parse_form_button_representation(field))
+        } else {
+            None
+        },
+        default_button: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(11)
+                .and_then(|field| parse_form_child_item_show_title(field))
+        } else {
+            None
+        },
         show_title: (tag == "UsualGroup")
             .then(|| {
                 fields
@@ -4986,7 +5002,11 @@ fn parse_form_child_item(
                     .and_then(|field| parse_form_child_item_show_title(field))
             })
             .flatten(),
-        item_type: if tag == "Button" {
+        item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(4)
+                .and_then(|field| parse_form_extended_button_type(field))
+        } else if tag == "Button" {
             fields
                 .get(7)
                 .and_then(|field| parse_form_button_type(field))
@@ -5125,11 +5145,34 @@ fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
     }
 }
 
+fn form_button_layout_is_extended(fields: &[&str]) -> bool {
+    fields.len() > 20
+}
+
 fn parse_form_button_type(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("UsualButton"),
         "1" => Some("CommandBarButton"),
         "2" => Some("Hyperlink"),
+        _ => None,
+    }
+}
+
+fn parse_form_extended_button_type(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("CommandBarButton"),
+        "1" => Some("UsualButton"),
+        "2" => Some("Hyperlink"),
+        _ => None,
+    }
+}
+
+fn parse_form_button_representation(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("Text"),
+        "1" => Some("Picture"),
+        "2" => Some("PictureAndText"),
+        "3" => Some("None"),
         _ => None,
     }
 }
@@ -5785,6 +5828,17 @@ fn format_form_child_item_xml(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
         ));
+    }
+    if item.tag == "Button"
+        && let Some(representation) = item.button_representation
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Representation>{}</Representation>\r\n",
+            escape_xml_text(representation)
+        ));
+    }
+    if item.default_button == Some(true) {
+        xml.push_str(&format!("{tab}\t<DefaultButton>true</DefaultButton>\r\n"));
     }
     if let Some(group) = item.group {
         xml.push_str(&format!(
@@ -13383,6 +13437,29 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_extended_button_properties_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{34,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Save",{1,0},1,{0},{0},2,1,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",0,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.item_type, Some("CommandBarButton"));
+        assert_eq!(item.button_representation, Some("PictureAndText"));
+        assert_eq!(item.default_button, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Type>CommandBarButton</Type>"));
+        assert!(xml.contains("<Representation>PictureAndText</Representation>"));
+        assert!(xml.contains("<DefaultButton>true</DefaultButton>"));
+    }
+
+    #[test]
     fn extracts_form_search_addition_type_from_layout_code() {
         let mut items = Vec::new();
         let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
@@ -13430,6 +13507,8 @@ mod tests {
             group: None,
             behavior: None,
             representation: None,
+            button_representation: None,
+            default_button: None,
             show_title: None,
             item_type: None,
             addition_source_item: None,
@@ -13445,6 +13524,8 @@ mod tests {
                     group: None,
                     behavior: None,
                     representation: None,
+                    button_representation: None,
+                    default_button: None,
                     show_title: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
@@ -13461,6 +13542,8 @@ mod tests {
                     group: None,
                     behavior: None,
                     representation: None,
+                    button_representation: None,
+                    default_button: None,
                     show_title: None,
                     item_type: None,
                     addition_source_item: None,

@@ -207,6 +207,8 @@ struct FormXmlChildItem {
     group: Option<FormXmlGroup>,
     behavior: Option<FormXmlGroupBehavior>,
     representation: Option<FormXmlGroupRepresentation>,
+    button_representation: Option<FormXmlButtonRepresentation>,
+    default_button: Option<bool>,
     show_title: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
@@ -252,6 +254,14 @@ enum FormXmlGroupRepresentation {
     StrongSeparation,
     WeakSeparation,
     NormalSeparation,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlButtonRepresentation {
+    Text,
+    Picture,
+    PictureAndText,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3670,6 +3680,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandName"
                         | "DataPath"
                         | "ShowTitle"
+                        | "DefaultButton"
                         | "Behavior"
                         | "Representation"
                         | "KeyParameter"
@@ -4077,7 +4088,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_behavior(&path, &current_child_items)
-                    || path_ends_with_for_child_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_group_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_button_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5390,11 +5403,35 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         }
                     }
                     "Representation"
-                        if path_ends_with_for_child_representation(&path, &current_child_items) =>
+                        if path_ends_with_for_child_group_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
                     {
                         if let Some(item) = current_child_items.last_mut() {
                             item.representation =
                                 Some(parse_form_group_representation_xml(text_value.trim())?);
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with_for_child_button_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.button_representation =
+                                Some(parse_form_button_representation_xml(text_value.trim())?);
+                        }
+                    }
+                    "DefaultButton"
+                        if path_ends_with_for_child_default_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.default_button = Some(parse_form_xml_bool(
+                                "ChildItem/DefaultButton",
+                                text_value.trim(),
+                            )?);
                         }
                     }
                     "ShowTitle"
@@ -5479,6 +5516,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandName"
                         | "DataPath"
                         | "ShowTitle"
+                        | "DefaultButton"
                         | "Behavior"
                         | "Representation"
                         | "lang"
@@ -5584,6 +5622,8 @@ fn parse_form_child_item_xml(
         group: None,
         behavior: None,
         representation: None,
+        button_representation: None,
+        default_button: None,
         show_title: None,
         item_type: None,
         addition_source_item: None,
@@ -5745,11 +5785,31 @@ fn path_ends_with_for_child_behavior(path: &[String], items: &[FormXmlChildItem]
     path_ends_with(path, &[item.tag.as_str(), "Behavior"])
 }
 
-fn path_ends_with_for_child_representation(path: &[String], items: &[FormXmlChildItem]) -> bool {
+fn path_ends_with_for_child_group_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    path_ends_with(path, &[item.tag.as_str(), "Representation"])
+    item.tag == "UsualGroup" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_button_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_default_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "DefaultButton"])
 }
 
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -5843,6 +5903,16 @@ fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepres
         other => Err(anyhow!(
             "unsupported Form UsualGroup Representation: {other}"
         )),
+    }
+}
+
+fn parse_form_button_representation_xml(value: &str) -> Result<FormXmlButtonRepresentation> {
+    match value {
+        "Text" => Ok(FormXmlButtonRepresentation::Text),
+        "Picture" => Ok(FormXmlButtonRepresentation::Picture),
+        "PictureAndText" => Ok(FormXmlButtonRepresentation::PictureAndText),
+        "None" => Ok(FormXmlButtonRepresentation::None),
+        other => Err(anyhow!("unsupported Form Button Representation: {other}")),
     }
 }
 
@@ -6815,10 +6885,36 @@ fn patch_form_layout_child_item_entry(
     }
     if item.tag == "Button"
         && let Some(item_type) = &item.item_type
-        && let Some(type_code) = form_button_type_code(item_type)
-        && let Some(type_range) = fields.get(7)
     {
-        replacements.push((type_range.clone(), type_code.to_string()));
+        if form_layout_button_is_extended(fields) {
+            if let Some(type_code) = form_extended_button_type_code(item_type)
+                && let Some(type_range) = fields.get(4)
+            {
+                replacements.push((type_range.clone(), type_code.to_string()));
+            }
+        } else if let Some(type_code) = form_button_type_code(item_type)
+            && let Some(type_range) = fields.get(7)
+        {
+            replacements.push((type_range.clone(), type_code.to_string()));
+        }
+    }
+    if item.tag == "Button"
+        && let Some(representation) = item.button_representation
+        && let Some(representation_range) = fields.get(10)
+    {
+        replacements.push((
+            representation_range.clone(),
+            form_button_representation_code(representation).to_string(),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(default_button) = item.default_button
+        && let Some(default_range) = fields.get(11)
+    {
+        replacements.push((
+            default_range.clone(),
+            if default_button { "1" } else { "0" }.to_string(),
+        ));
     }
     if item.tag.ends_with("Addition")
         && let Some(item_type) = &item.item_type
@@ -6922,6 +7018,10 @@ fn patch_form_layout_child_item_entry(
         source,
     )?;
     Ok(())
+}
+
+fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
+    fields.len() > 20
 }
 
 fn form_layout_usual_group_extended_options_range(
@@ -7207,6 +7307,24 @@ fn form_button_type_code(value: &str) -> Option<&'static str> {
         "CommandBarButton" => Some("1"),
         "Hyperlink" => Some("2"),
         _ => None,
+    }
+}
+
+fn form_extended_button_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "CommandBarButton" => Some("0"),
+        "UsualButton" => Some("1"),
+        "Hyperlink" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_button_representation_code(value: FormXmlButtonRepresentation) -> &'static str {
+    match value {
+        FormXmlButtonRepresentation::Text => "0",
+        FormXmlButtonRepresentation::Picture => "1",
+        FormXmlButtonRepresentation::PictureAndText => "2",
+        FormXmlButtonRepresentation::None => "3",
     }
 }
 
@@ -17000,6 +17118,36 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert!(parsed.trailing[2].contains(r#""Do",{1,"en","Run"}"#));
         assert!(parsed.trailing[2].contains(r#""Do",3,0,0,{0,0}"#));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_extended_button_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{34,{44,22222222-2222-4222-8222-222222222222},0,0,0,"Save",{1,0},1,{0},{0},3,0,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",0,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<Type>CommandBarButton</Type>
+			<Representation>PictureAndText</Representation>
+			<DefaultButton>true</DefaultButton>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[button_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[button_fields[10].clone()], "2");
+        assert_eq!(&parsed.layout[button_fields[11].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
