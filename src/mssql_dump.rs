@@ -10633,6 +10633,7 @@ fn metadata_source_for_text(
         {
             Some(("ScheduledJob", "ScheduledJobs"))
         }
+        4 if is_form_metadata_text(text, uuid) => Some(("CommonForm", "CommonForms")),
         4 if is_common_template_metadata_fields(&fields, uuid) => {
             Some(("CommonTemplate", "CommonTemplates"))
         }
@@ -10678,7 +10679,7 @@ fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> b
 }
 
 fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
-    parse_metadata_object_code(text) == Some(0)
+    matches!(parse_metadata_object_code(text), Some(0 | 4))
         && (contains_wrapped_metadata_object_code(text, 13, uuid)
             || contains_wrapped_metadata_object_code(text, 14, uuid))
 }
@@ -14436,6 +14437,71 @@ mod tests {
         assert_eq!(
             owned_row.metadata_xml_path.as_deref(),
             Some("Catalogs/Products/Forms/ListForm.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_code4_common_form_to_common_forms_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let form_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"SharedCode4\",{{1,\"en\",\"Shared code4\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let form_body = deflate_for_test(b"{4,{0},\"Procedure Run()\r\nEndProcedure\r\n\",{0}}");
+        let rows = vec![
+            ConfigRow {
+                file_name: form_uuid.to_string(),
+                part_no: 0,
+                data_size: form_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&form_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{form_uuid}.0"),
+                part_no: 0,
+                data_size: form_body.len() as i64,
+                binary_hex: encode_hex_for_test(&form_body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert!(root.join("CommonForms/SharedCode4.xml").exists());
+        assert!(root.join("CommonForms/SharedCode4/Ext/Form.xml").exists());
+        assert!(!root.join("CommonPictures/SharedCode4.xml").exists());
+        let common_xml = fs::read_to_string(root.join("CommonForms/SharedCode4.xml")).unwrap();
+        assert!(common_xml.contains("<CommonForm uuid=\"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa\">"));
+        let form_xml =
+            fs::read_to_string(root.join("CommonForms/SharedCode4/Ext/Form.xml")).unwrap();
+        assert!(form_xml.contains("<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\""));
+
+        let metadata_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == form_uuid)
+            .unwrap();
+        assert_eq!(
+            metadata_row.metadata_xml_path.as_deref(),
+            Some("CommonForms/SharedCode4.xml")
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{form_uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("CommonForms/SharedCode4/Ext/Form.xml")
         );
 
         let _ = fs::remove_dir_all(root);
