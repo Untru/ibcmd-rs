@@ -86,6 +86,7 @@ struct FormXmlBodyProperties {
     auto_title: Option<bool>,
     group: Option<FormXmlGroup>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
+    show_command_bar: Option<bool>,
     events_present: bool,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
@@ -3407,6 +3408,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.auto_title.is_some()
             || properties.group.is_some()
             || properties.command_bar_location.is_some()
+            || properties.show_command_bar.is_some()
             || properties.events_present
             || properties.auto_command_bar.is_some()
             || properties.child_items_present
@@ -3716,6 +3718,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoTitle"
                         | "Group"
                         | "CommandBarLocation"
+                        | "ShowCommandBar"
                         | "HorizontalAlign"
                         | "Autofill"
                         | "Event"
@@ -3953,6 +3956,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "AutoTitle"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
@@ -4337,6 +4341,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "AutoTitle"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
                     || path_ends_with(&path, &["Form", "Title", "item", "lang"])
@@ -4703,6 +4708,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         properties.command_bar_location =
                             Some(parse_form_command_bar_location_xml(text_value.trim())?);
+                    }
+                    "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
+                        properties.show_command_bar =
+                            Some(parse_form_xml_bool("ShowCommandBar", text_value.trim())?);
                     }
                     "Autofill"
                         if path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"]) =>
@@ -6829,7 +6838,24 @@ fn patch_form_layout_properties(
             form_command_bar_location_code(command_bar_location),
         )?;
     }
+    if let Some(show_command_bar) = properties.show_command_bar {
+        replace_form_show_command_bar(layout, show_command_bar)?;
+    }
     Ok(())
+}
+
+fn replace_form_show_command_bar(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(range) = fields.get(18) else {
+        return Ok(());
+    };
+    match layout[range.clone()].trim() {
+        "0" | "1" => {
+            layout.replace_range(range.clone(), if value { "0" } else { "1" });
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn format_form_title_value(title: &[LocalizedString]) -> String {
@@ -17172,6 +17198,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<AutoTitle>false</AutoTitle>
 	<Group>Horizontal</Group>
 	<CommandBarLocation>Bottom</CommandBarLocation>
+	<ShowCommandBar>true</ShowCommandBar>
 </Form>
 "#
         .as_bytes();
@@ -17192,6 +17219,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[fields[13].clone()], "0");
         assert_eq!(&parsed.layout[fields[14].clone()], "0");
         assert_eq!(&parsed.layout[fields[17].clone()], "3");
+        assert_eq!(&parsed.layout[fields[18].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(
             packed.plain_bytes,
