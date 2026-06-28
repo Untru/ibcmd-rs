@@ -83,6 +83,7 @@ struct FormXmlBodyProperties {
     width: Option<String>,
     height: Option<String>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
+    enter_key_behavior: Option<FormXmlEnterKeyBehavior>,
     save_window_settings: Option<bool>,
     auto_title: Option<bool>,
     auto_url: Option<bool>,
@@ -282,6 +283,11 @@ enum FormXmlWindowOpeningMode {
     DontBlock,
     LockOwner,
     LockWholeInterface,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlEnterKeyBehavior {
+    DefaultButton,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3492,6 +3498,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
         let properties = parse_form_xml_body_properties(form_xml)?;
         let form_command_uuids = form_command_uuids_for_pack(&plain, &properties.commands)?;
         if properties.window_opening_mode.is_some()
+            || properties.enter_key_behavior.is_some()
             || properties.save_window_settings.is_some()
             || !properties.title.is_empty()
             || properties.width.is_some()
@@ -3823,6 +3830,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if matches!(
                     local.as_str(),
                     "WindowOpeningMode"
+                        | "EnterKeyBehavior"
                         | "SaveWindowSettings"
                         | "Width"
                         | "Height"
@@ -4079,6 +4087,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
                     || path_ends_with(&path, &["Form", "SaveWindowSettings"])
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
@@ -4482,6 +4491,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
                     || path_ends_with(&path, &["Form", "SaveWindowSettings"])
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
@@ -4851,6 +4861,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         properties.window_opening_mode =
                             Some(parse_form_window_opening_mode_xml(text_value.trim())?);
+                    }
+                    "EnterKeyBehavior" if path_ends_with(&path, &["Form", "EnterKeyBehavior"]) => {
+                        properties.enter_key_behavior =
+                            Some(parse_form_enter_key_behavior_xml(text_value.trim())?);
                     }
                     "SaveWindowSettings"
                         if path_ends_with(&path, &["Form", "SaveWindowSettings"]) =>
@@ -6944,6 +6958,13 @@ fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpenin
     }
 }
 
+fn parse_form_enter_key_behavior_xml(value: &str) -> Result<FormXmlEnterKeyBehavior> {
+    match value {
+        "DefaultButton" => Ok(FormXmlEnterKeyBehavior::DefaultButton),
+        other => Err(anyhow!("unsupported Form EnterKeyBehavior: {other}")),
+    }
+}
+
 fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     match value {
         "Vertical" => Ok(FormXmlGroup::Vertical),
@@ -7178,6 +7199,9 @@ fn patch_form_layout_properties(
             2,
             form_window_opening_mode_code(window_opening_mode),
         )?;
+    }
+    if let Some(value) = properties.enter_key_behavior {
+        replace_braced_field(layout, 5, form_enter_key_behavior_code(value))?;
     }
     if let Some(value) = properties.save_window_settings {
         replace_form_save_window_settings(layout, value)?;
@@ -9882,6 +9906,12 @@ fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static st
         FormXmlWindowOpeningMode::DontBlock => "0",
         FormXmlWindowOpeningMode::LockOwner => "1",
         FormXmlWindowOpeningMode::LockWholeInterface => "2",
+    }
+}
+
+fn form_enter_key_behavior_code(value: FormXmlEnterKeyBehavior) -> &'static str {
+    match value {
+        FormXmlEnterKeyBehavior::DefaultButton => "0",
     }
 }
 
@@ -18157,6 +18187,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<Width>80</Width>
 	<Height>30</Height>
 	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
+	<EnterKeyBehavior>DefaultButton</EnterKeyBehavior>
 	<AutoTitle>false</AutoTitle>
 	<SaveDataInSettings>UseList</SaveDataInSettings>
 	<AutoSaveDataInSettings>Use</AutoSaveDataInSettings>
@@ -18174,6 +18205,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[fields[2].clone()], "2");
         assert_eq!(&parsed.layout[fields[3].clone()], "80");
         assert_eq!(&parsed.layout[fields[4].clone()], "30");
+        assert_eq!(&parsed.layout[fields[5].clone()], "0");
         assert_eq!(&parsed.layout[fields[6].clone()], "1");
         assert_eq!(&parsed.layout[fields[7].clone()], "1");
         assert_eq!(&parsed.layout[fields[9].clone()], "0");

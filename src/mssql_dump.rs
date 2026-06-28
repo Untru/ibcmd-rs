@@ -3885,6 +3885,7 @@ struct FormBodyProperties {
     width: Option<String>,
     height: Option<String>,
     window_opening_mode: Option<&'static str>,
+    enter_key_behavior: Option<&'static str>,
     save_window_settings: Option<bool>,
     auto_title: Option<bool>,
     auto_url: Option<bool>,
@@ -4080,6 +4081,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         width: extract_form_dimension(fields, 3),
         height: extract_form_dimension(fields, 4),
         window_opening_mode: extract_form_window_opening_mode(fields),
+        enter_key_behavior: extract_form_enter_key_behavior(fields),
         save_window_settings: extract_form_save_window_settings(fields),
         auto_title: extract_form_auto_title(fields),
         auto_url: extract_form_auto_url(fields),
@@ -4119,6 +4121,13 @@ fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
         "0" => Some("DontBlock"),
         "1" => Some("LockOwner"),
         "2" => Some("LockWholeInterface"),
+        _ => None,
+    }
+}
+
+fn extract_form_enter_key_behavior(fields: &[&str]) -> Option<&'static str> {
+    match fields.get(5).map(|field| field.trim())? {
+        "0" => Some("DefaultButton"),
         _ => None,
     }
 }
@@ -6630,6 +6639,12 @@ fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
             escape_xml_text(window_opening_mode)
+        ));
+    }
+    if let Some(value) = properties.enter_key_behavior {
+        xml.push_str(&format!(
+            "\t<EnterKeyBehavior>{}</EnterKeyBehavior>\r\n",
+            escape_xml_text(value)
         ));
     }
     if properties.save_window_settings == Some(false) {
@@ -14483,6 +14498,17 @@ mod tests {
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
         assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
         assert!(form_xml.contains("<ShowCommandBar>true</ShowCommandBar>"));
+    }
+
+    #[test]
+    fn extracts_form_enter_key_behavior_default_button_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,0,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<EnterKeyBehavior>DefaultButton</EnterKeyBehavior>"));
     }
 
     #[test]
