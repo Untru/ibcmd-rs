@@ -132,6 +132,8 @@ struct FormXmlAutoCommandBar {
     name: String,
     horizontal_align: Option<FormXmlHorizontalAlign>,
     autofill: Option<bool>,
+    child_items_present: bool,
+    child_items: Vec<FormXmlChildItem>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3560,7 +3562,13 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             let mut layout = plain[container.layout_range.clone()].trim().to_string();
             patch_form_layout_properties(&mut layout, &properties)?;
             if let Some(auto_command_bar) = &properties.auto_command_bar {
-                let _ = patch_form_layout_auto_command_bar(&mut layout, auto_command_bar)?;
+                let _ = patch_form_layout_auto_command_bar(
+                    &mut layout,
+                    auto_command_bar,
+                    &properties.commands,
+                    &form_command_uuids,
+                    source,
+                )?;
             }
             patch_form_layout_events(&mut layout, &properties.events, properties.events_present)?;
             patch_form_layout_child_items(
@@ -3982,6 +3990,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     properties.child_items_present = true;
                 }
                 if local == "ChildItems"
+                    && path_ends_with(&path, &["Form", "AutoCommandBar"])
+                    && let Some(command_bar) = properties.auto_command_bar.as_mut()
+                {
+                    command_bar.child_items_present = true;
+                }
+                if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
                     })
@@ -4100,6 +4114,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     properties.child_items_present = true;
                 }
                 if local == "ChildItems"
+                    && path_ends_with(&path, &["Form", "AutoCommandBar"])
+                    && let Some(command_bar) = properties.auto_command_bar.as_mut()
+                {
+                    command_bar.child_items_present = true;
+                }
+                if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
                     })
@@ -4122,13 +4142,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(mut item) = parse_form_child_item_xml(&local, &event)?
                 {
                     item.depth = current_child_items.len();
-                    if let Some(parent) = current_child_items.last_mut() {
+                    if path_ends_with_root_auto_command_bar_child_items(&path)
+                        && current_child_items.is_empty()
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.child_items.push(item);
+                        }
+                    } else if let Some(parent) = current_child_items.last_mut() {
                         if path.last().map(String::as_str) != Some("ChildItems") {
                             parent.child_items_present = true;
                         }
                         parent.child_items.push(item.clone());
+                        properties.child_items.push(item);
+                    } else {
+                        properties.child_items.push(item);
                     }
-                    properties.child_items.push(item);
                 }
             }
             Ok(Event::Text(text)) => {
@@ -6362,8 +6390,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(item) = current_child_items.pop() {
                             if let Some(parent) = current_child_items.last_mut() {
                                 parent.child_items.push(item.clone());
+                            } else if path_ends_with_root_auto_command_bar_child_item(&path, &item)
+                            {
+                                if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                                    command_bar.child_items.push(item.clone());
+                                }
                             }
-                            properties.child_items.push(item);
+                            if !path_ends_with_root_auto_command_bar_child_item(&path, &item) {
+                                properties.child_items.push(item);
+                            }
                         }
                     }
                     _ => {}
@@ -6463,6 +6498,8 @@ fn parse_form_auto_command_bar_xml(
         name,
         horizontal_align: None,
         autofill: None,
+        child_items_present: false,
+        child_items: Vec::new(),
     }))
 }
 
@@ -6709,6 +6746,20 @@ fn path_ends_with_for_current_child_item(path: &[String], items: &[FormXmlChildI
         return false;
     };
     path.last().map(String::as_str) == Some(item.tag.as_str())
+}
+
+fn path_ends_with_root_auto_command_bar_child_items(path: &[String]) -> bool {
+    path_ends_with(path, &["Form", "AutoCommandBar", "ChildItems"])
+}
+
+fn path_ends_with_root_auto_command_bar_child_item(
+    path: &[String],
+    item: &FormXmlChildItem,
+) -> bool {
+    path_ends_with(
+        path,
+        &["Form", "AutoCommandBar", "ChildItems", item.tag.as_str()],
+    )
 }
 
 fn path_ends_with_for_child_events(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -8195,6 +8246,9 @@ fn form_view_mode_application_on_set_report_result_code(
 fn patch_form_layout_auto_command_bar(
     text: &mut String,
     command_bar: &FormXmlAutoCommandBar,
+    commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if fields.first().map(|range| text[range.clone()].trim()) == Some("22")
@@ -8222,6 +8276,24 @@ fn patch_form_layout_auto_command_bar(
         for (range, replacement) in replacements.into_iter().rev() {
             text.replace_range(range, &replacement);
         }
+        if command_bar.child_items_present {
+            retain_form_layout_direct_child_items(text, &command_bar.child_items)?;
+        }
+        for child in &command_bar.child_items {
+            if !is_form_layout_creatable_nested_item(child) {
+                continue;
+            }
+            let _ = patch_or_append_form_layout_direct_child_item(
+                text,
+                child,
+                commands,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                command_uuids,
+                source,
+            )?;
+        }
         return Ok(true);
     }
 
@@ -8230,7 +8302,13 @@ fn patch_form_layout_auto_command_bar(
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_layout_auto_command_bar(&mut nested, command_bar)? {
+        if patch_form_layout_auto_command_bar(
+            &mut nested,
+            command_bar,
+            commands,
+            command_uuids,
+            source,
+        )? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -9873,6 +9951,11 @@ fn form_layout_direct_child_items_span(
     let item_type = fields.get(5).map(|range| text[range.clone()].trim());
     let (count_index, first_uuid_index) = if wrapper == "22"
         && form_layout_usual_group_extended_options_range(text, fields).is_some()
+    {
+        (21, 22)
+    } else if wrapper == "22"
+        && item_type == Some("9")
+        && form_layout_direct_child_items_span_at(text, fields, 21, 22).is_some()
     {
         (21, 22)
     } else if wrapper == "22"
@@ -19722,6 +19805,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!parsed.layout.contains("OldBar"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,"OldBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,1,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1">
+		<ChildItems>
+			<Button name="NewButton" id="54">
+				<Type>CommandBarButton</Type>
+			</Button>
+		</ChildItems>
+	</AutoCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, fields[1].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, bar_fields[23].start)?;
+
+        assert_eq!(&parsed.layout[bar_fields[6].clone()], r#""NewBar""#);
+        assert_eq!(&parsed.layout[bar_fields[21].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""NewButton""#);
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }

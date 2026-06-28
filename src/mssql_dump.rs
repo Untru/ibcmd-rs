@@ -3858,12 +3858,12 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     let mut properties = extract_form_body_properties(&form_fields);
     let events = extract_form_body_events(&form_fields);
-    let auto_command_bar = extract_form_auto_command_bar(&form_fields);
     let attributes = extract_form_body_attributes(&body.trailing, object_refs);
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
     properties.details_data = extract_form_report_attribute_ref(&form_fields, "6", &attributes);
     let parameters = extract_form_body_parameters(&body.trailing, object_refs);
     let commands = extract_form_body_commands(&body.trailing, object_refs);
+    let auto_command_bar = extract_form_auto_command_bar(&form_fields, &commands, object_refs);
     let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
     let command_interface = extract_form_command_interface(&body.trailing, object_refs);
 
@@ -3941,6 +3941,7 @@ struct FormAutoCommandBar {
     name: String,
     horizontal_align: Option<&'static str>,
     autofill: Option<bool>,
+    child_items: Vec<FormChildItem>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4541,11 +4542,19 @@ fn form_standard_excluded_command_name(uuid: &str) -> Option<&'static str> {
     }
 }
 
-fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
-    find_form_auto_command_bar(fields)
+fn extract_form_auto_command_bar(
+    fields: &[&str],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormAutoCommandBar> {
+    find_form_auto_command_bar(fields, commands, object_refs)
 }
 
-fn find_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
+fn find_form_auto_command_bar(
+    fields: &[&str],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormAutoCommandBar> {
     for field in fields {
         let field = field.trim();
         if !field.starts_with('{') {
@@ -4554,17 +4563,23 @@ fn find_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        if let Some(command_bar) = parse_form_auto_command_bar_fields(&nested) {
+        if let Some(command_bar) =
+            parse_form_auto_command_bar_fields(&nested, commands, object_refs)
+        {
             return Some(command_bar);
         }
-        if let Some(command_bar) = find_form_auto_command_bar(&nested) {
+        if let Some(command_bar) = find_form_auto_command_bar(&nested, commands, object_refs) {
             return Some(command_bar);
         }
     }
     None
 }
 
-fn parse_form_auto_command_bar_fields(fields: &[&str]) -> Option<FormAutoCommandBar> {
+fn parse_form_auto_command_bar_fields(
+    fields: &[&str],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormAutoCommandBar> {
     if fields.first().map(|value| value.trim()) != Some("22") {
         return None;
     }
@@ -4586,6 +4601,17 @@ fn parse_form_auto_command_bar_fields(fields: &[&str]) -> Option<FormAutoCommand
         autofill: fields
             .get(20)
             .and_then(|field| parse_form_auto_command_bar_autofill(field)),
+        child_items: parse_form_child_item_pairs(
+            fields,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            commands,
+            object_refs,
+        )
+        .unwrap_or_default(),
     })
 }
 
@@ -7160,7 +7186,10 @@ fn format_form_body_xml(
         ));
     }
     if let Some(command_bar) = auto_command_bar {
-        if command_bar.horizontal_align.is_some() || command_bar.autofill == Some(false) {
+        if command_bar.horizontal_align.is_some()
+            || command_bar.autofill == Some(false)
+            || !command_bar.child_items.is_empty()
+        {
             xml.push_str(&format!(
                 "\t<AutoCommandBar name=\"{}\" id=\"{}\">\r\n",
                 escape_xml_text(&command_bar.name),
@@ -7175,6 +7204,7 @@ fn format_form_body_xml(
             if command_bar.autofill == Some(false) {
                 xml.push_str("\t\t<Autofill>false</Autofill>\r\n");
             }
+            xml.push_str(&format_form_child_items_xml(&command_bar.child_items, 2));
             xml.push_str("\t</AutoCommandBar>\r\n");
         } else {
             xml.push_str(&format!(
@@ -15635,7 +15665,7 @@ mod tests {
         );
         assert_eq!(
             form_xml.matches("<ExtendedTooltip ").count(),
-            52,
+            55,
             "{}",
             form_xml
         );
@@ -15676,6 +15706,13 @@ mod tests {
         assert!(form_xml.contains(
             r#"<ContextMenu name="ОперандыДляРасчетовСтрокаПоискаКонтекстноеМеню" id="141">"#
         ));
+        assert!(form_xml.contains(r#"<Button name="ФормаЗаписатьИЗакрыть" id="54">"#));
+        assert!(form_xml.contains(r#"<DefaultButton>true</DefaultButton>"#));
+        assert!(form_xml.contains(r#"<CommandName>Form.Command.ФормаЗаписать</CommandName>"#));
+        assert!(
+            form_xml
+                .contains(r#"<ExtendedTooltip name="ПроверитьФормулуExtendedTooltip" id="77"/>"#)
+        );
     }
 
     #[test]
