@@ -93,6 +93,7 @@ struct FormXmlBodyProperties {
     auto_time: Option<FormXmlAutoTime>,
     use_posting_mode: Option<FormXmlUsePostingMode>,
     repost_on_write: Option<bool>,
+    auto_fill_check: Option<bool>,
     command_set_excluded_commands: Vec<FormXmlExcludedCommand>,
     use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     customizable: Option<bool>,
@@ -3514,6 +3515,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.auto_time.is_some()
             || properties.use_posting_mode.is_some()
             || properties.repost_on_write.is_some()
+            || properties.auto_fill_check.is_some()
             || !properties.command_set_excluded_commands.is_empty()
             || properties.use_for_folders_and_items.is_some()
             || properties.customizable.is_some()
@@ -3848,6 +3850,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoTime"
                         | "UsePostingMode"
                         | "RepostOnWrite"
+                        | "AutoFillCheck"
                         | "ExcludedCommand"
                         | "UseForFoldersAndItems"
                         | "Customizable"
@@ -4106,6 +4109,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "AutoTime"])
                     || path_ends_with(&path, &["Form", "UsePostingMode"])
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
+                    || path_ends_with(&path, &["Form", "AutoFillCheck"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
@@ -4513,6 +4517,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "AutoTime"])
                     || path_ends_with(&path, &["Form", "UsePostingMode"])
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
+                    || path_ends_with(&path, &["Form", "AutoFillCheck"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
@@ -4929,6 +4934,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "RepostOnWrite" if path_ends_with(&path, &["Form", "RepostOnWrite"]) => {
                         properties.repost_on_write =
                             Some(parse_form_xml_bool("RepostOnWrite", text_value.trim())?);
+                    }
+                    "AutoFillCheck" if path_ends_with(&path, &["Form", "AutoFillCheck"]) => {
+                        properties.auto_fill_check =
+                            Some(parse_form_xml_bool("AutoFillCheck", text_value.trim())?);
                     }
                     "ExcludedCommand"
                         if path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"]) =>
@@ -6280,6 +6289,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if matches!(
                     local.as_str(),
                     "WindowOpeningMode"
+                        | "AutoFillCheck"
                         | "Group"
                         | "Event"
                         | "Action"
@@ -7270,6 +7280,9 @@ fn patch_form_layout_properties(
     if let Some(value) = properties.repost_on_write {
         replace_form_repost_on_write(layout, value)?;
     }
+    if let Some(auto_fill_check) = properties.auto_fill_check {
+        replace_form_auto_fill_check(layout, auto_fill_check)?;
+    }
     if !properties.command_set_excluded_commands.is_empty() {
         replace_form_command_set(layout, &properties.command_set_excluded_commands)?;
     }
@@ -7399,6 +7412,21 @@ fn replace_form_repost_on_write(layout: &mut String, value: bool) -> Result<()> 
         return Ok(());
     }
     let Some(range) = form_root_property_bag_value_range(layout, &fields, "4") else {
+        return Ok(());
+    };
+    if !is_form_property_bag_bool_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(range, if value { r#"{"B",1}"# } else { r#"{"B",0}"# });
+    Ok(())
+}
+
+fn replace_form_auto_fill_check(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "24") else {
         return Ok(());
     };
     if !is_form_property_bag_bool_value(&layout[range.clone()]) {
@@ -18299,6 +18327,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_auto_fill_check_false() -> anyhow::Result<()> {
+        let base_text = r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,24,{"B",1},0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}},"Old module",{0}}"##;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoFillCheck>false</AutoFillCheck>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"24,{"B",0}"#));
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_false_text = base_text.replace(r#"24,{"B",1}"#, r#"24,{"B",0}"#);
+        let base = super::deflate_raw(base_false_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoFillCheck>true</AutoFillCheck>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"24,{"B",1}"#));
 
         Ok(())
     }

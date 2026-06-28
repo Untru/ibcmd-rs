@@ -3895,6 +3895,7 @@ struct FormBodyProperties {
     auto_time: Option<&'static str>,
     use_posting_mode: Option<&'static str>,
     repost_on_write: Option<bool>,
+    auto_fill_check: Option<bool>,
     command_set_excluded_commands: Vec<&'static str>,
     use_for_folders_and_items: Option<&'static str>,
     customizable: Option<bool>,
@@ -4094,6 +4095,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         auto_time: extract_form_auto_time(fields),
         use_posting_mode: extract_form_use_posting_mode(fields),
         repost_on_write: extract_form_repost_on_write(fields),
+        auto_fill_check: extract_form_auto_fill_check(fields),
         command_set_excluded_commands: extract_form_command_set_excluded_commands(fields),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
@@ -4243,6 +4245,18 @@ fn extract_form_repost_on_write(fields: &[&str]) -> Option<bool> {
     ) {
         (Some(r##""B""##), Some("0")) => Some(false),
         (Some(r##""B""##), Some("1")) => Some(true),
+        _ => None,
+    }
+}
+
+fn extract_form_auto_fill_check(fields: &[&str]) -> Option<bool> {
+    let value = form_root_property_bag_value(fields, "24")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+    ) {
+        (Some(r##""B""##), Some("0")) => Some(false),
         _ => None,
     }
 }
@@ -6720,6 +6734,9 @@ fn format_form_body_xml(
             "\t<RepostOnWrite>{}</RepostOnWrite>\r\n",
             if value { "true" } else { "false" }
         ));
+    }
+    if properties.auto_fill_check == Some(false) {
+        xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
     }
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
@@ -14587,6 +14604,17 @@ mod tests {
 
         assert!(form_xml.contains("<ShowTitle>false</ShowTitle>"));
         assert!(!form_xml.contains("<ShowCloseButton>false</ShowCloseButton>"));
+    }
+
+    #[test]
+    fn extracts_form_auto_fill_check_false_to_body_xml() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,24,{"B",0},0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<AutoFillCheck>false</AutoFillCheck>"));
     }
 
     #[test]
