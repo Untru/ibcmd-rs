@@ -4001,6 +4001,7 @@ struct FormChildItem {
     auto_max_height: Option<bool>,
     horizontal_stretch: Option<bool>,
     drop_list_button: Option<bool>,
+    clear_button: Option<bool>,
     choice_button_representation: Option<&'static str>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
@@ -5059,6 +5060,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        clear_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_clear_button(&fields)
+        } else {
+            None
+        },
         choice_button_representation: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
@@ -5306,6 +5312,17 @@ fn parse_form_input_field_drop_list_button(fields: &[&str]) -> Option<bool> {
         .get(39)
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
     match nested.get(47).map(|field| field.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_clear_button(fields: &[&str]) -> Option<bool> {
+    let nested = fields
+        .get(39)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    match nested.get(13).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -6021,6 +6038,12 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<DropListButton>{}</DropListButton>\r\n",
             if drop_list_button { "true" } else { "false" }
+        ));
+    }
+    if let Some(clear_button) = item.clear_button {
+        xml.push_str(&format!(
+            "{tab}\t<ClearButton>{}</ClearButton>\r\n",
+            if clear_button { "true" } else { "false" }
         ));
     }
     if let Some(choice_button_representation) = item.choice_button_representation {
@@ -13870,6 +13893,42 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_clear_button_from_layout_code() {
+        for (code, expected) in [("0", false), ("1", true)] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Field""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[13] = code.to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let field = format!("{{{}}}", input_fields.join(","));
+
+            let item = parse_form_child_item(
+                &field,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "InputField");
+            assert_eq!(item.clear_button, Some(expected));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains(&format!(
+                "<ClearButton>{}</ClearButton>",
+                if expected { "true" } else { "false" }
+            )));
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_choice_button_representation_from_layout_code() {
         for (code, expected) in [
             ("1", "ShowInDropList"),
@@ -13967,6 +14026,7 @@ mod tests {
             auto_max_height: None,
             horizontal_stretch: None,
             drop_list_button: None,
+            clear_button: None,
             choice_button_representation: None,
             item_type: None,
             addition_source_item: None,
@@ -13993,6 +14053,7 @@ mod tests {
                     auto_max_height: None,
                     horizontal_stretch: None,
                     drop_list_button: None,
+                    clear_button: None,
                     choice_button_representation: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
@@ -14020,6 +14081,7 @@ mod tests {
                     auto_max_height: None,
                     horizontal_stretch: None,
                     drop_list_button: None,
+                    clear_button: None,
                     choice_button_representation: None,
                     item_type: None,
                     addition_source_item: None,
