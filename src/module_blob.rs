@@ -28,6 +28,7 @@ const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
 const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
+const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -7244,6 +7245,11 @@ fn format_form_body_new_attribute(
     attribute: &FormXmlAttribute,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    let settings_text = if let Some(settings) = &attribute.settings {
+        format_form_dynamic_list_settings_new(settings, source)?
+    } else {
+        "{0,0}".to_string()
+    };
     Ok(format!(
         "{{9,{{{}}},0,{},{},{},{},{},{},{},{},0,0,0,{},{}}}",
         attribute.id,
@@ -7259,7 +7265,7 @@ fn format_form_body_new_attribute(
         } else {
             "0"
         },
-        "{0,0}",
+        settings_text,
         "{0,0}"
     ))
 }
@@ -7268,6 +7274,12 @@ fn format_form_attribute_type_pattern(
     attribute: &FormXmlAttribute,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    if attribute.types.len() == 1 && attribute.types[0].trim() == "cfg:DynamicList" {
+        return Ok(format!(
+            "{{\"Pattern\",{{\"#\",{}}}}}",
+            FORM_DYNAMIC_LIST_TYPE_UUID
+        ));
+    }
     let value_types = parse_metadata_type_pattern_elements(
         "Form Attribute",
         &attribute.types,
@@ -7280,6 +7292,52 @@ fn format_form_attribute_type_pattern(
         true,
     )?;
     Ok(format_metadata_type_pattern(&value_types))
+}
+
+fn format_form_dynamic_list_settings_new(
+    settings: &FormXmlDynamicListSettings,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut pairs = Vec::<(&str, String)>::new();
+    if let Some(query_text) = &settings.query_text {
+        pairs.push(("QueryText", format_form_setting_string(query_text)));
+    }
+    if let Some(main_table) = &settings.main_table
+        && let Some(source) = source
+    {
+        pairs.push((
+            "MainTable",
+            format_form_setting_metadata_ref(source, main_table)?,
+        ));
+    }
+    if let Some(dynamic_data_read) = settings.dynamic_data_read {
+        pairs.push((
+            "DynamicalDataSelection",
+            format_form_setting_bool(!dynamic_data_read),
+        ));
+    }
+    if let Some(manual_query) = settings.manual_query {
+        pairs.push(("ManualQuery", format_form_setting_bool(manual_query)));
+    }
+    if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
+        pairs.push(("ItemsViewMode", format_form_setting_string(items_view_mode)));
+    }
+    if let Some(items_user_setting_id) = &settings.list_settings.items_user_setting_id {
+        pairs.push((
+            "ItemsUserSettingID",
+            format_form_setting_string(items_user_setting_id),
+        ));
+    }
+
+    let mut text = format!("{{0,{}", pairs.len());
+    for (key, value) in pairs {
+        text.push(',');
+        text.push_str(&format_1c_string(key));
+        text.push(',');
+        text.push_str(&value);
+    }
+    text.push('}');
+    Ok(text)
 }
 
 fn patch_form_dynamic_list_settings(
@@ -15081,6 +15139,80 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.trailing[2], "{0,0}");
         assert_eq!(parsed.trailing[3], "{0}");
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_dynamic_list_attribute() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-new-dynamic-list-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<QueryText>SELECT Ref FROM Catalog.Products</QueryText>
+				<MainTable>Catalog.Products</MainTable>
+				<ListSettings>
+					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
+					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let attributes_fields = super::scan_braced_fields(&parsed.trailing[0], 0)?;
+        let attribute_fields =
+            super::scan_braced_fields(&parsed.trailing[0], attributes_fields[2].start)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(&parsed.trailing[0][attributes_fields[0].clone()], "4");
+        assert_eq!(&parsed.trailing[0][attributes_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[0][attribute_fields[0].clone()], "9");
+        assert_eq!(&parsed.trailing[0][attribute_fields[1].clone()], "{1}");
+        assert_eq!(
+            &parsed.trailing[0][attribute_fields[3].clone()],
+            r#""List""#
+        );
+        assert_eq!(&parsed.trailing[0][attribute_fields[10].clone()], "1");
+        assert!(parsed.trailing[0].contains(super::FORM_DYNAMIC_LIST_TYPE_UUID));
+        assert!(
+            parsed.trailing[0].contains(r#""QueryText",{"S","SELECT Ref FROM Catalog.Products"}"#)
+        );
+        assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
+        assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
+        assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""ItemsUserSettingID",{"S","cccccccc-cccc-4ccc-cccc-cccccccccccc"}"#)
+        );
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
