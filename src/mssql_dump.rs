@@ -3998,6 +3998,7 @@ struct FormChildItem {
     edit_mode: Option<&'static str>,
     auto_edit_mode: Option<bool>,
     auto_max_width: Option<bool>,
+    horizontal_stretch: Option<bool>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
     title: Vec<(String, String)>,
@@ -5040,6 +5041,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        horizontal_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_horizontal_stretch(&fields)
+        } else {
+            None
+        },
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(4)
@@ -5248,6 +5254,17 @@ fn parse_form_input_field_auto_max_width(fields: &[&str]) -> Option<bool> {
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
     match nested.get(49).map(|field| field.trim())? {
         "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_horizontal_stretch(fields: &[&str]) -> Option<bool> {
+    let nested = fields
+        .get(39)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    match nested.get(4).map(|field| field.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
         _ => None,
     }
 }
@@ -5935,6 +5952,12 @@ fn format_form_child_item_xml(
     }
     if item.auto_max_width == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+    }
+    if let Some(horizontal_stretch) = item.horizontal_stretch {
+        xml.push_str(&format!(
+            "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+            if horizontal_stretch { "true" } else { "false" }
+        ));
     }
     if let Some(group) = item.group {
         xml.push_str(&format!(
@@ -13652,6 +13675,42 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_horizontal_stretch_from_layout_code() {
+        for (code, expected) in [("0", false), ("1", true)] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Field""#.to_string();
+            let mut options = vec!["2".to_string(); 51];
+            options[0] = "38".to_string();
+            options[4] = code.to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let field = format!("{{{}}}", input_fields.join(","));
+
+            let item = parse_form_child_item(
+                &field,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "InputField");
+            assert_eq!(item.horizontal_stretch, Some(expected));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains(&format!(
+                "<HorizontalStretch>{}</HorizontalStretch>",
+                if expected { "true" } else { "false" }
+            )));
+        }
+    }
+
+    #[test]
     fn extracts_form_search_addition_type_from_layout_code() {
         let mut items = Vec::new();
         let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
@@ -13707,6 +13766,7 @@ mod tests {
             edit_mode: None,
             auto_edit_mode: None,
             auto_max_width: None,
+            horizontal_stretch: None,
             item_type: None,
             addition_source_item: None,
             title: Vec::new(),
@@ -13729,6 +13789,7 @@ mod tests {
                     edit_mode: None,
                     auto_edit_mode: None,
                     auto_max_width: None,
+                    horizontal_stretch: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
                     title: Vec::new(),
@@ -13752,6 +13813,7 @@ mod tests {
                     edit_mode: None,
                     auto_edit_mode: None,
                     auto_max_width: None,
+                    horizontal_stretch: None,
                     item_type: None,
                     addition_source_item: None,
                     title: Vec::new(),

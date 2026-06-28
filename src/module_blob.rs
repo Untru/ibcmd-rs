@@ -215,6 +215,7 @@ struct FormXmlChildItem {
     edit_mode: Option<FormXmlEditMode>,
     auto_edit_mode: Option<bool>,
     auto_max_width: Option<bool>,
+    horizontal_stretch: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -3703,6 +3704,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "EditMode"
                         | "AutoEditMode"
                         | "AutoMaxWidth"
+                        | "HorizontalStretch"
                         | "Behavior"
                         | "Representation"
                         | "KeyParameter"
@@ -4118,6 +4120,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_auto_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_auto_max_width(&path, &current_child_items)
+                    || path_ends_with_for_child_horizontal_stretch(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5506,6 +5509,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "HorizontalStretch"
+                        if path_ends_with_for_child_horizontal_stretch(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.horizontal_stretch = Some(parse_form_xml_bool(
+                                "ChildItem/HorizontalStretch",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ShowTitle"
                         if path_ends_with_for_child_show_title(&path, &current_child_items) =>
                     {
@@ -5594,6 +5610,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "EditMode"
                         | "AutoEditMode"
                         | "AutoMaxWidth"
+                        | "HorizontalStretch"
                         | "Behavior"
                         | "Representation"
                         | "lang"
@@ -5707,6 +5724,7 @@ fn parse_form_child_item_xml(
         edit_mode: None,
         auto_edit_mode: None,
         auto_max_width: None,
+        horizontal_stretch: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5927,6 +5945,16 @@ fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChil
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMaxWidth"])
+}
+
+fn path_ends_with_for_child_horizontal_stretch(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "HorizontalStretch"])
 }
 
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7283,7 +7311,7 @@ fn patch_form_layout_input_field_extended_options(
     existing: &str,
     item: &FormXmlChildItem,
 ) -> Result<Option<String>> {
-    if item.auto_max_width != Some(false) {
+    if item.auto_max_width != Some(false) && item.horizontal_stretch.is_none() {
         return Ok(None);
     }
     let mut text = existing.trim().to_string();
@@ -7291,12 +7319,19 @@ fn patch_form_layout_input_field_extended_options(
     if fields.first().map(|range| text[range.clone()].trim()) != Some("38") {
         return Ok(None);
     }
-    if fields.get(49).is_none() {
-        return Ok(None);
+    if let Some(horizontal_stretch) = item.horizontal_stretch
+        && fields.get(4).is_some()
+    {
+        replace_braced_field(&mut text, 4, if horizontal_stretch { "1" } else { "0" })?;
     }
-    replace_braced_field(&mut text, 49, "0")?;
-    if scan_braced_fields(&text, 0)?.get(50).is_some() {
-        replace_braced_field(&mut text, 50, "0")?;
+    if item.auto_max_width == Some(false) {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(49).is_some() {
+            replace_braced_field(&mut text, 49, "0")?;
+            if scan_braced_fields(&text, 0)?.get(50).is_some() {
+                replace_braced_field(&mut text, 50, "0")?;
+            }
+        }
     }
     Ok(Some(text))
 }
@@ -17819,6 +17854,45 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[options_fields[49].clone()], "0");
         assert_eq!(&parsed.layout[options_fields[50].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_horizontal_stretch() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 51];
+        options[0] = "38".to_string();
+        options[4] = "2".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<HorizontalStretch>false</HorizontalStretch>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[4].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
