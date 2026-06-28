@@ -4099,10 +4099,29 @@ fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'static str> {
 
 fn extract_form_show_command_bar(fields: &[&str]) -> Option<bool> {
     match fields.get(18).map(|field| field.trim())? {
-        "0" => Some(true),
-        "1" => Some(false),
-        _ => None,
+        "0" => return Some(true),
+        "1" => return Some(false),
+        _ => {}
     }
+    if form_root_uses_property_bag(fields) {
+        match fields.get(6).map(|field| field.trim())? {
+            "0" => Some(true),
+            "1" => Some(false),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+fn form_root_uses_property_bag(fields: &[&str]) -> bool {
+    fields
+        .get(18)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .is_some_and(|count| count > 1)
+        && fields
+            .get(19)
+            .is_some_and(|field| field.trim().parse::<usize>().is_ok())
 }
 
 fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
@@ -13983,6 +14002,18 @@ mod tests {
     fn extracts_form_show_command_bar_false_to_body_xml() {
         let form_body = deflate_for_test(
             r#"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,1,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<CommandBarLocation>None</CommandBarLocation>"));
+        assert!(form_xml.contains("<ShowCommandBar>false</ShowCommandBar>"));
+    }
+
+    #[test]
+    fn extracts_report_form_show_command_bar_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,21,5,{"B",0}},"",{0}}"#.as_bytes(),
         );
 
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();

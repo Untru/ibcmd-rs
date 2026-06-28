@@ -6854,8 +6854,26 @@ fn replace_form_show_command_bar(layout: &mut String, value: bool) -> Result<()>
             layout.replace_range(range.clone(), if value { "0" } else { "1" });
             Ok(())
         }
+        _ if form_layout_uses_property_bag(layout, &fields) => {
+            if let Some(range) = fields.get(6)
+                && matches!(layout[range.clone()].trim(), "0" | "1")
+            {
+                layout.replace_range(range.clone(), if value { "0" } else { "1" });
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
+}
+
+fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool {
+    fields
+        .get(18)
+        .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        .is_some_and(|count| count > 1)
+        && fields
+            .get(19)
+            .is_some_and(|range| layout[range.clone()].trim().parse::<usize>().is_ok())
 }
 
 fn format_form_title_value(title: &[LocalizedString]) -> String {
@@ -17225,6 +17243,28 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_report_form_body_xml_show_command_bar_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,21,5,{\"B\",0}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowCommandBar>true</ShowCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[6].clone()], "0");
+        assert_eq!(&parsed.layout[fields[18].clone()], "21");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
