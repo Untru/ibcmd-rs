@@ -211,6 +211,7 @@ struct FormXmlChildItem {
     default_button: Option<bool>,
     show_title: Option<bool>,
     read_only: Option<bool>,
+    title_location: Option<FormXmlTitleLocation>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -263,6 +264,13 @@ enum FormXmlButtonRepresentation {
     Picture,
     PictureAndText,
     None,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlTitleLocation {
+    None,
+    Left,
+    Top,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3683,6 +3691,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ShowTitle"
                         | "DefaultButton"
                         | "ReadOnly"
+                        | "TitleLocation"
                         | "Behavior"
                         | "Representation"
                         | "KeyParameter"
@@ -4094,6 +4103,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_read_only(&path, &current_child_items)
+                    || path_ends_with_for_child_title_location(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5447,6 +5457,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "TitleLocation"
+                        if path_ends_with_for_child_title_location(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.title_location =
+                                Some(parse_form_title_location_xml(text_value.trim())?);
+                        }
+                    }
                     "ShowTitle"
                         if path_ends_with_for_child_show_title(&path, &current_child_items) =>
                     {
@@ -5531,6 +5549,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ShowTitle"
                         | "DefaultButton"
                         | "ReadOnly"
+                        | "TitleLocation"
                         | "Behavior"
                         | "Representation"
                         | "lang"
@@ -5640,6 +5659,7 @@ fn parse_form_child_item_xml(
         default_button: None,
         show_title: None,
         read_only: None,
+        title_location: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5834,6 +5854,13 @@ fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
 }
 
+fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
+}
+
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -5935,6 +5962,17 @@ fn parse_form_button_representation_xml(value: &str) -> Result<FormXmlButtonRepr
         "PictureAndText" => Ok(FormXmlButtonRepresentation::PictureAndText),
         "None" => Ok(FormXmlButtonRepresentation::None),
         other => Err(anyhow!("unsupported Form Button Representation: {other}")),
+    }
+}
+
+fn parse_form_title_location_xml(value: &str) -> Result<FormXmlTitleLocation> {
+    match value {
+        "None" => Ok(FormXmlTitleLocation::None),
+        "Left" => Ok(FormXmlTitleLocation::Left),
+        "Top" => Ok(FormXmlTitleLocation::Top),
+        other => Err(anyhow!(
+            "unsupported Form InputField TitleLocation: {other}"
+        )),
     }
 }
 
@@ -6593,11 +6631,16 @@ fn format_form_layout_new_button_item(
 }
 
 fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    let title_location = item
+        .title_location
+        .map(form_input_field_title_location_code)
+        .unwrap_or("1");
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,0,2,{},1,0,{}",
+        "{{48,{{{},{}}},0,0,0,2,{},{},0,{}",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
+        title_location,
         format_1c_synonyms(&item.title)
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
@@ -6946,6 +6989,15 @@ fn patch_form_layout_child_item_entry(
         replacements.push((
             read_only_range.clone(),
             if read_only { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "InputField"
+        && let Some(title_location) = item.title_location
+        && let Some(title_location_range) = fields.get(7)
+    {
+        replacements.push((
+            title_location_range.clone(),
+            form_input_field_title_location_code(title_location).to_string(),
         ));
     }
     if item.tag.ends_with("Addition")
@@ -7361,6 +7413,14 @@ fn form_button_representation_code(value: FormXmlButtonRepresentation) -> &'stat
         FormXmlButtonRepresentation::Picture => "1",
         FormXmlButtonRepresentation::PictureAndText => "2",
         FormXmlButtonRepresentation::None => "3",
+    }
+}
+
+fn form_input_field_title_location_code(value: FormXmlTitleLocation) -> &'static str {
+    match value {
+        FormXmlTitleLocation::None => "0",
+        FormXmlTitleLocation::Left => "2",
+        FormXmlTitleLocation::Top => "3",
     }
 }
 
@@ -17542,6 +17602,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[input_fields[14].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_title_location() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<TitleLocation>Left</TitleLocation>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[7].clone()], "2");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
