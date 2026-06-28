@@ -5058,7 +5058,11 @@ fn parse_form_child_item(
         } else {
             None
         },
-        skip_on_input: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        skip_on_input: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(29)
+                .and_then(|field| parse_form_input_field_skip_on_input(field))
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(15)
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
@@ -14154,6 +14158,26 @@ mod tests {
         assert!(xml.contains("<Type>CommandBarButton</Type>"));
         assert!(xml.contains("<Representation>PictureAndText</Representation>"));
         assert!(xml.contains("<DefaultButton>true</DefaultButton>"));
+    }
+
+    #[test]
+    fn extracts_form_button_skip_on_input_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{34,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Save",{1,0},1,{0},{0},3,0,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",0,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Button");
+        assert_eq!(item.skip_on_input, Some(false));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
     }
 
     #[test]

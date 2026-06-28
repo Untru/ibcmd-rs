@@ -6341,7 +6341,8 @@ fn path_ends_with_for_child_skip_on_input(path: &[String], items: &[FormXmlChild
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
+    matches!(item.tag.as_str(), "Button" | "InputField")
+        && path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
 }
 
 fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7748,6 +7749,16 @@ fn patch_form_layout_child_item_entry(
         && let Some(skip_on_input) = item.skip_on_input
         && form_layout_input_field_is_extended(fields)
         && let Some(skip_on_input_range) = fields.get(15)
+    {
+        replacements.push((
+            skip_on_input_range.clone(),
+            if skip_on_input { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(skip_on_input) = item.skip_on_input
+        && form_layout_button_is_extended(fields)
+        && let Some(skip_on_input_range) = fields.get(29)
     {
         replacements.push((
             skip_on_input_range.clone(),
@@ -18351,6 +18362,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[button_fields[10].clone()], "2");
         assert_eq!(&parsed.layout[button_fields[11].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_button_skip_on_input() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{34,{44,22222222-2222-4222-8222-222222222222},0,0,0,"Save",{1,0},1,{0},{0},3,0,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}},"Old module",{0}}"#,
+            )?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<SkipOnInput>{value}</SkipOnInput>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+            assert_eq!(&parsed.layout[button_fields[29].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
 
         Ok(())
     }
