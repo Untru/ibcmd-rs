@@ -471,8 +471,11 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/help.xml")
         || lower.ends_with("/ext/commandinterface.xml")
         || lower.ends_with("/ext/style.xml")
+        || lower == "ext/homepageworkarea.xml"
         || lower == "ext/mobileclientsignature.bin"
         || lower == "ext/mainsectioncommandinterface.xml"
+        || lower == "ext/clientapplicationinterface.xml"
+        || lower == "ext/standaloneconfigurationcontent.bin"
 }
 
 fn is_form_ext_xml_path(path: &str) -> bool {
@@ -501,13 +504,7 @@ fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &
 
 fn is_known_uncovered_configuration_asset(path: &str) -> bool {
     let lower = normalize_source_path(path).to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "ext/additionalindexes.xml"
-            | "ext/standaloneconfigurationcontent.bin"
-            | "ext/clientapplicationinterface.xml"
-            | "ext/homepageworkarea.xml"
-    )
+    matches!(lower.as_str(), "ext/additionalindexes.xml")
 }
 
 fn normalize_source_path(path: &str) -> String {
@@ -1276,17 +1273,29 @@ mod tests {
             root.join("Ext/MainSectionCommandInterface.xml"),
             b"<CommandInterface/>",
         )?;
+        fs::write(
+            root.join("Ext/HomePageWorkArea.xml"),
+            b"<HomePageWorkArea/>",
+        )?;
+        fs::write(
+            root.join("Ext/ClientApplicationInterface.xml"),
+            b"<ClientApplicationInterface/>",
+        )?;
+        fs::write(
+            root.join("Ext/StandaloneConfigurationContent.bin"),
+            b"<StandaloneContent/>",
+        )?;
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 10);
+        assert_eq!(report.total_files, 13);
         assert_eq!(report.stage_metadata_xml_files, 2);
         assert_eq!(report.stage_common_module_xml_files, 1);
         assert_eq!(report.stage_entry_files, 3);
         assert_eq!(report.module_files, 2);
         assert_eq!(report.supported_module_files, 2);
-        assert_eq!(report.supported_ext_body_files, 3);
-        assert_eq!(report.potentially_stageable_body_files, 5);
+        assert_eq!(report.supported_ext_body_files, 6);
+        assert_eq!(report.potentially_stageable_body_files, 8);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);

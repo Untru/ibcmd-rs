@@ -2561,6 +2561,15 @@ fn prepare_configuration_asset_body_rows(
         server,
         database,
         properties,
+        infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
+        "8",
+        "HomePageWorkArea",
+    )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
         infer_configuration_ext_body_path(xml_path, "MobileClientSignature.bin"),
         "10",
         "MobileClientSignature",
@@ -2573,6 +2582,15 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
         "9",
     )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
+        "b",
+        "ClientApplicationInterface",
+    )?);
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
         server,
@@ -2580,6 +2598,15 @@ fn prepare_configuration_asset_body_rows(
         properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
         "c",
+    )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
+        "f",
+        "StandaloneConfigurationContent",
     )?);
     Ok(rows)
 }
@@ -5524,6 +5551,27 @@ mod tests {
                 "ParentConfigurations.bin"
             ),
             std::path::PathBuf::from(r"Ext\ParentConfigurations.bin")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "HomePageWorkArea.xml"
+            ),
+            std::path::PathBuf::from(r"Ext\HomePageWorkArea.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "ClientApplicationInterface.xml"
+            ),
+            std::path::PathBuf::from(r"Ext\ClientApplicationInterface.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "StandaloneConfigurationContent.bin"
+            ),
+            std::path::PathBuf::from(r"Ext\StandaloneConfigurationContent.bin")
         );
     }
 

@@ -667,14 +667,29 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
     ("4", "Ext/ParentConfigurations.bin", SourceAssetKind::Binary),
     (
+        "8",
+        "Ext/HomePageWorkArea.xml",
+        SourceAssetKind::InflatedBinary,
+    ),
+    (
         "10",
         "Ext/MobileClientSignature.bin",
+        SourceAssetKind::InflatedBinary,
+    ),
+    (
+        "b",
+        "Ext/ClientApplicationInterface.xml",
         SourceAssetKind::InflatedBinary,
     ),
     (
         "c",
         "Ext/MainSectionPicture.xml",
         SourceAssetKind::ExtPicture,
+    ),
+    (
+        "f",
+        "Ext/StandaloneConfigurationContent.bin",
+        SourceAssetKind::InflatedBinary,
     ),
 ];
 
@@ -12010,12 +12025,19 @@ mod tests {
         let png = b"\x89PNG\r\n\x1a\n";
         let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let parent_blob = b"parent-cf".to_vec();
+        let home_page_work_area = b"\xEF\xBB\xBF<HomePageWorkArea/>".to_vec();
+        let home_page_work_area_blob = deflate_for_test(&home_page_work_area);
         let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
         let mobile_signature_blob = deflate_for_test(&mobile_signature);
         let main_section_command_interface = deflate_for_test(
             b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
         );
+        let client_application_interface = b"\xEF\xBB\xBF<ClientApplicationInterface/>".to_vec();
+        let client_application_interface_blob = deflate_for_test(&client_application_interface);
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
+        let standalone_configuration_content = b"\xEF\xBB\xBF<StandaloneContent/>".to_vec();
+        let standalone_configuration_content_blob =
+            deflate_for_test(&standalone_configuration_content);
         let rows = vec![
             ConfigRow {
                 file_name: format!("{uuid}.0"),
@@ -12034,6 +12056,12 @@ mod tests {
                 part_no: 0,
                 data_size: parent_blob.len() as i64,
                 binary_hex: encode_hex_for_test(&parent_blob),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.8"),
+                part_no: 0,
+                data_size: home_page_work_area_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&home_page_work_area_blob),
             },
             ConfigRow {
                 file_name: format!("{uuid}.5"),
@@ -12066,17 +12094,29 @@ mod tests {
                 binary_hex: encode_hex_for_test(&main_section_command_interface),
             },
             ConfigRow {
+                file_name: format!("{uuid}.b"),
+                part_no: 0,
+                data_size: client_application_interface_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&client_application_interface_blob),
+            },
+            ConfigRow {
                 file_name: format!("{uuid}.c"),
                 part_no: 0,
                 data_size: main_picture_blob.len() as i64,
                 binary_hex: encode_hex_for_test(&main_picture_blob),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.f"),
+                part_no: 0,
+                data_size: standalone_configuration_content_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&standalone_configuration_content_blob),
             },
         ];
 
         let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 4);
-        assert_eq!(dumped.source_asset_rows, 5);
+        assert_eq!(dumped.source_asset_rows, 8);
         assert_eq!(
             fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
             ordinary_text
@@ -12103,8 +12143,20 @@ mod tests {
             parent_blob
         );
         assert_eq!(
+            fs::read(root.join("Ext/HomePageWorkArea.xml")).unwrap(),
+            home_page_work_area
+        );
+        assert_eq!(
             fs::read(root.join("Ext/MobileClientSignature.bin")).unwrap(),
             mobile_signature
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/ClientApplicationInterface.xml")).unwrap(),
+            client_application_interface
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/StandaloneConfigurationContent.bin")).unwrap(),
+            standalone_configuration_content
         );
         let main_section_xml =
             fs::read_to_string(root.join("Ext/MainSectionCommandInterface.xml")).unwrap();
@@ -12128,6 +12180,11 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.4"))
             .unwrap();
+        let home_page_work_area_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.8"))
+            .unwrap();
         let main_picture_row = dumped
             .rows
             .iter()
@@ -12143,6 +12200,16 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.9"))
             .unwrap();
+        let client_application_interface_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.b"))
+            .unwrap();
+        let standalone_configuration_content_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.f"))
+            .unwrap();
         assert_eq!(
             splash_row.source_asset_path.as_deref(),
             Some("Ext/Splash.xml")
@@ -12150,6 +12217,10 @@ mod tests {
         assert_eq!(
             parent_row.source_asset_path.as_deref(),
             Some("Ext/ParentConfigurations.bin")
+        );
+        assert_eq!(
+            home_page_work_area_row.source_asset_path.as_deref(),
+            Some("Ext/HomePageWorkArea.xml")
         );
         assert_eq!(
             main_picture_row.source_asset_path.as_deref(),
@@ -12162,6 +12233,18 @@ mod tests {
         assert_eq!(
             main_section_interface_row.source_asset_path.as_deref(),
             Some("Ext/MainSectionCommandInterface.xml")
+        );
+        assert_eq!(
+            client_application_interface_row
+                .source_asset_path
+                .as_deref(),
+            Some("Ext/ClientApplicationInterface.xml")
+        );
+        assert_eq!(
+            standalone_configuration_content_row
+                .source_asset_path
+                .as_deref(),
+            Some("Ext/StandaloneConfigurationContent.bin")
         );
 
         let _ = fs::remove_dir_all(root);
