@@ -10405,6 +10405,7 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
             "\t\t\t<DefaultPresentation>{value}</DefaultPresentation>\r\n"
         ));
     }
+    push_catalog_standard_attributes_xml(&mut xml, catalog);
     xml.push_str(
         "\t\t\t<Characteristics/>\r\n\
 \t\t\t<PredefinedDataUpdate>Auto</PredefinedDataUpdate>\r\n\
@@ -10535,6 +10536,163 @@ fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
         ));
     }
     xml.push_str("\t\t\t</InputByString>\r\n");
+}
+
+fn push_catalog_standard_attributes_xml(xml: &mut String, catalog: &CatalogProperties) {
+    xml.push_str("\t\t\t<StandardAttributes>\r\n");
+    for attribute in catalog_standard_attributes() {
+        push_catalog_standard_attribute_xml(xml, attribute, catalog);
+    }
+    xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+struct CatalogStandardAttribute {
+    name: &'static str,
+    fill_checking: &'static str,
+    fill_from_filling_value: bool,
+    type_reduction_mode: &'static str,
+    fill_value: CatalogStandardAttributeFillValue,
+}
+
+enum CatalogStandardAttributeFillValue {
+    Nil,
+    EmptyString,
+    CodeString,
+}
+
+fn catalog_standard_attributes() -> &'static [CatalogStandardAttribute] {
+    &[
+        CatalogStandardAttribute {
+            name: "PredefinedDataName",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Predefined",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Ref",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "DeletionMark",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "IsFolder",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Owner",
+            fill_checking: "ShowError",
+            fill_from_filling_value: true,
+            type_reduction_mode: "Deny",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Parent",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: true,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Description",
+            fill_checking: "ShowError",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::EmptyString,
+        },
+        CatalogStandardAttribute {
+            name: "Code",
+            fill_checking: "ShowError",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::CodeString,
+        },
+    ]
+}
+
+fn push_catalog_standard_attribute_xml(
+    xml: &mut String,
+    attribute: &CatalogStandardAttribute,
+    catalog: &CatalogProperties,
+) {
+    xml.push_str(&format!(
+        "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
+\t\t\t\t\t<xr:LinkByType/>\r\n\
+\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:ToolTip/>\r\n\
+\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:Format/>\r\n\
+\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+\t\t\t\t\t<xr:EditFormat/>\r\n\
+\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Synonym/>\r\n\
+\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n",
+        escape_xml_text(attribute.name),
+        attribute.fill_checking,
+        xml_bool(attribute.fill_from_filling_value),
+        attribute.type_reduction_mode
+    ));
+    push_catalog_standard_attribute_fill_value(xml, attribute, catalog);
+    xml.push_str(
+        "\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n",
+    );
+}
+
+fn push_catalog_standard_attribute_fill_value(
+    xml: &mut String,
+    attribute: &CatalogStandardAttribute,
+    catalog: &CatalogProperties,
+) {
+    match attribute.fill_value {
+        CatalogStandardAttributeFillValue::Nil => {
+            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+        }
+        CatalogStandardAttributeFillValue::EmptyString => {
+            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\"/>\r\n");
+        }
+        CatalogStandardAttributeFillValue::CodeString => {
+            if catalog.code_type == Some("String") {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\">{}</xr:FillValue>\r\n",
+                    " ".repeat(catalog.code_length as usize)
+                ));
+            } else {
+                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+            }
+        }
+    }
 }
 
 fn push_optional_text_element(xml: &mut String, indent: &str, name: &str, value: Option<&str>) {
@@ -16528,6 +16686,17 @@ mod tests {
             xml.contains("<DefaultObjectForm>Catalog.Products.Form.ItemForm</DefaultObjectForm>")
         );
         assert!(xml.contains("<Characteristics/>"));
+        assert!(xml.contains("<StandardAttributes>"));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="PredefinedDataName">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Owner">"#));
+        assert!(xml.contains("<xr:FillChecking>ShowError</xr:FillChecking>"));
+        assert!(xml.contains("<xr:FillFromFillingValue>true</xr:FillFromFillingValue>"));
+        assert!(xml.contains("<xr:TypeReductionMode>Deny</xr:TypeReductionMode>"));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Parent">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Description">"#));
+        assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:string"/>"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Code">"#));
+        assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:string">   </xr:FillValue>"#));
         assert!(xml.contains("<PredefinedDataUpdate>Auto</PredefinedDataUpdate>"));
         assert!(xml.contains("<EditType>InDialog</EditType>"));
         assert!(xml.contains("<QuickChoice>true</QuickChoice>"));
