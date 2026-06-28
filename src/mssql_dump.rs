@@ -8425,6 +8425,20 @@ enum ReturnValuesReuseValue {
 
 struct CatalogProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    hierarchical: bool,
+    level_count: u32,
+    folders_on_top: bool,
+    owners_empty: bool,
+    subordination_use: Option<&'static str>,
+    use_standard_commands: bool,
+    code_length: u32,
+    description_length: u32,
+    code_type: Option<&'static str>,
+    code_allowed_length: Option<&'static str>,
+    code_series: Option<&'static str>,
+    check_unique: bool,
+    autonumbering: bool,
+    default_presentation: Option<&'static str>,
 }
 
 struct GeneratedTypeEntry {
@@ -9139,7 +9153,40 @@ fn parse_catalog_properties_from_text(text: &str, uuid: &str) -> Option<CatalogP
         &format!("CatalogManager.{}", header.name),
         "Manager",
     );
-    Some(CatalogProperties { generated_types })
+    let hierarchical = parse_catalog_hierarchical_flag(fields.get(9).copied()).unwrap_or(false);
+    let level_count = parse_1c_u32_field(fields.get(10).copied()).unwrap_or(2);
+    let folders_on_top = parse_1c_bool_field(fields.get(11).copied()).unwrap_or(true);
+    let owners_empty = parse_catalog_owners_empty(fields.get(12).copied());
+    let subordination_use =
+        catalog_subordination_use_xml(parse_1c_u32_field(fields.get(13).copied()).unwrap_or(1));
+    let check_unique = parse_1c_bool_field(fields.get(14).copied()).unwrap_or(false);
+    let autonumbering = parse_1c_bool_field(fields.get(15).copied()).unwrap_or(false);
+    let code_series =
+        catalog_code_series_xml(parse_1c_u32_field(fields.get(16).copied()).unwrap_or(0));
+    let code_length = parse_1c_u32_field(fields.get(17).copied()).unwrap_or(0);
+    let code_type = catalog_code_type_xml(parse_1c_u32_field(fields.get(18).copied()).unwrap_or(1));
+    let description_length = parse_1c_u32_field(fields.get(19).copied()).unwrap_or(0);
+    let code_allowed_length =
+        catalog_code_allowed_length_xml(parse_1c_u32_field(fields.get(20).copied()).unwrap_or(1));
+    let use_standard_commands = parse_1c_bool_field(fields.get(33).copied()).unwrap_or(true);
+
+    Some(CatalogProperties {
+        generated_types,
+        hierarchical,
+        level_count,
+        folders_on_top,
+        owners_empty,
+        subordination_use,
+        use_standard_commands,
+        code_length,
+        description_length,
+        code_type,
+        code_allowed_length,
+        code_series,
+        check_unique,
+        autonumbering,
+        default_presentation: Some("AsDescription"),
+    })
 }
 
 fn push_generated_type_entry(
@@ -9162,6 +9209,65 @@ fn push_generated_type_entry(
         type_id,
         value_id,
     });
+}
+
+fn parse_catalog_hierarchical_flag(header_field: Option<&str>) -> Option<bool> {
+    let outer = split_1c_braced_fields(header_field?, 0)?;
+    let header = split_1c_braced_fields(outer.get(1)?, 0)?;
+    parse_1c_bool_field(header.get(5).copied())
+}
+
+fn parse_catalog_owners_empty(field: Option<&str>) -> bool {
+    field
+        .map(|value| {
+            value
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                == "{0,0}"
+        })
+        .unwrap_or(false)
+}
+
+fn parse_1c_bool_field(value: Option<&str>) -> Option<bool> {
+    parse_1c_bool_flag(value?.trim())
+}
+
+fn parse_1c_u32_field(value: Option<&str>) -> Option<u32> {
+    value?.trim().parse().ok()
+}
+
+fn catalog_subordination_use_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("ToFolders"),
+        1 => Some("ToItems"),
+        2 => Some("ToFoldersAndItems"),
+        _ => None,
+    }
+}
+
+fn catalog_code_type_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("Number"),
+        1 => Some("String"),
+        _ => None,
+    }
+}
+
+fn catalog_code_allowed_length_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("Fixed"),
+        1 => Some("Variable"),
+        _ => None,
+    }
+}
+
+fn catalog_code_series_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("WholeCatalog"),
+        1 => Some("WithinOwner"),
+        _ => None,
+    }
 }
 
 fn parse_1c_bool_flag(value: &str) -> Option<bool> {
@@ -10082,35 +10188,109 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
 }
 
 fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogProperties) -> String {
-    let mut xml = format_metadata_source_xml("Catalog", header);
-    if catalog.generated_types.is_empty() {
-        return xml;
-    }
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
+\t<Catalog uuid=\"{uuid}\">\r\n",
+        uuid = escape_xml_text(&header.uuid),
+    );
 
-    let mut internal_info = String::from("\t\t<InternalInfo>\r\n");
-    for generated_type in &catalog.generated_types {
-        internal_info.push_str(&format!(
-            "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+    if !catalog.generated_types.is_empty() {
+        xml.push_str("\t\t<InternalInfo>\r\n");
+        for generated_type in &catalog.generated_types {
+            xml.push_str(&format!(
+                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
 \t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
 \t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
 \t\t\t</xr:GeneratedType>\r\n",
-            escape_xml_text(&generated_type.name),
-            escape_xml_text(generated_type.category),
-            escape_xml_text(&generated_type.type_id),
-            escape_xml_text(&generated_type.value_id)
+                escape_xml_text(&generated_type.name),
+                escape_xml_text(generated_type.category),
+                escape_xml_text(&generated_type.type_id),
+                escape_xml_text(&generated_type.value_id)
+            ));
+        }
+        xml.push_str("\t\t</InternalInfo>\r\n");
+    }
+
+    xml.push_str("\t\t<Properties>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&header.name)
+    ));
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_text(&header.comment)
         ));
     }
-    internal_info.push_str("\t\t</InternalInfo>\r\n");
-    xml = xml.replace(
-        "\t\t<Properties>",
-        &format!("{internal_info}\t\t<Properties>"),
-    );
-    if !xml.contains("xmlns:xr=") {
-        xml = xml.replace(
-            "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
-            "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\"",
-        );
+    xml.push_str(&format!(
+        "\t\t\t<Hierarchical>{}</Hierarchical>\r\n\
+\t\t\t<HierarchyType>HierarchyFoldersAndItems</HierarchyType>\r\n\
+\t\t\t<LimitLevelCount>false</LimitLevelCount>\r\n\
+\t\t\t<LevelCount>{}</LevelCount>\r\n\
+\t\t\t<FoldersOnTop>{}</FoldersOnTop>\r\n\
+\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+        xml_bool(catalog.hierarchical),
+        catalog.level_count,
+        xml_bool(catalog.folders_on_top),
+        xml_bool(catalog.use_standard_commands),
+    ));
+    if catalog.owners_empty {
+        xml.push_str("\t\t\t<Owners/>\r\n");
     }
+    if let Some(value) = catalog.subordination_use {
+        xml.push_str(&format!(
+            "\t\t\t<SubordinationUse>{value}</SubordinationUse>\r\n"
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<CodeLength>{}</CodeLength>\r\n\
+\t\t\t<DescriptionLength>{}</DescriptionLength>\r\n",
+        catalog.code_length, catalog.description_length
+    ));
+    if let Some(value) = catalog.code_type {
+        xml.push_str(&format!("\t\t\t<CodeType>{value}</CodeType>\r\n"));
+    }
+    if let Some(value) = catalog.code_allowed_length {
+        xml.push_str(&format!(
+            "\t\t\t<CodeAllowedLength>{value}</CodeAllowedLength>\r\n"
+        ));
+    }
+    if let Some(value) = catalog.code_series {
+        xml.push_str(&format!("\t\t\t<CodeSeries>{value}</CodeSeries>\r\n"));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<CheckUnique>{}</CheckUnique>\r\n\
+\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
+        xml_bool(catalog.check_unique),
+        xml_bool(catalog.autonumbering),
+    ));
+    if let Some(value) = catalog.default_presentation {
+        xml.push_str(&format!(
+            "\t\t\t<DefaultPresentation>{value}</DefaultPresentation>\r\n"
+        ));
+    }
+    xml.push_str("\t\t</Properties>\r\n\t</Catalog>\r\n</MetaDataObject>");
     xml
 }
 
@@ -15943,7 +16123,7 @@ mod tests {
         let manager_value_id = "55555555-5555-4555-8555-555555555552";
         let catalog_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -15972,6 +16152,25 @@ mod tests {
         assert!(
             xml.contains(r#"<xr:GeneratedType name="CatalogManager.Products" category="Manager">"#)
         );
+        assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(xml.contains(r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#));
+        assert!(xml.contains("<Comment/>"));
+        assert!(xml.contains("<Hierarchical>false</Hierarchical>"));
+        assert!(xml.contains("<HierarchyType>HierarchyFoldersAndItems</HierarchyType>"));
+        assert!(xml.contains("<LimitLevelCount>false</LimitLevelCount>"));
+        assert!(xml.contains("<LevelCount>2</LevelCount>"));
+        assert!(xml.contains("<FoldersOnTop>true</FoldersOnTop>"));
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert!(xml.contains("<Owners/>"));
+        assert!(xml.contains("<SubordinationUse>ToItems</SubordinationUse>"));
+        assert!(xml.contains("<CodeLength>3</CodeLength>"));
+        assert!(xml.contains("<DescriptionLength>10</DescriptionLength>"));
+        assert!(xml.contains("<CodeType>String</CodeType>"));
+        assert!(xml.contains("<CodeAllowedLength>Variable</CodeAllowedLength>"));
+        assert!(xml.contains("<CodeSeries>WholeCatalog</CodeSeries>"));
+        assert!(xml.contains("<CheckUnique>false</CheckUnique>"));
+        assert!(xml.contains("<Autonumbering>false</Autonumbering>"));
+        assert!(xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"));
 
         let rows = vec![ConfigRow {
             file_name: catalog_uuid.to_string(),
