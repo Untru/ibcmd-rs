@@ -3888,6 +3888,7 @@ struct FormBodyProperties {
     save_data_in_settings: Option<&'static str>,
     auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
+    command_set_excluded_commands: Vec<&'static str>,
     use_for_folders_and_items: Option<&'static str>,
     customizable: Option<bool>,
     command_bar_location: Option<&'static str>,
@@ -3898,6 +3899,10 @@ struct FormBodyProperties {
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
+const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
+const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
+const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
+const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a23-f999f4c67ee6";
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct FormBodyEvent {
@@ -4060,6 +4065,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         save_data_in_settings: extract_form_save_data_in_settings(fields),
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
+        command_set_excluded_commands: extract_form_command_set_excluded_commands(fields),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
@@ -4133,6 +4139,17 @@ fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
         ("1", Some("0"), Some("0")) => Some("Horizontal"),
         _ => None,
     }
+}
+
+fn extract_form_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static str> {
+    let Some(command_set) = find_form_root_command_set_field(fields) else {
+        return Vec::new();
+    };
+    command_set
+        .iter()
+        .skip(1)
+        .filter_map(|uuid| form_standard_excluded_command_name(uuid.trim()))
+        .collect()
 }
 
 fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
@@ -4237,6 +4254,45 @@ fn form_root_property_bag_value<'a>(fields: &'a [&str], property_key: &str) -> O
         index += 2;
     }
     None
+}
+
+fn find_form_root_command_set_field<'a>(fields: &'a [&str]) -> Option<Vec<&'a str>> {
+    for field in fields {
+        let value = field.trim();
+        if !value.starts_with('{') {
+            continue;
+        }
+        let Some(nested) = split_1c_braced_fields(value, 0) else {
+            continue;
+        };
+        let Some(count) = nested
+            .first()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count == 0 || count != nested.len().saturating_sub(1) {
+            continue;
+        }
+        if nested
+            .iter()
+            .skip(1)
+            .all(|uuid| form_standard_excluded_command_name(uuid.trim()).is_some())
+        {
+            return Some(nested);
+        }
+    }
+    None
+}
+
+fn form_standard_excluded_command_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        FORM_COMMAND_CHANGE_UUID => Some("Change"),
+        FORM_COMMAND_COPY_UUID => Some("Copy"),
+        FORM_COMMAND_CREATE_UUID => Some("Create"),
+        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("CustomizeForm"),
+        _ => None,
+    }
 }
 
 fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
@@ -6419,6 +6475,16 @@ fn format_form_body_xml(
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if !properties.command_set_excluded_commands.is_empty() {
+        xml.push_str("\t<CommandSet>\r\n");
+        for command in &properties.command_set_excluded_commands {
+            xml.push_str(&format!(
+                "\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
+                escape_xml_text(command)
+            ));
+        }
+        xml.push_str("\t</CommandSet>\r\n");
     }
     if let Some(value) = properties.use_for_folders_and_items {
         xml.push_str(&format!(
@@ -14255,6 +14321,31 @@ mod tests {
 
         assert!(form_xml.contains("<Group>Vertical</Group>"));
         assert!(!form_xml.contains("<AutoURL>"));
+    }
+
+    #[test]
+    fn extracts_form_command_set_single_excluded_command() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,{0},{1,198ea630-fda2-4cda-8a23-f999f4c67ee6},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<CommandSet>"));
+        assert!(form_xml.contains("<ExcludedCommand>CustomizeForm</ExcludedCommand>"));
+    }
+
+    #[test]
+    fn extracts_form_command_set_multiple_excluded_commands() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{"N",0},{0,1,0},{3,342c531d-dc73-458a-8ac4-6a746916a33b,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ExcludedCommand>Change</ExcludedCommand>"));
+        assert!(form_xml.contains("<ExcludedCommand>Copy</ExcludedCommand>"));
+        assert!(form_xml.contains("<ExcludedCommand>Create</ExcludedCommand>"));
     }
 
     #[test]

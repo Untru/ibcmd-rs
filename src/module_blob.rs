@@ -88,6 +88,7 @@ struct FormXmlBodyProperties {
     save_data_in_settings: Option<FormXmlSaveDataInSettings>,
     auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
     group: Option<FormXmlGroup>,
+    command_set_excluded_commands: Vec<FormXmlExcludedCommand>,
     use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     customizable: Option<bool>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
@@ -290,6 +291,14 @@ enum FormXmlGroup {
     AlwaysHorizontal,
     HorizontalIfPossible,
     InCell,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlExcludedCommand {
+    Change,
+    Copy,
+    Create,
+    CustomizeForm,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3444,6 +3453,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.save_data_in_settings.is_some()
             || properties.auto_save_data_in_settings.is_some()
             || properties.group.is_some()
+            || !properties.command_set_excluded_commands.is_empty()
             || properties.use_for_folders_and_items.is_some()
             || properties.customizable.is_some()
             || properties.command_bar_location.is_some()
@@ -3761,6 +3771,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SaveDataInSettings"
                         | "AutoSaveDataInSettings"
                         | "Group"
+                        | "ExcludedCommand"
                         | "UseForFoldersAndItems"
                         | "Customizable"
                         | "CommandBarLocation"
@@ -4006,6 +4017,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
@@ -4398,6 +4410,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
@@ -4781,6 +4794,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "ExcludedCommand"
+                        if path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"]) =>
+                    {
+                        properties
+                            .command_set_excluded_commands
+                            .push(parse_form_excluded_command_xml(text_value.trim())?);
                     }
                     "UseForFoldersAndItems"
                         if path_ends_with(&path, &["Form", "UseForFoldersAndItems"]) =>
@@ -6790,6 +6810,16 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     }
 }
 
+fn parse_form_excluded_command_xml(value: &str) -> Result<FormXmlExcludedCommand> {
+    match value {
+        "Change" => Ok(FormXmlExcludedCommand::Change),
+        "Copy" => Ok(FormXmlExcludedCommand::Copy),
+        "Create" => Ok(FormXmlExcludedCommand::Create),
+        "CustomizeForm" => Ok(FormXmlExcludedCommand::CustomizeForm),
+        other => Err(anyhow!("unsupported Form ExcludedCommand: {other}")),
+    }
+}
+
 fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseForFoldersAndItems> {
     match value {
         "Items" => Ok(FormXmlUseForFoldersAndItems::Items),
@@ -6981,6 +7011,9 @@ fn patch_form_layout_properties(
             FormXmlGroup::InCell => return Err(anyhow!("unsupported root Form Group: InCell")),
         }
     }
+    if !properties.command_set_excluded_commands.is_empty() {
+        replace_form_command_set(layout, &properties.command_set_excluded_commands)?;
+    }
     if let Some(value) = properties.use_for_folders_and_items {
         replace_form_use_for_folders_and_items(layout, value)?;
     }
@@ -7008,6 +7041,10 @@ fn patch_form_layout_properties(
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
+const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
+const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
+const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
+const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a23-f999f4c67ee6";
 
 fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
@@ -7045,6 +7082,18 @@ fn replace_form_use_for_folders_and_items(
             form_use_for_folders_and_items_code(value)
         ),
     );
+    Ok(())
+}
+
+fn replace_form_command_set(
+    layout: &mut String,
+    commands: &[FormXmlExcludedCommand],
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(range) = form_root_command_set_range(layout, &fields) else {
+        return Ok(());
+    };
+    layout.replace_range(range, &format_form_command_set(commands));
     Ok(())
 }
 
@@ -7216,6 +7265,35 @@ fn form_root_property_bag_value_range(
     None
 }
 
+fn form_root_command_set_range(layout: &str, fields: &[Range<usize>]) -> Option<Range<usize>> {
+    for range in fields {
+        let value = layout[range.clone()].trim();
+        if !value.starts_with('{') {
+            continue;
+        }
+        let Ok(nested) = scan_braced_fields(layout, range.start) else {
+            continue;
+        };
+        let Some(count) = nested
+            .first()
+            .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count == 0 || count != nested.len().saturating_sub(1) {
+            continue;
+        }
+        if nested
+            .iter()
+            .skip(1)
+            .all(|range| form_excluded_command_from_uuid(layout[range.clone()].trim()).is_some())
+        {
+            return Some(range.clone());
+        }
+    }
+    None
+}
+
 fn is_form_use_for_folders_and_items_value(value: &str) -> bool {
     let value = value.trim();
     let Ok(fields) = scan_braced_fields(value, 0) else {
@@ -7283,6 +7361,35 @@ fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &
 fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
     match value {
         FormXmlVerticalScroll::UseIfNecessary => "2",
+    }
+}
+
+fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
+    let mut output = format!("{{{}", commands.len());
+    for command in commands {
+        output.push(',');
+        output.push_str(form_excluded_command_uuid(*command));
+    }
+    output.push('}');
+    output
+}
+
+fn form_excluded_command_uuid(command: FormXmlExcludedCommand) -> &'static str {
+    match command {
+        FormXmlExcludedCommand::Change => FORM_COMMAND_CHANGE_UUID,
+        FormXmlExcludedCommand::Copy => FORM_COMMAND_COPY_UUID,
+        FormXmlExcludedCommand::Create => FORM_COMMAND_CREATE_UUID,
+        FormXmlExcludedCommand::CustomizeForm => FORM_COMMAND_CUSTOMIZE_FORM_UUID,
+    }
+}
+
+fn form_excluded_command_from_uuid(uuid: &str) -> Option<FormXmlExcludedCommand> {
+    match uuid {
+        FORM_COMMAND_CHANGE_UUID => Some(FormXmlExcludedCommand::Change),
+        FORM_COMMAND_COPY_UUID => Some(FormXmlExcludedCommand::Copy),
+        FORM_COMMAND_CREATE_UUID => Some(FormXmlExcludedCommand::Create),
+        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some(FormXmlExcludedCommand::CustomizeForm),
+        _ => None,
     }
 }
 
@@ -17762,6 +17869,67 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[fields[13].clone()], "0");
         assert_eq!(&parsed.layout[fields[18].clone()], "4");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_command_set_single_excluded_command() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,{0},{1,342c531d-dc73-458a-8ac4-6a746916a33b},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandSet>
+		<ExcludedCommand>CustomizeForm</ExcludedCommand>
+	</CommandSet>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{1,198ea630-fda2-4cda-8a23-f999f4c67ee6}"),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("342c531d-dc73-458a-8ac4-6a746916a33b")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_command_set_multiple_excluded_commands() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{\"N\",0},{0,1,0},{1,198ea630-fda2-4cda-8a23-f999f4c67ee6},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandSet>
+		<ExcludedCommand>Change</ExcludedCommand>
+		<ExcludedCommand>Copy</ExcludedCommand>
+		<ExcludedCommand>Create</ExcludedCommand>
+	</CommandSet>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[22].clone()],
+            "{3,342c531d-dc73-458a-8ac4-6a746916a33b,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608}"
+        );
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
