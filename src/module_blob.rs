@@ -205,6 +205,8 @@ struct FormXmlChildItem {
     id: String,
     name: String,
     group: Option<FormXmlGroup>,
+    behavior: Option<FormXmlGroupBehavior>,
+    representation: Option<FormXmlGroupRepresentation>,
     show_title: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
@@ -235,6 +237,21 @@ enum FormXmlGroup {
     AlwaysHorizontal,
     HorizontalIfPossible,
     InCell,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlGroupBehavior {
+    Usual,
+    Collapsible,
+    PopUp,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlGroupRepresentation {
+    None,
+    StrongSeparation,
+    WeakSeparation,
+    NormalSeparation,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3653,6 +3670,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandName"
                         | "DataPath"
                         | "ShowTitle"
+                        | "Behavior"
+                        | "Representation"
                         | "KeyParameter"
                         | "Type"
                         | "Length"
@@ -4057,6 +4076,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
+                    || path_ends_with_for_child_behavior(&path, &current_child_items)
+                    || path_ends_with_for_child_representation(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5361,6 +5382,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.group = Some(parse_form_group_xml(text_value.trim())?);
                         }
                     }
+                    "Behavior"
+                        if path_ends_with_for_child_behavior(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.behavior = Some(parse_form_group_behavior_xml(text_value.trim())?);
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with_for_child_representation(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.representation =
+                                Some(parse_form_group_representation_xml(text_value.trim())?);
+                        }
+                    }
                     "ShowTitle"
                         if path_ends_with_for_child_show_title(&path, &current_child_items) =>
                     {
@@ -5443,6 +5479,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandName"
                         | "DataPath"
                         | "ShowTitle"
+                        | "Behavior"
+                        | "Representation"
                         | "lang"
                         | "content"
                 ) {
@@ -5544,6 +5582,8 @@ fn parse_form_child_item_xml(
         id,
         name,
         group: None,
+        behavior: None,
+        representation: None,
         show_title: None,
         item_type: None,
         addition_source_item: None,
@@ -5698,6 +5738,20 @@ fn path_ends_with_for_child_group(path: &[String], items: &[FormXmlChildItem]) -
     path_ends_with(path, &[item.tag.as_str(), "Group"])
 }
 
+fn path_ends_with_for_child_behavior(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Behavior"])
+}
+
+fn path_ends_with_for_child_representation(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -5768,6 +5822,27 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
         "HorizontalIfPossible" => Ok(FormXmlGroup::HorizontalIfPossible),
         "InCell" => Ok(FormXmlGroup::InCell),
         other => Err(anyhow!("unsupported Form Group: {other}")),
+    }
+}
+
+fn parse_form_group_behavior_xml(value: &str) -> Result<FormXmlGroupBehavior> {
+    match value {
+        "Usual" => Ok(FormXmlGroupBehavior::Usual),
+        "Collapsible" => Ok(FormXmlGroupBehavior::Collapsible),
+        "PopUp" => Ok(FormXmlGroupBehavior::PopUp),
+        other => Err(anyhow!("unsupported Form UsualGroup Behavior: {other}")),
+    }
+}
+
+fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepresentation> {
+    match value {
+        "None" => Ok(FormXmlGroupRepresentation::None),
+        "StrongSeparation" => Ok(FormXmlGroupRepresentation::StrongSeparation),
+        "WeakSeparation" => Ok(FormXmlGroupRepresentation::WeakSeparation),
+        "NormalSeparation" => Ok(FormXmlGroupRepresentation::NormalSeparation),
+        other => Err(anyhow!(
+            "unsupported Form UsualGroup Representation: {other}"
+        )),
     }
 }
 
@@ -6627,6 +6702,45 @@ fn form_child_group_code(value: FormXmlGroup) -> Option<&'static str> {
     }
 }
 
+fn form_extended_group_representation_code(
+    value: FormXmlGroupRepresentation,
+) -> Option<&'static str> {
+    match value {
+        FormXmlGroupRepresentation::None => Some("0"),
+        FormXmlGroupRepresentation::StrongSeparation => Some("1"),
+        FormXmlGroupRepresentation::WeakSeparation => Some("2"),
+        FormXmlGroupRepresentation::NormalSeparation => Some("3"),
+    }
+}
+
+fn form_extended_group_group_codes(
+    value: FormXmlGroup,
+) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    match value {
+        FormXmlGroup::Vertical => Some(("0", "0", "0", "0")),
+        FormXmlGroup::Horizontal => Some(("1", "1", "1", "1")),
+        FormXmlGroup::AlwaysHorizontal => Some(("1", "1", "3", "3")),
+        FormXmlGroup::HorizontalIfPossible => Some(("1", "2", "2", "2")),
+        FormXmlGroup::InCell => None,
+    }
+}
+
+fn form_extended_group_behavior_codes(
+    value: FormXmlGroupBehavior,
+) -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
+    match value {
+        FormXmlGroupBehavior::Usual => ("0", "0", "0", "0", "0"),
+        FormXmlGroupBehavior::Collapsible => ("1", "1", "1", "1", "1"),
+        FormXmlGroupBehavior::PopUp => ("1", "1", "0", "2", "2"),
+    }
+}
+
 fn format_form_new_button_command_reference(
     command_name: &str,
     commands: &[FormXmlCommand],
@@ -6749,10 +6863,37 @@ fn patch_form_layout_child_item_entry(
         item.tag.as_str(),
         "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
     ) && let Some(group) = item.group
+        && form_layout_usual_group_extended_options_range(text, fields).is_none()
         && let Some(group_code) = form_child_group_code(group)
         && let Some(group_range) = fields.get(8)
     {
         replacements.push((group_range.clone(), group_code.to_string()));
+    }
+    if item.tag == "UsualGroup"
+        && (item.group.is_some() || item.behavior.is_some() || item.representation.is_some())
+        && let Some(options_range) = form_layout_usual_group_extended_options_range(text, fields)
+        && let Some(options) =
+            patch_form_layout_usual_group_extended_options(&text[options_range.clone()], item)?
+    {
+        replacements.push((options_range, options));
+    }
+    if item.tag == "UsualGroup"
+        && let Some(behavior) = item.behavior
+    {
+        if let Some(style_range) = fields.get(16) {
+            let replacement = match behavior {
+                FormXmlGroupBehavior::PopUp => "{4,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f},3}",
+                FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{4,4,{0},4}",
+            };
+            replacements.push((style_range.clone(), replacement.to_string()));
+        }
+        if let Some(size_range) = fields.get(17) {
+            let replacement = match behavior {
+                FormXmlGroupBehavior::PopUp => "{8,2,0,{-31},1,100}",
+                FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{8,3,0,1,100}",
+            };
+            replacements.push((size_range.clone(), replacement.to_string()));
+        }
     }
     if matches!(
         item.tag.as_str(),
@@ -6781,6 +6922,112 @@ fn patch_form_layout_child_item_entry(
         source,
     )?;
     Ok(())
+}
+
+fn form_layout_usual_group_extended_options_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    if wrapper != "22" || fields.get(5).map(|range| text[range.clone()].trim()) != Some("5") {
+        return None;
+    }
+    let range = fields.get(20)?.clone();
+    text[range.clone()]
+        .trim_start()
+        .starts_with("{38")
+        .then_some(range)
+}
+
+fn patch_form_layout_usual_group_extended_options(
+    existing: &str,
+    item: &FormXmlChildItem,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("38") {
+        return Ok(None);
+    }
+    let mut replacements = Vec::<(usize, &'static str)>::new();
+    if let Some(representation) = item.representation
+        && let Some(code) = form_extended_group_representation_code(representation)
+    {
+        replacements.push((3, code));
+        replacements.push((35, code));
+    }
+    if let Some(group) = item.group
+        && let Some((orientation_code, group_code, layout_code, mirror_code)) =
+            form_extended_group_group_codes(group)
+    {
+        replacements.push((1, orientation_code));
+        replacements.push((22, group_code));
+        replacements.push((27, layout_code));
+        replacements.push((36, mirror_code));
+        if item.behavior.is_none() {
+            replacements.push((
+                4,
+                if group == FormXmlGroup::AlwaysHorizontal {
+                    "1"
+                } else {
+                    "0"
+                },
+            ));
+        }
+    }
+    if let Some(behavior) = item.behavior {
+        let (marker_code, flag10, flag11, flag24, flag28) =
+            form_extended_group_behavior_codes(behavior);
+        let marker_code = if behavior == FormXmlGroupBehavior::Usual
+            && item.group == Some(FormXmlGroup::AlwaysHorizontal)
+        {
+            "1"
+        } else {
+            marker_code
+        };
+        replacements.push((4, marker_code));
+        replacements.push((10, flag10));
+        replacements.push((11, flag11));
+        replacements.push((24, flag24));
+        replacements.push((28, flag28));
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    replacements.sort_by_key(|(index, _)| *index);
+    replacements.dedup_by_key(|(index, _)| *index);
+    for (index, value) in replacements.into_iter().rev() {
+        replace_braced_field(&mut text, index, value)?;
+    }
+    Ok(Some(text))
+}
+
+struct FormLayoutDirectChildItemsSpan {
+    count_range: Range<usize>,
+    count: usize,
+    first_uuid_index: usize,
+}
+
+fn form_layout_direct_child_items_span(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<FormLayoutDirectChildItemsSpan> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let (count_index, first_uuid_index) = if wrapper == "22"
+        && form_layout_usual_group_extended_options_range(text, fields).is_some()
+    {
+        (21, 22)
+    } else if matches!(wrapper, "22" | "73") {
+        (10, 11)
+    } else {
+        return None;
+    };
+    let count_range = fields.get(count_index)?.clone();
+    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
+    (fields.len() >= first_uuid_index + count * 2).then_some(FormLayoutDirectChildItemsSpan {
+        count_range,
+        count,
+        first_uuid_index,
+    })
 }
 
 fn patch_form_layout_direct_child_items(
@@ -6823,22 +7070,16 @@ fn retain_form_layout_direct_child_items(
     ) {
         return Ok(());
     }
-    let Some(count_range) = fields.get(10).cloned() else {
+    let Some(span) = form_layout_direct_child_items_span(text, &fields) else {
         return Ok(());
     };
-    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
-        return Ok(());
-    };
-    if fields.len() < 11 + count * 2 {
-        return Ok(());
-    }
 
     let mut retained = Vec::<(String, String)>::new();
     let mut changed = false;
 
-    for index in 0..count {
-        let uuid_index = 11 + index * 2;
-        let item_index = 12 + index * 2;
+    for index in 0..span.count {
+        let uuid_index = span.first_uuid_index + index * 2;
+        let item_index = span.first_uuid_index + 1 + index * 2;
         let Some(uuid_range) = fields.get(uuid_index).cloned() else {
             return Ok(());
         };
@@ -6876,10 +7117,10 @@ fn retain_form_layout_direct_child_items(
         return Ok(());
     }
 
-    let replace_end = if count == 0 {
-        count_range.end
+    let replace_end = if span.count == 0 {
+        span.count_range.end
     } else {
-        fields[10 + count * 2].end
+        fields[span.first_uuid_index - 1 + span.count * 2].end
     };
     let mut replacement = retained.len().to_string();
     for (uuid, item_text) in retained {
@@ -6888,7 +7129,7 @@ fn retain_form_layout_direct_child_items(
         replacement.push(',');
         replacement.push_str(&item_text);
     }
-    text.replace_range(count_range.start..replace_end, &replacement);
+    text.replace_range(span.count_range.start..replace_end, &replacement);
     Ok(())
 }
 
@@ -6908,18 +7149,12 @@ fn patch_or_append_form_layout_direct_child_item(
     ) {
         return Ok(false);
     }
-    let Some(count_range) = fields.get(10).cloned() else {
+    let Some(span) = form_layout_direct_child_items_span(text, &fields) else {
         return Ok(false);
     };
-    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
-        return Ok(false);
-    };
-    if fields.len() < 11 + count * 2 {
-        return Ok(false);
-    }
 
-    for index in 0..count {
-        let item_field_index = 12 + index * 2;
+    for index in 0..span.count {
+        let item_field_index = span.first_uuid_index + 1 + index * 2;
         let Some(item_range) = fields.get(item_field_index).cloned() else {
             return Ok(false);
         };
@@ -6953,16 +7188,16 @@ fn patch_or_append_form_layout_direct_child_item(
         command_uuids,
         source,
     )?;
-    let insert_at = if count == 0 {
-        count_range.end
+    let insert_at = if span.count == 0 {
+        span.count_range.end
     } else {
         fields
-            .get(10 + count * 2)
+            .get(span.first_uuid_index - 1 + span.count * 2)
             .map(|range| range.end)
-            .unwrap_or(count_range.end)
+            .unwrap_or(span.count_range.end)
     };
     text.insert_str(insert_at, &format!(",{child_uuid},{child_text}"));
-    text.replace_range(count_range, &(count + 1).to_string());
+    text.replace_range(span.count_range, &(span.count + 1).to_string());
     Ok(true)
 }
 
@@ -16851,6 +17086,58 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[group_fields[8].clone()], "3");
         assert_eq!(&parsed.layout[group_fields[9].clone()], "0");
         assert_eq!(&parsed.layout[group_fields[10].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_extended_usual_group_properties_and_children()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupРасширеннаяПодсказка",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}},"Old module",{0}}"#
+                .as_bytes(),
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Group>HorizontalIfPossible</Group>
+			<Behavior>Collapsible</Behavior>
+			<Representation>NormalSeparation</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ChildItems>
+				<Button name="Run" id="44">
+					<Type>UsualButton</Type>
+				</Button>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, group_fields[20].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, group_fields[23].start)?;
+
+        assert_eq!(&parsed.layout[group_fields[9].clone()], "0");
+        assert_eq!(&parsed.layout[group_fields[21].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""Run""#);
+        assert_eq!(&parsed.layout[options_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[3].clone()], "3");
+        assert_eq!(&parsed.layout[options_fields[4].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[22].clone()], "2");
+        assert_eq!(&parsed.layout[options_fields[24].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[27].clone()], "2");
+        assert_eq!(&parsed.layout[options_fields[28].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[35].clone()], "3");
+        assert_eq!(&parsed.layout[options_fields[36].clone()], "2");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())

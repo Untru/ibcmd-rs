@@ -3988,6 +3988,8 @@ struct FormChildItem {
     id: String,
     name: String,
     group: Option<&'static str>,
+    behavior: Option<&'static str>,
+    representation: Option<&'static str>,
     show_title: Option<bool>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
@@ -4952,17 +4954,31 @@ fn parse_form_child_item(
         object_refs,
     )
     .unwrap_or_default();
+    let extended_group_options = (tag == "UsualGroup")
+        .then(|| parse_form_usual_group_extended_options(&fields))
+        .flatten();
     Some(FormChildItem {
         tag,
         id: id.to_string(),
         name,
-        group: (tag == "UsualGroup")
-            .then(|| {
-                fields
-                    .get(8)
-                    .and_then(|field| parse_form_child_item_group(field))
-            })
-            .flatten(),
+        group: if tag == "UsualGroup" {
+            extended_group_options
+                .as_ref()
+                .and_then(|options| options.group)
+                .or_else(|| {
+                    fields
+                        .get(8)
+                        .and_then(|field| parse_form_child_item_group(field))
+                })
+        } else {
+            None
+        },
+        behavior: extended_group_options
+            .as_ref()
+            .and_then(|options| options.behavior),
+        representation: extended_group_options
+            .as_ref()
+            .and_then(|options| options.representation),
         show_title: (tag == "UsualGroup")
             .then(|| {
                 fields
@@ -5000,6 +5016,94 @@ fn parse_form_child_item(
         },
         child_items,
     })
+}
+
+struct FormUsualGroupExtendedOptions {
+    group: Option<&'static str>,
+    behavior: Option<&'static str>,
+    representation: Option<&'static str>,
+}
+
+fn parse_form_usual_group_extended_options(
+    fields: &[&str],
+) -> Option<FormUsualGroupExtendedOptions> {
+    let options = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    if options.first()?.trim() != "38" {
+        return None;
+    }
+    let group = parse_form_extended_group(
+        options.get(1)?.trim(),
+        options.get(22).map(|value| value.trim()),
+        options.get(27).map(|value| value.trim()),
+        options.get(36).map(|value| value.trim()),
+    );
+    let representation = options
+        .get(3)
+        .and_then(|field| parse_form_child_item_representation(field));
+    let behavior = parse_form_extended_group_behavior(
+        fields.get(16).map(|value| value.trim()),
+        fields.get(17).map(|value| value.trim()),
+        options.get(10).map(|value| value.trim()),
+        options.get(11).map(|value| value.trim()),
+        options.get(24).map(|value| value.trim()),
+        options.get(28).map(|value| value.trim()),
+    );
+    Some(FormUsualGroupExtendedOptions {
+        group,
+        behavior,
+        representation,
+    })
+}
+
+fn parse_form_extended_group(
+    orientation: &str,
+    group_code: Option<&str>,
+    layout_code: Option<&str>,
+    mirror_code: Option<&str>,
+) -> Option<&'static str> {
+    match (orientation, group_code, layout_code, mirror_code) {
+        ("0", Some("0"), Some("0"), Some("0")) => Some("Vertical"),
+        ("1", Some("1"), Some("1"), Some("1")) => Some("Horizontal"),
+        ("1", Some("1"), Some("3"), Some("3")) => Some("AlwaysHorizontal"),
+        ("1", Some("2"), Some("2"), Some("2")) => Some("HorizontalIfPossible"),
+        _ => None,
+    }
+}
+
+fn parse_form_child_item_representation(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("None"),
+        "1" => Some("StrongSeparation"),
+        "2" => Some("WeakSeparation"),
+        "3" => Some("NormalSeparation"),
+        _ => None,
+    }
+}
+
+fn parse_form_extended_group_behavior(
+    style_field: Option<&str>,
+    size_field: Option<&str>,
+    flag10: Option<&str>,
+    flag11: Option<&str>,
+    flag24: Option<&str>,
+    flag28: Option<&str>,
+) -> Option<&'static str> {
+    if style_field.is_some_and(|field| field.starts_with("{4,3"))
+        && size_field.is_some_and(|field| field.starts_with("{8,2"))
+        && flag10 == Some("1")
+        && flag11 == Some("0")
+        && flag24 == Some("2")
+        && flag28 == Some("2")
+    {
+        return Some("PopUp");
+    }
+    if flag10 == Some("1") && flag11 == Some("1") && flag24 == Some("1") && flag28 == Some("1") {
+        return Some("Collapsible");
+    }
+    if flag10 == Some("0") && flag11 == Some("0") && flag24 == Some("0") && flag28 == Some("0") {
+        return Some("Usual");
+    }
+    None
 }
 
 fn parse_form_child_item_group(field: &str) -> Option<&'static str> {
@@ -5686,6 +5790,18 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<Group>{}</Group>\r\n",
             escape_xml_text(group)
+        ));
+    }
+    if let Some(behavior) = item.behavior {
+        xml.push_str(&format!(
+            "{tab}\t<Behavior>{}</Behavior>\r\n",
+            escape_xml_text(behavior)
+        ));
+    }
+    if let Some(representation) = item.representation {
+        xml.push_str(&format!(
+            "{tab}\t<Representation>{}</Representation>\r\n",
+            escape_xml_text(representation)
         ));
     }
     if item.show_title == Some(false) {
@@ -13312,6 +13428,8 @@ mod tests {
             id: "25".to_string(),
             name: "Rows".to_string(),
             group: None,
+            behavior: None,
+            representation: None,
             show_title: None,
             item_type: None,
             addition_source_item: None,
@@ -13325,6 +13443,8 @@ mod tests {
                     id: "26".to_string(),
                     name: "RowsSearch".to_string(),
                     group: None,
+                    behavior: None,
+                    representation: None,
                     show_title: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
@@ -13339,6 +13459,8 @@ mod tests {
                     id: "40".to_string(),
                     name: "Name".to_string(),
                     group: None,
+                    behavior: None,
+                    representation: None,
                     show_title: None,
                     item_type: None,
                     addition_source_item: None,
@@ -13358,6 +13480,32 @@ mod tests {
         assert!(addition_at < nested_child_items_at);
         assert!(xml.contains("\t\t<SearchStringAddition name=\"RowsSearch\" id=\"26\">\r\n"));
         assert!(!xml.contains("\t\t<ChildItems>\r\n\t\t\t<SearchStringAddition"));
+    }
+
+    #[test]
+    fn parses_extended_usual_group_properties() {
+        let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{38,1,0,3,1,{0},{1,0},{"Pattern"},"",{4,4,{0},4},1,1,0,1,{1,0},0,0,3,3,2,0,1,2,{4,4,{0},4},1,2,0,2,1,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,3,2,0,2,0,0,2},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupРасширеннаяПодсказка",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}"#;
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.group, Some("HorizontalIfPossible"));
+        assert_eq!(item.behavior, Some("Collapsible"));
+        assert_eq!(item.representation, Some("NormalSeparation"));
+        assert_eq!(item.show_title, Some(false));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
+        assert!(xml.contains("<Behavior>Collapsible</Behavior>"));
+        assert!(xml.contains("<Representation>NormalSeparation</Representation>"));
+        assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
     }
 
     #[test]
