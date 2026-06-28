@@ -88,7 +88,9 @@ struct FormXmlBodyProperties {
     command_bar_location: Option<FormXmlCommandBarLocation>,
     events: Vec<FormXmlEvent>,
     auto_command_bar: Option<FormXmlAutoCommandBar>,
+    attributes_present: bool,
     attributes: Vec<FormXmlAttribute>,
+    parameters_present: bool,
     parameters: Vec<FormXmlParameter>,
     commands: Vec<FormXmlCommand>,
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
@@ -3342,7 +3344,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 plain.replace_range(commands_range, &commands);
             }
         }
-        if !properties.parameters.is_empty() {
+        if properties.parameters_present {
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(parameters_range) = container.trailing_ranges.get(1).cloned() {
                 let mut parameters = plain[parameters_range.clone()].trim().to_string();
@@ -3350,7 +3352,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 plain.replace_range(parameters_range, &parameters);
             }
         }
-        if !properties.attributes.is_empty() {
+        if properties.attributes_present {
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
                 let mut attributes = plain[attributes_range.clone()].trim().to_string();
@@ -3658,6 +3660,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     current_event_name = Some(name);
                 }
+                if local == "Attributes" && path_ends_with(&path, &["Form"]) {
+                    properties.attributes_present = true;
+                }
+                if local == "Parameters" && path_ends_with(&path, &["Form"]) {
+                    properties.parameters_present = true;
+                }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
                 }
@@ -3735,6 +3743,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                if local == "Attributes" && path_ends_with(&path, &["Form"]) {
+                    properties.attributes_present = true;
+                }
+                if local == "Parameters" && path_ends_with(&path, &["Form"]) {
+                    properties.parameters_present = true;
+                }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
                 }
@@ -6981,6 +6995,7 @@ fn patch_form_body_parameters(
     parameters: &[FormXmlParameter],
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    retain_form_body_parameters(text, parameters)?;
     for parameter in parameters {
         let patched = patch_form_body_parameter(text, parameter, source)?;
         if !patched {
@@ -6988,6 +7003,57 @@ fn patch_form_body_parameters(
         }
     }
     Ok(())
+}
+
+fn retain_form_body_parameters(text: &mut String, parameters: &[FormXmlParameter]) -> Result<()> {
+    let keep_names = parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(1) else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for range in fields.iter().skip(2) {
+        let entry = text[range.clone()].to_string();
+        match form_body_parameter_entry_name(&entry)? {
+            Some(name) if keep_names.contains(name.as_str()) => entries.push(entry),
+            Some(_) => {}
+            None => entries.push(entry),
+        }
+    }
+    if entries.len() == count {
+        return Ok(());
+    }
+    let mut replacement = format!("{{0,{}", entries.len());
+    for entry in entries {
+        replacement.push(',');
+        replacement.push_str(&entry);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn form_body_parameter_entry_name(text: &str) -> Result<Option<String>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(None);
+    }
+    Ok(fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok()))
 }
 
 fn patch_form_body_parameter(
@@ -7117,6 +7183,7 @@ fn patch_form_body_attributes(
     attributes: &[FormXmlAttribute],
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    retain_form_body_attributes(text, attributes)?;
     for attribute in attributes {
         let patched = patch_form_body_attribute(text, attribute, source)?;
         if !patched {
@@ -7124,6 +7191,87 @@ fn patch_form_body_attributes(
         }
     }
     Ok(())
+}
+
+fn retain_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute]) -> Result<()> {
+    let keep_ids = attributes
+        .iter()
+        .map(|attribute| attribute.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let keep_names = attributes
+        .iter()
+        .map(|attribute| attribute.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    match fields.first().map(|range| text[range.clone()].trim()) {
+        Some("0") => return Ok(()),
+        Some("4") => {}
+        _ => return Ok(()),
+    }
+    let Some(count_range) = fields.get(1) else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for range in fields.iter().skip(2) {
+        let entry = text[range.clone()].to_string();
+        match form_body_attribute_entry_identity(&entry)? {
+            Some((id, name))
+                if keep_ids.contains(id.as_str())
+                    || name
+                        .as_deref()
+                        .is_some_and(|name| keep_names.contains(name)) =>
+            {
+                entries.push(entry)
+            }
+            Some(_) => {}
+            None => entries.push(entry),
+        }
+    }
+    if entries.len() == count {
+        return Ok(());
+    }
+    if entries.is_empty() {
+        *text = "{0}".to_string();
+        return Ok(());
+    }
+
+    let mut replacement = format!("{{4,{}", entries.len());
+    for entry in entries {
+        replacement.push(',');
+        replacement.push_str(&entry);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn form_body_attribute_entry_identity(text: &str) -> Result<Option<(String, Option<String>)>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("9") {
+        return Ok(None);
+    }
+    let Some(identity_range) = fields.get(1) else {
+        return Ok(None);
+    };
+    let identity = scan_braced_fields(text, identity_range.start)?;
+    let Some(id) = identity
+        .first()
+        .map(|range| text[range.clone()].trim().to_string())
+        .filter(|id| !id.is_empty())
+    else {
+        return Ok(None);
+    };
+    let name = fields
+        .get(3)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    Ok(Some((id, name)))
 }
 
 fn patch_form_body_attribute(
@@ -15296,6 +15444,61 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_removes_missing_attributes() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{4,2,{9,{1},0,"Keep",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}},{9,{2},0,"Drop",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}},{0,0},{0,0},{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Attributes>
+		<Attribute name="Keep" id="1">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let attributes_fields = super::scan_braced_fields(&parsed.trailing[0], 0)?;
+
+        assert_eq!(&parsed.trailing[0][attributes_fields[0].clone()], "4");
+        assert_eq!(&parsed.trailing[0][attributes_fields[1].clone()], "1");
+        assert!(parsed.trailing[0].contains(r#""Keep""#));
+        assert!(!parsed.trailing[0].contains(r#""Drop""#));
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_attributes_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"Drop",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}},{0,0},{0,0},{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Attributes/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_parameters() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-form-parameter-source-{}",
@@ -15400,6 +15603,61 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.trailing[3], "{0}");
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_parameters() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{0},{0,2,{0,"Keep",{"Pattern",{"S"}},0},{0,"Drop",{"Pattern",{"S"}},0}},{0,0},{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Keep">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let parameters_fields = super::scan_braced_fields(&parsed.trailing[1], 0)?;
+
+        assert_eq!(&parsed.trailing[1][parameters_fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[1][parameters_fields[1].clone()], "1");
+        assert!(parsed.trailing[1].contains(r#""Keep""#));
+        assert!(!parsed.trailing[1].contains(r#""Drop""#));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_parameters_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Drop",{"Pattern",{"S"}},0}},{0,0},{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Parameters/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
         Ok(())
     }
 
