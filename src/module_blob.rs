@@ -78,8 +78,129 @@ pub struct ParsedFormBodyBlob {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlBodyProperties {
+    title: Vec<LocalizedString>,
+    width: Option<String>,
+    height: Option<String>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
+    auto_title: Option<bool>,
     group: Option<FormXmlGroup>,
+    command_bar_location: Option<FormXmlCommandBarLocation>,
+    events: Vec<FormXmlEvent>,
+    auto_command_bar: Option<FormXmlAutoCommandBar>,
+    attributes: Vec<FormXmlAttribute>,
+    parameters: Vec<FormXmlParameter>,
+    commands: Vec<FormXmlCommand>,
+    command_interface_items: Vec<FormXmlCommandInterfaceItem>,
+    child_items: Vec<FormXmlChildItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlAutoCommandBar {
+    id: String,
+    name: String,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlEvent {
+    name: String,
+    handler: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlCommand {
+    id: String,
+    name: String,
+    title: Vec<LocalizedString>,
+    tooltip: Vec<LocalizedString>,
+    action: Option<String>,
+    functional_options: Vec<String>,
+    current_row_use: Option<FormXmlCommandCurrentRowUse>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlAttribute {
+    id: String,
+    name: String,
+    main_attribute: Option<bool>,
+    settings: Option<FormXmlDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlParameter {
+    name: String,
+    types: Vec<String>,
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
+    key_parameter: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlDynamicListSettings {
+    manual_query: Option<bool>,
+    dynamic_data_read: Option<bool>,
+    query_text: Option<String>,
+    main_table: Option<String>,
+    list_settings: FormXmlListSettings,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettings {
+    filter: Option<FormXmlListSettingsStandardSection>,
+    order: Option<FormXmlListSettingsOrder>,
+    conditional_appearance: Option<FormXmlListSettingsStandardSection>,
+    items_view_mode: Option<String>,
+    items_user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsStandardSection {
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsOrder {
+    items: Vec<FormXmlListSettingsOrderItem>,
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsOrderItem {
+    field: Option<String>,
+    order_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlCommandInterfaceItem {
+    command: Option<String>,
+    command_group: Option<String>,
+    index: Option<usize>,
+    default_visible: Option<bool>,
+    visible_common: Option<bool>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlChildItem {
+    tag: String,
+    id: String,
+    name: String,
+    item_type: Option<String>,
+    addition_source_item: Option<String>,
+    title: Vec<LocalizedString>,
+    events: Vec<FormXmlEvent>,
+    command_name: Option<String>,
+    data_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlCommandCurrentRowUse {
+    DontUse,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -94,6 +215,22 @@ enum FormXmlGroup {
     Vertical,
     Horizontal,
     AlwaysHorizontal,
+    HorizontalIfPossible,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlCommandBarLocation {
+    None,
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlHorizontalAlign {
+    Left,
+    Center,
+    Right,
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,7 +249,7 @@ pub struct CommonModuleXmlProperties {
     pub return_values_reuse: ReturnValuesReuse,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct LocalizedString {
     pub lang: String,
     pub content: String,
@@ -376,6 +513,28 @@ impl MetadataSourceContext {
             anyhow!("unsupported metadata reference for source resolution: {reference}")
         })?;
         self.resolve_simple_metadata_uuid(reference, prefix, folder, &format!("{prefix}."))
+    }
+
+    fn resolve_command_reference_uuid(&self, reference: &str) -> Result<String> {
+        let reference = reference.trim();
+        let Some((owner_reference, command_name)) = reference.split_once(".Command.") else {
+            return self.resolve_metadata_reference_uuid(reference);
+        };
+        let (prefix, folder) =
+            metadata_reference_source_folder(owner_reference).ok_or_else(|| {
+                anyhow!("unsupported command owner reference for source resolution: {reference}")
+            })?;
+        let owner_name = owner_reference
+            .strip_prefix(&format!("{prefix}."))
+            .ok_or_else(|| anyhow!("invalid command owner reference: {reference}"))?;
+        let path = self
+            .source_root
+            .join(folder)
+            .join(format!("{owner_name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read command owner XML {}", path.display()))?;
+        parse_nested_command_uuid_from_xml(&xml, command_name)
+            .with_context(|| format!("failed to resolve command {reference}"))
     }
 }
 
@@ -3103,16 +3262,82 @@ pub fn pack_form_body_blob_from_form_xml(
     form_xml: &[u8],
     module_text: Option<&[u8]>,
 ) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml_with_source(base_blob, form_xml, module_text, None)
+}
+
+pub fn pack_form_body_blob_from_form_xml_with_source(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
     let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
     let mut plain =
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
     if !form_xml.is_empty() {
         let properties = parse_form_xml_body_properties(form_xml)?;
-        if properties.window_opening_mode.is_some() || properties.group.is_some() {
+        if properties.window_opening_mode.is_some()
+            || !properties.title.is_empty()
+            || properties.width.is_some()
+            || properties.height.is_some()
+            || properties.auto_title.is_some()
+            || properties.group.is_some()
+            || properties.command_bar_location.is_some()
+            || !properties.events.is_empty()
+            || properties.auto_command_bar.is_some()
+            || !properties.child_items.is_empty()
+        {
             let container = FormBodyContainer::parse(&plain)?;
             let mut layout = plain[container.layout_range.clone()].trim().to_string();
             patch_form_layout_properties(&mut layout, &properties)?;
+            if let Some(auto_command_bar) = &properties.auto_command_bar {
+                let _ = patch_form_layout_auto_command_bar(&mut layout, auto_command_bar)?;
+            }
+            patch_form_layout_events(&mut layout, &properties.events)?;
+            patch_form_layout_child_items(
+                &mut layout,
+                &properties.child_items,
+                &properties.commands,
+                source,
+            )?;
             plain.replace_range(container.layout_range, &layout);
+        }
+        if !properties.commands.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(commands_range) = container.trailing_ranges.get(2).cloned() {
+                let mut commands = plain[commands_range.clone()].trim().to_string();
+                patch_form_body_commands(&mut commands, &properties.commands, source)?;
+                plain.replace_range(commands_range, &commands);
+            }
+        }
+        if !properties.parameters.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(parameters_range) = container.trailing_ranges.get(1).cloned() {
+                let mut parameters = plain[parameters_range.clone()].trim().to_string();
+                patch_form_body_parameters(&mut parameters, &properties.parameters, source)?;
+                plain.replace_range(parameters_range, &parameters);
+            }
+        }
+        if !properties.attributes.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
+                let mut attributes = plain[attributes_range.clone()].trim().to_string();
+                patch_form_body_attributes(&mut attributes, &properties.attributes, source)?;
+                plain.replace_range(attributes_range, &attributes);
+            }
+        }
+        if !properties.command_interface_items.is_empty() {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(command_interface_range) = container.trailing_ranges.get(3).cloned() {
+                let mut command_interface =
+                    plain[command_interface_range.clone()].trim().to_string();
+                patch_form_command_interface(
+                    &mut command_interface,
+                    &properties.command_interface_items,
+                    source,
+                )?;
+                plain.replace_range(command_interface_range, &command_interface);
+            }
         }
     }
     if let Some(module_text) = module_text {
@@ -3137,26 +3362,732 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut path = Vec::<String>::new();
     let mut text_value = String::new();
     let mut properties = FormXmlBodyProperties::default();
+    let mut current_event_name = None::<String>;
+    let mut current_command = None::<FormXmlCommand>;
+    let mut current_localized_section = None::<String>;
+    let mut current_localized_lang = None::<String>;
+    let mut current_localized_content = None::<String>;
+    let mut current_attribute = None::<FormXmlAttribute>;
+    let mut current_parameter = None::<FormXmlParameter>;
+    let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
+    let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
+    let mut current_child_items = Vec::<FormXmlChildItem>::new();
+    let mut current_child_title_lang = None::<String>;
+    let mut current_child_title_content = None::<String>;
+    let mut current_child_event_name = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if matches!(local.as_str(), "WindowOpeningMode" | "Group") {
+                if matches!(
+                    local.as_str(),
+                    "WindowOpeningMode"
+                        | "Width"
+                        | "Height"
+                        | "AutoTitle"
+                        | "Group"
+                        | "CommandBarLocation"
+                        | "HorizontalAlign"
+                        | "Autofill"
+                        | "Event"
+                        | "Action"
+                        | "CurrentRowUse"
+                        | "Item"
+                        | "MainAttribute"
+                        | "ManualQuery"
+                        | "DynamicDataRead"
+                        | "QueryText"
+                        | "MainTable"
+                        | "field"
+                        | "orderType"
+                        | "viewMode"
+                        | "userSettingID"
+                        | "itemsViewMode"
+                        | "itemsUserSettingID"
+                        | "Command"
+                        | "CommandGroup"
+                        | "Index"
+                        | "DefaultVisible"
+                        | "Common"
+                        | "CommandName"
+                        | "DataPath"
+                        | "KeyParameter"
+                        | "Type"
+                        | "Length"
+                        | "AllowedLength"
+                        | "Digits"
+                        | "FractionDigits"
+                        | "AllowedSign"
+                        | "lang"
+                        | "content"
+                ) {
                     text_value.clear();
+                }
+                if local == "Event"
+                    && path_ends_with(&path, &["Form", "Events"])
+                    && let Some(name) = xml_attribute_value(&event, "name")?
+                {
+                    current_event_name = Some(name);
+                }
+                if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
+                    properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
+                if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
+                    current_command = parse_form_command_xml(&event)?;
+                } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
+                    current_attribute = parse_form_attribute_xml(&event)?;
+                } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
+                    current_parameter = parse_form_parameter_xml(&event)?;
+                } else if local == "Settings"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && current_attribute
+                        .as_ref()
+                        .and_then(|attribute| attribute.settings.as_ref())
+                        .is_none()
+                {
+                    if let Some(attribute) = current_attribute.as_mut() {
+                        attribute.settings = Some(FormXmlDynamicListSettings::default());
+                    }
+                } else if local == "item"
+                    && path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                        ],
+                    )
+                {
+                    current_list_settings_order_item =
+                        Some(FormXmlListSettingsOrderItem::default());
+                } else if local == "Item"
+                    && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
+                {
+                    current_command_interface_item = Some(FormXmlCommandInterfaceItem::default());
+                } else if is_form_child_item_xml_tag(&local)
+                    && (path.last().map(String::as_str) == Some("ChildItems")
+                        || current_child_items.last().is_some_and(|item| {
+                            path.last().map(String::as_str) == Some(item.tag.as_str())
+                        }))
+                {
+                    if let Some(item) = parse_form_child_item_xml(&local, &event)? {
+                        current_child_items.push(item);
+                    }
+                } else if local == "item"
+                    && path_ends_with_for_child_title(&path, &current_child_items)
+                {
+                    current_child_title_lang = None;
+                    current_child_title_content = None;
+                } else if local == "Event"
+                    && path_ends_with_for_child_events(&path, &current_child_items)
+                {
+                    current_child_event_name = xml_attribute_value(&event, "name")?;
+                } else if matches!(local.as_str(), "Title" | "ToolTip")
+                    && path_ends_with(&path, &["Form", "Commands", "Command"])
+                {
+                    current_localized_section = Some(local.clone());
+                } else if local == "Title" && path_ends_with(&path, &["Form"]) {
+                    current_localized_section = Some("FormTitle".to_string());
+                } else if local == "item" && path_ends_with(&path, &["Form", "Title"]) {
+                    current_localized_lang = None;
+                    current_localized_content = None;
+                } else if local == "item"
+                    && (path_ends_with(&path, &["Form", "Commands", "Command", "Title"])
+                        || path_ends_with(&path, &["Form", "Commands", "Command", "ToolTip"]))
+                {
+                    current_localized_lang = None;
+                    current_localized_content = None;
                 }
                 path.push(local);
             }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
+                    properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
+            }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "Width"])
+                    || path_ends_with(&path, &["Form", "Height"])
+                    || path_ends_with(&path, &["Form", "AutoTitle"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "lang"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "content"])
+                    || path_ends_with(&path, &["Form", "Events", "Event"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    )
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "DynamicDataRead",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "field",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "orderType",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsViewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsUserSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Command",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "CommandGroup",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Index",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "DefaultVisible",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Visible",
+                            "Common",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "content"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                    )
+                    || path_ends_with_for_child_title_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
+                    || path_ends_with_for_child_command_name(&path, &current_child_items)
+                    || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
             }
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "Width"])
+                    || path_ends_with(&path, &["Form", "Height"])
+                    || path_ends_with(&path, &["Form", "AutoTitle"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "lang"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "content"])
+                    || path_ends_with(&path, &["Form", "Events", "Event"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    )
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "DynamicDataRead",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "field",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "orderType",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsViewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsUserSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Command",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "CommandGroup",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Index",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "DefaultVisible",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Visible",
+                            "Common",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "content"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                    )
+                    || path_ends_with_for_child_title_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
+                    || path_ends_with_for_child_command_name(&path, &current_child_items)
+                    || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -3170,13 +4101,819 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         properties.window_opening_mode =
                             Some(parse_form_window_opening_mode_xml(text_value.trim())?);
                     }
+                    "Width" if path_ends_with(&path, &["Form", "Width"]) => {
+                        properties.width =
+                            Some(parse_form_dimension_xml("Width", text_value.trim())?);
+                    }
+                    "Height" if path_ends_with(&path, &["Form", "Height"]) => {
+                        properties.height =
+                            Some(parse_form_dimension_xml("Height", text_value.trim())?);
+                    }
+                    "AutoTitle" if path_ends_with(&path, &["Form", "AutoTitle"]) => {
+                        properties.auto_title =
+                            Some(parse_form_xml_bool("AutoTitle", text_value.trim())?);
+                    }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "CommandBarLocation"
+                        if path_ends_with(&path, &["Form", "CommandBarLocation"]) =>
+                    {
+                        properties.command_bar_location =
+                            Some(parse_form_command_bar_location_xml(text_value.trim())?);
+                    }
+                    "Autofill"
+                        if path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"]) =>
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.autofill = Some(parse_form_xml_bool(
+                                "AutoCommandBar/Autofill",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "HorizontalAlign"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "AutoCommandBar", "HorizontalAlign"],
+                        ) =>
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.horizontal_align =
+                                Some(parse_form_horizontal_align_xml(text_value.trim())?);
+                        }
+                    }
+                    "Event" if path_ends_with(&path, &["Form", "Events", "Event"]) => {
+                        if let Some(name) = current_event_name.take() {
+                            let handler = text_value.trim();
+                            if !handler.is_empty() {
+                                properties.events.push(FormXmlEvent {
+                                    name,
+                                    handler: handler.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "lang"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item", "lang"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                        ) || path_ends_with(&path, &["Form", "Title", "item", "lang"]) =>
+                    {
+                        current_localized_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item", "content"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                        ) || path_ends_with(&path, &["Form", "Title", "item", "content"]) =>
+                    {
+                        current_localized_content = Some(text_value.to_string());
+                    }
+                    "item" if path_ends_with(&path, &["Form", "Title", "item"]) => {
+                        if let (Some(lang), Some(content)) = (
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            properties.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item"],
+                        ) =>
+                    {
+                        if let (Some(command), Some(section), Some(lang), Some(content)) = (
+                            current_command.as_mut(),
+                            current_localized_section.as_deref(),
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            let value = LocalizedString { lang, content };
+                            match section {
+                                "Title" => command.title.push(value),
+                                "ToolTip" => command.tooltip.push(value),
+                                _ => {}
+                            }
+                        }
+                    }
+                    "Title" | "ToolTip"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", local.as_str()],
+                        ) =>
+                    {
+                        current_localized_section = None;
+                    }
+                    "Title" if path_ends_with(&path, &["Form", "Title"]) => {
+                        current_localized_section = None;
+                    }
+                    "Action"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", "Action"]) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.action = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CurrentRowUse"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "CurrentRowUse"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.current_row_use =
+                                Some(parse_form_command_current_row_use_xml(text_value.trim())?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                command.functional_options.push(value.to_string());
+                            }
+                        }
+                    }
+                    "Command" if path_ends_with(&path, &["Form", "Commands", "Command"]) => {
+                        if let Some(command) = current_command.take() {
+                            properties.commands.push(command);
+                        }
+                    }
+                    "Type"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Parameters", "Parameter", "Type", "Type"],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                parameter.types.push(value.to_string());
+                            }
+                        }
+                    }
+                    "KeyParameter"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Parameters", "Parameter", "KeyParameter"],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.key_parameter = Some(parse_form_xml_bool(
+                                "Parameter/KeyParameter",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Length"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "StringQualifiers",
+                                "Length",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.string_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedLength"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "StringQualifiers",
+                                "AllowedLength",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.string_allowed_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Digits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "NumberQualifiers",
+                                "Digits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "FractionDigits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "NumberQualifiers",
+                                "FractionDigits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_fraction_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedSign"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "NumberQualifiers",
+                                "AllowedSign",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_allowed_sign = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Parameter" if path_ends_with(&path, &["Form", "Parameters", "Parameter"]) => {
+                        if let Some(parameter) = current_parameter.take() {
+                            properties.parameters.push(parameter);
+                        }
+                    }
+                    "MainAttribute"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "MainAttribute"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.main_attribute = Some(parse_form_xml_bool(
+                                "Attribute/MainAttribute",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ManualQuery"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.manual_query = Some(parse_form_xml_bool(
+                                "Settings/ManualQuery",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "DynamicDataRead"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "DynamicDataRead",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.dynamic_data_read = Some(parse_form_xml_bool(
+                                "Settings/DynamicDataRead",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "QueryText"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.query_text = Some(text_value.to_string());
+                        }
+                    }
+                    "MainTable"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.main_table = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "field"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                                "field",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.as_mut() {
+                            item.field = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "orderType"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                                "orderType",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.as_mut() {
+                            item.order_type = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.take()
+                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .items
+                                .push(item);
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "itemsViewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "itemsViewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.list_settings.items_view_mode =
+                                Some(text_value.trim().to_string());
+                        }
+                    }
+                    "itemsUserSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "itemsUserSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.list_settings.items_user_setting_id =
+                                Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Attribute" if path_ends_with(&path, &["Form", "Attributes", "Attribute"]) => {
+                        if let Some(attribute) = current_attribute.take() {
+                            properties.attributes.push(attribute);
+                        }
+                    }
+                    "Command"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Command",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.command = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CommandGroup"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "CommandGroup",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.command_group = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Index"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Index",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.index = Some(text_value.trim().parse().with_context(|| {
+                                format!(
+                                    "invalid Form CommandInterface Index: {}",
+                                    text_value.trim()
+                                )
+                            })?);
+                        }
+                    }
+                    "DefaultVisible"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "DefaultVisible",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.default_visible = Some(parse_form_xml_bool(
+                                "CommandInterface/DefaultVisible",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Common"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Visible",
+                                "Common",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.visible_common = Some(parse_form_xml_bool(
+                                "CommandInterface/Visible/Common",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "CommandInterface", "NavigationPanel", "Item"],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.take() {
+                            properties.command_interface_items.push(item);
+                        }
+                    }
+                    "lang" if path_ends_with_for_child_title_lang(&path, &current_child_items) => {
+                        current_child_title_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with_for_child_title_content(&path, &current_child_items) =>
+                    {
+                        current_child_title_content = Some(text_value.to_string());
+                    }
+                    "item" if path_ends_with_for_child_title_item(&path, &current_child_items) => {
+                        if let (Some(item), Some(lang), Some(content)) = (
+                            current_child_items.last_mut(),
+                            current_child_title_lang.take(),
+                            current_child_title_content.take(),
+                        ) {
+                            item.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    "Event" if path_ends_with_for_child_event(&path, &current_child_items) => {
+                        if let (Some(item), Some(name)) = (
+                            current_child_items.last_mut(),
+                            current_child_event_name.take(),
+                        ) {
+                            let handler = text_value.trim();
+                            if !handler.is_empty() {
+                                item.events.push(FormXmlEvent {
+                                    name,
+                                    handler: handler.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "Type" if path_ends_with_for_child_type(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.item_type = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Item"
+                        if path_ends_with_for_child_addition_source_item(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                item.addition_source_item = Some(value.to_string());
+                            }
+                        }
+                    }
+                    "CommandName"
+                        if path_ends_with_for_child_command_name(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.command_name = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "DataPath"
+                        if path_ends_with_for_child_data_path(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.data_path = Some(text_value.trim().to_string());
+                        }
+                    }
+                    _ if current_child_items
+                        .last()
+                        .is_some_and(|item| local == item.tag)
+                        && path
+                            .last()
+                            .is_some_and(|current| current.as_str() == local.as_str()) =>
+                    {
+                        if let Some(item) = current_child_items.pop() {
+                            properties.child_items.push(item);
+                        }
                     }
                     _ => {}
                 }
                 let _ = path.pop();
-                if matches!(local.as_str(), "WindowOpeningMode" | "Group") {
+                if matches!(
+                    local.as_str(),
+                    "WindowOpeningMode"
+                        | "Group"
+                        | "Event"
+                        | "Action"
+                        | "CurrentRowUse"
+                        | "Item"
+                        | "MainAttribute"
+                        | "ManualQuery"
+                        | "DynamicDataRead"
+                        | "QueryText"
+                        | "MainTable"
+                        | "field"
+                        | "orderType"
+                        | "viewMode"
+                        | "userSettingID"
+                        | "itemsViewMode"
+                        | "itemsUserSettingID"
+                        | "Command"
+                        | "CommandGroup"
+                        | "Index"
+                        | "DefaultVisible"
+                        | "Common"
+                        | "Type"
+                        | "CommandName"
+                        | "DataPath"
+                        | "lang"
+                        | "content"
+                ) {
                     text_value.clear();
                 }
             }
@@ -3188,6 +4925,273 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     }
 
     Ok(properties)
+}
+
+fn parse_form_auto_command_bar_xml(
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlAutoCommandBar>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAutoCommandBar {
+        id,
+        name,
+        horizontal_align: None,
+        autofill: None,
+    }))
+}
+
+fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlCommand>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlCommand {
+        id,
+        name,
+        title: Vec::new(),
+        tooltip: Vec::new(),
+        action: None,
+        functional_options: Vec::new(),
+        current_row_use: None,
+    }))
+}
+
+fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttribute>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAttribute {
+        id,
+        name,
+        main_attribute: None,
+        settings: None,
+    }))
+}
+
+fn parse_form_parameter_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlParameter>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(FormXmlParameter {
+        name,
+        ..FormXmlParameter::default()
+    }))
+}
+
+fn parse_form_child_item_xml(
+    tag: &str,
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlChildItem>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlChildItem {
+        tag: tag.to_string(),
+        id,
+        name,
+        item_type: None,
+        addition_source_item: None,
+        title: Vec::new(),
+        events: Vec::new(),
+        command_name: None,
+        data_path: None,
+    }))
+}
+
+fn parse_nested_command_uuid_from_xml(xml: &[u8], command_name: &str) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_uuid = None::<String>;
+    let mut current_name = None::<String>;
+    let mut text_value = String::new();
+    let mut collecting_name = false;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command" {
+                    current_uuid = xml_attr_value(&event, "uuid")
+                        .map(|value| normalize_uuid_text(&value))
+                        .transpose()?;
+                    current_name = None;
+                } else if current_uuid.is_some()
+                    && local == "Name"
+                    && path_ends_with(&path, &["Command", "Properties"])
+                {
+                    text_value.clear();
+                    collecting_name = true;
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command" {
+                    current_uuid = None;
+                    current_name = None;
+                }
+            }
+            Ok(Event::Text(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if collecting_name && local == "Name" {
+                    current_name = Some(text_value.trim().to_string());
+                    collecting_name = false;
+                    text_value.clear();
+                }
+                if local == "Command" {
+                    if current_name.as_deref() == Some(command_name)
+                        && let Some(uuid) = current_uuid.take()
+                    {
+                        return Ok(uuid);
+                    }
+                    current_uuid = None;
+                    current_name = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Err(anyhow!("command {command_name} not found in owner XML"))
+}
+
+fn is_form_child_item_xml_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "UsualGroup"
+            | "CommandBar"
+            | "Popup"
+            | "ButtonGroup"
+            | "Button"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
+}
+
+fn path_ends_with_for_child_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title"])
+}
+
+fn path_ends_with_for_child_events(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Events"])
+}
+
+fn path_ends_with_for_child_event(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Events", "Event"])
+}
+
+fn path_ends_with_for_child_title_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item"])
+}
+
+fn path_ends_with_for_child_title_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item", "lang"])
+}
+
+fn path_ends_with_for_child_title_content(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item", "content"])
+}
+
+fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Type"])
+        || path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Type"])
+}
+
+fn path_ends_with_for_child_addition_source_item(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Item"])
+}
+
+fn path_ends_with_for_child_command_name(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "CommandName"])
+}
+
+fn path_ends_with_for_child_data_path(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "DataPath"])
+}
+
+fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(anyhow!("unsupported Form {name} boolean value: {other}")),
+    }
+}
+
+fn parse_form_dimension_xml(name: &str, value: &str) -> Result<String> {
+    let parsed = value
+        .parse::<u32>()
+        .with_context(|| format!("unsupported Form {name} dimension value: {value}"))?;
+    Ok(parsed.to_string())
+}
+
+fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandCurrentRowUse> {
+    match value {
+        "DontUse" => Ok(FormXmlCommandCurrentRowUse::DontUse),
+        other => Err(anyhow!("unsupported Form Command CurrentRowUse: {other}")),
+    }
 }
 
 fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpeningMode> {
@@ -3204,7 +5208,27 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
         "Vertical" => Ok(FormXmlGroup::Vertical),
         "Horizontal" => Ok(FormXmlGroup::Horizontal),
         "AlwaysHorizontal" => Ok(FormXmlGroup::AlwaysHorizontal),
+        "HorizontalIfPossible" => Ok(FormXmlGroup::HorizontalIfPossible),
         other => Err(anyhow!("unsupported Form Group: {other}")),
+    }
+}
+
+fn parse_form_command_bar_location_xml(value: &str) -> Result<FormXmlCommandBarLocation> {
+    match value {
+        "None" => Ok(FormXmlCommandBarLocation::None),
+        "Top" => Ok(FormXmlCommandBarLocation::Top),
+        "Bottom" => Ok(FormXmlCommandBarLocation::Bottom),
+        other => Err(anyhow!("unsupported Form CommandBarLocation: {other}")),
+    }
+}
+
+fn parse_form_horizontal_align_xml(value: &str) -> Result<FormXmlHorizontalAlign> {
+    match value {
+        "Left" => Ok(FormXmlHorizontalAlign::Left),
+        "Center" => Ok(FormXmlHorizontalAlign::Center),
+        "Right" => Ok(FormXmlHorizontalAlign::Right),
+        "Auto" => Ok(FormXmlHorizontalAlign::Auto),
+        other => Err(anyhow!("unsupported Form HorizontalAlign: {other}")),
     }
 }
 
@@ -3212,6 +5236,15 @@ fn patch_form_layout_properties(
     layout: &mut String,
     properties: &FormXmlBodyProperties,
 ) -> Result<()> {
+    if !properties.title.is_empty() {
+        replace_braced_field(layout, 10, &format_form_title_value(&properties.title))?;
+    }
+    if let Some(width) = &properties.width {
+        replace_braced_field(layout, 3, width)?;
+    }
+    if let Some(height) = &properties.height {
+        replace_braced_field(layout, 4, height)?;
+    }
     if let Some(window_opening_mode) = properties.window_opening_mode {
         replace_braced_field(
             layout,
@@ -3219,22 +5252,582 @@ fn patch_form_layout_properties(
             form_window_opening_mode_code(window_opening_mode),
         )?;
     }
+    if let Some(auto_title) = properties.auto_title {
+        replace_braced_field(layout, 9, if auto_title { "1" } else { "0" })?;
+    }
     if let Some(group) = properties.group {
         match group {
             FormXmlGroup::Vertical => {
-                replace_braced_field(layout, 17, "1")?;
+                replace_braced_field(layout, 11, "0")?;
             }
             FormXmlGroup::Horizontal => {
-                replace_braced_field(layout, 12, "2")?;
-                replace_braced_field(layout, 17, "3")?;
+                replace_braced_field(layout, 11, "1")?;
+                replace_braced_field(layout, 13, "0")?;
+                replace_braced_field(layout, 14, "0")?;
             }
-            FormXmlGroup::AlwaysHorizontal => {
-                replace_braced_field(layout, 12, "0")?;
-                replace_braced_field(layout, 17, "3")?;
+            FormXmlGroup::AlwaysHorizontal | FormXmlGroup::HorizontalIfPossible => {
+                replace_braced_field(layout, 11, "1")?;
+                replace_braced_field(layout, 13, "1")?;
+                replace_braced_field(layout, 14, "1")?;
             }
         }
     }
+    if let Some(command_bar_location) = properties.command_bar_location {
+        replace_braced_field(
+            layout,
+            17,
+            form_command_bar_location_code(command_bar_location),
+        )?;
+    }
     Ok(())
+}
+
+fn format_form_title_value(title: &[LocalizedString]) -> String {
+    let mut output = format!("{{1,{}", title.len());
+    for value in title {
+        output.push_str(",{");
+        output.push_str(&format_1c_string(&value.lang));
+        output.push(',');
+        output.push_str(&format_1c_string(&value.content));
+        output.push('}');
+    }
+    output.push('}');
+    output
+}
+
+fn form_command_bar_location_code(value: FormXmlCommandBarLocation) -> &'static str {
+    match value {
+        FormXmlCommandBarLocation::None => "0",
+        FormXmlCommandBarLocation::Top => "2",
+        FormXmlCommandBarLocation::Bottom => "3",
+    }
+}
+
+fn patch_form_layout_auto_command_bar(
+    text: &mut String,
+    command_bar: &FormXmlAutoCommandBar,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("22")
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && identity
+            .first()
+            .is_some_and(|range| text[range.clone()].trim() == command_bar.id)
+        && let Some(name_range) = fields.get(6)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        let mut replacements = Vec::<(Range<usize>, String)>::new();
+        replacements.push((name_range.clone(), format_1c_string(&command_bar.name)));
+        if (command_bar.horizontal_align.is_some() || command_bar.autofill.is_some())
+            && let Some(settings_range) = fields.get(20)
+            && let Some(settings) = format_form_auto_command_bar_settings(
+                &text[settings_range.clone()],
+                command_bar.horizontal_align,
+                command_bar.autofill,
+            )?
+        {
+            replacements.push((settings_range.clone(), settings));
+        }
+        replacements.sort_by_key(|(range, _)| range.start);
+        for (range, replacement) in replacements.into_iter().rev() {
+            text.replace_range(range, &replacement);
+        }
+        return Ok(true);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_auto_command_bar(&mut nested, command_bar)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn format_form_auto_command_bar_settings(
+    existing: &str,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.len() <= 1 || (autofill.is_some() && fields.len() <= 2) {
+        return Ok(None);
+    }
+    if let Some(horizontal_align) = horizontal_align {
+        replace_braced_field(&mut text, 1, form_horizontal_align_code(horizontal_align))?;
+    }
+    if let Some(autofill) = autofill {
+        replace_braced_field(&mut text, 2, if autofill { "1" } else { "0" })?;
+    }
+    Ok(Some(text))
+}
+
+fn form_horizontal_align_code(value: FormXmlHorizontalAlign) -> &'static str {
+    match value {
+        FormXmlHorizontalAlign::Left => "0",
+        FormXmlHorizontalAlign::Center => "1",
+        FormXmlHorizontalAlign::Right => "2",
+        FormXmlHorizontalAlign::Auto => "3",
+    }
+}
+
+fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
+    for event in events {
+        let identifiers = form_event_layout_identifiers(&event.name);
+        let _ = patch_form_layout_event(layout, &identifiers, &event.handler)?;
+    }
+    Ok(())
+}
+
+fn patch_form_layout_child_items(
+    layout: &mut String,
+    items: &[FormXmlChildItem],
+    commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
+    let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
+    for item in items {
+        let _ = patch_form_layout_child_item(
+            layout,
+            item,
+            commands,
+            &table_ids_by_name,
+            &table_column_ids_by_name,
+            source,
+        )?;
+    }
+    Ok(())
+}
+
+fn patch_form_layout_child_item(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if form_layout_child_item_matches(text, &fields, item) {
+        patch_form_layout_child_item_entry(
+            text,
+            &fields,
+            item,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            source,
+        )?;
+        return Ok(true);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_child_item(
+            &mut nested,
+            item,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            source,
+        )? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn form_layout_child_item_matches(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> bool {
+    let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return false;
+    };
+    if form_layout_child_item_tag(wrapper, text, fields) != Some(item.tag.as_str()) {
+        return false;
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = form_layout_child_item_name(text, wrapper, fields);
+    existing_id.as_deref() == Some(item.id.as_str())
+        || existing_name.as_deref() == Some(item.name.as_str())
+}
+
+fn patch_form_layout_child_item_entry(
+    text: &mut String,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return Ok(());
+    };
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = form_layout_child_item_name_range(text, wrapper, fields)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range, format_1c_string(&item.name)));
+    }
+    if !item.title.is_empty()
+        && let Some(title_range) = form_layout_child_item_title_range(text, wrapper, fields)
+    {
+        replacements.push((title_range, format_1c_synonyms(&item.title)));
+    }
+    if item.tag == "Button"
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_button_type_code(item_type)
+        && let Some(type_range) = fields.get(7)
+    {
+        replacements.push((type_range.clone(), type_code.to_string()));
+    }
+    if item.tag.ends_with("Addition")
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_search_addition_type_code(item_type)
+        && let Some(type_range) = fields.get(5)
+    {
+        replacements.push((type_range.clone(), type_code.to_string()));
+    }
+    if item.tag.ends_with("Addition")
+        && let Some(source_item) = &item.addition_source_item
+        && let Some(source_item_id) = table_ids_by_name.get(source_item)
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_search_addition_type_code(item_type)
+        && let Some(source_range) = fields.get(19)
+    {
+        replacements.push((
+            source_range.clone(),
+            format!("{{{source_item_id},{type_code}}}"),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(command_name) = &item.command_name
+        && let Some(command_range) = fields.get(8)
+        && let Some(command_ref) = format_form_button_command_reference(
+            &text[command_range.clone()],
+            command_name,
+            commands,
+            source,
+        )?
+    {
+        replacements.push((command_range.clone(), command_ref));
+    }
+    if item.tag == "Button"
+        && let Some(data_path) = &item.data_path
+        && let Some(data_path_range) = fields.get(9)
+        && let Some(data_path_ref) =
+            format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
+    {
+        replacements.push((data_path_range.clone(), data_path_ref));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    patch_form_layout_events(text, &item.events)?;
+    Ok(())
+}
+
+fn form_button_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "UsualButton" => Some("0"),
+        "CommandBarButton" => Some("1"),
+        "Hyperlink" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_search_addition_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "SearchStringRepresentation" => Some("0"),
+        "ViewStatusRepresentation" => Some("1"),
+        "SearchControl" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_layout_table_ids_by_name(layout: &str) -> Result<BTreeMap<String, String>> {
+    let mut tables = BTreeMap::new();
+    collect_form_layout_table_ids_by_name(layout, &mut tables)?;
+    Ok(tables)
+}
+
+fn form_layout_table_column_ids_by_name(
+    layout: &str,
+) -> Result<BTreeMap<(String, String), String>> {
+    let mut columns = BTreeMap::new();
+    collect_form_layout_table_column_ids_by_name(layout, &mut columns)?;
+    Ok(columns)
+}
+
+fn collect_form_layout_table_ids_by_name(
+    text: &str,
+    tables: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && let Some(id) = identity
+            .first()
+            .map(|range| text[range.clone()].trim().to_string())
+        && let Some(name) = form_layout_child_item_name(text, "73", &fields)
+    {
+        tables.insert(name, id);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_ids_by_name(&text[range], tables)?;
+    }
+    Ok(())
+}
+
+fn collect_form_layout_table_column_ids_by_name(
+    text: &str,
+    columns: &mut BTreeMap<(String, String), String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
+        && let Some(table_name) = form_layout_child_item_name(text, "73", &fields)
+    {
+        collect_form_layout_table_column_ids_for_table(text, &table_name, columns)?;
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_column_ids_by_name(&text[range], columns)?;
+    }
+    Ok(())
+}
+
+fn collect_form_layout_table_column_ids_for_table(
+    text: &str,
+    table_name: &str,
+    columns: &mut BTreeMap<(String, String), String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let wrapper = fields.first().map(|range| text[range.clone()].trim());
+    if matches!(
+        wrapper.and_then(|wrapper| form_layout_child_item_tag(wrapper, text, &fields)),
+        Some("InputField" | "LabelField")
+    ) && let Some(wrapper) = wrapper
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && let Some(id) = identity
+            .first()
+            .map(|range| text[range.clone()].trim().to_string())
+        && let Some(name) = form_layout_child_item_name(text, wrapper, &fields)
+    {
+        columns.insert((table_name.to_string(), name), id);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_column_ids_for_table(&text[range], table_name, columns)?;
+    }
+    Ok(())
+}
+
+fn format_form_button_data_path(
+    data_path: &str,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+) -> Option<String> {
+    let data_path = data_path.trim();
+    let rest = data_path.strip_prefix("Items.")?;
+    let (table_name, field_name) = rest.split_once(".CurrentData.")?;
+    let column_id = match field_name {
+        "Ссылка" => "8".to_string(),
+        _ => table_column_ids_by_name
+            .get(&(table_name.to_string(), field_name.to_string()))
+            .cloned()?,
+    };
+    let table_id = table_ids_by_name.get(table_name)?;
+    Some(format!("{{2,{{{table_id}}},{{{column_id}}}}}"))
+}
+
+fn format_form_button_command_reference(
+    existing: &str,
+    command_name: &str,
+    commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    if let Some(uuid) = form_standard_command_uuid(command_name) {
+        return Ok(Some(format!("{{0,{uuid}}}")));
+    }
+    if let Some(name) = command_name.strip_prefix("Form.Command.") {
+        let Some(command) = commands.iter().find(|command| command.name == name) else {
+            return Ok(None);
+        };
+        let fields = scan_braced_fields(existing.trim(), 0)?;
+        let Some(uuid) = fields.get(1).map(|range| existing[range.clone()].trim()) else {
+            return Ok(None);
+        };
+        return Ok(Some(format!("{{{},{uuid}}}", command.id)));
+    }
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let uuid = source.resolve_command_reference_uuid(command_name)?;
+    Ok(Some(format!("{{0,{uuid}}}")))
+}
+
+fn form_standard_command_uuid(command_name: &str) -> Option<&'static str> {
+    match command_name {
+        "Form.StandardCommand.Create" => Some("4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
+        "Form.StandardCommand.Help" => Some("39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+        _ => None,
+    }
+}
+
+fn form_layout_child_item_tag<'a>(
+    wrapper: &str,
+    text: &'a str,
+    fields: &[Range<usize>],
+) -> Option<&'static str> {
+    match wrapper {
+        "22" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" => Some("CommandBar"),
+            "1" => Some("Popup"),
+            "5" => Some("UsualGroup"),
+            "6" => Some("ButtonGroup"),
+            _ => None,
+        },
+        "34" => Some("Button"),
+        "48" => {
+            if fields.get(4).map(|range| text[range.clone()].trim()) == Some("1") {
+                Some("LabelField")
+            } else {
+                Some("InputField")
+            }
+        }
+        "6" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" => Some("SearchStringAddition"),
+            "1" => Some("ViewStatusAddition"),
+            "2" => Some("SearchControlAddition"),
+            _ => None,
+        },
+        "73" => Some("Table"),
+        _ => None,
+    }
+}
+
+fn form_layout_child_item_name(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<String> {
+    form_layout_child_item_name_range(text, wrapper, fields)
+        .and_then(|range| parse_1c_quoted_string(&text[range]).ok())
+}
+
+fn form_layout_child_item_name_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "73" | "34" => &[5],
+        "48" => &[6, 7],
+        _ => &[6],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        parse_1c_quoted_string(&text[range.clone()])
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(|_| range)
+    })
+}
+
+fn form_layout_child_item_title_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "73" => &[9],
+        "34" => &[6],
+        "48" => &[9, 10],
+        _ => &[7],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        scan_braced_fields(text, range.start).ok().map(|_| range)
+    })
+}
+
+fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &str) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        if form_event_field_matches(&text[window[0].clone()], identifiers)
+            && parse_1c_quoted_string(&text[window[1].clone()]).is_ok()
+        {
+            text.replace_range(window[1].clone(), &format_1c_string(handler));
+            return Ok(true);
+        }
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_event(&mut nested, identifiers, handler)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn form_event_field_matches(field: &str, identifiers: &[&str]) -> bool {
+    let value = parse_1c_quoted_string(field).unwrap_or_else(|_| field.trim().to_string());
+    identifiers
+        .iter()
+        .any(|identifier| value.eq_ignore_ascii_case(identifier))
+}
+
+fn form_event_layout_identifiers(name: &str) -> Vec<&str> {
+    let mut identifiers = vec![name];
+    match name {
+        "OnOpen" => identifiers.push("3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+        "ChoiceProcessing" => identifiers.push("1d632984-de3c-4b4b-ad9f-d69682a10182"),
+        "NotificationProcessing" => identifiers.push("3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
+        "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
+        "OnGetDataAtServer" => {}
+        _ => {}
+    }
+    identifiers
 }
 
 fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static str {
@@ -3243,6 +5836,782 @@ fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static st
         FormXmlWindowOpeningMode::LockOwner => "1",
         FormXmlWindowOpeningMode::LockWholeInterface => "2",
     }
+}
+
+fn patch_form_body_commands(
+    text: &mut String,
+    commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    for command in commands {
+        let _ = patch_form_body_command(text, command, source)?;
+    }
+    Ok(())
+}
+
+fn patch_form_command_interface(
+    text: &mut String,
+    items: &[FormXmlCommandInterfaceItem],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let item_ranges = fields
+        .iter()
+        .skip(2)
+        .filter_map(|range| {
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return None;
+            }
+            let item_fields = scan_braced_fields(text, range.start).ok()?;
+            (item_fields.first().map(|field| text[field.clone()].trim()) == Some("3"))
+                .then_some(range.clone())
+        })
+        .collect::<Vec<_>>();
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    for (range, item) in item_ranges.into_iter().zip(items) {
+        let mut item_text = text[range.clone()].to_string();
+        patch_form_command_interface_item(&mut item_text, item, source)?;
+        replacements.push((range, item_text));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn patch_form_command_interface_item(
+    text: &mut String,
+    item: &FormXmlCommandInterfaceItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(command) = &item.command
+        && let Some(range) = fields.get(2)
+        && let Some(source) = source
+    {
+        let uuid = source.resolve_command_reference_uuid(command)?;
+        replacements.push((range.clone(), format!("{{0,{uuid}}}")));
+    }
+    if let Some(command_group) = &item.command_group
+        && let Some(range) = fields.get(5)
+    {
+        let uuid = common_command_group_uuid(command_group).ok_or_else(|| {
+            anyhow!("unsupported Form CommandInterface CommandGroup: {command_group}")
+        })?;
+        replacements.push((range.clone(), format!("{{0,{uuid}}}")));
+    }
+    if let Some(index) = item.index
+        && let Some(range) = fields.get(6)
+    {
+        replacements.push((range.clone(), index.to_string()));
+    }
+    if let Some(default_visible) = item.default_visible
+        && let Some(range) = fields.get(7)
+    {
+        replacements.push((
+            range.clone(),
+            if default_visible { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if let Some(visible_common) = item.visible_common
+        && let Some(range) = fields.get(8)
+    {
+        replacements.push((
+            range.clone(),
+            format_form_nested_common_bool(visible_common),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn format_form_nested_common_bool(value: bool) -> String {
+    format!("{{0,{{0,{},0}}}}", format_form_setting_bool(value))
+}
+
+fn patch_form_body_parameters(
+    text: &mut String,
+    parameters: &[FormXmlParameter],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    for parameter in parameters {
+        let _ = patch_form_body_parameter(text, parameter, source)?;
+    }
+    Ok(())
+}
+
+fn patch_form_body_parameter(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_parameter_entry(&mut nested, parameter, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_parameter_entry(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    let existing_name = fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    if existing_name.as_deref() != Some(parameter.name.as_str()) {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = fields.get(1) {
+        replacements.push((name_range.clone(), format_1c_string(&parameter.name)));
+    }
+    if !parameter.types.is_empty()
+        && let Some(type_range) = fields.get(2)
+    {
+        replacements.push((
+            type_range.clone(),
+            format_form_parameter_type_pattern(parameter, source)?,
+        ));
+    }
+    if let Some(key_parameter) = parameter.key_parameter
+        && let Some(key_range) = fields.get(3)
+    {
+        replacements.push((
+            key_range.clone(),
+            if key_parameter { "1" } else { "0" }.to_string(),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(true)
+}
+
+fn format_form_parameter_type_pattern(
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value_types = parse_metadata_type_pattern_elements(
+        "Form Parameter",
+        &parameter.types,
+        parameter.string_length.clone(),
+        parameter.string_allowed_length.clone(),
+        parameter.number_digits.clone(),
+        parameter.number_fraction_digits.clone(),
+        parameter.number_allowed_sign.clone(),
+        source,
+        true,
+    )?;
+    Ok(format_metadata_type_pattern(&value_types))
+}
+
+fn patch_form_body_attributes(
+    text: &mut String,
+    attributes: &[FormXmlAttribute],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    for attribute in attributes {
+        let _ = patch_form_body_attribute(text, attribute, source)?;
+    }
+    Ok(())
+}
+
+fn patch_form_body_attribute(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_attribute_entry(&mut nested, attribute, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+        if patch_form_body_attribute(&mut nested, attribute, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_attribute_entry(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("9") {
+        return Ok(false);
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = fields
+        .get(3)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    let matches_attribute = existing_id.as_deref() == Some(attribute.id.as_str())
+        || existing_name.as_deref() == Some(attribute.name.as_str());
+    if !matches_attribute {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = fields.get(3)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range.clone(), format_1c_string(&attribute.name)));
+    }
+    if let Some(main_attribute) = attribute.main_attribute
+        && let Some(main_range) = fields.get(10)
+    {
+        replacements.push((
+            main_range.clone(),
+            if main_attribute { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if let Some(settings) = &attribute.settings
+        && let Some(settings_range) = fields.get(14)
+    {
+        let mut settings_text = text[settings_range.clone()].to_string();
+        patch_form_dynamic_list_settings(&mut settings_text, settings, source)?;
+        replacements.push((settings_range.clone(), settings_text));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(true)
+}
+
+fn patch_form_dynamic_list_settings(
+    text: &mut String,
+    settings: &FormXmlDynamicListSettings,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    if let Some(query_text) = &settings.query_text {
+        let _ =
+            patch_form_setting_value(text, "QueryText", &format_form_setting_string(query_text))?;
+    }
+    if let Some(manual_query) = settings.manual_query {
+        let _ =
+            patch_form_setting_value(text, "ManualQuery", &format_form_setting_bool(manual_query))?;
+    }
+    if let Some(dynamic_data_read) = settings.dynamic_data_read {
+        let data_selection = !dynamic_data_read;
+        let _ = patch_form_setting_value(
+            text,
+            "DynamicalDataSelection",
+            &format_form_setting_bool(data_selection),
+        )?;
+    }
+    if let Some(main_table) = &settings.main_table
+        && let Some(source) = source
+    {
+        let _ = patch_form_setting_value(
+            text,
+            "MainTable",
+            &format_form_setting_metadata_ref(source, main_table)?,
+        )?;
+    }
+    let mut list_replacements = Vec::new();
+    let list_settings_text = text.clone();
+    if let Some(order) = &settings.list_settings.order {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "Order",
+            format_form_setting_dcs_order(order, &list_settings_text, "Order")?,
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ConditionalAppearance",
+            format_form_setting_dcs_standard_section(
+                conditional_appearance,
+                "ConditionalAppearance",
+                &list_settings_text,
+                "ConditionalAppearance",
+            )?,
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ItemsViewMode",
+            format_form_setting_string(items_view_mode),
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(items_user_setting_id) = &settings.list_settings.items_user_setting_id {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ItemsUserSettingID",
+            format_form_setting_string(items_user_setting_id),
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(filter) = &settings.list_settings.filter {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "Filter",
+            format_form_setting_dcs_standard_section(
+                filter,
+                "Filter",
+                &list_settings_text,
+                "Filter",
+            )?,
+            &mut list_replacements,
+        )?;
+    }
+    list_replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in list_replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> Result<bool> {
+    if let Some(range) = find_form_setting_value_range(text, key) {
+        text.replace_range(range, replacement);
+        return Ok(true);
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key == key {
+            text.replace_range(window[1].clone(), replacement);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn push_form_setting_replacement(
+    text: &str,
+    key: &str,
+    replacement: String,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key) {
+        replacements.push((range, replacement));
+        return Ok(());
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key == key {
+            replacements.push((window[1].clone(), replacement));
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn find_form_setting_value_range(text: &str, key: &str) -> Option<Range<usize>> {
+    let needle = format!("\"{}\"", key.replace('"', "\"\""));
+    let mut offset = 0usize;
+    while let Some(relative) = text[offset..].find(&needle) {
+        let key_start = offset + relative;
+        let mut index = key_start + needle.len();
+        while text
+            .as_bytes()
+            .get(index)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            index += 1;
+        }
+        if text.as_bytes().get(index) != Some(&b',') {
+            offset = key_start + needle.len();
+            continue;
+        }
+        index += 1;
+        while text
+            .as_bytes()
+            .get(index)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            index += 1;
+        }
+        if let Some(range) = scan_1c_value_range(text, index) {
+            return Some(range);
+        }
+        offset = key_start + needle.len();
+    }
+    None
+}
+
+fn scan_1c_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    match text.as_bytes().get(start).copied()? {
+        b'{' => scan_1c_braced_value_range(text, start),
+        b'"' => scan_1c_quoted_value_range(text, start),
+        _ => {
+            let end = text[start..]
+                .find([',', '}'])
+                .map(|relative| start + relative)
+                .unwrap_or(text.len());
+            Some(trim_ascii_ws_range(text, start..end))
+        }
+    }
+}
+
+fn scan_1c_braced_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut index = start;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' if in_string && bytes.get(index + 1) == Some(&b'"') => {
+                index += 2;
+                continue;
+            }
+            b'"' => in_string = !in_string,
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start..index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn scan_1c_quoted_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            if bytes.get(index + 1) == Some(&b'"') {
+                index += 2;
+                continue;
+            }
+            return Some(start..index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn format_form_setting_string(value: &str) -> String {
+    format!("{{\"S\",{}}}", format_1c_string(value))
+}
+
+fn format_form_setting_bool(value: bool) -> String {
+    format!("{{\"B\",{}}}", if value { "1" } else { "0" })
+}
+
+fn format_form_setting_metadata_ref(
+    source: &MetadataSourceContext,
+    reference: &str,
+) -> Result<String> {
+    let uuid = source.resolve_metadata_reference_uuid(reference)?;
+    Ok(format!("{{\"#\",{uuid}}}"))
+}
+
+fn format_form_setting_dcs_order(
+    order: &FormXmlListSettingsOrder,
+    settings_text: &str,
+    key: &str,
+) -> Result<String> {
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
+        .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
+    let xml = format_form_dcs_order_xml(order);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    ))
+}
+
+fn format_form_setting_dcs_standard_section(
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+    settings_text: &str,
+    key: &str,
+) -> Result<String> {
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
+        .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
+    let xml = format_form_dcs_standard_section_xml(section, root_name);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    ))
+}
+
+fn find_form_setting_ref_uuid(text: &str, key: &str) -> Option<String> {
+    let fields = scan_braced_fields(text, 0).ok()?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key != key {
+            continue;
+        }
+        let value_fields = scan_braced_fields(text, window[1].start).ok()?;
+        if value_fields.first().map(|range| text[range.clone()].trim()) != Some(r##""#""##) {
+            return None;
+        }
+        return value_fields
+            .iter()
+            .skip(1)
+            .find_map(|range| parse_non_zero_uuid(text[range.clone()].trim()));
+    }
+    None
+}
+
+fn parse_non_zero_uuid(value: &str) -> Option<String> {
+    let uuid = Uuid::parse_str(value.trim()).ok()?;
+    (uuid != Uuid::nil()).then(|| uuid.hyphenated().to_string())
+}
+
+fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
+    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+        .to_string();
+    for item in &order.items {
+        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
+            continue;
+        };
+        xml.push_str("\t<item xsi:type=\"OrderItemField\">\r\n");
+        xml.push_str(&format!(
+            "\t\t<field>{}</field>\r\n",
+            escape_xml_text(field)
+        ));
+        if let Some(order_type) = item.order_type.as_deref().filter(|value| !value.is_empty()) {
+            xml.push_str(&format!(
+                "\t\t<orderType>{}</orderType>\r\n",
+                escape_xml_text(order_type)
+            ));
+        }
+        xml.push_str("\t</item>\r\n");
+    }
+    if let Some(view_mode) = order.view_mode.as_deref().filter(|value| !value.is_empty()) {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = order
+        .user_setting_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str("</Order>");
+    xml
+}
+
+fn format_form_dcs_standard_section_xml(
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+) -> String {
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<{root_name} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+    );
+    if let Some(view_mode) = section
+        .view_mode
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = section
+        .user_setting_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str(&format!("</{root_name}>"));
+    xml
+}
+
+fn escape_xml_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            _ => output.push(ch),
+        }
+    }
+    output
+}
+
+fn patch_form_body_command(
+    text: &mut String,
+    command: &FormXmlCommand,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_command_entry(&mut nested, command, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+        if patch_form_body_command(&mut nested, command, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_command_entry(
+    text: &mut String,
+    command: &FormXmlCommand,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+        return Ok(false);
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = fields
+        .get(2)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    let matches_command = existing_id.as_deref() == Some(command.id.as_str())
+        || existing_name.as_deref() == Some(command.name.as_str());
+    if !matches_command {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+
+    if let Some(name_range) = fields.get(2)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range.clone(), format_1c_string(&command.name)));
+    }
+    if !command.title.is_empty()
+        && let Some(title_range) = fields.get(3)
+    {
+        replacements.push((title_range.clone(), format_1c_synonyms(&command.title)));
+    }
+    if !command.tooltip.is_empty()
+        && let Some(tooltip_range) = fields.get(4)
+    {
+        replacements.push((tooltip_range.clone(), format_1c_synonyms(&command.tooltip)));
+    }
+    if let Some(action) = &command.action
+        && let Some(action_range) = fields.get(8)
+        && parse_1c_quoted_string(&text[action_range.clone()]).is_ok()
+    {
+        replacements.push((action_range.clone(), format_1c_string(action)));
+    }
+    if let Some(current_row_use) = command.current_row_use
+        && let Some(current_row_use_range) = fields.get(9)
+    {
+        replacements.push((
+            current_row_use_range.clone(),
+            form_command_current_row_use_code(current_row_use).to_string(),
+        ));
+    }
+    if !command.functional_options.is_empty()
+        && let Some(functional_options_range) = fields.get(12)
+        && let Some(source) = source
+    {
+        replacements.push((
+            functional_options_range.clone(),
+            format_form_reference_list(source, &command.functional_options)?,
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+
+    Ok(true)
+}
+
+fn form_command_current_row_use_code(value: FormXmlCommandCurrentRowUse) -> &'static str {
+    match value {
+        FormXmlCommandCurrentRowUse::DontUse => "3",
+    }
+}
+
+fn format_form_reference_list(
+    source: &MetadataSourceContext,
+    references: &[String],
+) -> Result<String> {
+    let mut text = format!("{{0,{}", references.len());
+    for reference in references {
+        let uuid = source.resolve_metadata_reference_uuid(reference)?;
+        text.push(',');
+        text.push_str(&uuid);
+    }
+    text.push('}');
+    Ok(text)
 }
 
 fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<()> {
@@ -7957,6 +11326,68 @@ mod tests {
     };
     use crate::module_blob::ModuleElement;
 
+    fn decode_base64_for_test(input: &str) -> anyhow::Result<Vec<u8>> {
+        fn value(byte: u8) -> anyhow::Result<u8> {
+            match byte {
+                b'A'..=b'Z' => Ok(byte - b'A'),
+                b'a'..=b'z' => Ok(byte - b'a' + 26),
+                b'0'..=b'9' => Ok(byte - b'0' + 52),
+                b'+' => Ok(62),
+                b'/' => Ok(63),
+                _ => anyhow::bail!("invalid base64 byte {byte}"),
+            }
+        }
+
+        let bytes: Vec<u8> = input
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect();
+        let mut output = Vec::with_capacity(bytes.len() / 4 * 3);
+        for chunk in bytes.chunks(4) {
+            if chunk.len() != 4 {
+                anyhow::bail!("invalid base64 length");
+            }
+            let first = value(chunk[0])?;
+            let second = value(chunk[1])?;
+            let third = if chunk[2] == b'=' {
+                0
+            } else {
+                value(chunk[2])?
+            };
+            let fourth = if chunk[3] == b'=' {
+                0
+            } else {
+                value(chunk[3])?
+            };
+            output.push((first << 2) | (second >> 4));
+            if chunk[2] != b'=' {
+                output.push((second << 4) | (third >> 2));
+            }
+            if chunk[3] != b'=' {
+                output.push((third << 6) | fourth);
+            }
+        }
+        Ok(output)
+    }
+
+    fn form_setting_base64_xml_for_test(text: &str, key: &str) -> anyhow::Result<String> {
+        let key_start = text
+            .find(&format!("\"{key}\""))
+            .ok_or_else(|| anyhow::anyhow!("setting {key} not found"))?;
+        let payload_prefix = "{#base64:";
+        let payload_start = text[key_start..]
+            .find(payload_prefix)
+            .map(|relative| key_start + relative + payload_prefix.len())
+            .ok_or_else(|| anyhow::anyhow!("setting {key} base64 payload not found"))?;
+        let payload_end = text[payload_start..]
+            .find('}')
+            .map(|relative| payload_start + relative)
+            .ok_or_else(|| anyhow::anyhow!("setting {key} base64 payload is not closed"))?;
+        let bytes = decode_base64_for_test(&text[payload_start..payload_end])?;
+        let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+        String::from_utf8(bytes.to_vec()).map_err(Into::into)
+    }
+
     #[test]
     fn packs_module_inner_with_plain_info_and_text() {
         let inner = build_module_inner(&[
@@ -10013,25 +13444,753 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let base = super::deflate_raw(
             b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,1,1,0,1,1,1},\"Old module\",{0}}",
         )?;
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Title>
+		<v8:item>
+			<v8:lang>ru</v8:lang>
+			<v8:content>Новый заголовок</v8:content>
+		</v8:item>
+		<v8:item>
+			<v8:lang>en</v8:lang>
+			<v8:content>New title</v8:content>
+		</v8:item>
+	</Title>
+	<Width>80</Width>
+	<Height>30</Height>
 	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
+	<AutoTitle>false</AutoTitle>
 	<Group>Horizontal</Group>
+	<CommandBarLocation>Bottom</CommandBarLocation>
 </Form>
-"#;
+"#
+        .as_bytes();
 
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let fields = super::scan_braced_fields(&parsed.layout, 0)?;
 
         assert_eq!(&parsed.layout[fields[2].clone()], "2");
-        assert_eq!(&parsed.layout[fields[12].clone()], "2");
+        assert_eq!(&parsed.layout[fields[3].clone()], "80");
+        assert_eq!(&parsed.layout[fields[4].clone()], "30");
+        assert_eq!(&parsed.layout[fields[9].clone()], "0");
+        assert_eq!(
+            &parsed.layout[fields[10].clone()],
+            r#"{1,2,{"ru","Новый заголовок"},{"en","New title"}}"#
+        );
+        assert_eq!(&parsed.layout[fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
         assert_eq!(&parsed.layout[fields[17].clone()], "3");
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_events() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"},{2,\"AfterWrite\",\"OldAfterWrite\"},{3,\"BeforeWrite\",\"OldBeforeWrite\"},{4,\"OnWriteAtServer\",\"OldWriteAtServer\"},{5,\"FillCheckProcessingAtServer\",\"OldFillCheck\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="OnOpen">NewOpen</Event>
+		<Event name="ChoiceProcessing">NewChoice</Event>
+		<Event name="AfterWrite">NewAfterWrite</Event>
+		<Event name="BeforeWrite">NewBeforeWrite</Event>
+		<Event name="OnWriteAtServer">NewWriteAtServer</Event>
+		<Event name="FillCheckProcessingAtServer">NewFillCheck</Event>
+		<Event name="BeforeClose">ShouldNotBeAdded</Event>
+	</Events>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"OnOpen\",\"NewOpen\""));
+        assert!(parsed.layout.contains("\"ChoiceProcessing\",\"NewChoice\""));
+        assert!(parsed.layout.contains("\"AfterWrite\",\"NewAfterWrite\""));
+        assert!(parsed.layout.contains("\"BeforeWrite\",\"NewBeforeWrite\""));
+        assert!(
+            parsed
+                .layout
+                .contains("\"OnWriteAtServer\",\"NewWriteAtServer\"")
+        );
+        assert!(
+            parsed
+                .layout
+                .contains("\"FillCheckProcessingAtServer\",\"NewFillCheck\"")
+        );
+        assert!(!parsed.layout.contains("OldOpen"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert!(!parsed.layout.contains("OldAfterWrite"));
+        assert!(!parsed.layout.contains("OldBeforeWrite"));
+        assert!(!parsed.layout.contains("OldWriteAtServer"));
+        assert!(!parsed.layout.contains("OldFillCheck"));
+        assert!(!parsed.layout.contains("ShouldNotBeAdded"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,\"OldBar\",{1,0}}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1"/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"NewBar\""));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar_autofill() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,"OldBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,1,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1">
+		<HorizontalAlign>Center</HorizontalAlign>
+		<Autofill>false</Autofill>
+	</AutoCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"NewBar\""));
+        assert!(parsed.layout.contains("{1,1,0,0}"), "{}", parsed.layout);
+        assert!(!parsed.layout.contains("{1,0,1,0}"));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_attributes() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-main-table-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,9,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Filter",{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}},"ConditionalAppearance",{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}},"ItemsViewMode",{"S","Normal"},"ItemsUserSettingID",{"S","911b6018-f537-43e8-a417-da56b22f9aec"}},{0,0}}},{0,0},{0,0},{0}}"##,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="Список" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<QueryText>ВЫБРАТЬ Ссылка ИЗ Справочник.Товары</QueryText>
+				<MainTable>Catalog.Products</MainTable>
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Quick</dcsset:viewMode>
+						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+					</dcsset:filter>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Код</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
+					</dcsset:order>
+					<dcsset:conditionalAppearance>
+						<dcsset:viewMode>Compact</dcsset:viewMode>
+						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+					</dcsset:conditionalAppearance>
+					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
+					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let parsed_xml = super::parse_form_xml_body_properties(xml)?;
+        let parsed_order = parsed_xml.attributes[0]
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.list_settings.order.as_ref())
+            .ok_or_else(|| anyhow::anyhow!("order was not parsed from form XML"))?;
+        assert_eq!(parsed_order.items[0].field.as_deref(), Some("Код"));
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[0].contains(r#""Список""#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,9,"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
+        );
+        assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
+        assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
+        assert!(parsed.trailing[0].contains("\"MainTable\",{\"#\","));
+        assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
+        assert!(
+            filter_xml
+                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let order_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+        assert!(order_xml.contains("<field>Код</field>"), "{order_xml}");
+        assert!(
+            order_xml.contains("<orderType>Asc</orderType>"),
+            "{order_xml}"
+        );
+        assert!(parsed.trailing[0].contains(
+            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
+        ));
+        let appearance_xml =
+            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
+        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        assert!(
+            appearance_xml
+                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
+        );
+        assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""ItemsUserSettingID",{"S","cccccccc-cccc-4ccc-cccc-cccccccccccc"}"#)
+        );
+        assert!(!parsed.trailing[0].contains("88888888-8888-4888-8888-888888888888"));
+        assert!(!parsed.trailing[0].contains("OldList"));
+        assert!(!parsed.trailing[0].contains("Old query"));
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_parameters() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-parameter-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("ChartsOfAccounts"))?;
+        std::fs::write(
+            root.join("ChartsOfAccounts").join("Хозрасчетный.xml"),
+            r#"<MetaDataObject><ChartOfAccounts><InternalInfo><GeneratedType name="ChartOfAccountsRef.Хозрасчетный"><TypeId>99999999-9999-4999-8999-999999999999</TypeId></GeneratedType></InternalInfo><Properties><Name>Хозрасчетный</Name></Properties></ChartOfAccounts></MetaDataObject>"#
+                .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            r##"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Счет",{"Pattern",{"#",88888888-8888-4888-8888-888888888888}},0}},{0,0},{0}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Счет">
+			<Type>
+				<v8:Type>cfg:ChartOfAccountsRef.Хозрасчетный</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(
+            parsed.trailing[1]
+                .contains(r##""Счет",{"Pattern",{"#",99999999-9999-4999-8999-999999999999}},1"##)
+        );
+        assert!(!parsed.trailing[1].contains("88888888-8888-4888-8888-888888888888"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_commands() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-command-options-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("FunctionalOptions"))?;
+        std::fs::write(
+            root.join("FunctionalOptions").join("UseFeature.xml"),
+            br#"<MetaDataObject><FunctionalOption uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>UseFeature</Name></Properties></FunctionalOption></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,\"ru\",\"Old title\"},{1,\"ru\",\"Old tip\"},0,0,0,\"OldAction\",0,0,0,{0,1,88888888-8888-4888-8888-888888888888}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>New title</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>New tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>NewAction</Action>
+			<CurrentRowUse>DontUse</CurrentRowUse>
+			<FunctionalOptions>
+				<Item>FunctionalOption.UseFeature</Item>
+			</FunctionalOptions>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[2].contains(r#""Do",{1,"ru","New title"}"#));
+        assert!(parsed.trailing[2].contains(r#"{1,"ru","New tip"}"#));
+        assert!(
+            parsed.trailing[2]
+                .contains(r#""NewAction",3,0,0,{0,1,99999999-9999-4999-8999-999999999999}"#)
+        );
+        assert!(!parsed.trailing[2].contains("Old title"));
+        assert!(!parsed.trailing[2].contains("Old tip"));
+        assert!(!parsed.trailing[2].contains("OldAction"));
+        assert!(!parsed.trailing[2].contains("88888888-8888-4888-8888-888888888888"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_command_interface() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>2</Index>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[3].contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(!parsed.trailing[3].contains("eacad741-96b9-4b3a-bf79-dde9ecead1a1"));
+        assert!(parsed.trailing[3].contains("},2,0,{0,{0,{\"B\",0},0}}"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0},"OnChange","OldChange","StartChoice","OldChoice"},"OnGetDataAtServer","OldGetData"}},"Old module",{0}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Action>Do</Action>
+		</Command>
+	</Commands>
+	<ChildItems>
+		<CommandBar name="NewBar" id="64">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>New bar</v8:content>
+				</v8:item>
+			</Title>
+			<ChildItems>
+				<Button name="NewButton" id="44">
+					<Type>UsualButton</Type>
+					<CommandName>Form.Command.Do</CommandName>
+					<DataPath>Items.Rows.CurrentData.Наименование</DataPath>
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>New button</v8:content>
+						</v8:item>
+					</Title>
+				</Button>
+				<InputField name="Наименование" id="40">
+					<Events>
+						<Event name="OnChange">NewChange</Event>
+						<Event name="StartChoice">NewChoice</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</CommandBar>
+		<Table name="Rows" id="25">
+			<Events>
+				<Event name="OnGetDataAtServer">NewGetData</Event>
+			</Events>
+		</Table>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""NewBar""#));
+        assert!(parsed.layout.contains(r#"{1,"en","New bar"}"#));
+        assert!(parsed.layout.contains(r#""NewButton""#));
+        assert!(parsed.layout.contains(r#"{1,"en","New button"}"#));
+        assert!(
+            parsed
+                .layout
+                .contains(r#""NewButton",{1,"en","New button"},0,"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains("{2,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert!(parsed.layout.contains("{2,{25},{40}}"));
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnGetDataAtServer","NewGetData""#)
+        );
+        assert!(parsed.layout.contains(r#""OnChange","NewChange""#));
+        assert!(parsed.layout.contains(r#""StartChoice","NewChoice""#));
+        assert!(!parsed.layout.contains("OldGetData"));
+        assert!(!parsed.layout.contains("OldChange"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert!(!parsed.layout.contains("Old bar"));
+        assert!(!parsed.layout.contains("OldButton"));
+        assert!(!parsed.layout.contains("Old button"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_search_addition_type() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"OldStatus",{1,0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<ViewStatusAddition name="NewStatus" id="134">
+			<AdditionSource>
+				<Type>ViewStatusRepresentation</Type>
+			</AdditionSource>
+		</ViewStatusAddition>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewStatus""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains("OldStatus"));
+        assert!(
+            parsed
+                .layout
+                .contains(r#",{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"NewStatus""#)
+                || parsed.layout.contains(
+                    r#"{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"NewStatus""#
+                ),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_search_addition_source_item() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{6,{134,33333333-3333-4333-8333-333333333333},0,0,0,0,"OldSearch",{1,0},{1,0},1,1,0,1,{1,0},0,0,0,0,0,{26,0}}},{73,{26,44444444-4444-4444-8444-444444444444},0,1,0,"OldRows"}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<SearchStringAddition name="NewSearch" id="134">
+			<AdditionSource>
+				<Item>Rows</Item>
+				<Type>SearchStringRepresentation</Type>
+			</AdditionSource>
+		</SearchStringAddition>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewSearch""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains("{25,0}"), "{}", parsed.layout);
+        assert!(!parsed.layout.contains("{26,0}"));
+        assert!(!parsed.layout.contains("OldSearch"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_external_button_command_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{59,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,0},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="OldButton" id="44">
+			<CommandName>DataProcessor.Loader.Command.Load</CommandName>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{0,99999999-9999-4999-8999-999999999999}")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_command_interface_external_command_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-interface-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelGoTo</CommandGroup>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[3].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(!parsed.trailing[3].contains("eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee"));
+        assert!(parsed.trailing[3].contains("},0,0,{0,{0,{\"B\",0},0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_uuid_based_events() -> anyhow::Result<()> {
+        let unknown_event_uuid = "213d1900-dcad-4616-9f20-3f077156a40f";
+        let base = super::deflate_raw(
+            format!(r#"{{4,{{59,{{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"СтарыйВыбор",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"СтароеОповещение",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"СтароеСоздание",{unknown_event_uuid},"СтарыйUuid",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}}}},"",{{0}}}}"#).as_bytes(),
+        )?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="ChoiceProcessing">НовыйВыбор</Event>
+		<Event name="NotificationProcessing">НовоеОповещение</Event>
+		<Event name="OnCreateAtServer">НовоеСоздание</Event>
+		<Event name="{unknown_event_uuid}">НовыйUuid</Event>
+	</Events>
+</Form>
+"#
+        )
+        .into_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, &xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"НовыйВыбор\""));
+        assert!(parsed.layout.contains("\"НовоеОповещение\""));
+        assert!(parsed.layout.contains("\"НовоеСоздание\""));
+        assert!(parsed.layout.contains("\"НовыйUuid\""));
+        assert!(!parsed.layout.contains("СтарыйВыбор"));
+        assert!(!parsed.layout.contains("СтароеОповещение"));
+        assert!(!parsed.layout.contains("СтароеСоздание"));
+        assert!(!parsed.layout.contains("СтарыйUuid"));
+        assert_eq!(parsed.module_text, "");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }

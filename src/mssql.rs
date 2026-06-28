@@ -43,18 +43,20 @@ use crate::module_blob::{
     VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml, pack_help_blob_from_parts,
-    pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source,
-    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
-    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source,
+    pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
 };
 use crate::parallel;
-use crate::source::scan_sources;
-use crate::source_audit::{SourceLoadCoverageAuditReport, audit_source_load_coverage};
+use crate::source::{scan_sources, scan_sources_with_prefixes};
+use crate::source_audit::{
+    SourceLoadCoverageAuditReport, audit_source_load_coverage_from_manifest,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
@@ -488,8 +490,8 @@ pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Resul
 pub fn audit_source_parity(
     args: &MssqlAuditSourceParityArgs,
 ) -> Result<MssqlSourceParityAuditReport> {
-    let source_coverage = audit_source_load_coverage(&args.source_root)?;
-    let manifest = scan_sources(&args.source_root)?;
+    let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
+    let source_coverage = audit_source_load_coverage_from_manifest(&manifest)?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
         &args.source_root,
@@ -1301,7 +1303,7 @@ pub fn stage_source_objects(
         ));
     }
 
-    let manifest = scan_sources(&args.source_root)?;
+    let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
         &args.source_root,
@@ -2287,7 +2289,7 @@ fn prepare_metadata_body_rows(
             sqlcmd, server, database, xml_path, properties, source,
         ),
         "Form" | "CommonForm" => {
-            prepare_form_body_row(sqlcmd, server, database, xml_path, properties)
+            prepare_form_body_row(sqlcmd, server, database, xml_path, properties, source)
         }
         "Role" => prepare_role_rights_body_row(sqlcmd, server, database, xml_path, properties),
         _ => Ok(Vec::new()),
@@ -2576,6 +2578,23 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
         "4",
     )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "MobileClientSignature.bin"),
+        "10",
+        "MobileClientSignature",
+    )?);
+    rows.extend(prepare_configuration_command_interface_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
+        "9",
+    )?);
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
         server,
@@ -2623,6 +2642,73 @@ fn prepare_configuration_ext_picture_body_row(
         format!(
             "failed to pack Configuration ExtPicture {}",
             picture_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_command_interface_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration CommandInterface {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_command_interface_blob_from_xml(&base_body, &xml).with_context(|| {
+        format!(
+            "failed to pack Configuration CommandInterface {}",
+            body_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn prepare_configuration_raw_deflated_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+    label: &str,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration {label} {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_raw_deflated_blob_from_bytes(&bytes).with_context(|| {
+        format!(
+            "failed to pack Configuration {label} {}",
+            body_path.display()
         )
     })?;
     Ok(vec![PreparedMetadataBodyStage {
@@ -2770,6 +2856,7 @@ fn prepare_form_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let form_path = infer_form_body_path(xml_path);
     let module_path = infer_form_module_body_path(xml_path);
@@ -2792,8 +2879,13 @@ fn prepare_form_body_row(
     } else {
         None
     };
-    let packed = pack_form_body_blob_from_form_xml(&base_body, &form_xml, module_text.as_deref())
-        .with_context(|| format!("failed to pack Form body {}", form_path.display()))?;
+    let packed = pack_form_body_blob_from_form_xml_with_source(
+        &base_body,
+        &form_xml,
+        module_text.as_deref(),
+        source,
+    )
+    .with_context(|| format!("failed to pack Form body {}", form_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: if form_path.exists() {

@@ -15,7 +15,7 @@ use crate::module_blob::{
 };
 use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
-use crate::source::{SourceKind, scan_sources};
+use crate::source::{SourceKind, SourceManifest, scan_sources};
 
 #[derive(Debug, Serialize)]
 pub struct SpreadsheetTemplateAuditReport {
@@ -150,6 +150,12 @@ struct SpreadsheetTemplateRoundTripItemAudit {
 
 pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAuditReport> {
     let manifest = scan_sources(root)?;
+    audit_source_load_coverage_from_manifest(&manifest)
+}
+
+pub fn audit_source_load_coverage_from_manifest(
+    manifest: &SourceManifest,
+) -> Result<SourceLoadCoverageAuditReport> {
     let mut files_by_kind = BTreeMap::<String, (usize, u64)>::new();
     let mut stage_metadata_xml_files = 0usize;
     let mut stage_common_module_xml_files = 0usize;
@@ -231,7 +237,7 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
         unsupported_form_xml_files.saturating_sub(form_xml_stageable_by_module);
 
     Ok(SourceLoadCoverageAuditReport {
-        root: manifest.root,
+        root: manifest.root.clone(),
         total_files: manifest.files.len(),
         total_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
         files_by_kind: sorted_source_kind_counts(files_by_kind),
@@ -465,6 +471,8 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/help.xml")
         || lower.ends_with("/ext/commandinterface.xml")
         || lower.ends_with("/ext/style.xml")
+        || lower == "ext/mobileclientsignature.bin"
+        || lower == "ext/mainsectioncommandinterface.xml"
 }
 
 fn is_form_ext_xml_path(path: &str) -> bool {
@@ -496,9 +504,7 @@ fn is_known_uncovered_configuration_asset(path: &str) -> bool {
     matches!(
         lower.as_str(),
         "ext/additionalindexes.xml"
-            | "ext/mobileclientsignature.bin"
             | "ext/standaloneconfigurationcontent.bin"
-            | "ext/mainsectioncommandinterface.xml"
             | "ext/clientapplicationinterface.xml"
             | "ext/homepageworkarea.xml"
     )
@@ -1229,6 +1235,7 @@ mod tests {
         fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
         fs::create_dir_all(root.join("Catalogs/Products/Ext"))?;
         fs::create_dir_all(root.join("CommonModules/Foo/Ext"))?;
+        fs::create_dir_all(root.join("Ext"))?;
         fs::write(
             root.join("Catalogs/Products.xml"),
             br#"<MetaDataObject><Catalog uuid="11111111-1111-4111-8111-111111111111"/></MetaDataObject>"#,
@@ -1261,17 +1268,25 @@ mod tests {
             root.join("CommonModules/Foo/Ext/Module.bsl"),
             b"Procedure Run()\nEndProcedure\n",
         )?;
+        fs::write(
+            root.join("Ext/MobileClientSignature.bin"),
+            b"{2,\"\",\"\",{0},0}",
+        )?;
+        fs::write(
+            root.join("Ext/MainSectionCommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 8);
+        assert_eq!(report.total_files, 10);
         assert_eq!(report.stage_metadata_xml_files, 2);
         assert_eq!(report.stage_common_module_xml_files, 1);
         assert_eq!(report.stage_entry_files, 3);
         assert_eq!(report.module_files, 2);
         assert_eq!(report.supported_module_files, 2);
-        assert_eq!(report.supported_ext_body_files, 1);
-        assert_eq!(report.potentially_stageable_body_files, 3);
+        assert_eq!(report.supported_ext_body_files, 3);
+        assert_eq!(report.potentially_stageable_body_files, 5);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);
