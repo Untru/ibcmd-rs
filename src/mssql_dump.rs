@@ -4034,6 +4034,7 @@ struct FormChildItem {
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
+    scroll_on_compress: Option<bool>,
     show_title: Option<bool>,
     show_in_header: Option<bool>,
     read_only: Option<bool>,
@@ -5564,6 +5565,7 @@ fn parse_form_child_item(
         } else {
             None
         },
+        scroll_on_compress: parse_form_page_scroll_on_compress(tag, &fields),
         show_title: (tag == "UsualGroup")
             .then(|| {
                 fields
@@ -5931,6 +5933,17 @@ fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
         "1" => Some(true),
         _ => None,
     }
+}
+
+fn parse_form_page_scroll_on_compress(tag: &str, fields: &[&str]) -> Option<bool> {
+    if tag != "Page" {
+        return None;
+    }
+    fields
+        .get(8)
+        .filter(|field| field.trim_start().starts_with('{'))
+        .and_then(|_| fields.get(11))
+        .and_then(|field| parse_form_child_item_show_title(field))
 }
 
 fn parse_form_child_item_show_in_header(fields: &[&str]) -> Option<bool> {
@@ -7249,6 +7262,12 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<Group>{}</Group>\r\n",
             escape_xml_text(group)
+        ));
+    }
+    if let Some(scroll_on_compress) = item.scroll_on_compress {
+        xml.push_str(&format!(
+            "{tab}\t<ScrollOnCompress>{}</ScrollOnCompress>\r\n",
+            if scroll_on_compress { "true" } else { "false" }
         ));
     }
     if let Some(behavior) = item.behavior {
@@ -15284,6 +15303,7 @@ mod tests {
         assert_eq!(item.child_items.len(), 1);
         assert_eq!(item.child_items[0].tag, "Page");
         assert_eq!(item.child_items[0].group, Some("HorizontalIfPossible"));
+        assert_eq!(item.child_items[0].scroll_on_compress, Some(false));
         assert_eq!(
             item.child_items[0].tooltip,
             vec![("ru".to_string(), "Page tip".to_string())]
@@ -15297,7 +15317,27 @@ mod tests {
         assert!(xml.contains("<v8:content>Pages tip</v8:content>"));
         assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
         assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
+        assert!(xml.contains("<ScrollOnCompress>false</ScrollOnCompress>"));
         assert!(xml.contains("<v8:content>Page tip</v8:content>"));
+    }
+
+    #[test]
+    fn extracts_real_sfc_page_scroll_on_compress() {
+        let form_body = fs::read(
+            r"lab\sfc\verify\event_aliases_after_patch_20260628\Config\f1335af3-b387-4b08-b9f0-d742466fb011.0__part0.bin",
+        )
+        .unwrap();
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            form_xml
+                .matches("<ScrollOnCompress>false</ScrollOnCompress>")
+                .count(),
+            4,
+            "{}",
+            form_xml
+        );
     }
 
     #[test]
@@ -16639,6 +16679,7 @@ mod tests {
             button_representation: None,
             location_in_command_bar: None,
             default_button: None,
+            scroll_on_compress: None,
             show_title: None,
             show_in_header: None,
             read_only: None,
@@ -16690,6 +16731,7 @@ mod tests {
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
+                    scroll_on_compress: None,
                     show_title: None,
                     show_in_header: None,
                     read_only: None,
@@ -16742,6 +16784,7 @@ mod tests {
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
+                    scroll_on_compress: None,
                     show_title: None,
                     show_in_header: None,
                     read_only: None,

@@ -235,6 +235,7 @@ struct FormXmlChildItem {
     button_representation: Option<FormXmlButtonRepresentation>,
     location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
     default_button: Option<bool>,
+    scroll_on_compress: Option<bool>,
     show_title: Option<bool>,
     show_in_header: Option<bool>,
     read_only: Option<bool>,
@@ -3900,6 +3901,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Common"
                         | "CommandName"
                         | "DataPath"
+                        | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
                         | "DefaultButton"
@@ -4375,6 +4377,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group_representation(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
+                    || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
                     || path_ends_with_for_child_read_only(&path, &current_child_items)
                     || path_ends_with_for_child_skip_on_input(&path, &current_child_items)
                     || path_ends_with_for_child_location_in_command_bar(&path, &current_child_items)
@@ -4782,6 +4785,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
+                    || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5932,6 +5936,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "ScrollOnCompress"
+                        if path_ends_with_for_child_scroll_on_compress(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.scroll_on_compress = Some(parse_form_xml_bool(
+                                "ChildItem/ScrollOnCompress",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ReadOnly"
                         if path_ends_with_for_child_read_only(&path, &current_child_items) =>
                     {
@@ -6362,6 +6379,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Type"
                         | "CommandName"
                         | "DataPath"
+                        | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
                         | "DefaultButton"
@@ -6503,6 +6521,7 @@ fn parse_form_child_item_xml(
         button_representation: None,
         location_in_command_bar: None,
         default_button: None,
+        scroll_on_compress: None,
         show_title: None,
         show_in_header: None,
         read_only: None,
@@ -6754,6 +6773,16 @@ fn path_ends_with_for_child_default_button(path: &[String], items: &[FormXmlChil
         return false;
     };
     item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "DefaultButton"])
+}
+
+fn path_ends_with_for_child_scroll_on_compress(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Page" && path_ends_with(path, &[item.tag.as_str(), "ScrollOnCompress"])
 }
 
 fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -9155,6 +9184,15 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((height_range.clone(), height.to_string()));
     }
+    if item.tag == "Page"
+        && let Some(scroll_on_compress) = item.scroll_on_compress
+        && let Some(scroll_range) = form_layout_page_scroll_on_compress_range(text, fields, item)
+    {
+        replacements.push((
+            scroll_range.clone(),
+            if scroll_on_compress { "1" } else { "0" }.to_string(),
+        ));
+    }
     if item.tag.ends_with("Addition")
         && let Some(item_type) = &item.item_type
         && let Some(type_code) = form_search_addition_type_code(item_type)
@@ -9286,6 +9324,20 @@ fn form_layout_child_item_group_range(
     } else {
         fields.get(8).cloned()
     }
+}
+
+fn form_layout_page_scroll_on_compress_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> Option<Range<usize>> {
+    if item.tag != "Page" {
+        return None;
+    }
+    fields
+        .get(8)
+        .filter(|range| text[(*range).clone()].trim_start().starts_with('{'))?;
+    fields.get(11).cloned()
 }
 
 fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
@@ -20801,7 +20853,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
     #[test]
     fn packs_form_body_xml_existing_pages_and_page() -> anyhow::Result<()> {
-        let pages = r#"{22,{8,22222222-2222-4222-8222-222222222222},0,0,0,3,"PagesGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,33333333-3333-4333-8333-333333333333,{22,{9,22222222-2222-4222-8222-222222222222},0,0,0,4,"MainPage",{1,0},{1,0},0,1,0}}"#;
+        let pages = r#"{22,{8,22222222-2222-4222-8222-222222222222},0,0,0,3,"PagesGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,33333333-3333-4333-8333-333333333333,{22,{9,22222222-2222-4222-8222-222222222222},0,0,0,4,"MainPage",{1,0},{1,0},0,1,1}}"#;
         let base_text = format!(
             r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{pages}}},"Old module",{{0}}}}"#
         );
@@ -20820,6 +20872,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<ChildItems>
 				<Page name="MainPage" id="9">
 					<Group>HorizontalIfPossible</Group>
+					<ScrollOnCompress>false</ScrollOnCompress>
 					<ToolTip>
 						<v8:item>
 							<v8:lang>en</v8:lang>
