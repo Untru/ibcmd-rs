@@ -826,14 +826,15 @@ fn push_form_element(
     if path.len() == 1 {
         *shape.top_level_elements.entry(name.clone()).or_insert(0) += 1;
     }
-    if path.last().is_some_and(|parent| parent == "ChildItems") && is_form_child_item_xml_tag(&name)
-    {
+    let is_child_item = is_form_child_item_xml_tag(&name);
+    let parent_is_child_items = path.last().is_some_and(|parent| parent == "ChildItems");
+    let parent_is_child_item = path
+        .last()
+        .is_some_and(|parent| is_form_child_item_xml_tag(parent));
+    if is_child_item && (parent_is_child_items || parent_is_child_item) {
         *shape.child_item_elements.entry(name.clone()).or_insert(0) += 1;
     }
-    if path
-        .last()
-        .is_some_and(|parent| is_form_child_item_xml_tag(parent))
-    {
+    if parent_is_child_item && !is_child_item {
         *shape.child_item_properties.entry(name.clone()).or_insert(0) += 1;
     }
     Ok(name)
@@ -1252,6 +1253,12 @@ mod tests {
       <ChildItems>
         <Table name="Rows" id="2">
           <DataPath>Items.Rows</DataPath>
+          <SearchStringAddition name="RowsSearch" id="5">
+            <AdditionSource>
+              <Item>Rows</Item>
+              <Type>SearchStringRepresentation</Type>
+            </AdditionSource>
+          </SearchStringAddition>
           <ChildItems>
             <InputField name="Name" id="3">
               <DataPath>Items.Rows.CurrentData.Name</DataPath>
@@ -1312,7 +1319,7 @@ mod tests {
         }));
         assert!(report.elements.contains(&FormElementCount {
             name: "Item".to_string(),
-            count: 1
+            count: 2
         }));
         assert!(report.child_item_elements.contains(&FormElementCount {
             name: "UsualGroup".to_string(),
@@ -1327,7 +1334,15 @@ mod tests {
             count: 1
         }));
         assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "SearchStringAddition".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
             name: "Button".to_string(),
+            count: 1
+        }));
+        assert!(!report.child_item_properties.contains(&FormElementCount {
+            name: "SearchStringAddition".to_string(),
             count: 1
         }));
         assert!(report.child_item_properties.contains(&FormElementCount {
