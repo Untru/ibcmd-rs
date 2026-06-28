@@ -3293,6 +3293,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
     if !form_xml.is_empty() {
         let properties = parse_form_xml_body_properties(form_xml)?;
+        let form_command_uuids = form_command_uuids_for_pack(&plain, &properties.commands)?;
         if properties.window_opening_mode.is_some()
             || !properties.title.is_empty()
             || properties.width.is_some()
@@ -3315,6 +3316,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 &mut layout,
                 &properties.child_items,
                 &properties.commands,
+                &form_command_uuids,
                 source,
             )?;
             plain.replace_range(container.layout_range, &layout);
@@ -3323,7 +3325,12 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(commands_range) = container.trailing_ranges.get(2).cloned() {
                 let mut commands = plain[commands_range.clone()].trim().to_string();
-                patch_form_body_commands(&mut commands, &properties.commands, source)?;
+                patch_form_body_commands(
+                    &mut commands,
+                    &properties.commands,
+                    &form_command_uuids,
+                    source,
+                )?;
                 plain.replace_range(commands_range, &commands);
             }
         }
@@ -5592,6 +5599,52 @@ fn form_horizontal_align_code(value: FormXmlHorizontalAlign) -> &'static str {
     }
 }
 
+fn form_command_uuids_for_pack(
+    plain: &str,
+    commands: &[FormXmlCommand],
+) -> Result<BTreeMap<String, String>> {
+    let mut uuids = BTreeMap::new();
+    let container = FormBodyContainer::parse(plain)?;
+    if let Some(commands_range) = container.trailing_ranges.get(2) {
+        collect_form_command_uuids(&plain[commands_range.clone()], &mut uuids)?;
+    }
+    for command in commands {
+        uuids
+            .entry(command.name.clone())
+            .or_insert_with(|| Uuid::new_v4().hyphenated().to_string());
+    }
+    Ok(uuids)
+}
+
+fn collect_form_command_uuids(text: &str, uuids: &mut BTreeMap<String, String>) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("11")
+        && let Some(name) = fields
+            .get(2)
+            .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+        && let Some(uuid) = fields
+            .get(1)
+            .and_then(|range| scan_braced_fields(text, range.start).ok())
+            .and_then(|identity| {
+                identity
+                    .get(1)
+                    .map(|range| text[range.clone()].trim().to_string())
+            })
+            .filter(|uuid| is_uuid_text(uuid))
+    {
+        uuids.insert(name, uuid);
+        return Ok(());
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_command_uuids(&text[range], uuids)?;
+    }
+    Ok(())
+}
+
 fn patch_form_layout_events(layout: &mut String, events: &[FormXmlEvent]) -> Result<()> {
     for event in events {
         let identifiers = form_event_layout_identifiers(&event.name);
@@ -5604,6 +5657,7 @@ fn patch_form_layout_child_items(
     layout: &mut String,
     items: &[FormXmlChildItem],
     commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
@@ -5615,14 +5669,17 @@ fn patch_form_layout_child_items(
             commands,
             &table_ids_by_name,
             &table_column_ids_by_name,
+            command_uuids,
             source,
         )?;
         if !patched {
             let _ = append_form_layout_top_level_child_item(
                 layout,
                 item,
+                commands,
                 &table_ids_by_name,
                 &table_column_ids_by_name,
+                command_uuids,
                 source,
             )?;
         }
@@ -5636,6 +5693,7 @@ fn patch_form_layout_child_item(
     commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
@@ -5663,6 +5721,7 @@ fn patch_form_layout_child_item(
             commands,
             table_ids_by_name,
             table_column_ids_by_name,
+            command_uuids,
             source,
         )? {
             text.replace_range(range, &nested);
@@ -5675,8 +5734,10 @@ fn patch_form_layout_child_item(
 fn append_form_layout_top_level_child_item(
     text: &mut String,
     item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     if item.depth != 0 || item.tag != "Button" {
@@ -5705,8 +5766,10 @@ fn append_form_layout_top_level_child_item(
     let item_text = format_form_layout_new_button_item(
         item,
         &item_uuid,
+        commands,
         table_ids_by_name,
         table_column_ids_by_name,
+        command_uuids,
         source,
     )?;
     text.replace_range(count_range, &(count + 1).to_string());
@@ -5720,8 +5783,10 @@ fn append_form_layout_top_level_child_item(
 fn format_form_layout_new_button_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
+    commands: &[FormXmlCommand],
     table_ids_by_name: &BTreeMap<String, String>,
     table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let item_type = item
@@ -5732,7 +5797,9 @@ fn format_form_layout_new_button_item(
     let command_ref = item
         .command_name
         .as_deref()
-        .map(|command_name| format_form_new_button_command_reference(command_name, source))
+        .map(|command_name| {
+            format_form_new_button_command_reference(command_name, commands, command_uuids, source)
+        })
         .transpose()?
         .flatten()
         .unwrap_or_else(|| "{0}".to_string());
@@ -5758,13 +5825,20 @@ fn format_form_layout_new_button_item(
 
 fn format_form_new_button_command_reference(
     command_name: &str,
+    commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<Option<String>> {
     if let Some(uuid) = form_standard_command_uuid(command_name) {
         return Ok(Some(format!("{{0,{uuid}}}")));
     }
-    if command_name.strip_prefix("Form.Command.").is_some() {
-        return Ok(None);
+    if let Some(name) = command_name.strip_prefix("Form.Command.") {
+        let Some(command) = commands.iter().find(|command| command.name == name) else {
+            return Ok(None);
+        };
+        return Ok(command_uuids
+            .get(name)
+            .map(|uuid| format!("{{{},{uuid}}}", command.id)));
     }
     let Some(source) = source else {
         return Ok(None);
@@ -6166,10 +6240,14 @@ fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static st
 fn patch_form_body_commands(
     text: &mut String,
     commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     for command in commands {
-        let _ = patch_form_body_command(text, command, source)?;
+        let patched = patch_form_body_command(text, command, source)?;
+        if !patched {
+            let _ = append_form_body_command(text, command, command_uuids, source)?;
+        }
     }
     Ok(())
 }
@@ -6917,6 +6995,68 @@ fn patch_form_body_command_entry(
     }
 
     Ok(true)
+}
+
+fn append_form_body_command(
+    text: &mut String,
+    command: &FormXmlCommand,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() != 2 + count {
+        return Ok(false);
+    }
+    let Some(uuid) = command_uuids.get(&command.name) else {
+        return Ok(false);
+    };
+    let entry = format_form_body_new_command(command, uuid, source)?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form commands section is not closed"))?;
+    text.insert_str(insert_at, &format!(",{entry}"));
+    Ok(true)
+}
+
+fn format_form_body_new_command(
+    command: &FormXmlCommand,
+    uuid: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let action = command.action.as_deref().unwrap_or("");
+    let current_row_use = command
+        .current_row_use
+        .map(form_command_current_row_use_code)
+        .unwrap_or("0");
+    let functional_options = if command.functional_options.is_empty() {
+        "{0,0}".to_string()
+    } else if let Some(source) = source {
+        format_form_reference_list(source, &command.functional_options)?
+    } else {
+        "{0,0}".to_string()
+    };
+
+    Ok(format!(
+        "{{11,{{{},{}}},{},{},{},0,0,0,{},{},0,0,{}}}",
+        command.id,
+        uuid,
+        format_1c_string(&command.name),
+        format_1c_synonyms(&command.title),
+        format_1c_synonyms(&command.tooltip),
+        format_1c_string(action),
+        current_row_use,
+        functional_options
+    ))
 }
 
 fn form_command_current_row_use_code(value: FormXmlCommandCurrentRowUse) -> &'static str {
@@ -14433,6 +14573,68 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_top_level_button_with_local_command() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Run</v8:content>
+				</v8:item>
+			</Title>
+			<Action>Do</Action>
+			<CurrentRowUse>DontUse</CurrentRowUse>
+		</Command>
+	</Commands>
+	<ChildItems>
+		<Button name="RunButton" id="44">
+			<Type>CommandBarButton</Type>
+			<CommandName>Form.Command.Do</CommandName>
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Run</v8:content>
+				</v8:item>
+			</Title>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_command_fields =
+            super::scan_braced_fields(&parsed.layout, button_fields[8].start)?;
+        let command_uuid = parsed.layout[button_command_fields[1].clone()].to_string();
+        let commands_fields = super::scan_braced_fields(&parsed.trailing[2], 0)?;
+        let command_entry_fields =
+            super::scan_braced_fields(&parsed.trailing[2], commands_fields[2].start)?;
+        let command_identity_fields =
+            super::scan_braced_fields(&parsed.trailing[2], command_entry_fields[1].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[button_command_fields[0].clone()], "2");
+        assert!(super::is_uuid_text(&command_uuid));
+        assert_eq!(&parsed.trailing[2][commands_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[2][command_identity_fields[0].clone()], "2");
+        assert_eq!(
+            &parsed.trailing[2][command_identity_fields[1].clone()],
+            command_uuid
+        );
+        assert!(parsed.trailing[2].contains(r#""Do",{1,"en","Run"}"#));
+        assert!(parsed.trailing[2].contains(r#""Do",3,0,0,{0,0}"#));
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
