@@ -3891,6 +3891,7 @@ struct FormBodyProperties {
     use_for_folders_and_items: Option<&'static str>,
     customizable: Option<bool>,
     command_bar_location: Option<&'static str>,
+    vertical_scroll: Option<&'static str>,
     show_command_bar: Option<bool>,
 }
 
@@ -4060,6 +4061,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
+        vertical_scroll: extract_form_vertical_scroll(fields),
         show_command_bar: extract_form_show_command_bar(fields),
     }
 }
@@ -4159,6 +4161,17 @@ fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'static str> {
         "0" => Some("None"),
         "2" => Some("Top"),
         "3" => Some("Bottom"),
+        _ => None,
+    }
+}
+
+fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    match (
+        fields.get(tail_start + 5).map(|field| field.trim()),
+        fields.get(tail_start + 15).map(|field| field.trim()),
+    ) {
+        (Some("2"), Some("2")) => Some("useIfNecessary"),
         _ => None,
     }
 }
@@ -5060,6 +5073,42 @@ fn parse_form_child_item_pairs(
 fn parse_form_child_item_count(value: &str) -> Option<usize> {
     let count = value.trim().parse::<usize>().ok()?;
     (1..=200).contains(&count).then_some(count)
+}
+
+fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = parse_form_child_item_count(fields[index]) else {
+            continue;
+        };
+        let tail_start = index + 1 + count * 2;
+        if tail_start >= fields.len() {
+            continue;
+        }
+        let mut complete = true;
+        for item_index in 0..count {
+            let uuid_index = index + 1 + item_index * 2;
+            let value_index = uuid_index + 1;
+            if fields
+                .get(uuid_index)
+                .and_then(|field| parse_non_zero_uuid(field.trim()))
+                .is_none()
+                || fields
+                    .get(value_index)
+                    .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+                    .and_then(|item_fields| {
+                        form_child_item_tag(item_fields.first()?.trim(), &item_fields)
+                    })
+                    .is_none()
+            {
+                complete = false;
+                break;
+            }
+        }
+        if complete {
+            return Some(tail_start);
+        }
+    }
+    None
 }
 
 fn parse_form_child_item(
@@ -6365,6 +6414,12 @@ fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<CommandBarLocation>{}</CommandBarLocation>\r\n",
             escape_xml_text(command_bar_location)
+        ));
+    }
+    if let Some(vertical_scroll) = properties.vertical_scroll {
+        xml.push_str(&format!(
+            "\t<VerticalScroll>{}</VerticalScroll>\r\n",
+            escape_xml_text(vertical_scroll)
         ));
     }
     if let Some(show_command_bar) = properties.show_command_bar {
@@ -14210,6 +14265,28 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(!form_xml.contains("<UseForFoldersAndItems>"));
+    }
+
+    #[test]
+    fn extracts_form_vertical_scroll_use_if_necessary_from_tail() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{48,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Поле"},"","",0,1,"",2,0,0,0,0,0,3,3,0,0,2,100},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<VerticalScroll>useIfNecessary</VerticalScroll>"));
+    }
+
+    #[test]
+    fn does_not_extract_form_vertical_scroll_from_default_tail() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{48,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Поле"},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(!form_xml.contains("<VerticalScroll>"));
     }
 
     #[test]

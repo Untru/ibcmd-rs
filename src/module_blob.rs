@@ -91,6 +91,7 @@ struct FormXmlBodyProperties {
     use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     customizable: Option<bool>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
+    vertical_scroll: Option<FormXmlVerticalScroll>,
     show_command_bar: Option<bool>,
     events_present: bool,
     events: Vec<FormXmlEvent>,
@@ -294,6 +295,11 @@ enum FormXmlGroup {
 enum FormXmlUseForFoldersAndItems {
     Items,
     Folders,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlVerticalScroll {
+    UseIfNecessary,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3434,6 +3440,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.use_for_folders_and_items.is_some()
             || properties.customizable.is_some()
             || properties.command_bar_location.is_some()
+            || properties.vertical_scroll.is_some()
             || properties.show_command_bar.is_some()
             || properties.events_present
             || properties.auto_command_bar.is_some()
@@ -3749,6 +3756,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "UseForFoldersAndItems"
                         | "Customizable"
                         | "CommandBarLocation"
+                        | "VerticalScroll"
                         | "ShowCommandBar"
                         | "HorizontalAlign"
                         | "Autofill"
@@ -3992,6 +4000,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
@@ -4382,6 +4391,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
@@ -4776,6 +4786,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         properties.command_bar_location =
                             Some(parse_form_command_bar_location_xml(text_value.trim())?);
+                    }
+                    "VerticalScroll" if path_ends_with(&path, &["Form", "VerticalScroll"]) => {
+                        properties.vertical_scroll =
+                            Some(parse_form_vertical_scroll_xml(text_value.trim())?);
                     }
                     "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
                         properties.show_command_bar =
@@ -6766,6 +6780,13 @@ fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseFor
     }
 }
 
+fn parse_form_vertical_scroll_xml(value: &str) -> Result<FormXmlVerticalScroll> {
+    match value {
+        "useIfNecessary" => Ok(FormXmlVerticalScroll::UseIfNecessary),
+        other => Err(anyhow!("unsupported Form VerticalScroll: {other}")),
+    }
+}
+
 fn parse_form_auto_save_data_in_settings_xml(value: &str) -> Result<FormXmlAutoSaveDataInSettings> {
     match value {
         "Use" => Ok(FormXmlAutoSaveDataInSettings::Use),
@@ -6943,6 +6964,9 @@ fn patch_form_layout_properties(
             form_command_bar_location_code(command_bar_location),
         )?;
     }
+    if let Some(vertical_scroll) = properties.vertical_scroll {
+        replace_form_vertical_scroll(layout, vertical_scroll)?;
+    }
     if let Some(show_command_bar) = properties.show_command_bar {
         replace_form_show_command_bar(layout, show_command_bar)?;
     }
@@ -7039,6 +7063,26 @@ fn replace_form_show_command_bar(layout: &mut String, value: bool) -> Result<()>
     }
 }
 
+fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScroll) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let code = form_vertical_scroll_code(value);
+    let mut replacements = Vec::<Range<usize>>::new();
+    for index in [tail_start + 5, tail_start + 15] {
+        if let Some(range) = fields.get(index)
+            && matches!(layout[range.clone()].trim(), "0" | "2")
+        {
+            replacements.push(range.clone());
+        }
+    }
+    for range in replacements.into_iter().rev() {
+        layout.replace_range(range, code);
+    }
+    Ok(())
+}
+
 fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool {
     fields
         .get(18)
@@ -7047,6 +7091,49 @@ fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool 
         && fields
             .get(19)
             .is_some_and(|range| layout[range.clone()].trim().parse::<usize>().is_ok())
+}
+
+fn form_layout_child_items_tail_start(layout: &str, fields: &[Range<usize>]) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if !(1..=200).contains(&count) {
+            continue;
+        }
+        let tail_start = index + 1 + count * 2;
+        if tail_start >= fields.len() {
+            continue;
+        }
+        let mut complete = true;
+        for item_index in 0..count {
+            let uuid_index = index + 1 + item_index * 2;
+            let value_index = uuid_index + 1;
+            if fields
+                .get(uuid_index)
+                .and_then(|range| parse_non_zero_uuid(layout[range.clone()].trim()))
+                .is_none()
+                || fields
+                    .get(value_index)
+                    .and_then(|range| scan_braced_fields(layout, range.start).ok())
+                    .and_then(|item_fields| {
+                        let wrapper = item_fields.first()?;
+                        form_layout_child_item_tag(&layout[wrapper.clone()], layout, &item_fields)
+                    })
+                    .is_none()
+            {
+                complete = false;
+                break;
+            }
+        }
+        if complete {
+            return Some(tail_start);
+        }
+    }
+    None
 }
 
 fn form_root_property_bag_value_range(
@@ -7120,6 +7207,12 @@ fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &
     match value {
         FormXmlUseForFoldersAndItems::Items => "0",
         FormXmlUseForFoldersAndItems::Folders => "1",
+    }
+}
+
+fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
+    match value {
+        FormXmlVerticalScroll::UseIfNecessary => "2",
     }
 }
 
@@ -17638,6 +17731,28 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             &parsed.layout[fields[20].clone()],
             r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1}"##
         );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_vertical_scroll_use_if_necessary() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{48,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,\"Field\"},\"\",\"\",0,1,\"\",0,0,0,0,0,0,3,3,0,0,0,100},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<VerticalScroll>useIfNecessary</VerticalScroll>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[30].clone()], "2");
+        assert_eq!(&parsed.layout[fields[40].clone()], "2");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
