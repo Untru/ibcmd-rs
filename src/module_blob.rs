@@ -7319,6 +7319,26 @@ fn format_form_dynamic_list_settings_new(
     if let Some(manual_query) = settings.manual_query {
         pairs.push(("ManualQuery", format_form_setting_bool(manual_query)));
     }
+    if let Some(filter) = &settings.list_settings.filter {
+        pairs.push((
+            "Filter",
+            format_form_setting_dcs_standard_section(filter, "Filter", "", "Filter")?,
+        ));
+    }
+    if let Some(order) = &settings.list_settings.order {
+        pairs.push(("Order", format_form_setting_dcs_order(order, "", "Order")?));
+    }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        pairs.push((
+            "ConditionalAppearance",
+            format_form_setting_dcs_standard_section(
+                conditional_appearance,
+                "ConditionalAppearance",
+                "",
+                "ConditionalAppearance",
+            )?,
+        ));
+    }
     if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
         pairs.push(("ItemsViewMode", format_form_setting_string(items_view_mode)));
     }
@@ -7581,7 +7601,7 @@ fn format_form_setting_dcs_order(
     key: &str,
 ) -> Result<String> {
     let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
-        .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
+        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
     let xml = format_form_dcs_order_xml(order);
     let mut bytes = b"\xEF\xBB\xBF".to_vec();
     bytes.extend_from_slice(xml.as_bytes());
@@ -7598,7 +7618,7 @@ fn format_form_setting_dcs_standard_section(
     key: &str,
 ) -> Result<String> {
     let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
-        .unwrap_or_else(|| "11743ff3-2db3-4cfc-9404-90ed8209437f".to_string());
+        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
     let xml = format_form_dcs_standard_section_xml(section, root_name);
     let mut bytes = b"\xEF\xBB\xBF".to_vec();
     bytes.extend_from_slice(xml.as_bytes());
@@ -7606,6 +7626,14 @@ fn format_form_setting_dcs_standard_section(
         "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
         encode_base64(&bytes)
     ))
+}
+
+fn default_form_setting_ref_uuid(key: &str) -> &'static str {
+    match key {
+        "Filter" => "21743ff3-2db3-4cfc-9404-90ed8209437f",
+        "ConditionalAppearance" => "31743ff3-2db3-4cfc-9404-90ed8209437f",
+        _ => "11743ff3-2db3-4cfc-9404-90ed8209437f",
+    }
 }
 
 fn find_form_setting_ref_uuid(text: &str, key: &str) -> Option<String> {
@@ -15169,6 +15197,22 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<QueryText>SELECT Ref FROM Catalog.Products</QueryText>
 				<MainTable>Catalog.Products</MainTable>
 				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Quick</dcsset:viewMode>
+						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+					</dcsset:filter>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Code</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+					</dcsset:order>
+					<dcsset:conditionalAppearance>
+						<dcsset:viewMode>Compact</dcsset:viewMode>
+						<dcsset:userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</dcsset:userSettingID>
+					</dcsset:conditionalAppearance>
 					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
 					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
 				</ListSettings>
@@ -15203,6 +15247,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
+        assert!(
+            filter_xml
+                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let order_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+        assert!(order_xml.contains("<field>Code</field>"), "{order_xml}");
+        assert!(
+            order_xml.contains("<orderType>Asc</orderType>"),
+            "{order_xml}"
+        );
+        assert!(order_xml.contains("<viewMode>Normal</viewMode>"));
+        assert!(
+            order_xml
+                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
+        );
+        assert!(parsed.trailing[0].contains(
+            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
+        ));
+        let appearance_xml =
+            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
+        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        assert!(
+            appearance_xml
+                .contains("<userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</userSettingID>")
+        );
         assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
         assert!(
             parsed.trailing[0]
