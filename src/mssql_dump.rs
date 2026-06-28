@@ -3888,10 +3888,13 @@ struct FormBodyProperties {
     save_data_in_settings: Option<&'static str>,
     auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
+    use_for_folders_and_items: Option<&'static str>,
     customizable: Option<bool>,
     command_bar_location: Option<&'static str>,
     show_command_bar: Option<bool>,
 }
+
+const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct FormBodyEvent {
@@ -4054,6 +4057,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         save_data_in_settings: extract_form_save_data_in_settings(fields),
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
+        use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         show_command_bar: extract_form_show_command_bar(fields),
@@ -4126,6 +4130,19 @@ fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     }
 }
 
+fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "0")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("0")) => Some("Items"),
+        _ => None,
+    }
+}
+
 fn extract_form_customizable(fields: &[&str]) -> Option<bool> {
     match (
         fields.get(11).map(|field| field.trim())?,
@@ -4170,6 +4187,23 @@ fn form_root_uses_property_bag(fields: &[&str]) -> bool {
         && fields
             .get(19)
             .is_some_and(|field| field.trim().parse::<usize>().is_ok())
+}
+
+fn form_root_property_bag_value<'a>(fields: &'a [&str], property_key: &str) -> Option<&'a str> {
+    if !form_root_uses_property_bag(fields) {
+        return None;
+    }
+    let count = fields.get(18)?.trim().parse::<usize>().ok()?;
+    let mut index = 19usize;
+    for _ in 0..count {
+        let key = fields.get(index)?.trim();
+        let value = *fields.get(index + 1)?;
+        if key == property_key {
+            return Some(value);
+        }
+        index += 2;
+    }
+    None
 }
 
 fn extract_form_auto_command_bar(fields: &[&str]) -> Option<FormAutoCommandBar> {
@@ -6316,6 +6350,12 @@ fn format_form_body_xml(
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if let Some(value) = properties.use_for_folders_and_items {
+        xml.push_str(&format!(
+            "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
+            escape_xml_text(value)
+        ));
     }
     if properties.customizable == Some(false) {
         xml.push_str("\t<Customizable>false</Customizable>\r\n");
@@ -14134,6 +14174,29 @@ mod tests {
 
         assert!(form_xml.contains("<Group>Vertical</Group>"));
         assert!(!form_xml.contains("<AutoURL>"));
+    }
+
+    #[test]
+    fn extracts_form_use_for_folders_and_items_items_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Group>Vertical</Group>"));
+        assert!(form_xml.contains("<UseForFoldersAndItems>Items</UseForFoldersAndItems>"));
+    }
+
+    #[test]
+    fn does_not_extract_form_use_for_folders_and_items_without_property_key() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,3,24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(!form_xml.contains("<UseForFoldersAndItems>"));
     }
 
     #[test]

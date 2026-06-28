@@ -88,6 +88,7 @@ struct FormXmlBodyProperties {
     save_data_in_settings: Option<FormXmlSaveDataInSettings>,
     auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
     group: Option<FormXmlGroup>,
+    use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     customizable: Option<bool>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
     show_command_bar: Option<bool>,
@@ -287,6 +288,12 @@ enum FormXmlGroup {
     AlwaysHorizontal,
     HorizontalIfPossible,
     InCell,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlUseForFoldersAndItems {
+    Items,
+    Folders,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3738,6 +3745,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SaveDataInSettings"
                         | "AutoSaveDataInSettings"
                         | "Group"
+                        | "UseForFoldersAndItems"
                         | "Customizable"
                         | "CommandBarLocation"
                         | "ShowCommandBar"
@@ -3980,6 +3988,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
@@ -4369,6 +4378,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
@@ -4749,6 +4759,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "UseForFoldersAndItems"
+                        if path_ends_with(&path, &["Form", "UseForFoldersAndItems"]) =>
+                    {
+                        properties.use_for_folders_and_items =
+                            Some(parse_form_use_for_folders_and_items_xml(text_value.trim())?);
                     }
                     "Customizable" if path_ends_with(&path, &["Form", "Customizable"]) => {
                         properties.customizable =
@@ -6741,6 +6757,14 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     }
 }
 
+fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseForFoldersAndItems> {
+    match value {
+        "Items" => Ok(FormXmlUseForFoldersAndItems::Items),
+        "Folders" => Ok(FormXmlUseForFoldersAndItems::Folders),
+        other => Err(anyhow!("unsupported Form UseForFoldersAndItems: {other}")),
+    }
+}
+
 fn parse_form_auto_save_data_in_settings_xml(value: &str) -> Result<FormXmlAutoSaveDataInSettings> {
     match value {
         "Use" => Ok(FormXmlAutoSaveDataInSettings::Use),
@@ -6905,6 +6929,9 @@ fn patch_form_layout_properties(
             FormXmlGroup::InCell => return Err(anyhow!("unsupported root Form Group: InCell")),
         }
     }
+    if let Some(value) = properties.use_for_folders_and_items {
+        replace_form_use_for_folders_and_items(layout, value)?;
+    }
     if let Some(customizable) = properties.customizable {
         replace_form_customizable(layout, customizable)?;
     }
@@ -6921,6 +6948,8 @@ fn patch_form_layout_properties(
     Ok(())
 }
 
+const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+
 fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
     if form_layout_uses_property_bag(layout, &fields) {
@@ -6933,6 +6962,31 @@ fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
     {
         layout.replace_range(range.clone(), if value { "1" } else { "0" });
     }
+    Ok(())
+}
+
+fn replace_form_use_for_folders_and_items(
+    layout: &mut String,
+    value: FormXmlUseForFoldersAndItems,
+) -> Result<()> {
+    if value != FormXmlUseForFoldersAndItems::Items {
+        return Ok(());
+    }
+
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "0") else {
+        return Ok(());
+    };
+    if !is_form_use_for_folders_and_items_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(
+        range,
+        &format!(r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},0}}"##),
+    );
     Ok(())
 }
 
@@ -6993,6 +7047,40 @@ fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool 
         && fields
             .get(19)
             .is_some_and(|range| layout[range.clone()].trim().parse::<usize>().is_ok())
+}
+
+fn form_root_property_bag_value_range(
+    layout: &str,
+    fields: &[Range<usize>],
+    property_key: &str,
+) -> Option<Range<usize>> {
+    if !form_layout_uses_property_bag(layout, fields) {
+        return None;
+    }
+    let count = fields.get(18)?.clone();
+    let count = layout[count].trim().parse::<usize>().ok()?;
+    let mut index = 19usize;
+    for _ in 0..count {
+        let key_range = fields.get(index)?;
+        let value_range = fields.get(index + 1)?;
+        if layout[key_range.clone()].trim() == property_key {
+            return Some(value_range.clone());
+        }
+        index += 2;
+    }
+    None
+}
+
+fn is_form_use_for_folders_and_items_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "#")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| value[range.clone()].trim() == FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
 }
 
 fn format_form_title_value(title: &[LocalizedString]) -> String {
@@ -17495,6 +17583,55 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[fields[13].clone()], "0");
         assert_eq!(&parsed.layout[fields[18].clone()], "4");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_use_for_folders_and_items_items_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<UseForFoldersAndItems>Items</UseForFoldersAndItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn accepts_form_body_xml_use_for_folders_and_items_folders_without_known_patch()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<UseForFoldersAndItems>Folders</UseForFoldersAndItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}"##
+        );
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
