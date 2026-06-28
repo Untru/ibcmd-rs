@@ -3431,6 +3431,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.save_data_in_settings.is_some()
             || properties.auto_save_data_in_settings.is_some()
             || properties.group.is_some()
+            || properties.use_for_folders_and_items.is_some()
             || properties.customizable.is_some()
             || properties.command_bar_location.is_some()
             || properties.show_command_bar.is_some()
@@ -6969,10 +6970,6 @@ fn replace_form_use_for_folders_and_items(
     layout: &mut String,
     value: FormXmlUseForFoldersAndItems,
 ) -> Result<()> {
-    if value != FormXmlUseForFoldersAndItems::Items {
-        return Ok(());
-    }
-
     let fields = scan_braced_fields(layout, 0)?;
     if !form_layout_uses_property_bag(layout, &fields) {
         return Ok(());
@@ -6985,7 +6982,10 @@ fn replace_form_use_for_folders_and_items(
     }
     layout.replace_range(
         range,
-        &format!(r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},0}}"##),
+        &format!(
+            r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},{}}}"##,
+            form_use_for_folders_and_items_code(value)
+        ),
     );
     Ok(())
 }
@@ -7113,6 +7113,13 @@ fn form_auto_save_data_in_settings_code(value: FormXmlAutoSaveDataInSettings) ->
 fn form_save_data_in_settings_code(value: FormXmlSaveDataInSettings) -> &'static str {
     match value {
         FormXmlSaveDataInSettings::UseList => "1",
+    }
+}
+
+fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &'static str {
+    match value {
+        FormXmlUseForFoldersAndItems::Items => "0",
+        FormXmlUseForFoldersAndItems::Folders => "1",
     }
 }
 
@@ -17591,7 +17598,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_use_for_folders_and_items_items_property_bag() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
@@ -17613,8 +17620,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn accepts_form_body_xml_use_for_folders_and_items_folders_without_known_patch()
-    -> anyhow::Result<()> {
+    fn packs_form_body_xml_use_for_folders_and_items_folders_property_bag() -> anyhow::Result<()> {
         let base = super::deflate_raw(
             b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
         )?;
@@ -17630,7 +17636,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             &parsed.layout[fields[20].clone()],
-            r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}"##
+            r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1}"##
         );
         assert_eq!(parsed.module_text, "Old module");
 

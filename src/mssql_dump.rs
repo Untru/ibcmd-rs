@@ -4139,6 +4139,7 @@ fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static st
         value_fields.get(2).map(|field| field.trim()),
     ) {
         (Some(r##""#""##), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("0")) => Some("Items"),
+        (Some(r##""#""##), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("1")) => Some("Folders"),
         _ => None,
     }
 }
@@ -14186,6 +14187,18 @@ mod tests {
 
         assert!(form_xml.contains("<Group>Vertical</Group>"));
         assert!(form_xml.contains("<UseForFoldersAndItems>Items</UseForFoldersAndItems>"));
+    }
+
+    #[test]
+    fn extracts_form_use_for_folders_and_items_folders_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Group>Vertical</Group>"));
+        assert!(form_xml.contains("<UseForFoldersAndItems>Folders</UseForFoldersAndItems>"));
     }
 
     #[test]
