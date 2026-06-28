@@ -219,6 +219,8 @@ struct FormXmlChildItem {
     horizontal_stretch: Option<bool>,
     drop_list_button: Option<bool>,
     clear_button: Option<bool>,
+    open_button: Option<bool>,
+    choice_list_button: Option<bool>,
     choice_button_representation: Option<FormXmlChoiceButtonRepresentation>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
@@ -3721,6 +3723,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "HorizontalStretch"
                         | "DropListButton"
                         | "ClearButton"
+                        | "OpenButton"
+                        | "ChoiceListButton"
                         | "ChoiceButtonRepresentation"
                         | "Behavior"
                         | "Representation"
@@ -4141,6 +4145,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_horizontal_stretch(&path, &current_child_items)
                     || path_ends_with_for_child_drop_list_button(&path, &current_child_items)
                     || path_ends_with_for_child_clear_button(&path, &current_child_items)
+                    || path_ends_with_for_child_open_button(&path, &current_child_items)
+                    || path_ends_with_for_child_choice_list_button(&path, &current_child_items)
                     || path_ends_with_for_child_choice_button_representation(
                         &path,
                         &current_child_items,
@@ -5582,6 +5588,29 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "OpenButton"
+                        if path_ends_with_for_child_open_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.open_button = Some(parse_form_xml_bool(
+                                "ChildItem/OpenButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ChoiceListButton"
+                        if path_ends_with_for_child_choice_list_button(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.choice_list_button = Some(parse_form_xml_bool(
+                                "ChildItem/ChoiceListButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ChoiceButtonRepresentation"
                         if path_ends_with_for_child_choice_button_representation(
                             &path,
@@ -5686,6 +5715,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "HorizontalStretch"
                         | "DropListButton"
                         | "ClearButton"
+                        | "OpenButton"
+                        | "ChoiceListButton"
                         | "ChoiceButtonRepresentation"
                         | "Behavior"
                         | "Representation"
@@ -5804,6 +5835,8 @@ fn parse_form_child_item_xml(
         horizontal_stretch: None,
         drop_list_button: None,
         clear_button: None,
+        open_button: None,
+        choice_list_button: None,
         choice_button_representation: None,
         item_type: None,
         addition_source_item: None,
@@ -6056,6 +6089,23 @@ fn path_ends_with_for_child_clear_button(path: &[String], items: &[FormXmlChildI
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ClearButton"])
+}
+
+fn path_ends_with_for_child_open_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "OpenButton"])
+}
+
+fn path_ends_with_for_child_choice_list_button(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChoiceListButton"])
 }
 
 fn path_ends_with_for_child_choice_button_representation(
@@ -7445,6 +7495,8 @@ fn patch_form_layout_input_field_extended_options(
         && item.horizontal_stretch.is_none()
         && item.drop_list_button.is_none()
         && item.clear_button.is_none()
+        && item.open_button.is_none()
+        && item.choice_list_button.is_none()
         && item.choice_button_representation.is_none()
     {
         return Ok(None);
@@ -7484,6 +7536,18 @@ fn patch_form_layout_input_field_extended_options(
         let fields = scan_braced_fields(&text, 0)?;
         if fields.get(13).is_some() {
             replace_braced_field(&mut text, 13, if clear_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(open_button) = item.open_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(15).is_some() {
+            replace_braced_field(&mut text, 15, if open_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(choice_list_button) = item.choice_list_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(11).is_some() {
+            replace_braced_field(&mut text, 11, if choice_list_button { "1" } else { "0" })?;
         }
     }
     if let Some(choice_button_representation) = item.choice_button_representation {
@@ -18242,6 +18306,92 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
             assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
             assert_eq!(&parsed.layout[options_fields[13].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_open_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[15] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<OpenButton>{value}</OpenButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[15].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_choice_list_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[11] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ChoiceListButton>{value}</ChoiceListButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[11].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
 
