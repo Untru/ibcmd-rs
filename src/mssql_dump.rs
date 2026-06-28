@@ -3237,15 +3237,15 @@ fn format_ext_picture_xml(file_name: &str) -> String {
 
 fn format_help_xml(pages: &[HelpPage]) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
     );
     for page in pages {
         xml.push_str("\t<Page>");
         xml.push_str(&escape_xml_text(&page.page));
         xml.push_str("</Page>\r\n");
     }
-    xml.push_str("</Help>\r\n");
+    xml.push_str("</Help>");
     xml
 }
 
@@ -12742,11 +12742,13 @@ mod tests {
 
         assert_eq!(dumped.metadata_xml_rows, 1);
         assert_eq!(dumped.source_asset_rows, 1);
-        assert!(
-            fs::read_to_string(root.join("Catalogs/Products/Ext/Help.xml"))
-                .unwrap()
-                .contains("<Page>ru</Page>")
-        );
+        let help_xml = fs::read(root.join("Catalogs/Products/Ext/Help.xml")).unwrap();
+        assert!(help_xml.starts_with(b"\xEF\xBB\xBF<?xml"));
+        assert!(help_xml.ends_with(b"</Help>"));
+        assert!(!help_xml.ends_with(b"</Help>\r\n"));
+        let help_xml_text = String::from_utf8(help_xml).unwrap();
+        assert!(help_xml_text.contains(r#"version="2.21""#));
+        assert!(help_xml_text.contains("<Page>ru</Page>"));
         assert_eq!(
             fs::read(root.join("Catalogs/Products/Ext/Help/ru.html")).unwrap(),
             b"<html></html>"
