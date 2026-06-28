@@ -5266,6 +5266,13 @@ fn form_input_field_layout_is_extended(fields: &[&str]) -> bool {
     fields.len() > 20
 }
 
+fn form_input_field_extended_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'a str>> {
+    fields.iter().skip(39).find_map(|field| {
+        let options = split_1c_braced_fields(field.trim(), 0)?;
+        (options.first().copied() == Some("38")).then_some(options)
+    })
+}
+
 fn parse_form_button_type(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("UsualButton"),
@@ -5320,9 +5327,7 @@ fn parse_form_input_field_auto_edit_mode(field: &str) -> Option<bool> {
 }
 
 fn parse_form_input_field_auto_max_width(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(49).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
@@ -5330,9 +5335,7 @@ fn parse_form_input_field_auto_max_width(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_auto_max_height(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(52).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
@@ -5340,9 +5343,7 @@ fn parse_form_input_field_auto_max_height(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_horizontal_stretch(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(4).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5351,9 +5352,7 @@ fn parse_form_input_field_horizontal_stretch(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_drop_list_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(47).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5362,9 +5361,7 @@ fn parse_form_input_field_drop_list_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_clear_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(13).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5373,9 +5370,7 @@ fn parse_form_input_field_clear_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_open_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(15).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5384,9 +5379,7 @@ fn parse_form_input_field_open_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_create_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(45).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5395,9 +5388,7 @@ fn parse_form_input_field_create_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_choice_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(12).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5406,9 +5397,7 @@ fn parse_form_input_field_choice_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_choice_list_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(11).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5417,9 +5406,7 @@ fn parse_form_input_field_choice_list_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_spin_button(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(14).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5428,9 +5415,7 @@ fn parse_form_input_field_spin_button(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_quick_choice(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(23).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5439,9 +5424,7 @@ fn parse_form_input_field_quick_choice(fields: &[&str]) -> Option<bool> {
 }
 
 fn parse_form_input_field_auto_mark_incomplete(fields: &[&str]) -> Option<bool> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(31).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
@@ -5450,9 +5433,7 @@ fn parse_form_input_field_auto_mark_incomplete(fields: &[&str]) -> Option<bool> 
 }
 
 fn parse_form_input_field_choice_button_representation(fields: &[&str]) -> Option<&'static str> {
-    let nested = fields
-        .get(39)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let nested = form_input_field_extended_options(fields)?;
     match nested.get(46).map(|field| field.trim())? {
         "1" => Some("ShowInDropList"),
         "2" => Some("ShowInDropListAndInInputField"),
@@ -14308,6 +14289,41 @@ mod tests {
                 if expected { "true" } else { "false" }
             )));
         }
+    }
+
+    #[test]
+    fn extracts_form_input_field_options_from_shifted_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 41];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Field""#.to_string();
+        input_fields[39] = "1".to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[13] = "1".to_string();
+        options[23] = "0".to_string();
+        input_fields[40] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.clear_button, Some(true));
+        assert_eq!(item.quick_choice, Some(false));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ClearButton>true</ClearButton>"));
+        assert!(xml.contains("<QuickChoice>false</QuickChoice>"));
     }
 
     #[test]

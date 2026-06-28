@@ -7407,7 +7407,7 @@ fn patch_form_layout_child_item_entry(
     }
     if item.tag == "InputField"
         && form_layout_input_field_is_extended(fields)
-        && let Some(options_range) = fields.get(39)
+        && let Some(options_range) = form_layout_input_field_extended_options_range(text, fields)?
         && let Some(options) =
             patch_form_layout_input_field_extended_options(&text[options_range.clone()], item)?
     {
@@ -7523,6 +7523,23 @@ fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
 
 fn form_layout_input_field_is_extended(fields: &[Range<usize>]) -> bool {
     fields.len() > 20
+}
+
+fn form_layout_input_field_extended_options_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Result<Option<Range<usize>>> {
+    for range in fields.iter().skip(39) {
+        let value = text[range.clone()].trim();
+        if !value.starts_with('{') {
+            continue;
+        }
+        let nested = scan_braced_fields(value, 0)?;
+        if nested.first().map(|field| value[field.clone()].trim()) == Some("38") {
+            return Ok(Some(range.clone()));
+        }
+    }
+    Ok(None)
 }
 
 fn form_layout_usual_group_extended_options_range(
@@ -18717,6 +18734,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             assert_eq!(&parsed.layout[options_fields[23].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_shifted_extended_options() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 41];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        input_fields[39] = "1".to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[13] = "2".to_string();
+        options[23] = "2".to_string();
+        input_fields[40] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ClearButton>true</ClearButton>
+			<QuickChoice>false</QuickChoice>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[40].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[39].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[13].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[23].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
