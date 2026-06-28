@@ -4012,6 +4012,7 @@ struct FormChildItem {
     choice_button: Option<bool>,
     choice_list_button: Option<bool>,
     spin_button: Option<bool>,
+    list_choice_mode: Option<bool>,
     quick_choice: Option<bool>,
     choose_type: Option<bool>,
     auto_mark_incomplete: Option<bool>,
@@ -5128,6 +5129,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        list_choice_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_list_choice_mode(&fields)
+        } else {
+            None
+        },
         quick_choice: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_quick_choice(&fields)
         } else {
@@ -5478,6 +5484,14 @@ fn parse_form_input_field_spin_button(fields: &[&str]) -> Option<bool> {
     let nested = form_input_field_extended_options(fields)?;
     match nested.get(14).map(|field| field.trim())? {
         "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_list_choice_mode(fields: &[&str]) -> Option<bool> {
+    let nested = form_input_field_extended_options(fields)?;
+    match nested.get(19).map(|field| field.trim())? {
         "1" => Some(true),
         _ => None,
     }
@@ -6283,6 +6297,9 @@ fn format_form_child_item_xml(
             "{tab}\t<SpinButton>{}</SpinButton>\r\n",
             if spin_button { "true" } else { "false" }
         ));
+    }
+    if item.list_choice_mode == Some(true) {
+        xml.push_str(&format!("{tab}\t<ListChoiceMode>true</ListChoiceMode>\r\n"));
     }
     if let Some(quick_choice) = item.quick_choice {
         xml.push_str(&format!(
@@ -14490,6 +14507,37 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_list_choice_mode_from_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Field""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[19] = "1".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.list_choice_mode, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ListChoiceMode>true</ListChoiceMode>"));
+    }
+
+    #[test]
     fn extracts_form_input_field_create_button_from_layout_code() {
         for (code, expected) in [("0", false), ("1", true)] {
             let mut input_fields = vec!["0".to_string(); 40];
@@ -14777,6 +14825,7 @@ mod tests {
             choice_button: None,
             choice_list_button: None,
             spin_button: None,
+            list_choice_mode: None,
             quick_choice: None,
             choose_type: None,
             auto_mark_incomplete: None,
@@ -14817,6 +14866,7 @@ mod tests {
                     choice_button: None,
                     choice_list_button: None,
                     spin_button: None,
+                    list_choice_mode: None,
                     quick_choice: None,
                     choose_type: None,
                     auto_mark_incomplete: None,
@@ -14858,6 +14908,7 @@ mod tests {
                     choice_button: None,
                     choice_list_button: None,
                     spin_button: None,
+                    list_choice_mode: None,
                     quick_choice: None,
                     choose_type: None,
                     auto_mark_incomplete: None,

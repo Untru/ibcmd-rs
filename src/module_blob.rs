@@ -229,6 +229,7 @@ struct FormXmlChildItem {
     choice_button: Option<bool>,
     choice_list_button: Option<bool>,
     spin_button: Option<bool>,
+    list_choice_mode: Option<bool>,
     quick_choice: Option<bool>,
     choose_type: Option<bool>,
     auto_mark_incomplete: Option<bool>,
@@ -3742,6 +3743,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ChoiceButton"
                         | "ChoiceListButton"
                         | "SpinButton"
+                        | "ListChoiceMode"
                         | "QuickChoice"
                         | "ChooseType"
                         | "AutoMarkIncomplete"
@@ -4175,6 +4177,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_choice_button(&path, &current_child_items)
                     || path_ends_with_for_child_choice_list_button(&path, &current_child_items)
                     || path_ends_with_for_child_spin_button(&path, &current_child_items)
+                    || path_ends_with_for_child_list_choice_mode(&path, &current_child_items)
                     || path_ends_with_for_child_quick_choice(&path, &current_child_items)
                     || path_ends_with_for_child_choose_type(&path, &current_child_items)
                     || path_ends_with_for_child_auto_mark_incomplete(&path, &current_child_items)
@@ -5721,6 +5724,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "ListChoiceMode"
+                        if path_ends_with_for_child_list_choice_mode(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.list_choice_mode = Some(parse_form_xml_bool(
+                                "ChildItem/ListChoiceMode",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "QuickChoice"
                         if path_ends_with_for_child_quick_choice(&path, &current_child_items) =>
                     {
@@ -5866,6 +5882,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ChoiceButton"
                         | "ChoiceListButton"
                         | "SpinButton"
+                        | "ListChoiceMode"
                         | "QuickChoice"
                         | "ChooseType"
                         | "AutoMarkIncomplete"
@@ -5997,6 +6014,7 @@ fn parse_form_child_item_xml(
         choice_button: None,
         choice_list_button: None,
         spin_button: None,
+        list_choice_mode: None,
         quick_choice: None,
         choose_type: None,
         auto_mark_incomplete: None,
@@ -6325,6 +6343,13 @@ fn path_ends_with_for_child_spin_button(path: &[String], items: &[FormXmlChildIt
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "SpinButton"])
+}
+
+fn path_ends_with_for_child_list_choice_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ListChoiceMode"])
 }
 
 fn path_ends_with_for_child_quick_choice(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7765,6 +7790,7 @@ fn patch_form_layout_input_field_extended_options(
         && item.choice_button.is_none()
         && item.choice_list_button.is_none()
         && item.spin_button.is_none()
+        && item.list_choice_mode.is_none()
         && item.quick_choice.is_none()
         && item.choose_type.is_none()
         && item.auto_mark_incomplete.is_none()
@@ -7786,6 +7812,12 @@ fn patch_form_layout_input_field_extended_options(
         let fields = scan_braced_fields(&text, 0)?;
         if fields.get(5).is_some() {
             replace_braced_field(&mut text, 5, if vertical_stretch { "1" } else { "0" })?;
+        }
+    }
+    if let Some(list_choice_mode) = item.list_choice_mode {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(19).is_some() {
+            replace_braced_field(&mut text, 19, if list_choice_mode { "1" } else { "0" })?;
         }
     }
     if let Some(width) = &item.width {
@@ -19016,6 +19048,49 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
             assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
             assert_eq!(&parsed.layout[options_fields[14].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_list_choice_mode() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[19] = "0".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ListChoiceMode>{value}</ListChoiceMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[19].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
 
