@@ -228,6 +228,7 @@ struct FormXmlChildItem {
     multi_line: Option<bool>,
     wrap: Option<bool>,
     text_edit: Option<bool>,
+    auto_cell_height: Option<bool>,
     drop_list_button: Option<bool>,
     clear_button: Option<bool>,
     open_button: Option<bool>,
@@ -3748,6 +3749,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "MultiLine"
                         | "Wrap"
                         | "TextEdit"
+                        | "AutoCellHeight"
                         | "DropListButton"
                         | "ClearButton"
                         | "OpenButton"
@@ -4188,6 +4190,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_multi_line(&path, &current_child_items)
                     || path_ends_with_for_child_wrap(&path, &current_child_items)
                     || path_ends_with_for_child_text_edit(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_cell_height(&path, &current_child_items)
                     || path_ends_with_for_child_drop_list_button(&path, &current_child_items)
                     || path_ends_with_for_child_clear_button(&path, &current_child_items)
                     || path_ends_with_for_child_open_button(&path, &current_child_items)
@@ -5725,6 +5728,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "AutoCellHeight"
+                        if path_ends_with_for_child_auto_cell_height(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_cell_height = Some(parse_form_xml_bool(
+                                "ChildItem/AutoCellHeight",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "DropListButton"
                         if path_ends_with_for_child_drop_list_button(
                             &path,
@@ -5958,6 +5974,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "MultiLine"
                         | "Wrap"
                         | "TextEdit"
+                        | "AutoCellHeight"
                         | "DropListButton"
                         | "ClearButton"
                         | "OpenButton"
@@ -6096,6 +6113,7 @@ fn parse_form_child_item_xml(
         multi_line: None,
         wrap: None,
         text_edit: None,
+        auto_cell_height: None,
         drop_list_button: None,
         clear_button: None,
         open_button: None,
@@ -6198,6 +6216,7 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "Table"
             | "InputField"
             | "LabelField"
+            | "CheckBoxField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -6425,6 +6444,13 @@ fn path_ends_with_for_child_text_edit(path: &[String], items: &[FormXmlChildItem
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "TextEdit"])
+}
+
+fn path_ends_with_for_child_auto_cell_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoCellHeight"])
 }
 
 fn path_ends_with_for_child_drop_list_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7703,6 +7729,18 @@ fn patch_form_layout_child_item_entry(
     }
     if item.tag == "InputField"
         && form_layout_input_field_is_extended(fields)
+        && let Some(auto_cell_height) = item.auto_cell_height
+    {
+        let index = 28 + form_layout_input_field_top_level_offset(text, fields);
+        if let Some(auto_cell_height_range) = fields.get(index) {
+            replacements.push((
+                auto_cell_height_range.clone(),
+                if auto_cell_height { "1" } else { "0" }.to_string(),
+            ));
+        }
+    }
+    if item.tag == "InputField"
+        && form_layout_input_field_is_extended(fields)
         && let Some(options_range) = form_layout_input_field_extended_options_range(text, fields)?
         && let Some(options) =
             patch_form_layout_input_field_extended_options(&text[options_range.clone()], item)?
@@ -7819,6 +7857,15 @@ fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
 
 fn form_layout_input_field_is_extended(fields: &[Range<usize>]) -> bool {
     fields.len() > 20
+}
+
+fn form_layout_input_field_top_level_offset(text: &str, fields: &[Range<usize>]) -> usize {
+    fields
+        .get(6)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+        .filter(|value| !value.is_empty())
+        .map(|_| 0)
+        .unwrap_or(1)
 }
 
 fn form_layout_input_field_extended_options_range(
@@ -8543,13 +8590,15 @@ fn form_layout_child_item_tag<'a>(
             _ => None,
         },
         "34" => Some("Button"),
-        "48" => {
-            if fields.get(4).map(|range| text[range.clone()].trim()) == Some("1") {
-                Some("LabelField")
-            } else {
-                Some("InputField")
-            }
-        }
+        "48" => match fields
+            .get(5 + form_layout_input_field_top_level_offset(text, fields))
+            .map(|range| text[range.clone()].trim())?
+        {
+            "1" => Some("LabelField"),
+            "2" => Some("InputField"),
+            "3" => Some("CheckBoxField"),
+            _ => None,
+        },
         "6" => match fields.get(5).map(|range| text[range.clone()].trim())? {
             "0" => Some("SearchStringAddition"),
             "1" => Some("ViewStatusAddition"),
@@ -19137,6 +19186,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
             assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
             assert_eq!(&parsed.layout[options_fields[41].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_auto_cell_height() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 75];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{83,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[4] = "1".to_string();
+            input_fields[5] = r#"{0,{0,{"B",0},0}}"#.to_string();
+            input_fields[6] = "2".to_string();
+            input_fields[7] = r#""Author""#.to_string();
+            input_fields[29] = "0".to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            input_fields[40] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="83">
+			<AutoCellHeight>{value}</AutoCellHeight>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[29].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
 

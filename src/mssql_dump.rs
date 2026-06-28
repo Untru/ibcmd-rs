@@ -4011,6 +4011,7 @@ struct FormChildItem {
     multi_line: Option<bool>,
     wrap: Option<bool>,
     text_edit: Option<bool>,
+    auto_cell_height: Option<bool>,
     drop_list_button: Option<bool>,
     clear_button: Option<bool>,
     open_button: Option<bool>,
@@ -5134,6 +5135,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        auto_cell_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_auto_cell_height(&fields)
+        } else {
+            None
+        },
         drop_list_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_drop_list_button(&fields)
         } else {
@@ -5355,6 +5361,15 @@ fn form_input_field_extended_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'
     })
 }
 
+fn form_input_field_top_level_offset(fields: &[&str]) -> usize {
+    fields
+        .get(6)
+        .and_then(|field| parse_1c_quoted_string_with_len(field.trim()))
+        .filter(|(value, _)| !value.is_empty())
+        .map(|_| 0)
+        .unwrap_or(1)
+}
+
 fn parse_form_button_type(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("UsualButton"),
@@ -5508,6 +5523,14 @@ fn parse_form_input_field_text_edit(fields: &[&str]) -> Option<bool> {
     }
 }
 
+fn parse_form_input_field_auto_cell_height(fields: &[&str]) -> Option<bool> {
+    let index = 28 + form_input_field_top_level_offset(fields);
+    match fields.get(index).map(|field| field.trim())? {
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
 fn parse_form_input_field_drop_list_button(fields: &[&str]) -> Option<bool> {
     let nested = form_input_field_extended_options(fields)?;
     match nested.get(47).map(|field| field.trim())? {
@@ -5647,13 +5670,15 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             _ => None,
         },
         "34" => Some("Button"),
-        "48" => {
-            if fields.get(4).map(|value| value.trim()) == Some("1") {
-                Some("LabelField")
-            } else {
-                Some("InputField")
-            }
-        }
+        "48" => match fields
+            .get(5 + form_input_field_top_level_offset(fields))
+            .map(|value| value.trim())?
+        {
+            "1" => Some("LabelField"),
+            "2" => Some("InputField"),
+            "3" => Some("CheckBoxField"),
+            _ => None,
+        },
         "6" => match fields.get(5).map(|value| value.trim())? {
             "0" => Some("SearchStringAddition"),
             "1" => Some("ViewStatusAddition"),
@@ -5814,7 +5839,9 @@ fn parse_form_child_item_data_path(
 ) -> Option<String> {
     match tag {
         "Table" => main_data_path.map(ToOwned::to_owned),
-        "InputField" | "LabelField" => parent_data_path.map(|parent| format!("{parent}.{name}")),
+        "InputField" | "LabelField" | "CheckBoxField" => {
+            parent_data_path.map(|parent| format!("{parent}.{name}"))
+        }
         "Button" => fields.get(9).and_then(|field| {
             parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
         }),
@@ -6372,6 +6399,9 @@ fn format_form_child_item_xml(
     }
     if item.wrap == Some(false) {
         xml.push_str(&format!("{tab}\t<Wrap>false</Wrap>\r\n"));
+    }
+    if item.auto_cell_height == Some(true) {
+        xml.push_str(&format!("{tab}\t<AutoCellHeight>true</AutoCellHeight>\r\n"));
     }
     if let Some(drop_list_button) = item.drop_list_button {
         xml.push_str(&format!(
@@ -14536,6 +14566,39 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_auto_cell_height_from_shifted_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 75];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{83,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[4] = "1".to_string();
+        input_fields[5] = r#"{0,{0,{"B",0},0}}"#.to_string();
+        input_fields[6] = "2".to_string();
+        input_fields[7] = r#""Description""#.to_string();
+        input_fields[29] = "1".to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        input_fields[40] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.auto_cell_height, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<AutoCellHeight>true</AutoCellHeight>"));
+    }
+
+    #[test]
     fn extracts_form_input_field_password_mode_from_layout_code() {
         for (code, expected) in [("0", false), ("1", true)] {
             let mut input_fields = vec!["0".to_string(); 40];
@@ -15141,6 +15204,7 @@ mod tests {
             multi_line: None,
             wrap: None,
             text_edit: None,
+            auto_cell_height: None,
             drop_list_button: None,
             clear_button: None,
             open_button: None,
@@ -15188,6 +15252,7 @@ mod tests {
                     multi_line: None,
                     wrap: None,
                     text_edit: None,
+                    auto_cell_height: None,
                     drop_list_button: None,
                     clear_button: None,
                     open_button: None,
@@ -15236,6 +15301,7 @@ mod tests {
                     multi_line: None,
                     wrap: None,
                     text_edit: None,
+                    auto_cell_height: None,
                     drop_list_button: None,
                     clear_button: None,
                     open_button: None,
