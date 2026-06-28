@@ -234,6 +234,12 @@ struct FormXmlChildItem {
     group: Option<FormXmlGroup>,
     behavior: Option<FormXmlGroupBehavior>,
     representation: Option<FormXmlGroupRepresentation>,
+    table_representation: Option<String>,
+    height_in_table_rows: Option<String>,
+    row_selection_mode: Option<String>,
+    enable_start_drag: Option<bool>,
+    enable_drag: Option<bool>,
+    file_drag_mode: Option<String>,
     button_representation: Option<FormXmlButtonRepresentation>,
     location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
     default_button: Option<bool>,
@@ -4421,6 +4427,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_behavior(&path, &current_child_items)
                     || path_ends_with_for_child_group_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_table_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_height_in_table_rows(&path, &current_child_items)
+                    || path_ends_with_for_child_row_selection_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
@@ -4832,6 +4844,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
+                    || path_ends_with_for_child_table_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_height_in_table_rows(&path, &current_child_items)
+                    || path_ends_with_for_child_row_selection_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -6573,6 +6591,12 @@ fn parse_form_child_item_xml(
         group: None,
         behavior: None,
         representation: None,
+        table_representation: None,
+        height_in_table_rows: None,
+        row_selection_mode: None,
+        enable_start_drag: None,
+        enable_drag: None,
+        file_drag_mode: None,
         button_representation: None,
         location_in_command_bar: None,
         default_button: None,

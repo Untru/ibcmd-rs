@@ -4032,6 +4032,12 @@ struct FormChildItem {
     group: Option<&'static str>,
     behavior: Option<&'static str>,
     representation: Option<&'static str>,
+    table_representation: Option<&'static str>,
+    height_in_table_rows: Option<String>,
+    row_selection_mode: Option<&'static str>,
+    enable_start_drag: Option<bool>,
+    enable_drag: Option<bool>,
+    file_drag_mode: Option<&'static str>,
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
@@ -5663,6 +5669,51 @@ fn parse_form_child_item_with_attrs(
         representation: extended_group_options
             .as_ref()
             .and_then(|options| options.representation),
+        table_representation: if tag == "Table" {
+            fields
+                .get(8)
+                .and_then(|field| parse_form_table_representation(field))
+        } else {
+            None
+        },
+        height_in_table_rows: if tag == "Table" {
+            fields
+                .get(21)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else {
+            None
+        },
+        row_selection_mode: if tag == "Table" {
+            fields
+                .get(24)
+                .and_then(|field| parse_form_table_row_selection_mode(field))
+        } else {
+            None
+        },
+        enable_start_drag: if tag == "Table" {
+            fields
+                .get(26)
+                .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| *value)
+        } else {
+            None
+        },
+        enable_drag: if tag == "Table" {
+            fields
+                .get(29)
+                .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| *value)
+        } else {
+            None
+        },
+        file_drag_mode: if tag == "Table" {
+            fields
+                .get(30)
+                .and_then(|field| parse_form_table_file_drag_mode(field))
+        } else {
+            None
+        },
         button_representation: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(10)
@@ -6515,6 +6566,27 @@ fn parse_form_search_addition_source_item(
     table_name_by_id.get(table_id).cloned()
 }
 
+fn parse_form_table_representation(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "1" => Some("List"),
+        _ => None,
+    }
+}
+
+fn parse_form_table_row_selection_mode(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "1" => Some("Cell"),
+        _ => None,
+    }
+}
+
+fn parse_form_table_file_drag_mode(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "2" => Some("AsFile"),
+        _ => None,
+    }
+}
+
 fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
     match wrapper {
         "22" => match fields.get(5).map(|value| value.trim())? {
@@ -6734,7 +6806,10 @@ fn parse_form_child_item_data_path(
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
     match tag {
-        "Table" => main_data_path.map(ToOwned::to_owned),
+        "Table" => fields
+            .get(11)
+            .and_then(|field| parse_form_attribute_data_path(field, name, attribute_names_by_id))
+            .or_else(|| main_data_path.map(ToOwned::to_owned)),
         "InputField" | "LabelField" | "CheckBoxField" => {
             parent_data_path.map(|parent| format!("{parent}.{name}"))
         }
@@ -7347,6 +7422,38 @@ fn format_form_child_item_xml(
             "{tab}\t<CommandName>{}</CommandName>\r\n",
             escape_xml_text(command_name)
         ));
+    }
+    if item.tag == "Table" {
+        if let Some(representation) = item.table_representation {
+            xml.push_str(&format!(
+                "{tab}\t<Representation>{}</Representation>\r\n",
+                escape_xml_text(representation)
+            ));
+        }
+        if let Some(height) = &item.height_in_table_rows {
+            xml.push_str(&format!(
+                "{tab}\t<HeightInTableRows>{}</HeightInTableRows>\r\n",
+                escape_xml_text(height)
+            ));
+        }
+        if let Some(row_selection_mode) = item.row_selection_mode {
+            xml.push_str(&format!(
+                "{tab}\t<RowSelectionMode>{}</RowSelectionMode>\r\n",
+                escape_xml_text(row_selection_mode)
+            ));
+        }
+        if item.enable_start_drag == Some(true) {
+            xml.push_str(&format!("{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"));
+        }
+        if item.enable_drag == Some(true) {
+            xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
+        }
+        if let Some(file_drag_mode) = item.file_drag_mode {
+            xml.push_str(&format!(
+                "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
+                escape_xml_text(file_drag_mode)
+            ));
+        }
     }
     if let Some(data_path) = &item.data_path {
         xml.push_str(&format!(
@@ -17197,6 +17304,12 @@ mod tests {
             group: None,
             behavior: None,
             representation: None,
+            table_representation: None,
+            height_in_table_rows: None,
+            row_selection_mode: None,
+            enable_start_drag: None,
+            enable_drag: None,
+            file_drag_mode: None,
             button_representation: None,
             location_in_command_bar: None,
             default_button: None,
@@ -17250,6 +17363,12 @@ mod tests {
                     group: None,
                     behavior: None,
                     representation: None,
+                    table_representation: None,
+                    height_in_table_rows: None,
+                    row_selection_mode: None,
+                    enable_start_drag: None,
+                    enable_drag: None,
+                    file_drag_mode: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
@@ -17304,6 +17423,12 @@ mod tests {
                     group: None,
                     behavior: None,
                     representation: None,
+                    table_representation: None,
+                    height_in_table_rows: None,
+                    row_selection_mode: None,
+                    enable_start_drag: None,
+                    enable_drag: None,
+                    file_drag_mode: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
