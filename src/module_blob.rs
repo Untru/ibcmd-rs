@@ -17185,14 +17185,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
 	<ChildItems>
 		<Table name="Rows" id="25">
-			<ChildItems>
-				<SearchStringAddition name="SearchRows" id="134">
-					<AdditionSource>
-						<Item>Rows</Item>
-						<Type>SearchStringRepresentation</Type>
-					</AdditionSource>
-				</SearchStringAddition>
-			</ChildItems>
+			<SearchStringAddition name="SearchRows" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+			</SearchStringAddition>
 		</Table>
 	</ChildItems>
 </Form>

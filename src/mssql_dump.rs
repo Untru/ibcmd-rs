@@ -5596,13 +5596,17 @@ fn format_form_child_items_xml(items: &[FormChildItem], indent: usize) -> String
     let tab = "\t".repeat(indent);
     let mut xml = format!("{tab}<ChildItems>\r\n");
     for item in items {
-        xml.push_str(&format_form_child_item_xml(item, indent + 1));
+        xml.push_str(&format_form_child_item_xml(item, indent + 1, false));
     }
     xml.push_str(&format!("{tab}</ChildItems>\r\n"));
     xml
 }
 
-fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
+fn format_form_child_item_xml(
+    item: &FormChildItem,
+    indent: usize,
+    table_addition_child: bool,
+) -> String {
     let tab = "\t".repeat(indent);
     let mut xml = format!(
         "{tab}<{} name=\"{}\" id=\"{}\">\r\n",
@@ -5667,7 +5671,19 @@ fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
         }
         xml.push_str(&format!("{tab}\t</Events>\r\n"));
     }
-    xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
+    if item.tag == "Table" {
+        let mut regular_children = Vec::new();
+        for child in &item.child_items {
+            if child.tag.ends_with("Addition") {
+                xml.push_str(&format_form_child_item_xml(child, indent + 1, true));
+            } else {
+                regular_children.push(child.clone());
+            }
+        }
+        xml.push_str(&format_form_child_items_xml(&regular_children, indent + 1));
+    } else if !table_addition_child {
+        xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
+    }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
 }
@@ -13231,6 +13247,58 @@ mod tests {
         assert!(xml.contains("<Type>ViewStatusRepresentation</Type>"));
         assert!(xml.contains("<SearchControlAddition"));
         assert!(xml.contains("<Type>SearchControl</Type>"));
+    }
+
+    #[test]
+    fn formats_table_search_additions_as_direct_sections() {
+        let table = FormChildItem {
+            tag: "Table",
+            id: "25".to_string(),
+            name: "Rows".to_string(),
+            group: None,
+            item_type: None,
+            addition_source_item: None,
+            title: Vec::new(),
+            events: Vec::new(),
+            data_path: Some("List".to_string()),
+            command_name: None,
+            child_items: vec![
+                FormChildItem {
+                    tag: "SearchStringAddition",
+                    id: "26".to_string(),
+                    name: "RowsSearch".to_string(),
+                    group: None,
+                    item_type: Some("SearchStringRepresentation"),
+                    addition_source_item: Some("Rows".to_string()),
+                    title: Vec::new(),
+                    events: Vec::new(),
+                    data_path: None,
+                    command_name: None,
+                    child_items: Vec::new(),
+                },
+                FormChildItem {
+                    tag: "InputField",
+                    id: "40".to_string(),
+                    name: "Name".to_string(),
+                    group: None,
+                    item_type: None,
+                    addition_source_item: None,
+                    title: Vec::new(),
+                    events: Vec::new(),
+                    data_path: Some("List.Name".to_string()),
+                    command_name: None,
+                    child_items: Vec::new(),
+                },
+            ],
+        };
+
+        let xml = format_form_child_items_xml(&[table], 1);
+
+        let addition_at = xml.find("\t\t<SearchStringAddition").unwrap();
+        let nested_child_items_at = xml.rfind("\t\t<ChildItems>").unwrap();
+        assert!(addition_at < nested_child_items_at);
+        assert!(xml.contains("\t\t<SearchStringAddition name=\"RowsSearch\" id=\"26\">\r\n"));
+        assert!(!xml.contains("\t\t<ChildItems>\r\n\t\t\t<SearchStringAddition"));
     }
 
     #[test]
