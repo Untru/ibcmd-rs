@@ -217,6 +217,7 @@ struct FormXmlChildItem {
     auto_max_width: Option<bool>,
     auto_max_height: Option<bool>,
     horizontal_stretch: Option<bool>,
+    drop_list_button: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -3709,6 +3710,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoMaxWidth"
                         | "AutoMaxHeight"
                         | "HorizontalStretch"
+                        | "DropListButton"
                         | "Behavior"
                         | "Representation"
                         | "KeyParameter"
@@ -4126,6 +4128,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_auto_max_width(&path, &current_child_items)
                     || path_ends_with_for_child_auto_max_height(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_stretch(&path, &current_child_items)
+                    || path_ends_with_for_child_drop_list_button(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5540,6 +5543,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "DropListButton"
+                        if path_ends_with_for_child_drop_list_button(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.drop_list_button = Some(parse_form_xml_bool(
+                                "ChildItem/DropListButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ShowTitle"
                         if path_ends_with_for_child_show_title(&path, &current_child_items) =>
                     {
@@ -5630,6 +5646,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoMaxWidth"
                         | "AutoMaxHeight"
                         | "HorizontalStretch"
+                        | "DropListButton"
                         | "Behavior"
                         | "Representation"
                         | "lang"
@@ -5745,6 +5762,7 @@ fn parse_form_child_item_xml(
         auto_max_width: None,
         auto_max_height: None,
         horizontal_stretch: None,
+        drop_list_button: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5982,6 +6000,13 @@ fn path_ends_with_for_child_horizontal_stretch(
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "HorizontalStretch"])
+}
+
+fn path_ends_with_for_child_drop_list_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "DropListButton"])
 }
 
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7343,6 +7368,7 @@ fn patch_form_layout_input_field_extended_options(
     if item.auto_max_width != Some(false)
         && item.auto_max_height != Some(false)
         && item.horizontal_stretch.is_none()
+        && item.drop_list_button.is_none()
     {
         return Ok(None);
     }
@@ -7369,6 +7395,12 @@ fn patch_form_layout_input_field_extended_options(
         let fields = scan_braced_fields(&text, 0)?;
         if fields.get(52).is_some() {
             replace_braced_field(&mut text, 52, "0")?;
+        }
+    }
+    if let Some(drop_list_button) = item.drop_list_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(47).is_some() {
+            replace_braced_field(&mut text, 47, if drop_list_button { "1" } else { "0" })?;
         }
     }
     Ok(Some(text))
@@ -18026,6 +18058,45 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[options_fields[4].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_drop_list_button() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[47] = "2".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<DropListButton>false</DropListButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[47].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
