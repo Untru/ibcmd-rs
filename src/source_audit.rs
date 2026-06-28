@@ -107,6 +107,8 @@ pub struct SourceLoadCoverageAuditReport {
     pub module_files: usize,
     pub supported_module_files: usize,
     pub supported_ext_body_files: usize,
+    pub partially_supported_form_xml_files: usize,
+    pub partially_supported_form_xml_bytes: u64,
     pub unsupported_form_xml_files: usize,
     pub unsupported_form_xml_bytes: u64,
     pub form_xml_stageable_by_module: usize,
@@ -162,6 +164,8 @@ pub fn audit_source_load_coverage_from_manifest(
     let mut module_files = 0usize;
     let mut supported_module_files = 0usize;
     let mut supported_ext_body_files = 0usize;
+    let mut partially_supported_form_xml_files = 0usize;
+    let mut partially_supported_form_xml_bytes = 0u64;
     let mut unsupported_form_xml_files = 0usize;
     let mut unsupported_form_xml_bytes = 0u64;
     let mut form_xml_stageable_by_module = 0usize;
@@ -193,6 +197,8 @@ pub fn audit_source_load_coverage_from_manifest(
         }
 
         if is_form_ext_xml_path(&file.path) {
+            partially_supported_form_xml_files += 1;
+            partially_supported_form_xml_bytes += file.size_bytes;
             unsupported_form_xml_files += 1;
             unsupported_form_xml_bytes += file.size_bytes;
             if form_module_path_exists(&manifest.files, &file.path) {
@@ -201,7 +207,8 @@ pub fn audit_source_load_coverage_from_manifest(
             known_uncovered.push(SourceLoadCoverageItem {
                 path: file.path.clone(),
                 bytes: file.size_bytes,
-                reason: "full Form.xml body is not compiled by current loader".to_string(),
+                reason: "Form.xml body is partially compiled; full ibcmd parity is not complete"
+                    .to_string(),
             });
         } else if is_form_ext_non_module_file(&file.path)
             && !is_supported_form_item_asset_file(&file.path)
@@ -228,7 +235,8 @@ pub fn audit_source_load_coverage_from_manifest(
     known_uncovered.truncate(50);
 
     let stage_entry_files = stage_metadata_xml_files + stage_common_module_xml_files;
-    let potentially_stageable_body_files = supported_module_files + supported_ext_body_files;
+    let potentially_stageable_body_files =
+        supported_module_files + supported_ext_body_files + partially_supported_form_xml_files;
     let form_xml_without_stageable_module =
         unsupported_form_xml_files.saturating_sub(form_xml_stageable_by_module);
 
@@ -244,6 +252,8 @@ pub fn audit_source_load_coverage_from_manifest(
         module_files,
         supported_module_files,
         supported_ext_body_files,
+        partially_supported_form_xml_files,
+        partially_supported_form_xml_bytes,
         unsupported_form_xml_files,
         unsupported_form_xml_bytes,
         form_xml_stageable_by_module,
@@ -1348,18 +1358,17 @@ mod tests {
         assert_eq!(report.module_files, 6);
         assert_eq!(report.supported_module_files, 6);
         assert_eq!(report.supported_ext_body_files, 9);
-        assert_eq!(report.potentially_stageable_body_files, 15);
+        assert_eq!(report.potentially_stageable_body_files, 16);
+        assert_eq!(report.partially_supported_form_xml_files, 1);
+        assert_eq!(report.partially_supported_form_xml_bytes, 26);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);
         assert_eq!(report.ignored_form_ext_files, 0);
         assert_eq!(report.known_uncovered_files, 1);
-        assert!(
-            report
-                .top_known_uncovered
-                .iter()
-                .any(|item| item.path == "Catalogs/Products/Forms/ListForm/Ext/Form.xml")
-        );
+        assert!(report.top_known_uncovered.iter().any(|item| item.path
+            == "Catalogs/Products/Forms/ListForm/Ext/Form.xml"
+            && item.reason.contains("partially compiled")));
 
         let _ = fs::remove_dir_all(root);
         Ok(())
