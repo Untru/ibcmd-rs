@@ -81,6 +81,7 @@ pub struct FormSourceAuditReport {
     pub elements: Vec<FormElementCount>,
     pub child_item_elements: Vec<FormElementCount>,
     pub child_item_properties: Vec<FormElementCount>,
+    pub child_item_property_contexts: Vec<FormElementCount>,
     pub errors: Vec<FormSourceAuditError>,
 }
 
@@ -142,6 +143,7 @@ struct FormXmlShape {
     elements: BTreeMap<String, usize>,
     child_item_elements: BTreeMap<String, usize>,
     child_item_properties: BTreeMap<String, usize>,
+    child_item_property_contexts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -650,6 +652,7 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     let mut elements = BTreeMap::new();
     let mut child_item_elements = BTreeMap::new();
     let mut child_item_properties = BTreeMap::new();
+    let mut child_item_property_contexts = BTreeMap::new();
     let mut report = FormSourceAuditReport {
         root: root.clone(),
         form_xml_files: 0,
@@ -674,6 +677,7 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         elements: Vec::new(),
         child_item_elements: Vec::new(),
         child_item_properties: Vec::new(),
+        child_item_property_contexts: Vec::new(),
         errors: Vec::new(),
     };
 
@@ -728,6 +732,10 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
                 merge_counts(&mut elements, shape.elements);
                 merge_counts(&mut child_item_elements, shape.child_item_elements);
                 merge_counts(&mut child_item_properties, shape.child_item_properties);
+                merge_counts(
+                    &mut child_item_property_contexts,
+                    shape.child_item_property_contexts,
+                );
             }
             Err(error) => {
                 report.failed += 1;
@@ -752,6 +760,7 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     report.elements = sorted_element_counts(elements);
     report.child_item_elements = sorted_element_counts(child_item_elements);
     report.child_item_properties = sorted_element_counts(child_item_properties);
+    report.child_item_property_contexts = sorted_element_counts(child_item_property_contexts);
     Ok(report)
 }
 
@@ -836,6 +845,12 @@ fn push_form_element(
     }
     if parent_is_child_item && !is_child_item {
         *shape.child_item_properties.entry(name.clone()).or_insert(0) += 1;
+        if let Some(parent) = path.last() {
+            *shape
+                .child_item_property_contexts
+                .entry(format!("{parent}/{name}"))
+                .or_insert(0) += 1;
+        }
     }
     Ok(name)
 }
@@ -1361,6 +1376,46 @@ mod tests {
             name: "DefaultButton".to_string(),
             count: 1
         }));
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Table/DataPath".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "InputField/DataPath".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "SearchStringAddition/AdditionSource".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Button/CommandName".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Button/DefaultButton".to_string(),
+                    count: 1
+                })
+        );
         assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
 
         let _ = fs::remove_dir_all(root);
