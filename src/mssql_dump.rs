@@ -3884,6 +3884,7 @@ struct FormBodyProperties {
     height: Option<String>,
     window_opening_mode: Option<&'static str>,
     auto_title: Option<bool>,
+    auto_url: Option<bool>,
     save_data_in_settings: Option<&'static str>,
     auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
@@ -4049,6 +4050,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         height: extract_form_dimension(fields, 4),
         window_opening_mode: extract_form_window_opening_mode(fields),
         auto_title: extract_form_auto_title(fields),
+        auto_url: extract_form_auto_url(fields),
         save_data_in_settings: extract_form_save_data_in_settings(fields),
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
@@ -4078,6 +4080,16 @@ fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
 fn extract_form_auto_title(fields: &[&str]) -> Option<bool> {
     match fields.get(9).map(|field| field.trim())? {
         "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
+    match (
+        fields.get(11).map(|field| field.trim())?,
+        fields.get(13).map(|field| field.trim())?,
+    ) {
+        ("0", "0") => Some(false),
         _ => None,
     }
 }
@@ -4114,10 +4126,9 @@ fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
 fn extract_form_customizable(fields: &[&str]) -> Option<bool> {
     match (
         fields.get(11).map(|field| field.trim())?,
-        fields.get(13).map(|field| field.trim())?,
         fields.get(14).map(|field| field.trim())?,
     ) {
-        ("0", "1", "0") => Some(false),
+        ("0", "0") => Some(false),
         _ => None,
     }
 }
@@ -6284,6 +6295,9 @@ fn format_form_body_xml(
     }
     if properties.auto_title == Some(false) {
         xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
+    }
+    if properties.auto_url == Some(false) {
+        xml.push_str("\t<AutoURL>false</AutoURL>\r\n");
     }
     if let Some(value) = properties.save_data_in_settings {
         xml.push_str(&format!(
@@ -14079,6 +14093,31 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<Group>Vertical</Group>"));
+        assert!(form_xml.contains("<Customizable>false</Customizable>"));
+    }
+
+    #[test]
+    fn extracts_form_auto_url_false_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Group>Vertical</Group>"));
+        assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
+        assert!(!form_xml.contains("<Customizable>false</Customizable>"));
+    }
+
+    #[test]
+    fn extracts_form_auto_url_and_customizable_false_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,0,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
         assert!(form_xml.contains("<Customizable>false</Customizable>"));
     }
 

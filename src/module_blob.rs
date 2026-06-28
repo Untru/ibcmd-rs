@@ -84,6 +84,7 @@ struct FormXmlBodyProperties {
     height: Option<String>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     auto_title: Option<bool>,
+    auto_url: Option<bool>,
     save_data_in_settings: Option<FormXmlSaveDataInSettings>,
     auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
     group: Option<FormXmlGroup>,
@@ -3419,6 +3420,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.width.is_some()
             || properties.height.is_some()
             || properties.auto_title.is_some()
+            || properties.auto_url.is_some()
             || properties.save_data_in_settings.is_some()
             || properties.auto_save_data_in_settings.is_some()
             || properties.group.is_some()
@@ -3732,6 +3734,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Width"
                         | "Height"
                         | "AutoTitle"
+                        | "AutoURL"
                         | "SaveDataInSettings"
                         | "AutoSaveDataInSettings"
                         | "Group"
@@ -3973,6 +3976,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
+                    || path_ends_with(&path, &["Form", "AutoURL"])
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
@@ -4361,6 +4365,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
+                    || path_ends_with(&path, &["Form", "AutoURL"])
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
@@ -4724,6 +4729,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "AutoTitle" if path_ends_with(&path, &["Form", "AutoTitle"]) => {
                         properties.auto_title =
                             Some(parse_form_xml_bool("AutoTitle", text_value.trim())?);
+                    }
+                    "AutoURL" if path_ends_with(&path, &["Form", "AutoURL"]) => {
+                        properties.auto_url =
+                            Some(parse_form_xml_bool("AutoURL", text_value.trim())?);
                     }
                     "SaveDataInSettings"
                         if path_ends_with(&path, &["Form", "SaveDataInSettings"]) =>
@@ -6869,6 +6878,9 @@ fn patch_form_layout_properties(
     if let Some(auto_title) = properties.auto_title {
         replace_braced_field(layout, 9, if auto_title { "1" } else { "0" })?;
     }
+    if let Some(auto_url) = properties.auto_url {
+        replace_form_auto_url(layout, auto_url)?;
+    }
     if let Some(value) = properties.save_data_in_settings {
         replace_form_save_data_in_settings(layout, value)?;
     }
@@ -6909,15 +6921,24 @@ fn patch_form_layout_properties(
     Ok(())
 }
 
+fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if fields
+        .get(11)
+        .is_some_and(|range| layout[range.clone()].trim() == "0")
+        && let Some(range) = fields.get(13)
+    {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
 fn replace_form_customizable(layout: &mut String, value: bool) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
     if fields
         .get(11)
         .is_some_and(|range| layout[range.clone()].trim() == "0")
     {
-        if let Some(range) = fields.get(13) {
-            layout.replace_range(range.clone(), "1");
-        }
         if let Some(range) = fields.get(14) {
             layout.replace_range(range.clone(), if value { "1" } else { "0" });
         }
@@ -17398,6 +17419,56 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[fields[11].clone()], "0");
         assert_eq!(&parsed.layout[fields[13].clone()], "1");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_auto_url_false_for_vertical_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Group>Vertical</Group>
+	<AutoURL>false</AutoURL>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[11].clone()], "0");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_auto_url_and_customizable_false_for_vertical_layout()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Group>Vertical</Group>
+	<AutoURL>false</AutoURL>
+	<Customizable>false</Customizable>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[11].clone()], "0");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
         assert_eq!(&parsed.layout[fields[14].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
 
