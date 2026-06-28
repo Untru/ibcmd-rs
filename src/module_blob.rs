@@ -95,6 +95,7 @@ struct FormXmlBodyProperties {
     parameters: Vec<FormXmlParameter>,
     commands_present: bool,
     commands: Vec<FormXmlCommand>,
+    command_interface_present: bool,
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
@@ -3366,7 +3367,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 plain.replace_range(attributes_range, &attributes);
             }
         }
-        if !properties.command_interface_items.is_empty() {
+        if properties.command_interface_present {
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(command_interface_range) = container.trailing_ranges.get(3).cloned() {
                 let mut command_interface =
@@ -3678,6 +3679,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if local == "Commands" && path_ends_with(&path, &["Form"]) {
                     properties.commands_present = true;
                 }
+                if local == "CommandInterface" && path_ends_with(&path, &["Form"]) {
+                    properties.command_interface_present = true;
+                }
                 if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
                     properties.child_items_present = true;
                 }
@@ -3777,6 +3781,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "Commands" && path_ends_with(&path, &["Form"]) {
                     properties.commands_present = true;
+                }
+                if local == "CommandInterface" && path_ends_with(&path, &["Form"]) {
+                    properties.command_interface_present = true;
                 }
                 if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
                     properties.child_items_present = true;
@@ -7260,6 +7267,61 @@ fn patch_form_command_interface(
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(());
+    }
+    if items.is_empty() {
+        *text = "{0}".to_string();
+        return Ok(());
+    }
+
+    let existing_count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if fields.len() != 1 && fields.len() != 2 + existing_count {
+        patch_existing_form_command_interface_items(text, items, source)?;
+        return Ok(());
+    }
+
+    let mut entries = fields
+        .iter()
+        .skip(2)
+        .filter_map(|range| {
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return None;
+            }
+            let item_fields = scan_braced_fields(text, range.start).ok()?;
+            (item_fields.first().map(|field| text[field.clone()].trim()) == Some("3"))
+                .then(|| text[range.clone()].to_string())
+        })
+        .collect::<Vec<_>>();
+    entries.truncate(items.len());
+
+    for (entry, item) in entries.iter_mut().zip(items) {
+        patch_form_command_interface_item(entry, item, source)?;
+    }
+
+    for item in items.iter().skip(entries.len()) {
+        if let Some(entry) = format_form_command_interface_item(item, source)? {
+            entries.push(entry);
+        }
+    }
+
+    if entries.is_empty() {
+        *text = "{0}".to_string();
+    } else {
+        *text = format!("{{0,{},{}}}", entries.len(), entries.join(","));
+    }
+    Ok(())
+}
+
+fn patch_existing_form_command_interface_items(
+    text: &mut String,
+    items: &[FormXmlCommandInterfaceItem],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
     let item_ranges = fields
         .iter()
         .skip(2)
@@ -7272,7 +7334,6 @@ fn patch_form_command_interface(
                 .then_some(range.clone())
         })
         .collect::<Vec<_>>();
-
     let mut replacements = Vec::<(Range<usize>, String)>::new();
     for (range, item) in item_ranges.into_iter().zip(items) {
         let mut item_text = text[range.clone()].to_string();
@@ -7285,6 +7346,34 @@ fn patch_form_command_interface(
         text.replace_range(range, &replacement);
     }
     Ok(())
+}
+
+fn format_form_command_interface_item(
+    item: &FormXmlCommandInterfaceItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let Some(command) = &item.command else {
+        return Ok(None);
+    };
+    let command_uuid = source.resolve_command_reference_uuid(command)?;
+    let command_group_uuid = item
+        .command_group
+        .as_deref()
+        .and_then(common_command_group_uuid)
+        .unwrap_or_else(|| "eacad741-96b9-4b3a-bf79-dde9ecead1a1".to_string());
+    let index = item.index.unwrap_or(0);
+    let default_visible = if item.default_visible.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let visible_common = format_form_nested_common_bool(item.visible_common.unwrap_or(true));
+    Ok(Some(format!(
+        "{{3,0,{{0,{command_uuid}}},{{0}},1,{{0,{command_group_uuid}}},{index},{default_visible},{visible_common}}}"
+    )))
 }
 
 fn patch_form_command_interface_item(
@@ -16224,6 +16313,106 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_command_interface_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,2,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}},{3,0,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0},1,{0,dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2},1,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>2</Index>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.trailing[3], 0)?;
+
+        assert_eq!(&parsed.trailing[3][fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[3][fields[1].clone()], "1");
+        assert!(parsed.trailing[3].contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(!parsed.trailing[3].contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(parsed.trailing[3].contains("},2,1,"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_command_interface_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandInterface/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_command_interface_item_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-new-interface-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"##)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>3</Index>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.trailing[3], 0)?;
+
+        assert_eq!(&parsed.trailing[3][fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[3][fields[1].clone()], "1");
+        assert!(parsed.trailing[3].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(parsed.trailing[3].contains("},3,0,{0,{0,{\"B\",0},0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
