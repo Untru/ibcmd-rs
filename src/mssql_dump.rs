@@ -3892,6 +3892,7 @@ struct FormBodyProperties {
     save_data_in_settings: Option<&'static str>,
     auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
+    scaling_mode: Option<&'static str>,
     auto_time: Option<&'static str>,
     use_posting_mode: Option<&'static str>,
     repost_on_write: Option<bool>,
@@ -4092,6 +4093,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         save_data_in_settings: extract_form_save_data_in_settings(fields),
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
+        scaling_mode: extract_form_scaling_mode(fields),
         auto_time: extract_form_auto_time(fields),
         use_posting_mode: extract_form_use_posting_mode(fields),
         repost_on_write: extract_form_repost_on_write(fields),
@@ -4395,6 +4397,15 @@ fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
         fields.get(tail_start + 15).map(|field| field.trim()),
     ) {
         (Some("2"), Some("2")) => Some("useIfNecessary"),
+        _ => None,
+    }
+}
+
+fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str> {
+    let tail_start = form_root_child_item_pairs_tail_start(fields)?;
+    match fields.get(tail_start + 6).map(|field| field.trim())? {
+        "1" => Some("Normal"),
+        "2" => Some("Compact"),
         _ => None,
     }
 }
@@ -5406,6 +5417,38 @@ fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
                         form_child_item_tag(item_fields.first()?.trim(), &item_fields)
                     })
                     .is_none()
+            {
+                complete = false;
+                break;
+            }
+        }
+        if complete {
+            return Some(tail_start);
+        }
+    }
+    None
+}
+
+fn form_root_child_item_pairs_tail_start(fields: &[&str]) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = parse_form_child_item_count(fields[index]) else {
+            continue;
+        };
+        let tail_start = index + 1 + count * 2;
+        if tail_start >= fields.len() {
+            continue;
+        }
+        let mut complete = true;
+        for item_index in 0..count {
+            let uuid_index = index + 1 + item_index * 2;
+            let value_index = uuid_index + 1;
+            if fields
+                .get(uuid_index)
+                .and_then(|field| parse_non_zero_uuid(field.trim()))
+                .is_none()
+                || !fields
+                    .get(value_index)
+                    .is_some_and(|field| field.trim().starts_with('{'))
             {
                 complete = false;
                 break;
@@ -6716,6 +6759,12 @@ fn format_form_body_xml(
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if let Some(value) = properties.scaling_mode {
+        xml.push_str(&format!(
+            "\t<ScalingMode>{}</ScalingMode>\r\n",
+            escape_xml_text(value)
+        ));
     }
     if let Some(value) = properties.auto_time {
         xml.push_str(&format!(
@@ -14626,6 +14675,28 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<HorizontalAlign>Right</HorizontalAlign>"));
+    }
+
+    #[test]
+    fn extracts_form_scaling_mode_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,2,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ScalingMode>Compact</ScalingMode>"));
+    }
+
+    #[test]
+    fn extracts_form_scaling_mode_when_root_child_item_is_pages() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"ГруппаСтраницы",{1,0}},"","",0,1,"",0,2,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ScalingMode>Compact</ScalingMode>"));
     }
 
     #[test]

@@ -90,6 +90,7 @@ struct FormXmlBodyProperties {
     save_data_in_settings: Option<FormXmlSaveDataInSettings>,
     auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
     group: Option<FormXmlGroup>,
+    scaling_mode: Option<FormXmlScalingMode>,
     auto_time: Option<FormXmlAutoTime>,
     use_posting_mode: Option<FormXmlUsePostingMode>,
     repost_on_write: Option<bool>,
@@ -311,6 +312,12 @@ enum FormXmlGroup {
     AlwaysHorizontal,
     HorizontalIfPossible,
     InCell,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlScalingMode {
+    Normal,
+    Compact,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3512,6 +3519,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.save_data_in_settings.is_some()
             || properties.auto_save_data_in_settings.is_some()
             || properties.group.is_some()
+            || properties.scaling_mode.is_some()
             || properties.auto_time.is_some()
             || properties.use_posting_mode.is_some()
             || properties.repost_on_write.is_some()
@@ -3847,6 +3855,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SaveDataInSettings"
                         | "AutoSaveDataInSettings"
                         | "Group"
+                        | "ScalingMode"
                         | "AutoTime"
                         | "UsePostingMode"
                         | "RepostOnWrite"
@@ -4106,6 +4115,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "ScalingMode"])
                     || path_ends_with(&path, &["Form", "AutoTime"])
                     || path_ends_with(&path, &["Form", "UsePostingMode"])
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
@@ -4514,6 +4524,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "ScalingMode"])
                     || path_ends_with(&path, &["Form", "AutoTime"])
                     || path_ends_with(&path, &["Form", "UsePostingMode"])
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
@@ -4923,6 +4934,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "ScalingMode" if path_ends_with(&path, &["Form", "ScalingMode"]) => {
+                        properties.scaling_mode =
+                            Some(parse_form_scaling_mode_xml(text_value.trim())?);
                     }
                     "AutoTime" if path_ends_with(&path, &["Form", "AutoTime"]) => {
                         properties.auto_time = Some(parse_form_auto_time_xml(text_value.trim())?);
@@ -7011,6 +7026,14 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     }
 }
 
+fn parse_form_scaling_mode_xml(value: &str) -> Result<FormXmlScalingMode> {
+    match value {
+        "Normal" => Ok(FormXmlScalingMode::Normal),
+        "Compact" => Ok(FormXmlScalingMode::Compact),
+        other => Err(anyhow!("unsupported Form ScalingMode: {other}")),
+    }
+}
+
 fn parse_form_auto_time_xml(value: &str) -> Result<FormXmlAutoTime> {
     match value {
         "DontUse" => Ok(FormXmlAutoTime::DontUse),
@@ -7270,6 +7293,9 @@ fn patch_form_layout_properties(
             }
             FormXmlGroup::InCell => return Err(anyhow!("unsupported root Form Group: InCell")),
         }
+    }
+    if let Some(value) = properties.scaling_mode {
+        replace_form_scaling_mode(layout, value)?;
     }
     if let Some(value) = properties.auto_time {
         replace_form_auto_time(layout, value)?;
@@ -7638,6 +7664,20 @@ fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScrol
     Ok(())
 }
 
+fn replace_form_scaling_mode(layout: &mut String, value: FormXmlScalingMode) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_item_pairs_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 6) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1" | "2") {
+        layout.replace_range(range.clone(), form_scaling_mode_code(value));
+    }
+    Ok(())
+}
+
 fn replace_form_show_close_button(layout: &mut String, value: bool) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
     let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
@@ -7745,6 +7785,44 @@ fn form_layout_child_items_tail_start(layout: &str, fields: &[Range<usize>]) -> 
                         form_layout_child_item_tag(&layout[wrapper.clone()], layout, &item_fields)
                     })
                     .is_none()
+            {
+                complete = false;
+                break;
+            }
+        }
+        if complete {
+            return Some(tail_start);
+        }
+    }
+    None
+}
+
+fn form_layout_child_item_pairs_tail_start(layout: &str, fields: &[Range<usize>]) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if !(1..=200).contains(&count) {
+            continue;
+        }
+        let tail_start = index + 1 + count * 2;
+        if tail_start >= fields.len() {
+            continue;
+        }
+        let mut complete = true;
+        for item_index in 0..count {
+            let uuid_index = index + 1 + item_index * 2;
+            let value_index = uuid_index + 1;
+            if fields
+                .get(uuid_index)
+                .and_then(|range| parse_non_zero_uuid(layout[range.clone()].trim()))
+                .is_none()
+                || !fields
+                    .get(value_index)
+                    .is_some_and(|range| layout[range.clone()].trim().starts_with('{'))
             {
                 complete = false;
                 break;
@@ -7897,6 +7975,13 @@ fn form_use_posting_mode_code(value: FormXmlUsePostingMode) -> &'static str {
 fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
     match value {
         FormXmlVerticalScroll::UseIfNecessary => "2",
+    }
+}
+
+fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
+    match value {
+        FormXmlScalingMode::Normal => "1",
+        FormXmlScalingMode::Compact => "2",
     }
 }
 
@@ -18514,6 +18599,65 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
 
         assert_eq!(&parsed.layout[fields[tail_start + 11].clone()], "2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_root_scaling_mode() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ScalingMode>Compact</ScalingMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_compact_text = base_text.replace(r#""",0,0,0,0,0,0,3,3"#, r#""",0,2,0,0,0,0,3,3"#);
+        let base = super::deflate_raw(base_compact_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ScalingMode>Normal</ScalingMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_root_scaling_mode_with_pages_item() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ScalingMode>Compact</ScalingMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_item_pairs_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "2");
 
         Ok(())
     }
