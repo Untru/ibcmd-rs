@@ -3998,6 +3998,7 @@ struct FormChildItem {
     edit_mode: Option<&'static str>,
     auto_edit_mode: Option<bool>,
     auto_max_width: Option<bool>,
+    max_width: Option<String>,
     auto_max_height: Option<bool>,
     horizontal_stretch: Option<bool>,
     drop_list_button: Option<bool>,
@@ -5053,6 +5054,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_max_width(&fields)
+        } else {
+            None
+        },
         auto_max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_height(&fields)
         } else {
@@ -5338,6 +5344,12 @@ fn parse_form_input_field_auto_max_width(fields: &[&str]) -> Option<bool> {
         "0" => Some(false),
         _ => None,
     }
+}
+
+fn parse_form_input_field_max_width(fields: &[&str]) -> Option<String> {
+    let nested = form_input_field_extended_options(fields)?;
+    let value = nested.get(50)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 fn parse_form_input_field_auto_max_height(fields: &[&str]) -> Option<bool> {
@@ -6139,6 +6151,12 @@ fn format_form_child_item_xml(
     }
     if item.auto_max_width == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+    }
+    if let Some(max_width) = &item.max_width {
+        xml.push_str(&format!(
+            "{tab}\t<MaxWidth>{}</MaxWidth>\r\n",
+            escape_xml_text(max_width)
+        ));
     }
     if item.auto_max_height == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
@@ -13954,6 +13972,37 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_max_width_from_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Field""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[50] = "54".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.max_width.as_deref(), Some("54"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<MaxWidth>54</MaxWidth>"));
+    }
+
+    #[test]
     fn extracts_form_input_field_auto_max_height_false_from_layout_code() {
         let mut input_fields = vec!["0".to_string(); 40];
         input_fields[0] = "48".to_string();
@@ -14510,6 +14559,7 @@ mod tests {
             edit_mode: None,
             auto_edit_mode: None,
             auto_max_width: None,
+            max_width: None,
             auto_max_height: None,
             horizontal_stretch: None,
             drop_list_button: None,
@@ -14545,6 +14595,7 @@ mod tests {
                     edit_mode: None,
                     auto_edit_mode: None,
                     auto_max_width: None,
+                    max_width: None,
                     auto_max_height: None,
                     horizontal_stretch: None,
                     drop_list_button: None,
@@ -14581,6 +14632,7 @@ mod tests {
                     edit_mode: None,
                     auto_edit_mode: None,
                     auto_max_width: None,
+                    max_width: None,
                     auto_max_height: None,
                     horizontal_stretch: None,
                     drop_list_button: None,

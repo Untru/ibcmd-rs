@@ -215,6 +215,7 @@ struct FormXmlChildItem {
     edit_mode: Option<FormXmlEditMode>,
     auto_edit_mode: Option<bool>,
     auto_max_width: Option<bool>,
+    max_width: Option<String>,
     auto_max_height: Option<bool>,
     horizontal_stretch: Option<bool>,
     drop_list_button: Option<bool>,
@@ -3725,6 +3726,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "EditMode"
                         | "AutoEditMode"
                         | "AutoMaxWidth"
+                        | "MaxWidth"
                         | "AutoMaxHeight"
                         | "HorizontalStretch"
                         | "DropListButton"
@@ -4153,6 +4155,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_auto_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_auto_max_width(&path, &current_child_items)
+                    || path_ends_with_for_child_max_width(&path, &current_child_items)
                     || path_ends_with_for_child_auto_max_height(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_stretch(&path, &current_child_items)
                     || path_ends_with_for_child_drop_list_button(&path, &current_child_items)
@@ -5557,6 +5560,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "MaxWidth"
+                        if path_ends_with_for_child_max_width(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.max_width = Some(parse_form_dimension_xml(
+                                "ChildItem/MaxWidth",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "AutoMaxHeight"
                         if path_ends_with_for_child_auto_max_height(
                             &path,
@@ -5792,6 +5805,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "EditMode"
                         | "AutoEditMode"
                         | "AutoMaxWidth"
+                        | "MaxWidth"
                         | "AutoMaxHeight"
                         | "HorizontalStretch"
                         | "DropListButton"
@@ -5918,6 +5932,7 @@ fn parse_form_child_item_xml(
         edit_mode: None,
         auto_edit_mode: None,
         auto_max_width: None,
+        max_width: None,
         auto_max_height: None,
         horizontal_stretch: None,
         drop_list_button: None,
@@ -6151,6 +6166,13 @@ fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChil
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMaxWidth"])
+}
+
+fn path_ends_with_for_child_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MaxWidth"])
 }
 
 fn path_ends_with_for_child_auto_max_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7646,6 +7668,7 @@ fn patch_form_layout_input_field_extended_options(
     item: &FormXmlChildItem,
 ) -> Result<Option<String>> {
     if item.auto_max_width != Some(false)
+        && item.max_width.is_none()
         && item.auto_max_height != Some(false)
         && item.horizontal_stretch.is_none()
         && item.drop_list_button.is_none()
@@ -7676,9 +7699,15 @@ fn patch_form_layout_input_field_extended_options(
         let fields = scan_braced_fields(&text, 0)?;
         if fields.get(49).is_some() {
             replace_braced_field(&mut text, 49, "0")?;
-            if scan_braced_fields(&text, 0)?.get(50).is_some() {
+            if item.max_width.is_none() && scan_braced_fields(&text, 0)?.get(50).is_some() {
                 replace_braced_field(&mut text, 50, "0")?;
             }
+        }
+    }
+    if let Some(max_width) = &item.max_width {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(50).is_some() {
+            replace_braced_field(&mut text, 50, max_width)?;
         }
     }
     if item.auto_max_height == Some(false) {
@@ -18344,6 +18373,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[options_fields[49].clone()], "0");
         assert_eq!(&parsed.layout[options_fields[50].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_max_width() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[49] = "1".to_string();
+        options[50] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<AutoMaxWidth>false</AutoMaxWidth>
+			<MaxWidth>54</MaxWidth>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[49].clone()], "0");
+        assert_eq!(&parsed.layout[options_fields[50].clone()], "54");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
