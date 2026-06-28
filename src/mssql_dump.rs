@@ -3856,10 +3856,12 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
 fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
-    let properties = extract_form_body_properties(&form_fields);
+    let mut properties = extract_form_body_properties(&form_fields);
     let events = extract_form_body_events(&form_fields);
     let auto_command_bar = extract_form_auto_command_bar(&form_fields);
     let attributes = extract_form_body_attributes(&body.trailing, object_refs);
+    properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
+    properties.details_data = extract_form_report_attribute_ref(&form_fields, "6", &attributes);
     let parameters = extract_form_body_parameters(&body.trailing, object_refs);
     let commands = extract_form_body_commands(&body.trailing, object_refs);
     let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
@@ -3898,6 +3900,8 @@ struct FormBodyProperties {
     vertical_scroll: Option<&'static str>,
     conversations_representation: Option<&'static str>,
     show_command_bar: Option<bool>,
+    report_result: Option<String>,
+    details_data: Option<String>,
     report_form_type: Option<&'static str>,
     auto_show_state: Option<&'static str>,
     report_result_view_mode: Option<&'static str>,
@@ -3912,6 +3916,7 @@ const FORM_REPORT_FORM_TYPE_UUID: &str = "acbc2eeb-2efb-48e4-b78a-661fd09fcf80";
 const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048fd2df";
 const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
     "874260df-7e23-4f02-9e10-5794914b5adf";
+const FORM_REPORT_ATTRIBUTE_REF_UUID: &str = "11cfd3e0-86f8-4480-aaa5-dc6a6ccac689";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
 const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
@@ -4089,6 +4094,8 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         vertical_scroll: extract_form_vertical_scroll(fields),
         conversations_representation: extract_form_conversations_representation(fields),
         show_command_bar: extract_form_show_command_bar(fields),
+        report_result: None,
+        details_data: None,
         report_form_type,
         auto_show_state: extract_form_auto_show_state(fields),
         report_result_view_mode: extract_form_report_result_view_mode(fields),
@@ -4281,6 +4288,32 @@ fn extract_form_view_mode_application_on_set_report_result(
         ) => Some("Auto"),
         _ => None,
     }
+}
+
+fn extract_form_report_attribute_ref(
+    fields: &[&str],
+    property_key: &str,
+    attributes: &[FormAttribute],
+) -> Option<String> {
+    let value = form_root_property_bag_value(fields, property_key)?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_REPORT_ATTRIBUTE_REF_UUID)) => {}
+        _ => return None,
+    }
+    let ref_fields = split_1c_braced_fields(value_fields.get(2)?.trim(), 0)?;
+    if ref_fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    let id_fields = split_1c_braced_fields(ref_fields.get(1)?.trim(), 0)?;
+    let attribute_id = id_fields.first()?.trim();
+    attributes
+        .iter()
+        .find(|attribute| attribute.id == attribute_id)
+        .map(|attribute| attribute.name.clone())
 }
 
 fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
@@ -6669,6 +6702,18 @@ fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<ShowCommandBar>{}</ShowCommandBar>\r\n",
             if show_command_bar { "true" } else { "false" }
+        ));
+    }
+    if let Some(value) = &properties.report_result {
+        xml.push_str(&format!(
+            "\t<ReportResult>{}</ReportResult>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = &properties.details_data {
+        xml.push_str(&format!(
+            "\t<DetailsData>{}</DetailsData>\r\n",
+            escape_xml_text(value)
         ));
     }
     if let Some(value) = properties.report_form_type {
@@ -14582,6 +14627,18 @@ mod tests {
             "<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>"
         ));
         assert!(!form_xml.contains("<ConversationsRepresentation>"));
+    }
+
+    #[test]
+    fn extracts_report_result_and_details_data_from_attribute_refs() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,2,5,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{1,{3},""}},6,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{1,{4},""}},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{4,2,{9,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,"Результат",0,0,0,0,0,0,0},{9,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,"ДанныеРасшифровки",0,0,0,0,0,0,0}}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ReportResult>Результат</ReportResult>"));
+        assert!(form_xml.contains("<DetailsData>ДанныеРасшифровки</DetailsData>"));
     }
 
     #[test]

@@ -98,6 +98,8 @@ struct FormXmlBodyProperties {
     vertical_scroll: Option<FormXmlVerticalScroll>,
     conversations_representation: Option<FormXmlConversationsRepresentation>,
     show_command_bar: Option<bool>,
+    report_result: Option<String>,
+    details_data: Option<String>,
     report_form_type: Option<FormXmlReportFormType>,
     auto_show_state: Option<FormXmlAutoShowState>,
     report_result_view_mode: Option<FormXmlReportResultViewMode>,
@@ -3507,6 +3509,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.vertical_scroll.is_some()
             || properties.conversations_representation.is_some()
             || properties.show_command_bar.is_some()
+            || properties.report_result.is_some()
+            || properties.details_data.is_some()
             || properties.report_form_type.is_some()
             || properties.auto_show_state.is_some()
             || properties.report_result_view_mode.is_some()
@@ -3834,6 +3838,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
                         | "ShowCommandBar"
+                        | "ReportResult"
+                        | "DetailsData"
                         | "ReportFormType"
                         | "AutoShowState"
                         | "ReportResultViewMode"
@@ -4087,6 +4093,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ReportResult"])
+                    || path_ends_with(&path, &["Form", "DetailsData"])
                     || path_ends_with(&path, &["Form", "ReportFormType"])
                     || path_ends_with(&path, &["Form", "AutoShowState"])
                     || path_ends_with(&path, &["Form", "ReportResultViewMode"])
@@ -4487,6 +4495,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ReportResult"])
+                    || path_ends_with(&path, &["Form", "DetailsData"])
                     || path_ends_with(&path, &["Form", "ReportFormType"])
                     || path_ends_with(&path, &["Form", "AutoShowState"])
                     || path_ends_with(&path, &["Form", "ReportResultViewMode"])
@@ -4917,6 +4927,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
                         properties.show_command_bar =
                             Some(parse_form_xml_bool("ShowCommandBar", text_value.trim())?);
+                    }
+                    "ReportResult" if path_ends_with(&path, &["Form", "ReportResult"]) => {
+                        let value = text_value.trim();
+                        if !value.is_empty() {
+                            properties.report_result = Some(value.to_string());
+                        }
+                    }
+                    "DetailsData" if path_ends_with(&path, &["Form", "DetailsData"]) => {
+                        let value = text_value.trim();
+                        if !value.is_empty() {
+                            properties.details_data = Some(value.to_string());
+                        }
                     }
                     "ReportFormType" if path_ends_with(&path, &["Form", "ReportFormType"]) => {
                         properties.report_form_type =
@@ -7208,6 +7230,24 @@ fn patch_form_layout_properties(
     if let Some(show_command_bar) = properties.show_command_bar {
         replace_form_show_command_bar(layout, show_command_bar)?;
     }
+    if let Some(report_result) = &properties.report_result {
+        replace_form_report_attribute_ref(
+            layout,
+            "5",
+            "ReportResult",
+            report_result,
+            &properties.attributes,
+        )?;
+    }
+    if let Some(details_data) = &properties.details_data {
+        replace_form_report_attribute_ref(
+            layout,
+            "6",
+            "DetailsData",
+            details_data,
+            &properties.attributes,
+        )?;
+    }
     if let Some(report_form_type) = properties.report_form_type {
         replace_form_report_form_type(layout, report_form_type)?;
     }
@@ -7231,6 +7271,7 @@ const FORM_REPORT_FORM_TYPE_UUID: &str = "acbc2eeb-2efb-48e4-b78a-661fd09fcf80";
 const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048fd2df";
 const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
     "874260df-7e23-4f02-9e10-5794914b5adf";
+const FORM_REPORT_ATTRIBUTE_REF_UUID: &str = "11cfd3e0-86f8-4480-aaa5-dc6a6ccac689";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
 const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
@@ -7319,6 +7360,41 @@ fn replace_form_view_mode_application_on_set_report_result(
         FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID,
         form_view_mode_application_on_set_report_result_code(value),
     )
+}
+
+fn replace_form_report_attribute_ref(
+    layout: &mut String,
+    property_key: &str,
+    xml_tag: &str,
+    attribute_name: &str,
+    attributes: &[FormXmlAttribute],
+) -> Result<()> {
+    let Some(attribute) = attributes
+        .iter()
+        .find(|attribute| attribute.name == attribute_name)
+    else {
+        return Err(anyhow!(
+            "Form {xml_tag} references unknown attribute: {attribute_name}"
+        ));
+    };
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, property_key) else {
+        return Ok(());
+    };
+    if !is_form_property_bag_enum_value(&layout[range.clone()], FORM_REPORT_ATTRIBUTE_REF_UUID) {
+        return Ok(());
+    }
+    layout.replace_range(
+        range,
+        &format!(
+            r##"{{"#",{FORM_REPORT_ATTRIBUTE_REF_UUID},{{1,{{{}}},""}}}}"##,
+            attribute.id
+        ),
+    );
+    Ok(())
 }
 
 fn replace_form_property_bag_enum(
@@ -18364,6 +18440,46 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             parsed
                 .layout
                 .contains(r##"27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,1}"##),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_report_result_and_details_data_refs() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r##"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,2,5,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{0,""}},6,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{0,""}},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}}},"Old module",{4,2,{9,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,"Результат",0,0,0,0,0,0,0},{9,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,"ДанныеРасшифровки",0,0,0,0,0,0,0}}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ReportResult>Результат</ReportResult>
+	<DetailsData>ДанныеРасшифровки</DetailsData>
+	<Attributes>
+		<Attribute name="Результат" id="3"></Attribute>
+		<Attribute name="ДанныеРасшифровки" id="4"></Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"5,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{1,{3},""}}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"6,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{1,{4},""}}"##),
             "{}",
             parsed.layout
         );
