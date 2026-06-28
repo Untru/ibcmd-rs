@@ -3991,6 +3991,7 @@ struct FormChildItem {
     behavior: Option<&'static str>,
     representation: Option<&'static str>,
     button_representation: Option<&'static str>,
+    location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
     show_title: Option<bool>,
     show_in_header: Option<bool>,
@@ -5027,6 +5028,13 @@ fn parse_form_child_item(
         } else {
             None
         },
+        location_in_command_bar: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(49)
+                .and_then(|field| parse_form_button_location_in_command_bar(field))
+        } else {
+            None
+        },
         default_button: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(11)
@@ -5453,6 +5461,15 @@ fn parse_form_button_representation(field: &str) -> Option<&'static str> {
         "1" => Some("Picture"),
         "2" => Some("PictureAndText"),
         "3" => Some("None"),
+        _ => None,
+    }
+}
+
+fn parse_form_button_location_in_command_bar(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "1" => Some("InAdditionalSubmenu"),
+        "2" => Some("InCommandBar"),
+        "3" => Some("InCommandBarAndInAdditionalSubmenu"),
         _ => None,
     }
 }
@@ -6364,6 +6381,14 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<Representation>{}</Representation>\r\n",
             escape_xml_text(representation)
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(location) = item.location_in_command_bar
+    {
+        xml.push_str(&format!(
+            "{tab}\t<LocationInCommandBar>{}</LocationInCommandBar>\r\n",
+            escape_xml_text(location)
         ));
     }
     if item.default_button == Some(true) {
@@ -14181,6 +14206,96 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_button_location_in_command_bar_from_layout_code() {
+        for (code, expected) in [
+            ("1", "InAdditionalSubmenu"),
+            ("2", "InCommandBar"),
+            ("3", "InCommandBarAndInAdditionalSubmenu"),
+        ] {
+            let fields = [
+                "34",
+                "{44,02023637-7868-4a5f-8576-835a76e0c9ba}",
+                "0",
+                "0",
+                "0",
+                "\"Save\"",
+                "{1,0}",
+                "1",
+                "{0}",
+                "{0}",
+                "3",
+                "0",
+                "0",
+                "0",
+                "2",
+                "2",
+                "0",
+                "0",
+                "0",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{8,3,0,1,100}",
+                "{0,0,0}",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "1",
+                "{\"Pattern\"}",
+                "\"\"",
+                "2",
+                "0",
+                "1",
+                "{0}",
+                "{\"U\"}",
+                "1",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "0",
+                "3",
+                "3",
+                "3",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                code,
+                "1",
+                "0",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "0",
+                "0",
+                "0",
+                "1",
+                "\"\"",
+            ];
+            let layout = format!("{{{}}}", fields.join(","));
+            let item = parse_form_child_item(
+                &layout,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "Button");
+            assert_eq!(item.location_in_command_bar, Some(expected));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains(&format!(
+                "<LocationInCommandBar>{expected}</LocationInCommandBar>"
+            )));
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_read_only_from_layout_code() {
         let item = parse_form_child_item(
             r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0}"#,
@@ -15327,6 +15442,7 @@ mod tests {
             behavior: None,
             representation: None,
             button_representation: None,
+            location_in_command_bar: None,
             default_button: None,
             show_title: None,
             show_in_header: None,
@@ -15376,6 +15492,7 @@ mod tests {
                     behavior: None,
                     representation: None,
                     button_representation: None,
+                    location_in_command_bar: None,
                     default_button: None,
                     show_title: None,
                     show_in_header: None,
@@ -15426,6 +15543,7 @@ mod tests {
                     behavior: None,
                     representation: None,
                     button_representation: None,
+                    location_in_command_bar: None,
                     default_button: None,
                     show_title: None,
                     show_in_header: None,

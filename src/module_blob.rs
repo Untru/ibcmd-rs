@@ -208,6 +208,7 @@ struct FormXmlChildItem {
     behavior: Option<FormXmlGroupBehavior>,
     representation: Option<FormXmlGroupRepresentation>,
     button_representation: Option<FormXmlButtonRepresentation>,
+    location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
     default_button: Option<bool>,
     show_title: Option<bool>,
     show_in_header: Option<bool>,
@@ -294,6 +295,13 @@ enum FormXmlButtonRepresentation {
     Picture,
     PictureAndText,
     None,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlButtonLocationInCommandBar {
+    InAdditionalSubmenu,
+    InCommandBar,
+    InCommandBarAndInAdditionalSubmenu,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3737,6 +3745,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DefaultButton"
                         | "ReadOnly"
                         | "SkipOnInput"
+                        | "LocationInCommandBar"
                         | "TitleLocation"
                         | "EditMode"
                         | "MarkRequiredComplete"
@@ -4176,6 +4185,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_read_only(&path, &current_child_items)
                     || path_ends_with_for_child_skip_on_input(&path, &current_child_items)
+                    || path_ends_with_for_child_location_in_command_bar(&path, &current_child_items)
                     || path_ends_with_for_child_title_location(&path, &current_child_items)
                     || path_ends_with_for_child_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_mark_required_complete(&path, &current_child_items)
@@ -5572,6 +5582,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "LocationInCommandBar"
+                        if path_ends_with_for_child_location_in_command_bar(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.location_in_command_bar = Some(
+                                parse_form_button_location_in_command_bar_xml(text_value.trim())?,
+                            );
+                        }
+                    }
                     "TitleLocation"
                         if path_ends_with_for_child_title_location(&path, &current_child_items) =>
                     {
@@ -5974,6 +5996,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DefaultButton"
                         | "ReadOnly"
                         | "SkipOnInput"
+                        | "LocationInCommandBar"
                         | "TitleLocation"
                         | "EditMode"
                         | "MarkRequiredComplete"
@@ -6107,6 +6130,7 @@ fn parse_form_child_item_xml(
         behavior: None,
         representation: None,
         button_representation: None,
+        location_in_command_bar: None,
         default_button: None,
         show_title: None,
         show_in_header: None,
@@ -6343,6 +6367,16 @@ fn path_ends_with_for_child_skip_on_input(path: &[String], items: &[FormXmlChild
     };
     matches!(item.tag.as_str(), "Button" | "InputField")
         && path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
+}
+
+fn path_ends_with_for_child_location_in_command_bar(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "LocationInCommandBar"])
 }
 
 fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -6675,6 +6709,21 @@ fn parse_form_button_representation_xml(value: &str) -> Result<FormXmlButtonRepr
         "PictureAndText" => Ok(FormXmlButtonRepresentation::PictureAndText),
         "None" => Ok(FormXmlButtonRepresentation::None),
         other => Err(anyhow!("unsupported Form Button Representation: {other}")),
+    }
+}
+
+fn parse_form_button_location_in_command_bar_xml(
+    value: &str,
+) -> Result<FormXmlButtonLocationInCommandBar> {
+    match value {
+        "InAdditionalSubmenu" => Ok(FormXmlButtonLocationInCommandBar::InAdditionalSubmenu),
+        "InCommandBar" => Ok(FormXmlButtonLocationInCommandBar::InCommandBar),
+        "InCommandBarAndInAdditionalSubmenu" => {
+            Ok(FormXmlButtonLocationInCommandBar::InCommandBarAndInAdditionalSubmenu)
+        }
+        other => Err(anyhow!(
+            "unsupported Form Button LocationInCommandBar: {other}"
+        )),
     }
 }
 
@@ -7765,6 +7814,16 @@ fn patch_form_layout_child_item_entry(
             if skip_on_input { "1" } else { "0" }.to_string(),
         ));
     }
+    if item.tag == "Button"
+        && let Some(location) = item.location_in_command_bar
+        && form_layout_button_is_extended(fields)
+        && let Some(location_range) = fields.get(49)
+    {
+        replacements.push((
+            location_range.clone(),
+            form_button_location_in_command_bar_code(location).to_string(),
+        ));
+    }
     if item.tag == "InputField"
         && let Some(title_location) = item.title_location
         && let Some(title_location_range) = fields.get(7)
@@ -8506,6 +8565,16 @@ fn form_button_representation_code(value: FormXmlButtonRepresentation) -> &'stat
         FormXmlButtonRepresentation::Picture => "1",
         FormXmlButtonRepresentation::PictureAndText => "2",
         FormXmlButtonRepresentation::None => "3",
+    }
+}
+
+fn form_button_location_in_command_bar_code(
+    value: FormXmlButtonLocationInCommandBar,
+) -> &'static str {
+    match value {
+        FormXmlButtonLocationInCommandBar::InAdditionalSubmenu => "1",
+        FormXmlButtonLocationInCommandBar::InCommandBar => "2",
+        FormXmlButtonLocationInCommandBar::InCommandBarAndInAdditionalSubmenu => "3",
     }
 }
 
@@ -18391,6 +18460,104 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
             assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
             assert_eq!(&parsed.layout[button_fields[29].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_button_location_in_command_bar() -> anyhow::Result<()> {
+        for (value, expected_code) in [
+            ("InAdditionalSubmenu", "1"),
+            ("InCommandBar", "2"),
+            ("InCommandBarAndInAdditionalSubmenu", "3"),
+        ] {
+            let button = [
+                "34",
+                "{44,22222222-2222-4222-8222-222222222222}",
+                "0",
+                "0",
+                "0",
+                "\"Save\"",
+                "{1,0}",
+                "1",
+                "{0}",
+                "{0}",
+                "3",
+                "0",
+                "0",
+                "0",
+                "2",
+                "2",
+                "0",
+                "0",
+                "0",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{8,3,0,1,100}",
+                "{0,0,0}",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "1",
+                "{\"Pattern\"}",
+                "\"\"",
+                "2",
+                "0",
+                "1",
+                "{0}",
+                "{\"U\"}",
+                "1",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "0",
+                "3",
+                "3",
+                "3",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "0",
+                "0",
+                "0",
+                "1",
+                "\"\"",
+            ]
+            .join(",");
+            let layout = format!(
+                "{{4,{{59,1,11111111-1111-4111-8111-111111111111,{{{button}}}}},\"Old module\",{{0}}}}"
+            );
+            let base = super::deflate_raw(layout.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<LocationInCommandBar>{value}</LocationInCommandBar>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+            assert_eq!(&parsed.layout[button_fields[49].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
 
