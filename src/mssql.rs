@@ -2618,6 +2618,14 @@ fn prepare_configuration_asset_body_rows(
         server,
         database,
         properties,
+        infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
+        "a",
+    )?);
+    rows.extend(prepare_configuration_command_interface_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
         "9",
     )?);
@@ -5610,6 +5618,13 @@ mod tests {
                 "ParentConfigurations.bin"
             ),
             std::path::PathBuf::from(r"Ext\ParentConfigurations.bin")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "CommandInterface.xml"
+            ),
+            std::path::PathBuf::from(r"Ext\CommandInterface.xml")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(

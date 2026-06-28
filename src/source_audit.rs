@@ -448,6 +448,10 @@ fn is_supported_module_file(path: &str) -> bool {
             | Some("recordsetmodule.bsl")
             | Some("valuemanagermodule.bsl")
             | Some("commandmodule.bsl")
+            | Some("ordinaryapplicationmodule.bsl")
+            | Some("externalconnectionmodule.bsl")
+            | Some("managedapplicationmodule.bsl")
+            | Some("sessionmodule.bsl")
     )
 }
 
@@ -466,6 +470,7 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/commandinterface.xml")
         || is_supported_additional_indexes_file(&lower)
         || lower.ends_with("/ext/style.xml")
+        || lower == "ext/commandinterface.xml"
         || lower == "ext/homepageworkarea.xml"
         || lower == "ext/mobileclientsignature.bin"
         || lower == "ext/mainsectioncommandinterface.xml"
@@ -1271,6 +1276,26 @@ mod tests {
             b"<AdditionalIndexes/>",
         )?;
         fs::write(
+            root.join("Ext/OrdinaryApplicationModule.bsl"),
+            b"Procedure OnStart()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/ExternalConnectionModule.bsl"),
+            b"Procedure OnConnect()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/ManagedApplicationModule.bsl"),
+            b"Procedure BeforeStart()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/SessionModule.bsl"),
+            b"Procedure SetSessionParameters(Names)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/CommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
+        fs::write(
             root.join("Ext/MobileClientSignature.bin"),
             b"{2,\"\",\"\",{0},0}",
         )?;
@@ -1293,14 +1318,14 @@ mod tests {
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 15);
+        assert_eq!(report.total_files, 20);
         assert_eq!(report.stage_metadata_xml_files, 3);
         assert_eq!(report.stage_common_module_xml_files, 1);
         assert_eq!(report.stage_entry_files, 4);
-        assert_eq!(report.module_files, 2);
-        assert_eq!(report.supported_module_files, 2);
-        assert_eq!(report.supported_ext_body_files, 7);
-        assert_eq!(report.potentially_stageable_body_files, 9);
+        assert_eq!(report.module_files, 6);
+        assert_eq!(report.supported_module_files, 6);
+        assert_eq!(report.supported_ext_body_files, 8);
+        assert_eq!(report.potentially_stageable_body_files, 14);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);

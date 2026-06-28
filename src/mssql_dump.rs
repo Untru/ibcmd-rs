@@ -529,21 +529,26 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
                 );
             }
         }
-        let main_section_interface_id = format!("{metadata_id}.9");
-        if let Some(row) = rows_by_file_name.get(main_section_interface_id.as_str())
-            && let Ok(bytes) = decode_hex(&row.binary_hex)
-            && parse_command_interface_blob(&bytes, &command_refs, &metadata_refs).is_some()
-        {
-            paths.insert(
-                main_section_interface_id,
-                SourceAsset {
-                    primary_path: PathBuf::from("Ext/MainSectionCommandInterface.xml"),
-                    kind: SourceAssetKind::CommandInterface {
-                        command_refs: command_refs.clone(),
-                        metadata_refs: metadata_refs.clone(),
+        for (suffix, path) in [
+            ("9", "Ext/MainSectionCommandInterface.xml"),
+            ("a", "Ext/CommandInterface.xml"),
+        ] {
+            let interface_id = format!("{metadata_id}.{suffix}");
+            if let Some(row) = rows_by_file_name.get(interface_id.as_str())
+                && let Ok(bytes) = decode_hex(&row.binary_hex)
+                && parse_command_interface_blob(&bytes, &command_refs, &metadata_refs).is_some()
+            {
+                paths.insert(
+                    interface_id,
+                    SourceAsset {
+                        primary_path: PathBuf::from(path),
+                        kind: SourceAssetKind::CommandInterface {
+                            command_refs: command_refs.clone(),
+                            metadata_refs: metadata_refs.clone(),
+                        },
                     },
-                },
-            );
+                );
+            }
         }
     }
     for row in rows {
@@ -12107,6 +12112,9 @@ mod tests {
         let main_section_command_interface = deflate_for_test(
             b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
         );
+        let command_interface = deflate_for_test(
+            b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
+        );
         let client_application_interface = b"\xEF\xBB\xBF<ClientApplicationInterface/>".to_vec();
         let client_application_interface_blob = deflate_for_test(&client_application_interface);
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
@@ -12169,6 +12177,12 @@ mod tests {
                 binary_hex: encode_hex_for_test(&main_section_command_interface),
             },
             ConfigRow {
+                file_name: format!("{uuid}.a"),
+                part_no: 0,
+                data_size: command_interface.len() as i64,
+                binary_hex: encode_hex_for_test(&command_interface),
+            },
+            ConfigRow {
                 file_name: format!("{uuid}.b"),
                 part_no: 0,
                 data_size: client_application_interface_blob.len() as i64,
@@ -12191,7 +12205,7 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 4);
-        assert_eq!(dumped.source_asset_rows, 8);
+        assert_eq!(dumped.source_asset_rows, 9);
         assert_eq!(
             fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
             ordinary_text
@@ -12239,6 +12253,13 @@ mod tests {
         assert!(
             main_section_xml.contains(r#"<Command name="0:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#)
         );
+        let command_interface_xml =
+            fs::read_to_string(root.join("Ext/CommandInterface.xml")).unwrap();
+        assert!(command_interface_xml.contains("<CommandInterface"));
+        assert!(
+            command_interface_xml
+                .contains(r#"<Command name="0:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#)
+        );
         assert!(
             fs::read_to_string(root.join("Ext/Splash.xml"))
                 .unwrap()
@@ -12275,6 +12296,11 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.9"))
             .unwrap();
+        let command_interface_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.a"))
+            .unwrap();
         let client_application_interface_row = dumped
             .rows
             .iter()
@@ -12308,6 +12334,10 @@ mod tests {
         assert_eq!(
             main_section_interface_row.source_asset_path.as_deref(),
             Some("Ext/MainSectionCommandInterface.xml")
+        );
+        assert_eq!(
+            command_interface_row.source_asset_path.as_deref(),
+            Some("Ext/CommandInterface.xml")
         );
         assert_eq!(
             client_application_interface_row
