@@ -4070,6 +4070,7 @@ struct FormChildItem {
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
     title: Vec<(String, String)>,
+    tooltip: Vec<(String, String)>,
     events: Vec<FormBodyEvent>,
     data_path: Option<String>,
     command_name: Option<String>,
@@ -5781,6 +5782,7 @@ fn parse_form_child_item(
             None
         },
         title: parse_form_child_item_title(wrapper, &fields),
+        tooltip: parse_form_child_item_tooltip(wrapper, &fields),
         events: parse_form_child_item_event_fields(&fields),
         data_path,
         command_name: if tag == "Button" {
@@ -6313,6 +6315,23 @@ fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, S
         "34" => &[6],
         "48" => &[9, 10],
         _ => &[7],
+    };
+    indexes
+        .iter()
+        .find_map(|index| {
+            let values = fields
+                .get(*index)
+                .map(|field| parse_form_localized_strings(field))
+                .unwrap_or_default();
+            (!values.is_empty()).then_some(values)
+        })
+        .unwrap_or_default()
+}
+
+fn parse_form_child_item_tooltip(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
+    let indexes: &[usize] = match wrapper {
+        "22" => &[8],
+        _ => &[],
     };
     indexes
         .iter()
@@ -7253,6 +7272,11 @@ fn format_form_child_item_xml(
     xml.push_str(&format_form_localized_section(
         "Title",
         &item.title,
+        indent + 1,
+    ));
+    xml.push_str(&format_form_localized_section(
+        "ToolTip",
+        &item.tooltip,
         indent + 1,
     ));
     if !item.events.is_empty() {
@@ -15226,7 +15250,7 @@ mod tests {
     #[test]
     fn extracts_form_pages_and_page_from_layout_codes() {
         let item = parse_form_child_item(
-            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,0},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,0},3,1,0}}"#,
+            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,1,{"ru","Pages tip"}},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,1,{"ru","Page tip"}},3,1,0}}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -15238,16 +15262,27 @@ mod tests {
 
         assert_eq!(item.tag, "Pages");
         assert_eq!(item.height.as_deref(), Some("14"));
+        assert_eq!(
+            item.tooltip,
+            vec![("ru".to_string(), "Pages tip".to_string())]
+        );
         assert_eq!(item.child_items.len(), 1);
         assert_eq!(item.child_items[0].tag, "Page");
         assert_eq!(item.child_items[0].group, Some("HorizontalIfPossible"));
+        assert_eq!(
+            item.child_items[0].tooltip,
+            vec![("ru".to_string(), "Page tip".to_string())]
+        );
 
         let xml = format_form_child_items_xml(&[item], 1);
 
         assert!(xml.contains(r#"<Pages name="PagesGroup" id="8">"#));
         assert!(xml.contains("<Height>14</Height>"));
+        assert!(xml.contains("<ToolTip>"));
+        assert!(xml.contains("<v8:content>Pages tip</v8:content>"));
         assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
         assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
+        assert!(xml.contains("<v8:content>Page tip</v8:content>"));
     }
 
     #[test]
@@ -16625,6 +16660,7 @@ mod tests {
             item_type: None,
             addition_source_item: None,
             title: Vec::new(),
+            tooltip: Vec::new(),
             events: Vec::new(),
             data_path: Some("List".to_string()),
             command_name: None,
@@ -16675,6 +16711,7 @@ mod tests {
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
                     title: Vec::new(),
+                    tooltip: Vec::new(),
                     events: Vec::new(),
                     data_path: None,
                     command_name: None,
@@ -16726,6 +16763,7 @@ mod tests {
                     item_type: None,
                     addition_source_item: None,
                     title: Vec::new(),
+                    tooltip: Vec::new(),
                     events: Vec::new(),
                     data_path: Some("List.Name".to_string()),
                     command_name: None,

@@ -271,6 +271,7 @@ struct FormXmlChildItem {
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
+    tooltip: Vec<LocalizedString>,
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
     data_path: Option<String>,
@@ -3835,6 +3836,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
+    let mut current_child_localized_section = None::<String>;
     let mut current_child_title_lang = None::<String>;
     let mut current_child_title_content = None::<String>;
     let mut current_child_event_name = None::<String>;
@@ -4031,8 +4033,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         current_child_items.push(item);
                     }
                 } else if local == "item"
-                    && path_ends_with_for_child_title(&path, &current_child_items)
+                    && (path_ends_with_for_child_title(&path, &current_child_items)
+                        || path_ends_with_for_child_tooltip(&path, &current_child_items))
                 {
+                    current_child_localized_section = path
+                        .last()
+                        .map(|value| value.to_string())
+                        .filter(|value| matches!(value.as_str(), "Title" | "ToolTip"));
                     current_child_title_lang = None;
                     current_child_title_content = None;
                 } else if local == "Event"
@@ -4359,6 +4366,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
@@ -4768,6 +4777,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_title_lang(&path, &current_child_items)
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
@@ -5819,22 +5830,44 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             properties.command_interface_items.push(item);
                         }
                     }
-                    "lang" if path_ends_with_for_child_title_lang(&path, &current_child_items) => {
+                    "lang"
+                        if path_ends_with_for_child_title_lang(&path, &current_child_items)
+                            || path_ends_with_for_child_tooltip_lang(
+                                &path,
+                                &current_child_items,
+                            ) =>
+                    {
                         current_child_title_lang = Some(text_value.trim().to_string());
                     }
                     "content"
-                        if path_ends_with_for_child_title_content(&path, &current_child_items) =>
+                        if path_ends_with_for_child_title_content(&path, &current_child_items)
+                            || path_ends_with_for_child_tooltip_content(
+                                &path,
+                                &current_child_items,
+                            ) =>
                     {
                         current_child_title_content = Some(text_value.to_string());
                     }
-                    "item" if path_ends_with_for_child_title_item(&path, &current_child_items) => {
+                    "item"
+                        if path_ends_with_for_child_title_item(&path, &current_child_items)
+                            || path_ends_with_for_child_tooltip_item(
+                                &path,
+                                &current_child_items,
+                            ) =>
+                    {
                         if let (Some(item), Some(lang), Some(content)) = (
                             current_child_items.last_mut(),
                             current_child_title_lang.take(),
                             current_child_title_content.take(),
                         ) {
-                            item.title.push(LocalizedString { lang, content });
+                            let value = LocalizedString { lang, content };
+                            if current_child_localized_section.as_deref() == Some("ToolTip") {
+                                item.tooltip.push(value);
+                            } else {
+                                item.title.push(value);
+                            }
                         }
+                        current_child_localized_section = None;
                     }
                     "Event" if path_ends_with_for_child_event(&path, &current_child_items) => {
                         if let (Some(item), Some(name)) = (
@@ -6506,6 +6539,7 @@ fn parse_form_child_item_xml(
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
+        tooltip: Vec::new(),
         events: Vec::new(),
         command_name: None,
         data_path: None,
@@ -6610,6 +6644,13 @@ fn path_ends_with_for_child_title(path: &[String], items: &[FormXmlChildItem]) -
     path_ends_with(path, &[item.tag.as_str(), "Title"])
 }
 
+fn path_ends_with_for_child_tooltip(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip"])
+}
+
 fn path_ends_with_for_child_events(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -6631,6 +6672,13 @@ fn path_ends_with_for_child_title_item(path: &[String], items: &[FormXmlChildIte
     path_ends_with(path, &[item.tag.as_str(), "Title", "item"])
 }
 
+fn path_ends_with_for_child_tooltip_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item"])
+}
+
 fn path_ends_with_for_child_title_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -6643,6 +6691,20 @@ fn path_ends_with_for_child_title_content(path: &[String], items: &[FormXmlChild
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Title", "item", "content"])
+}
+
+fn path_ends_with_for_child_tooltip_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item", "lang"])
+}
+
+fn path_ends_with_for_child_tooltip_content(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item", "content"])
 }
 
 fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -8959,6 +9021,11 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((title_range, format_1c_synonyms(&item.title)));
     }
+    if !item.tooltip.is_empty()
+        && let Some(tooltip_range) = form_layout_child_item_tooltip_range(text, wrapper, fields)
+    {
+        replacements.push((tooltip_range, format_1c_synonyms(&item.tooltip)));
+    }
     if item.tag == "Button"
         && let Some(item_type) = &item.item_type
     {
@@ -10090,6 +10157,21 @@ fn form_layout_child_item_title_range(
         "34" => &[6],
         "48" => &[9, 10],
         _ => &[7],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        scan_braced_fields(text, range.start).ok().map(|_| range)
+    })
+}
+
+fn form_layout_child_item_tooltip_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "22" => &[8],
+        _ => &[],
     };
     indexes.iter().find_map(|index| {
         let range = fields.get(*index)?.clone();
@@ -20718,13 +20800,25 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         let base = super::deflate_raw(base_text.as_bytes())?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core">
 	<ChildItems>
 		<Pages name="PagesGroup" id="8">
 			<Height>14</Height>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Pages tip</v8:content>
+				</v8:item>
+			</ToolTip>
 			<ChildItems>
 				<Page name="MainPage" id="9">
 					<Group>HorizontalIfPossible</Group>
+					<ToolTip>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Page tip</v8:content>
+						</v8:item>
+					</ToolTip>
 				</Page>
 			</ChildItems>
 		</Pages>
@@ -20738,14 +20832,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             parsed
                 .layout
-                .contains(r#",3,"PagesGroup",{1,0},{1,0},0,1,0,0,14,2,2,"#),
+                .contains(r#",3,"PagesGroup",{1,0},{1,"en","Pages tip"},0,1,0,0,14,2,2,"#),
             "{}",
             parsed.layout
         );
         assert!(
             parsed
                 .layout
-                .contains(r#",4,"MainPage",{1,0},{1,0},3,1,0}"#),
+                .contains(r#",4,"MainPage",{1,0},{1,"en","Page tip"},3,1,0}"#),
             "{}",
             parsed.layout
         );
