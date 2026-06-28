@@ -79,6 +79,8 @@ pub struct FormSourceAuditReport {
     pub ignored_ext_form_bytes: u64,
     pub top_level_elements: Vec<FormElementCount>,
     pub elements: Vec<FormElementCount>,
+    pub child_item_elements: Vec<FormElementCount>,
+    pub child_item_properties: Vec<FormElementCount>,
     pub errors: Vec<FormSourceAuditError>,
 }
 
@@ -138,6 +140,8 @@ pub struct SourceLoadCoverageItem {
 struct FormXmlShape {
     top_level_elements: BTreeMap<String, usize>,
     elements: BTreeMap<String, usize>,
+    child_item_elements: BTreeMap<String, usize>,
+    child_item_properties: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -644,6 +648,8 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
     let mut top_level_elements = BTreeMap::new();
     let mut elements = BTreeMap::new();
+    let mut child_item_elements = BTreeMap::new();
+    let mut child_item_properties = BTreeMap::new();
     let mut report = FormSourceAuditReport {
         root: root.clone(),
         form_xml_files: 0,
@@ -666,6 +672,8 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         ignored_ext_form_bytes: 0,
         top_level_elements: Vec::new(),
         elements: Vec::new(),
+        child_item_elements: Vec::new(),
+        child_item_properties: Vec::new(),
         errors: Vec::new(),
     };
 
@@ -718,6 +726,8 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
                 report.parsed += 1;
                 merge_counts(&mut top_level_elements, shape.top_level_elements);
                 merge_counts(&mut elements, shape.elements);
+                merge_counts(&mut child_item_elements, shape.child_item_elements);
+                merge_counts(&mut child_item_properties, shape.child_item_properties);
             }
             Err(error) => {
                 report.failed += 1;
@@ -740,6 +750,8 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     report.unsupported_form_xml_bytes = report.total_xml_bytes;
     report.top_level_elements = sorted_element_counts(top_level_elements);
     report.elements = sorted_element_counts(elements);
+    report.child_item_elements = sorted_element_counts(child_item_elements);
+    report.child_item_properties = sorted_element_counts(child_item_properties);
     Ok(report)
 }
 
@@ -782,19 +794,19 @@ fn is_form_module_file(form_ext_dir: &Path, path: &Path) -> bool {
 fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut depth = 0usize;
+    let mut path = Vec::<String>::new();
     let mut shape = FormXmlShape::default();
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
-                push_form_element(&mut shape, &event, depth)?;
-                depth += 1;
+                let name = push_form_element(&mut shape, &event, &path)?;
+                path.push(name);
             }
             Ok(Event::Empty(event)) => {
-                push_form_element(&mut shape, &event, depth)?;
+                push_form_element(&mut shape, &event, &path)?;
             }
             Ok(Event::End(_)) => {
-                depth = depth.saturating_sub(1);
+                path.pop();
             }
             Ok(Event::Eof) => break,
             Err(error) => return Err(anyhow!("invalid Form.xml: {error}")),
@@ -804,13 +816,44 @@ fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
     Ok(shape)
 }
 
-fn push_form_element(shape: &mut FormXmlShape, event: &BytesStart<'_>, depth: usize) -> Result<()> {
+fn push_form_element(
+    shape: &mut FormXmlShape,
+    event: &BytesStart<'_>,
+    path: &[String],
+) -> Result<String> {
     let name = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
     *shape.elements.entry(name.clone()).or_insert(0) += 1;
-    if depth == 1 {
-        *shape.top_level_elements.entry(name).or_insert(0) += 1;
+    if path.len() == 1 {
+        *shape.top_level_elements.entry(name.clone()).or_insert(0) += 1;
     }
-    Ok(())
+    if path.last().is_some_and(|parent| parent == "ChildItems") && is_form_child_item_xml_tag(&name)
+    {
+        *shape.child_item_elements.entry(name.clone()).or_insert(0) += 1;
+    }
+    if path
+        .last()
+        .is_some_and(|parent| is_form_child_item_xml_tag(parent))
+    {
+        *shape.child_item_properties.entry(name.clone()).or_insert(0) += 1;
+    }
+    Ok(name)
+}
+
+fn is_form_child_item_xml_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "UsualGroup"
+            | "CommandBar"
+            | "Popup"
+            | "ButtonGroup"
+            | "Button"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
 }
 
 fn merge_counts(target: &mut BTreeMap<String, usize>, source: BTreeMap<String, usize>) {
@@ -1203,6 +1246,26 @@ mod tests {
   <Items>
     <Item name="List"/>
   </Items>
+  <ChildItems>
+    <UsualGroup name="Page" id="1">
+      <Group>Vertical</Group>
+      <ChildItems>
+        <Table name="Rows" id="2">
+          <DataPath>Items.Rows</DataPath>
+          <ChildItems>
+            <InputField name="Name" id="3">
+              <DataPath>Items.Rows.CurrentData.Name</DataPath>
+              <Title/>
+            </InputField>
+          </ChildItems>
+        </Table>
+        <Button name="Open" id="4">
+          <CommandName>Form.Command.Open</CommandName>
+          <DefaultButton>true</DefaultButton>
+        </Button>
+      </ChildItems>
+    </UsualGroup>
+  </ChildItems>
   <Commands/>
 </Form>
 "#,
@@ -1249,6 +1312,38 @@ mod tests {
         }));
         assert!(report.elements.contains(&FormElementCount {
             name: "Item".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "UsualGroup".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "Table".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "InputField".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "Button".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "ChildItems".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "DataPath".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "CommandName".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "DefaultButton".to_string(),
             count: 1
         }));
         assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
