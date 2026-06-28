@@ -4010,6 +4010,7 @@ struct FormChildItem {
     password_mode: Option<bool>,
     multi_line: Option<bool>,
     wrap: Option<bool>,
+    text_edit: Option<bool>,
     drop_list_button: Option<bool>,
     clear_button: Option<bool>,
     open_button: Option<bool>,
@@ -5128,6 +5129,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        text_edit: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_text_edit(&fields)
+        } else {
+            None
+        },
         drop_list_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_drop_list_button(&fields)
         } else {
@@ -5489,6 +5495,14 @@ fn parse_form_input_field_multi_line(fields: &[&str]) -> Option<bool> {
 fn parse_form_input_field_wrap(fields: &[&str]) -> Option<bool> {
     let nested = form_input_field_extended_options(fields)?;
     match nested.get(6).map(|field| field.trim())? {
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_text_edit(fields: &[&str]) -> Option<bool> {
+    let nested = form_input_field_extended_options(fields)?;
+    match nested.get(41).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
@@ -6388,6 +6402,9 @@ fn format_form_child_item_xml(
             "{tab}\t<ChoiceButton>{}</ChoiceButton>\r\n",
             if choice_button { "true" } else { "false" }
         ));
+    }
+    if item.text_edit == Some(false) {
+        xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
     }
     if let Some(choice_list_button) = item.choice_list_button {
         xml.push_str(&format!(
@@ -14488,6 +14505,37 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_text_edit_false_from_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Field""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[41] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.text_edit, Some(false));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<TextEdit>false</TextEdit>"));
+    }
+
+    #[test]
     fn extracts_form_input_field_password_mode_from_layout_code() {
         for (code, expected) in [("0", false), ("1", true)] {
             let mut input_fields = vec!["0".to_string(); 40];
@@ -15092,6 +15140,7 @@ mod tests {
             password_mode: None,
             multi_line: None,
             wrap: None,
+            text_edit: None,
             drop_list_button: None,
             clear_button: None,
             open_button: None,
@@ -15138,6 +15187,7 @@ mod tests {
                     password_mode: None,
                     multi_line: None,
                     wrap: None,
+                    text_edit: None,
                     drop_list_button: None,
                     clear_button: None,
                     open_button: None,
@@ -15185,6 +15235,7 @@ mod tests {
                     password_mode: None,
                     multi_line: None,
                     wrap: None,
+                    text_edit: None,
                     drop_list_button: None,
                     clear_button: None,
                     open_button: None,
