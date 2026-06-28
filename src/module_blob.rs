@@ -210,6 +210,7 @@ struct FormXmlChildItem {
     button_representation: Option<FormXmlButtonRepresentation>,
     default_button: Option<bool>,
     show_title: Option<bool>,
+    show_in_header: Option<bool>,
     read_only: Option<bool>,
     skip_on_input: Option<bool>,
     title_location: Option<FormXmlTitleLocation>,
@@ -3732,6 +3733,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandName"
                         | "DataPath"
                         | "ShowTitle"
+                        | "ShowInHeader"
                         | "DefaultButton"
                         | "ReadOnly"
                         | "SkipOnInput"
@@ -4207,6 +4209,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
+                    || path_ends_with_for_child_show_in_header(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
@@ -5885,6 +5888,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "ShowInHeader"
+                        if path_ends_with_for_child_show_in_header(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.show_in_header = Some(parse_form_xml_bool(
+                                "ChildItem/ShowInHeader",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "Item"
                         if path_ends_with_for_child_addition_source_item(
                             &path,
@@ -5957,6 +5970,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandName"
                         | "DataPath"
                         | "ShowTitle"
+                        | "ShowInHeader"
                         | "DefaultButton"
                         | "ReadOnly"
                         | "SkipOnInput"
@@ -6095,6 +6109,7 @@ fn parse_form_child_item_xml(
         button_representation: None,
         default_button: None,
         show_title: None,
+        show_in_header: None,
         read_only: None,
         skip_on_input: None,
         title_location: None,
@@ -6552,6 +6567,16 @@ fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildIte
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "ShowTitle"])
+}
+
+fn path_ends_with_for_child_show_in_header(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(
+        item.tag.as_str(),
+        "InputField" | "LabelField" | "CheckBoxField"
+    ) && path_ends_with(path, &[item.tag.as_str(), "ShowInHeader"])
 }
 
 fn path_ends_with_for_child_addition_source_item(
@@ -7736,6 +7761,20 @@ fn patch_form_layout_child_item_entry(
             replacements.push((
                 auto_cell_height_range.clone(),
                 if auto_cell_height { "1" } else { "0" }.to_string(),
+            ));
+        }
+    }
+    if matches!(
+        item.tag.as_str(),
+        "InputField" | "LabelField" | "CheckBoxField"
+    ) && form_layout_input_field_is_extended(fields)
+        && let Some(show_in_header) = item.show_in_header
+    {
+        let index = 20 + form_layout_input_field_top_level_offset(text, fields);
+        if let Some(show_in_header_range) = fields.get(index) {
+            replacements.push((
+                show_in_header_range.clone(),
+                if show_in_header { "1" } else { "0" }.to_string(),
             ));
         }
     }
@@ -19230,6 +19269,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
             assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
             assert_eq!(&parsed.layout[input_fields[29].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_item_show_in_header() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 75];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{83,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[4] = "1".to_string();
+            input_fields[5] = r#"{0,{0,{"B",0},0}}"#.to_string();
+            input_fields[6] = "2".to_string();
+            input_fields[7] = r#""Author""#.to_string();
+            input_fields[21] = "1".to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            input_fields[40] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="83">
+			<ShowInHeader>{value}</ShowInHeader>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[21].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
 

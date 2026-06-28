@@ -3993,6 +3993,7 @@ struct FormChildItem {
     button_representation: Option<&'static str>,
     default_button: Option<bool>,
     show_title: Option<bool>,
+    show_in_header: Option<bool>,
     read_only: Option<bool>,
     skip_on_input: Option<bool>,
     title_location: Option<&'static str>,
@@ -5033,6 +5034,10 @@ fn parse_form_child_item(
                     .and_then(|field| parse_form_child_item_show_title(field))
             })
             .flatten(),
+        show_in_header: (matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
+            && form_input_field_layout_is_extended(&fields))
+        .then(|| parse_form_child_item_show_in_header(&fields))
+        .flatten(),
         read_only: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(14)
@@ -5342,6 +5347,14 @@ fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
     match field.trim() {
         "0" => Some(false),
         "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_child_item_show_in_header(fields: &[&str]) -> Option<bool> {
+    let index = 20 + form_input_field_top_level_offset(fields);
+    match fields.get(index).map(|field| field.trim())? {
+        "0" => Some(false),
         _ => None,
     }
 }
@@ -6496,6 +6509,9 @@ fn format_form_child_item_xml(
     }
     if item.show_title == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
+    }
+    if item.show_in_header == Some(false) {
+        xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
     }
     xml.push_str(&format_form_localized_section(
         "Title",
@@ -14599,6 +14615,39 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_child_item_show_in_header_false_from_shifted_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 75];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{83,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[4] = "1".to_string();
+        input_fields[5] = r#"{0,{0,{"B",0},0}}"#.to_string();
+        input_fields[6] = "2".to_string();
+        input_fields[7] = r#""Description""#.to_string();
+        input_fields[21] = "0".to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        input_fields[40] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.show_in_header, Some(false));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ShowInHeader>false</ShowInHeader>"));
+    }
+
+    #[test]
     fn extracts_form_input_field_password_mode_from_layout_code() {
         for (code, expected) in [("0", false), ("1", true)] {
             let mut input_fields = vec!["0".to_string(); 40];
@@ -15186,6 +15235,7 @@ mod tests {
             button_representation: None,
             default_button: None,
             show_title: None,
+            show_in_header: None,
             read_only: None,
             skip_on_input: None,
             title_location: None,
@@ -15234,6 +15284,7 @@ mod tests {
                     button_representation: None,
                     default_button: None,
                     show_title: None,
+                    show_in_header: None,
                     read_only: None,
                     skip_on_input: None,
                     title_location: None,
@@ -15283,6 +15334,7 @@ mod tests {
                     button_representation: None,
                     default_button: None,
                     show_title: None,
+                    show_in_header: None,
                     read_only: None,
                     skip_on_input: None,
                     title_location: None,
