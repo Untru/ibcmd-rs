@@ -3997,6 +3997,7 @@ struct FormChildItem {
     title_location: Option<&'static str>,
     edit_mode: Option<&'static str>,
     auto_edit_mode: Option<bool>,
+    width: Option<String>,
     auto_max_width: Option<bool>,
     max_width: Option<String>,
     auto_max_height: Option<bool>,
@@ -5049,6 +5050,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_width(&fields)
+        } else {
+            None
+        },
         auto_max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_width(&fields)
         } else {
@@ -5336,6 +5342,12 @@ fn parse_form_input_field_auto_edit_mode(field: &str) -> Option<bool> {
         "2" => Some(true),
         _ => None,
     }
+}
+
+fn parse_form_input_field_width(fields: &[&str]) -> Option<String> {
+    let nested = form_input_field_extended_options(fields)?;
+    let value = nested.get(2)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 fn parse_form_input_field_auto_max_width(fields: &[&str]) -> Option<bool> {
@@ -6148,6 +6160,12 @@ fn format_form_child_item_xml(
     }
     if item.auto_edit_mode == Some(true) {
         xml.push_str(&format!("{tab}\t<AutoEditMode>true</AutoEditMode>\r\n"));
+    }
+    if let Some(width) = &item.width {
+        xml.push_str(&format!(
+            "{tab}\t<Width>{}</Width>\r\n",
+            escape_xml_text(width)
+        ));
     }
     if item.auto_max_width == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
@@ -13972,6 +13990,37 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_width_from_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Field""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[2] = "22".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.width.as_deref(), Some("22"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Width>22</Width>"));
+    }
+
+    #[test]
     fn extracts_form_input_field_max_width_from_layout_code() {
         let mut input_fields = vec!["0".to_string(); 40];
         input_fields[0] = "48".to_string();
@@ -14558,6 +14607,7 @@ mod tests {
             title_location: None,
             edit_mode: None,
             auto_edit_mode: None,
+            width: None,
             auto_max_width: None,
             max_width: None,
             auto_max_height: None,
@@ -14594,6 +14644,7 @@ mod tests {
                     title_location: None,
                     edit_mode: None,
                     auto_edit_mode: None,
+                    width: None,
                     auto_max_width: None,
                     max_width: None,
                     auto_max_height: None,
@@ -14631,6 +14682,7 @@ mod tests {
                     title_location: None,
                     edit_mode: None,
                     auto_edit_mode: None,
+                    width: None,
                     auto_max_width: None,
                     max_width: None,
                     auto_max_height: None,
