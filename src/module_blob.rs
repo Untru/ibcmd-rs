@@ -6037,7 +6037,7 @@ fn patch_form_layout_child_items(
             command_uuids,
             source,
         )?;
-        if !patched {
+        if !patched && item.depth == 0 {
             let _ = append_form_layout_top_level_child_item(
                 layout,
                 item,
@@ -17332,6 +17332,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
         assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
         assert!(!parsed.layout.contains("OldColumn"), "{}", parsed.layout);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_adds_direct_search_addition_to_existing_table() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},0}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<SearchStringAddition name="NewSearch" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+			</SearchStringAddition>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
+        assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
+        assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
 
         Ok(())
     }
