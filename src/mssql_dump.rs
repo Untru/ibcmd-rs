@@ -3997,6 +3997,7 @@ struct FormChildItem {
     skip_on_input: Option<bool>,
     title_location: Option<&'static str>,
     edit_mode: Option<&'static str>,
+    mark_required_complete: Option<bool>,
     auto_edit_mode: Option<bool>,
     width: Option<String>,
     height: Option<String>,
@@ -5058,6 +5059,13 @@ fn parse_form_child_item(
         } else {
             None
         },
+        mark_required_complete: if tag == "InputField"
+            && form_input_field_layout_is_extended(&fields)
+        {
+            parse_form_input_field_mark_required_complete(&fields)
+        } else {
+            None
+        },
         auto_edit_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(26)
@@ -5581,6 +5589,10 @@ fn parse_form_input_field_auto_mark_incomplete(fields: &[&str]) -> Option<bool> 
         "1" => Some(true),
         _ => None,
     }
+}
+
+fn parse_form_input_field_mark_required_complete(fields: &[&str]) -> Option<bool> {
+    parse_form_input_field_auto_mark_incomplete(fields)
 }
 
 fn parse_form_input_field_choice_button_representation(fields: &[&str]) -> Option<&'static str> {
@@ -6275,6 +6287,16 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<EditMode>{}</EditMode>\r\n",
             escape_xml_text(edit_mode)
+        ));
+    }
+    if let Some(mark_required_complete) = item.mark_required_complete {
+        xml.push_str(&format!(
+            "{tab}\t<MarkRequiredComplete>{}</MarkRequiredComplete>\r\n",
+            if mark_required_complete {
+                "true"
+            } else {
+                "false"
+            }
         ));
     }
     if item.auto_edit_mode == Some(true) {
@@ -14928,6 +14950,42 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_mark_required_complete_from_layout_code() {
+        for (code, expected) in [("0", false), ("1", true)] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Field""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[31] = code.to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let field = format!("{{{}}}", input_fields.join(","));
+
+            let item = parse_form_child_item(
+                &field,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "InputField");
+            assert_eq!(item.mark_required_complete, Some(expected));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains(&format!(
+                "<MarkRequiredComplete>{}</MarkRequiredComplete>",
+                if expected { "true" } else { "false" }
+            )));
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_choice_button_representation_from_layout_code() {
         for (code, expected) in [
             ("1", "ShowInDropList"),
@@ -15021,6 +15079,7 @@ mod tests {
             skip_on_input: None,
             title_location: None,
             edit_mode: None,
+            mark_required_complete: None,
             auto_edit_mode: None,
             width: None,
             height: None,
@@ -15066,6 +15125,7 @@ mod tests {
                     skip_on_input: None,
                     title_location: None,
                     edit_mode: None,
+                    mark_required_complete: None,
                     auto_edit_mode: None,
                     width: None,
                     height: None,
@@ -15112,6 +15172,7 @@ mod tests {
                     skip_on_input: None,
                     title_location: None,
                     edit_mode: None,
+                    mark_required_complete: None,
                     auto_edit_mode: None,
                     width: None,
                     height: None,

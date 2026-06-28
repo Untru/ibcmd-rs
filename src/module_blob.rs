@@ -214,6 +214,7 @@ struct FormXmlChildItem {
     skip_on_input: Option<bool>,
     title_location: Option<FormXmlTitleLocation>,
     edit_mode: Option<FormXmlEditMode>,
+    mark_required_complete: Option<bool>,
     auto_edit_mode: Option<bool>,
     width: Option<String>,
     height: Option<String>,
@@ -3734,6 +3735,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SkipOnInput"
                         | "TitleLocation"
                         | "EditMode"
+                        | "MarkRequiredComplete"
                         | "AutoEditMode"
                         | "AutoMaxWidth"
                         | "MaxWidth"
@@ -4170,6 +4172,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_skip_on_input(&path, &current_child_items)
                     || path_ends_with_for_child_title_location(&path, &current_child_items)
                     || path_ends_with_for_child_edit_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_mark_required_complete(&path, &current_child_items)
                     || path_ends_with_for_child_auto_edit_mode(&path, &current_child_items)
                     || path_ends_with_for_child_width(&path, &current_child_items)
                     || path_ends_with_for_child_height(&path, &current_child_items)
@@ -5575,6 +5578,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.edit_mode = Some(parse_form_edit_mode_xml(text_value.trim())?);
                         }
                     }
+                    "MarkRequiredComplete"
+                        if path_ends_with_for_child_mark_required_complete(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.mark_required_complete = Some(parse_form_xml_bool(
+                                "ChildItem/MarkRequiredComplete",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "AutoEditMode"
                         if path_ends_with_for_child_auto_edit_mode(&path, &current_child_items) =>
                     {
@@ -5917,6 +5933,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SkipOnInput"
                         | "TitleLocation"
                         | "EditMode"
+                        | "MarkRequiredComplete"
                         | "AutoEditMode"
                         | "AutoMaxWidth"
                         | "MaxWidth"
@@ -6051,6 +6068,7 @@ fn parse_form_child_item_xml(
         skip_on_input: None,
         title_location: None,
         edit_mode: None,
+        mark_required_complete: None,
         auto_edit_mode: None,
         width: None,
         height: None,
@@ -6288,6 +6306,16 @@ fn path_ends_with_for_child_edit_mode(path: &[String], items: &[FormXmlChildItem
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "EditMode"])
+}
+
+fn path_ends_with_for_child_mark_required_complete(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MarkRequiredComplete"])
 }
 
 fn path_ends_with_for_child_auto_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -7890,6 +7918,7 @@ fn patch_form_layout_input_field_extended_options(
         && item.list_choice_mode.is_none()
         && item.quick_choice.is_none()
         && item.choose_type.is_none()
+        && item.mark_required_complete.is_none()
         && item.auto_mark_incomplete.is_none()
         && item.choice_button_representation.is_none()
     {
@@ -7927,6 +7956,16 @@ fn patch_form_layout_input_field_extended_options(
         let fields = scan_braced_fields(&text, 0)?;
         if fields.get(6).is_some() {
             replace_braced_field(&mut text, 6, if wrap { "1" } else { "0" })?;
+        }
+    }
+    if let Some(mark_required_complete) = item.mark_required_complete {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(31).is_some() {
+            replace_braced_field(
+                &mut text,
+                31,
+                if mark_required_complete { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(list_choice_mode) = item.list_choice_mode {
@@ -19568,6 +19607,49 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<ChildItems>
 		<InputField name="Author" id="78">
 			<AutoMarkIncomplete>{value}</AutoMarkIncomplete>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[31].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_mark_required_complete() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[31] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<MarkRequiredComplete>{value}</MarkRequiredComplete>
 		</InputField>
 	</ChildItems>
 </Form>
