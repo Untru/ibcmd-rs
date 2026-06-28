@@ -204,6 +204,7 @@ struct FormXmlChildItem {
     depth: usize,
     id: String,
     name: String,
+    group: Option<FormXmlGroup>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -232,6 +233,7 @@ enum FormXmlGroup {
     Horizontal,
     AlwaysHorizontal,
     HorizontalIfPossible,
+    InCell,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -4052,6 +4054,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
@@ -4394,6 +4397,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
@@ -5348,6 +5352,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.item_type = Some(text_value.trim().to_string());
                         }
                     }
+                    "Group" if path_ends_with_for_child_group(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.group = Some(parse_form_group_xml(text_value.trim())?);
+                        }
+                    }
                     "Item"
                         if path_ends_with_for_child_addition_source_item(
                             &path,
@@ -5519,6 +5528,7 @@ fn parse_form_child_item_xml(
         depth: 0,
         id,
         name,
+        group: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5665,6 +5675,13 @@ fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) ->
         || path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Type"])
 }
 
+fn path_ends_with_for_child_group(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Group"])
+}
+
 fn path_ends_with_for_child_addition_source_item(
     path: &[String],
     items: &[FormXmlChildItem],
@@ -5726,6 +5743,7 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
         "Horizontal" => Ok(FormXmlGroup::Horizontal),
         "AlwaysHorizontal" => Ok(FormXmlGroup::AlwaysHorizontal),
         "HorizontalIfPossible" => Ok(FormXmlGroup::HorizontalIfPossible),
+        "InCell" => Ok(FormXmlGroup::InCell),
         other => Err(anyhow!("unsupported Form Group: {other}")),
     }
 }
@@ -5787,6 +5805,7 @@ fn patch_form_layout_properties(
                 replace_braced_field(layout, 13, "1")?;
                 replace_braced_field(layout, 14, "1")?;
             }
+            FormXmlGroup::InCell => return Err(anyhow!("unsupported root Form Group: InCell")),
         }
     }
     if let Some(command_bar_location) = properties.command_bar_location {
@@ -6494,18 +6513,20 @@ fn format_form_layout_new_group_item(
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
+    let group = item.group.and_then(form_child_group_code).unwrap_or("0");
     let creatable_children = item
         .child_items
         .iter()
         .filter(|child| is_form_layout_creatable_nested_item(child))
         .collect::<Vec<_>>();
     let mut text = format!(
-        "{{22,{{{},{}}},0,0,0,{},{},{},0,1,{}",
+        "{{22,{{{},{}}},0,0,0,{},{},{},{},1,{}",
         item.id,
         item_uuid,
         group_type,
         format_1c_string(&item.name),
         format_1c_synonyms(&item.title),
+        group,
         creatable_children.len()
     );
     for child in creatable_children {
@@ -6564,6 +6585,16 @@ fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
         "UsualGroup" => Some("5"),
         "ButtonGroup" => Some("6"),
         _ => None,
+    }
+}
+
+fn form_child_group_code(value: FormXmlGroup) -> Option<&'static str> {
+    match value {
+        FormXmlGroup::Vertical => Some("0"),
+        FormXmlGroup::Horizontal => Some("1"),
+        FormXmlGroup::AlwaysHorizontal => Some("2"),
+        FormXmlGroup::HorizontalIfPossible => Some("3"),
+        FormXmlGroup::InCell => Some("4"),
     }
 }
 
@@ -6684,6 +6715,15 @@ fn patch_form_layout_child_item_entry(
             format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
     {
         replacements.push((data_path_range.clone(), data_path_ref));
+    }
+    if matches!(
+        item.tag.as_str(),
+        "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+    ) && let Some(group) = item.group
+        && let Some(group_code) = form_child_group_code(group)
+        && let Some(group_range) = fields.get(8)
+    {
+        replacements.push((group_range.clone(), group_code.to_string()));
     }
 
     replacements.sort_by_key(|(range, _)| range.start);
@@ -16705,6 +16745,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			</Title>
 		</CommandBar>
 		<UsualGroup name="MainGroup" id="22">
+			<Group>Horizontal</Group>
 			<Title>
 				<v8:item>
 					<v8:lang>en</v8:lang>
@@ -16735,10 +16776,39 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             parsed
                 .layout
-                .contains(r#",5,"MainGroup",{1,"en","Main"},0,1,0}"#)
+                .contains(r#",5,"MainGroup",{1,"en","Main"},1,1,0}"#)
         );
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_group_layout_group() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{0},0,1,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Group>HorizontalIfPossible</Group>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[5].clone()], "5");
+        assert_eq!(&parsed.layout[group_fields[8].clone()], "3");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }

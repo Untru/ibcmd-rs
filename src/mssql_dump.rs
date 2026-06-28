@@ -4955,7 +4955,13 @@ fn parse_form_child_item(
         tag,
         id: id.to_string(),
         name,
-        group: (tag == "UsualGroup").then_some("Vertical"),
+        group: (tag == "UsualGroup")
+            .then(|| {
+                fields
+                    .get(8)
+                    .and_then(|field| parse_form_child_item_group(field))
+            })
+            .flatten(),
         item_type: if tag == "Button" {
             fields
                 .get(7)
@@ -4986,6 +4992,17 @@ fn parse_form_child_item(
         },
         child_items,
     })
+}
+
+fn parse_form_child_item_group(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("Vertical"),
+        "1" => Some("Horizontal"),
+        "2" => Some("AlwaysHorizontal"),
+        "3" => Some("HorizontalIfPossible"),
+        "4" => Some("InCell"),
+        _ => None,
+    }
 }
 
 fn parse_form_button_type(field: &str) -> Option<&'static str> {
@@ -13151,6 +13168,25 @@ mod tests {
             .count(),
             1
         );
+    }
+
+    #[test]
+    fn extracts_form_usual_group_group_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{22,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0},3,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        let xml = format_form_child_items_xml(&[item], 1);
+
+        assert!(xml.contains(r#"<UsualGroup name="MainGroup" id="22">"#));
+        assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
     }
 
     #[test]
