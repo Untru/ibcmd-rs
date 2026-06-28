@@ -778,6 +778,19 @@ fn source_assets_from_metadata_blob_inner(
         }
     }
 
+    if let Some(suffix) = additional_indexes_body_suffix(kind) {
+        let additional_indexes_id = format!("{uuid}.{suffix}");
+        if file_names.contains(additional_indexes_id.as_str()) {
+            assets.push((
+                additional_indexes_id,
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("AdditionalIndexes.xml"),
+                    kind: SourceAssetKind::InflatedBinary,
+                },
+            ));
+        }
+    }
+
     let body_id = format!("{uuid}.0");
     if file_names.contains(body_id.as_str()) {
         let asset = match kind {
@@ -896,6 +909,14 @@ fn source_assets_from_metadata_blob_inner(
     }
 
     Some(assets)
+}
+
+fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Document" => Some("3"),
+        "AccumulationRegister" => Some("4"),
+        _ => None,
+    }
 }
 
 fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
@@ -11845,6 +11866,60 @@ mod tests {
                 Some(expected)
             );
         }
+    }
+
+    #[test]
+    fn writes_document_additional_indexes_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let document_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,\r\n{{3,\r\n{{1,0,{uuid}}},\"Order\",{{1,\"en\",\"Order\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let additional_indexes =
+            b"\xef\xbb\xbf<AdditionalIndexes><AdditionalIndex id=\"idx\"/></AdditionalIndexes>"
+                .to_vec();
+        let additional_indexes_blob = deflate_for_test(&additional_indexes);
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: document_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&document_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.3"),
+                part_no: 0,
+                data_size: additional_indexes_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&additional_indexes_blob),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("Documents/Order/Ext/AdditionalIndexes.xml")).unwrap(),
+            additional_indexes
+        );
+        let row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.3"))
+            .unwrap();
+        assert_eq!(
+            row.source_asset_path.as_deref(),
+            Some("Documents/Order/Ext/AdditionalIndexes.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

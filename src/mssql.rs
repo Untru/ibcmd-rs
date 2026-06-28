@@ -2284,7 +2284,46 @@ fn prepare_metadata_body_rows(
     rows.extend(prepare_command_interface_body_row(
         sqlcmd, server, database, xml_path, properties,
     )?);
+    rows.extend(prepare_additional_indexes_body_row(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
     Ok(rows)
+}
+
+fn prepare_additional_indexes_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(suffix) = additional_indexes_body_suffix(&properties.kind) else {
+        return Ok(Vec::new());
+    };
+    let body_path = infer_additional_indexes_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path)
+        .with_context(|| format!("failed to read AdditionalIndexes {}", body_path.display()))?;
+    let packed = pack_raw_deflated_blob_from_bytes(&bytes)
+        .with_context(|| format!("failed to pack AdditionalIndexes {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Document" => Some("3"),
+        "AccumulationRegister" => Some("4"),
+        _ => None,
+    }
 }
 
 fn prepare_style_body_row(
@@ -4806,6 +4845,12 @@ fn infer_command_interface_body_path(xml: &Path) -> PathBuf {
         .join("CommandInterface.xml")
 }
 
+fn infer_additional_indexes_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("")
+        .join("Ext")
+        .join("AdditionalIndexes.xml")
+}
+
 fn infer_exchange_plan_content_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Content.xml")
 }
@@ -5512,6 +5557,20 @@ mod tests {
             ]
         );
         assert!(super::object_module_body_suffixes("Role").is_empty());
+    }
+
+    #[test]
+    fn maps_additional_indexes_body_suffixes_for_load() {
+        assert_eq!(super::additional_indexes_body_suffix("Document"), Some("3"));
+        assert_eq!(
+            super::additional_indexes_body_suffix("AccumulationRegister"),
+            Some("4")
+        );
+        assert_eq!(super::additional_indexes_body_suffix("Catalog"), None);
+        assert_eq!(
+            super::infer_additional_indexes_body_path(r"Documents\Order.xml".as_ref()),
+            std::path::PathBuf::from(r"Documents\Order\Ext\AdditionalIndexes.xml")
+        );
     }
 
     #[test]

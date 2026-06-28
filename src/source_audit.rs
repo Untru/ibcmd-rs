@@ -212,12 +212,6 @@ pub fn audit_source_load_coverage_from_manifest(
                 reason: "non-module file under Ext/Form is not loaded by current form body packer"
                     .to_string(),
             });
-        } else if is_known_uncovered_configuration_asset(&file.path) {
-            known_uncovered.push(SourceLoadCoverageItem {
-                path: file.path.clone(),
-                bytes: file.size_bytes,
-                reason: "configuration asset is not routed by current loader".to_string(),
-            });
         }
     }
 
@@ -470,12 +464,19 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/flowchart.xml")
         || lower.ends_with("/ext/help.xml")
         || lower.ends_with("/ext/commandinterface.xml")
+        || is_supported_additional_indexes_file(&lower)
         || lower.ends_with("/ext/style.xml")
         || lower == "ext/homepageworkarea.xml"
         || lower == "ext/mobileclientsignature.bin"
         || lower == "ext/mainsectioncommandinterface.xml"
         || lower == "ext/clientapplicationinterface.xml"
         || lower == "ext/standaloneconfigurationcontent.bin"
+}
+
+fn is_supported_additional_indexes_file(lower_path: &str) -> bool {
+    lower_path.ends_with("/ext/additionalindexes.xml")
+        && (lower_path.starts_with("documents/")
+            || lower_path.starts_with("accumulationregisters/"))
 }
 
 fn is_form_ext_xml_path(path: &str) -> bool {
@@ -500,11 +501,6 @@ fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &
     files
         .iter()
         .any(|file| normalize_source_path(&file.path).eq_ignore_ascii_case(&module_path))
-}
-
-fn is_known_uncovered_configuration_asset(path: &str) -> bool {
-    let lower = normalize_source_path(path).to_ascii_lowercase();
-    matches!(lower.as_str(), "ext/additionalindexes.xml")
 }
 
 fn normalize_source_path(path: &str) -> String {
@@ -1232,6 +1228,7 @@ mod tests {
         fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
         fs::create_dir_all(root.join("Catalogs/Products/Ext"))?;
         fs::create_dir_all(root.join("CommonModules/Foo/Ext"))?;
+        fs::create_dir_all(root.join("Documents/Order/Ext"))?;
         fs::create_dir_all(root.join("Ext"))?;
         fs::write(
             root.join("Catalogs/Products.xml"),
@@ -1266,6 +1263,14 @@ mod tests {
             b"Procedure Run()\nEndProcedure\n",
         )?;
         fs::write(
+            root.join("Documents/Order.xml"),
+            br#"<MetaDataObject><Document uuid="44444444-4444-4444-8444-444444444444"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Documents/Order/Ext/AdditionalIndexes.xml"),
+            b"<AdditionalIndexes/>",
+        )?;
+        fs::write(
             root.join("Ext/MobileClientSignature.bin"),
             b"{2,\"\",\"\",{0},0}",
         )?;
@@ -1288,14 +1293,14 @@ mod tests {
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 13);
-        assert_eq!(report.stage_metadata_xml_files, 2);
+        assert_eq!(report.total_files, 15);
+        assert_eq!(report.stage_metadata_xml_files, 3);
         assert_eq!(report.stage_common_module_xml_files, 1);
-        assert_eq!(report.stage_entry_files, 3);
+        assert_eq!(report.stage_entry_files, 4);
         assert_eq!(report.module_files, 2);
         assert_eq!(report.supported_module_files, 2);
-        assert_eq!(report.supported_ext_body_files, 6);
-        assert_eq!(report.potentially_stageable_body_files, 8);
+        assert_eq!(report.supported_ext_body_files, 7);
+        assert_eq!(report.potentially_stageable_body_files, 9);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);
