@@ -4005,6 +4005,7 @@ struct FormChildItem {
     max_height: Option<String>,
     horizontal_stretch: Option<bool>,
     vertical_stretch: Option<bool>,
+    multi_line: Option<bool>,
     drop_list_button: Option<bool>,
     clear_button: Option<bool>,
     open_button: Option<bool>,
@@ -5094,6 +5095,11 @@ fn parse_form_child_item(
         } else {
             None
         },
+        multi_line: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_multi_line(&fields)
+        } else {
+            None
+        },
         drop_list_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_drop_list_button(&fields)
         } else {
@@ -5420,6 +5426,15 @@ fn parse_form_input_field_horizontal_stretch(fields: &[&str]) -> Option<bool> {
 fn parse_form_input_field_vertical_stretch(fields: &[&str]) -> Option<bool> {
     let nested = form_input_field_extended_options(fields)?;
     match nested.get(5).map(|field| field.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_multi_line(fields: &[&str]) -> Option<bool> {
+    let nested = form_input_field_extended_options(fields)?;
+    match nested.get(8).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -6254,6 +6269,12 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
+        ));
+    }
+    if let Some(multi_line) = item.multi_line {
+        xml.push_str(&format!(
+            "{tab}\t<MultiLine>{}</MultiLine>\r\n",
+            if multi_line { "true" } else { "false" }
         ));
     }
     if let Some(drop_list_button) = item.drop_list_button {
@@ -14291,6 +14312,42 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_multi_line_from_layout_code() {
+        for (code, expected) in [("0", false), ("1", true)] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Field""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[8] = code.to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let field = format!("{{{}}}", input_fields.join(","));
+
+            let item = parse_form_child_item(
+                &field,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, "InputField");
+            assert_eq!(item.multi_line, Some(expected));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains(&format!(
+                "<MultiLine>{}</MultiLine>",
+                if expected { "true" } else { "false" }
+            )));
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_drop_list_button_from_layout_code() {
         for (code, expected) in [("0", false), ("1", true)] {
             let mut input_fields = vec!["0".to_string(); 40];
@@ -14818,6 +14875,7 @@ mod tests {
             max_height: None,
             horizontal_stretch: None,
             vertical_stretch: None,
+            multi_line: None,
             drop_list_button: None,
             clear_button: None,
             open_button: None,
@@ -14859,6 +14917,7 @@ mod tests {
                     max_height: None,
                     horizontal_stretch: None,
                     vertical_stretch: None,
+                    multi_line: None,
                     drop_list_button: None,
                     clear_button: None,
                     open_button: None,
@@ -14901,6 +14960,7 @@ mod tests {
                     max_height: None,
                     horizontal_stretch: None,
                     vertical_stretch: None,
+                    multi_line: None,
                     drop_list_button: None,
                     clear_button: None,
                     open_button: None,
