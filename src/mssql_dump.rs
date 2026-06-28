@@ -5523,6 +5523,15 @@ fn parse_form_child_item(
                         .get(8)
                         .and_then(|field| parse_form_child_item_group(field))
                 })
+        } else if tag == "Page" {
+            fields
+                .get(8)
+                .and_then(|field| parse_form_child_item_group(field))
+                .or_else(|| {
+                    fields
+                        .get(9)
+                        .and_then(|field| parse_form_child_item_group(field))
+                })
         } else {
             None
         },
@@ -5623,6 +5632,11 @@ fn parse_form_child_item(
         },
         height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_height(&fields)
+        } else if tag == "Pages" {
+            fields
+                .get(13)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0")
         } else {
             None
         },
@@ -6253,6 +6267,8 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "0" => Some("CommandBar"),
             "1" => Some("Popup"),
             "2" => Some("ColumnGroup"),
+            "3" => Some("Pages"),
+            "4" => Some("Page"),
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
             _ => None,
@@ -15205,6 +15221,33 @@ mod tests {
         assert!(xml.contains(r#"<UsualGroup name="MainGroup" id="22">"#));
         assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
         assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
+    }
+
+    #[test]
+    fn extracts_form_pages_and_page_from_layout_codes() {
+        let item = parse_form_child_item(
+            r#"{22,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,1,{"ru","Pages title"}},{1,0},0,1,0,0,14,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,11111111-1111-4111-8111-111111111111,{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,1,{"ru","Main"}},{1,0},3,1,0}}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Pages");
+        assert_eq!(item.height.as_deref(), Some("14"));
+        assert_eq!(item.child_items.len(), 1);
+        assert_eq!(item.child_items[0].tag, "Page");
+        assert_eq!(item.child_items[0].group, Some("HorizontalIfPossible"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+
+        assert!(xml.contains(r#"<Pages name="PagesGroup" id="8">"#));
+        assert!(xml.contains("<Height>14</Height>"));
+        assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
+        assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
     }
 
     #[test]

@@ -6589,6 +6589,8 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "CommandBar"
             | "ColumnGroup"
             | "Popup"
+            | "Pages"
+            | "Page"
             | "ButtonGroup"
             | "Button"
             | "Table"
@@ -6759,7 +6761,8 @@ fn path_ends_with_for_child_height(path: &[String], items: &[FormXmlChildItem]) 
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "Height"])
+    matches!(item.tag.as_str(), "InputField" | "Pages")
+        && path_ends_with(path, &[item.tag.as_str(), "Height"])
 }
 
 fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -8462,6 +8465,8 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
             | "UsualGroup"
             | "ColumnGroup"
             | "Popup"
+            | "Pages"
+            | "Page"
             | "ButtonGroup"
             | "Table"
             | "InputField"
@@ -8491,17 +8496,16 @@ fn format_form_layout_new_top_level_item(
             command_uuids,
             source,
         ),
-        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "ButtonGroup" => {
-            format_form_layout_new_child_item(
-                item,
-                item_uuid,
-                commands,
-                table_ids_by_name,
-                table_column_ids_by_name,
-                command_uuids,
-                source,
-            )
-        }
+        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages" | "Page"
+        | "ButtonGroup" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
         "Table" => format_form_layout_new_child_item(
             item,
             item_uuid,
@@ -8547,17 +8551,16 @@ fn format_form_layout_new_child_item(
             command_uuids,
             source,
         ),
-        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "ButtonGroup" => {
-            format_form_layout_new_group_item(
-                item,
-                item_uuid,
-                commands,
-                table_ids_by_name,
-                table_column_ids_by_name,
-                command_uuids,
-                source,
-            )
-        }
+        "CommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages" | "Page"
+        | "ButtonGroup" => format_form_layout_new_group_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
         "Table" => format_form_layout_new_table_item(
             item,
             item_uuid,
@@ -8789,6 +8792,8 @@ fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
             | "UsualGroup"
             | "ColumnGroup"
             | "Popup"
+            | "Pages"
+            | "Page"
             | "ButtonGroup"
             | "Table"
             | "InputField"
@@ -8815,6 +8820,8 @@ fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
         "CommandBar" => Some("0"),
         "Popup" => Some("1"),
         "ColumnGroup" => Some("2"),
+        "Pages" => Some("3"),
+        "Page" => Some("4"),
         "UsualGroup" => Some("5"),
         "ButtonGroup" => Some("6"),
         _ => None,
@@ -9075,6 +9082,12 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((options_range.clone(), options));
     }
+    if item.tag == "Pages"
+        && let Some(height) = &item.height
+        && let Some(height_range) = fields.get(13)
+    {
+        replacements.push((height_range.clone(), height.to_string()));
+    }
     if item.tag.ends_with("Addition")
         && let Some(item_type) = &item.item_type
         && let Some(type_code) = form_search_addition_type_code(item_type)
@@ -9116,11 +9129,11 @@ fn patch_form_layout_child_item_entry(
     }
     if matches!(
         item.tag.as_str(),
-        "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup"
     ) && let Some(group) = item.group
         && form_layout_usual_group_extended_options_range(text, fields).is_none()
         && let Some(group_code) = form_child_group_code(group)
-        && let Some(group_range) = fields.get(8)
+        && let Some(group_range) = form_layout_child_item_group_range(text, fields, item)
     {
         replacements.push((group_range.clone(), group_code.to_string()));
     }
@@ -9152,7 +9165,7 @@ fn patch_form_layout_child_item_entry(
     }
     if matches!(
         item.tag.as_str(),
-        "CommandBar" | "UsualGroup" | "Popup" | "ButtonGroup"
+        "CommandBar" | "UsualGroup" | "Popup" | "Pages" | "Page" | "ButtonGroup"
     ) && let Some(show_title) = item.show_title
         && let Some(show_title_range) = fields.get(9)
     {
@@ -9185,6 +9198,27 @@ fn patch_form_layout_child_item_entry(
         source,
     )?;
     Ok(())
+}
+
+fn form_layout_child_item_group_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> Option<Range<usize>> {
+    if item.tag == "Page" {
+        for index in [8, 9] {
+            let range = fields.get(index)?.clone();
+            if form_child_group_code(item.group?) == Some(text[range.clone()].trim()) {
+                return Some(range);
+            }
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return Some(range);
+            }
+        }
+        None
+    } else {
+        fields.get(8).cloned()
+    }
 }
 
 fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
@@ -9553,8 +9587,14 @@ fn form_layout_direct_child_items_span(
     fields: &[Range<usize>],
 ) -> Option<FormLayoutDirectChildItemsSpan> {
     let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let item_type = fields.get(5).map(|range| text[range.clone()].trim());
     let (count_index, first_uuid_index) = if wrapper == "22"
         && form_layout_usual_group_extended_options_range(text, fields).is_some()
+    {
+        (21, 22)
+    } else if wrapper == "22"
+        && matches!(item_type, Some("3" | "4"))
+        && form_layout_direct_child_items_span_at(text, fields, 21, 22).is_some()
     {
         (21, 22)
     } else if matches!(wrapper, "22" | "73") {
@@ -9562,6 +9602,15 @@ fn form_layout_direct_child_items_span(
     } else {
         return None;
     };
+    form_layout_direct_child_items_span_at(text, fields, count_index, first_uuid_index)
+}
+
+fn form_layout_direct_child_items_span_at(
+    text: &str,
+    fields: &[Range<usize>],
+    count_index: usize,
+    first_uuid_index: usize,
+) -> Option<FormLayoutDirectChildItemsSpan> {
     let count_range = fields.get(count_index)?.clone();
     let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
     (fields.len() >= first_uuid_index + count * 2).then_some(FormLayoutDirectChildItemsSpan {
@@ -9976,6 +10025,8 @@ fn form_layout_child_item_tag<'a>(
             "0" => Some("CommandBar"),
             "1" => Some("Popup"),
             "2" => Some("ColumnGroup"),
+            "3" => Some("Pages"),
+            "4" => Some("Page"),
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
             _ => None,
@@ -20654,6 +20705,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[group_fields[8].clone()], "3");
         assert_eq!(&parsed.layout[group_fields[9].clone()], "0");
         assert_eq!(&parsed.layout[group_fields[10].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_pages_and_page() -> anyhow::Result<()> {
+        let pages = r#"{22,{8,22222222-2222-4222-8222-222222222222},0,0,0,3,"PagesGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,33333333-3333-4333-8333-333333333333,{22,{9,22222222-2222-4222-8222-222222222222},0,0,0,4,"MainPage",{1,0},{1,0},0,1,0}}"#;
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{pages}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Pages name="PagesGroup" id="8">
+			<Height>14</Height>
+			<ChildItems>
+				<Page name="MainPage" id="9">
+					<Group>HorizontalIfPossible</Group>
+				</Page>
+			</ChildItems>
+		</Pages>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r#",3,"PagesGroup",{1,0},{1,0},0,1,0,0,14,2,2,"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r#",4,"MainPage",{1,0},{1,0},3,1,0}"#),
+            "{}",
+            parsed.layout
+        );
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
