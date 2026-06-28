@@ -9934,8 +9934,8 @@ fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
 
 fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
 \t<{kind} uuid=\"{uuid}\">\r\n\
 \t\t<Properties>\r\n\
 \t\t\t<Name>{name}</Name>\r\n",
@@ -9960,16 +9960,23 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
         }
         xml.push_str("\t\t\t</Synonym>\r\n");
     }
-    xml.push_str(&format!(
-        "\t\t\t<Comment>{}</Comment>\r\n\
-\t\t\t<FormType>Managed</FormType>\r\n\
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_text(&header.comment)
+        ));
+    }
+    xml.push_str(
+        "\t\t\t<FormType>Managed</FormType>\r\n\
 \t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n\
 \t\t\t<UsePurposes>\r\n\
 \t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>\r\n\
 \t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">MobilePlatformApplication</v8:Value>\r\n\
-\t\t\t</UsePurposes>\r\n",
-        escape_xml_text(&header.comment)
-    ));
+\t\t\t</UsePurposes>\r\n\
+\t\t\t<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>\r\n",
+    );
     if kind == "CommonForm" {
         xml.push_str(
             "\t\t\t<UseStandardCommands>false</UseStandardCommands>\r\n\
@@ -9980,7 +9987,7 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
     xml.push_str(&format!(
         "\t\t</Properties>\r\n\
 \t</{kind}>\r\n\
-</MetaDataObject>\r\n"
+</MetaDataObject>"
     ));
     xml
 }
@@ -11855,12 +11862,30 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 4);
-        let owned_xml =
-            fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm.xml")).unwrap();
+        let owned_xml_bytes = fs::read(root.join("Catalogs/Products/Forms/ListForm.xml")).unwrap();
+        assert!(owned_xml_bytes.starts_with(b"\xEF\xBB\xBF<?xml"));
+        assert!(owned_xml_bytes.ends_with(b"</MetaDataObject>"));
+        assert!(!owned_xml_bytes.ends_with(b"</MetaDataObject>\r\n"));
+        let owned_xml = String::from_utf8(owned_xml_bytes).unwrap();
         let common_xml = fs::read_to_string(root.join("CommonForms/SharedForm.xml")).unwrap();
         assert!(owned_xml.contains("<Form uuid=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
+        assert!(owned_xml.contains(r#"version="2.21""#));
+        assert!(
+            owned_xml.contains(r#"xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config""#)
+        );
+        assert!(owned_xml.contains(r#"xmlns:xr="http://v8.1c.ru/8.3/xcf/readable""#));
+        assert!(owned_xml.contains("<Comment/>"));
         assert!(owned_xml.contains("<FormType>Managed</FormType>"));
+        assert!(
+            owned_xml
+                .contains("<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>")
+        );
         assert!(common_xml.contains("<CommonForm uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">"));
+        assert!(common_xml.contains(r#"version="2.21""#));
+        assert!(
+            common_xml
+                .contains("<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>")
+        );
         assert!(common_xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
         assert!(!root.join("Catalogs/Products/Forms/SharedForm.xml").exists());
         assert!(!root.join("Catalogs/Services/Forms/SharedForm.xml").exists());
