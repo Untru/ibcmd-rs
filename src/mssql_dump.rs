@@ -8439,6 +8439,7 @@ struct CatalogProperties {
     check_unique: bool,
     autonumbering: bool,
     default_presentation: Option<&'static str>,
+    input_by_string_fields: Vec<String>,
     default_object_form: Option<String>,
     default_folder_form: Option<String>,
     default_list_form: Option<String>,
@@ -9207,6 +9208,10 @@ fn parse_catalog_properties_from_text(
         check_unique,
         autonumbering,
         default_presentation: Some("AsDescription"),
+        input_by_string_fields: parse_catalog_input_by_string_fields(
+            fields.get(42).copied(),
+            &header.name,
+        ),
         default_object_form: parse_catalog_form_ref(fields.get(21).copied(), form_refs),
         default_folder_form: parse_catalog_form_ref(fields.get(22).copied(), form_refs),
         default_list_form: parse_catalog_form_ref(fields.get(23).copied(), form_refs),
@@ -9272,6 +9277,30 @@ fn parse_catalog_form_ref(
 ) -> Option<String> {
     let uuid = parse_non_zero_uuid(field?)?;
     form_refs.get(&uuid).and_then(form_source_reference_name)
+}
+
+fn parse_catalog_input_by_string_fields(field: Option<&str>, catalog_name: &str) -> Vec<String> {
+    let Some(field) = field else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    for code in ["-3", "-2"] {
+        let marker = format!("{{{code}}}");
+        if field.contains(&marker) {
+            if let Some(name) = catalog_standard_attribute_name(code) {
+                values.push(format!("Catalog.{catalog_name}.StandardAttribute.{name}"));
+            }
+        }
+    }
+    values
+}
+
+fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
+    match code {
+        "-3" => Some("Description"),
+        "-2" => Some("Code"),
+        _ => None,
+    }
 }
 
 fn form_source_reference_name(form_ref: &FormSourceReference) -> Option<String> {
@@ -10376,6 +10405,19 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
             "\t\t\t<DefaultPresentation>{value}</DefaultPresentation>\r\n"
         ));
     }
+    xml.push_str(
+        "\t\t\t<Characteristics/>\r\n\
+\t\t\t<PredefinedDataUpdate>Auto</PredefinedDataUpdate>\r\n\
+\t\t\t<EditType>InDialog</EditType>\r\n\
+\t\t\t<QuickChoice>true</QuickChoice>\r\n\
+\t\t\t<ChoiceMode>BothWays</ChoiceMode>\r\n",
+    );
+    push_catalog_input_by_string_xml(&mut xml, &catalog.input_by_string_fields);
+    xml.push_str(
+        "\t\t\t<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>\r\n",
+    );
     push_optional_text_element(
         &mut xml,
         "\t\t\t",
@@ -10469,8 +10511,30 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         &catalog.extended_list_presentation,
     );
     push_localized_property(&mut xml, "\t\t\t", "Explanation", &catalog.explanation);
+    xml.push_str(
+        "\t\t\t<CreateOnInput>DontUse</CreateOnInput>\r\n\
+\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n\
+\t\t\t<DataHistory>DontUse</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+    );
     xml.push_str("\t\t</Properties>\r\n\t</Catalog>\r\n</MetaDataObject>");
     xml
+}
+
+fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
+    if fields.is_empty() {
+        xml.push_str("\t\t\t<InputByString/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<InputByString>\r\n");
+    for field in fields {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Field>{}</xr:Field>\r\n",
+            escape_xml_text(field)
+        ));
+    }
+    xml.push_str("\t\t\t</InputByString>\r\n");
 }
 
 fn push_optional_text_element(xml: &mut String, indent: &str, name: &str, value: Option<&str>) {
@@ -16463,6 +16527,27 @@ mod tests {
         assert!(
             xml.contains("<DefaultObjectForm>Catalog.Products.Form.ItemForm</DefaultObjectForm>")
         );
+        assert!(xml.contains("<Characteristics/>"));
+        assert!(xml.contains("<PredefinedDataUpdate>Auto</PredefinedDataUpdate>"));
+        assert!(xml.contains("<EditType>InDialog</EditType>"));
+        assert!(xml.contains("<QuickChoice>true</QuickChoice>"));
+        assert!(xml.contains("<ChoiceMode>BothWays</ChoiceMode>"));
+        assert!(xml.contains("<InputByString>"));
+        assert!(
+            xml.contains("<xr:Field>Catalog.Products.StandardAttribute.Description</xr:Field>")
+        );
+        assert!(xml.contains("<xr:Field>Catalog.Products.StandardAttribute.Code</xr:Field>"));
+        assert!(
+            xml.contains(
+                "<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>"
+            )
+        );
+        assert!(
+            xml.contains("<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>")
+        );
+        assert!(xml.contains(
+            "<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>"
+        ));
         assert!(xml.contains("<DefaultFolderForm/>"));
         assert!(xml.contains("<DefaultListForm>Catalog.Products.Form.ListForm</DefaultListForm>"));
         assert!(
@@ -16478,6 +16563,15 @@ mod tests {
         assert!(xml.contains("<Explanation>"));
         assert!(xml.contains("<v8:content>Товары для продажи</v8:content>"));
         assert!(xml.contains("<v8:content>Goods for sale</v8:content>"));
+        assert!(xml.contains("<CreateOnInput>DontUse</CreateOnInput>"));
+        assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+        assert!(xml.contains("<DataHistory>DontUse</DataHistory>"));
+        assert!(xml.contains(
+            "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>"
+        ));
+        assert!(xml.contains(
+            "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
+        ));
     }
 
     #[test]
