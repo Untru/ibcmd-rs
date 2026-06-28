@@ -3888,6 +3888,9 @@ struct FormBodyProperties {
     save_data_in_settings: Option<&'static str>,
     auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
+    auto_time: Option<&'static str>,
+    use_posting_mode: Option<&'static str>,
+    repost_on_write: Option<bool>,
     command_set_excluded_commands: Vec<&'static str>,
     use_for_folders_and_items: Option<&'static str>,
     customizable: Option<bool>,
@@ -3898,6 +3901,8 @@ struct FormBodyProperties {
 }
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
+const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
@@ -4065,6 +4070,9 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         save_data_in_settings: extract_form_save_data_in_settings(fields),
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
+        auto_time: extract_form_auto_time(fields),
+        use_posting_mode: extract_form_use_posting_mode(fields),
+        repost_on_write: extract_form_repost_on_write(fields),
         command_set_excluded_commands: extract_form_command_set_excluded_commands(fields),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
@@ -4150,6 +4158,47 @@ fn extract_form_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static s
         .skip(1)
         .filter_map(|uuid| form_standard_excluded_command_name(uuid.trim()))
         .collect()
+}
+
+fn extract_form_auto_time(fields: &[&str]) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "2")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_AUTO_TIME_UUID), Some("0")) => Some("DontUse"),
+        (Some(r##""#""##), Some(FORM_AUTO_TIME_UUID), Some("3")) => Some("CurrentOrLast"),
+        _ => None,
+    }
+}
+
+fn extract_form_use_posting_mode(fields: &[&str]) -> Option<&'static str> {
+    let value = form_root_property_bag_value(fields, "3")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+        value_fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(r##""#""##), Some(FORM_USE_POSTING_MODE_UUID), Some("0")) => Some("Regular"),
+        (Some(r##""#""##), Some(FORM_USE_POSTING_MODE_UUID), Some("3")) => Some("Auto"),
+        _ => None,
+    }
+}
+
+fn extract_form_repost_on_write(fields: &[&str]) -> Option<bool> {
+    let value = form_root_property_bag_value(fields, "4")?;
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    match (
+        value_fields.first().map(|field| field.trim()),
+        value_fields.get(1).map(|field| field.trim()),
+    ) {
+        (Some(r##""B""##), Some("0")) => Some(false),
+        (Some(r##""B""##), Some("1")) => Some(true),
+        _ => None,
+    }
 }
 
 fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
@@ -6475,6 +6524,24 @@ fn format_form_body_xml(
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if let Some(value) = properties.auto_time {
+        xml.push_str(&format!(
+            "\t<AutoTime>{}</AutoTime>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.use_posting_mode {
+        xml.push_str(&format!(
+            "\t<UsePostingMode>{}</UsePostingMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.repost_on_write {
+        xml.push_str(&format!(
+            "\t<RepostOnWrite>{}</RepostOnWrite>\r\n",
+            if value { "true" } else { "false" }
+        ));
     }
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
@@ -14346,6 +14413,32 @@ mod tests {
         assert!(form_xml.contains("<ExcludedCommand>Change</ExcludedCommand>"));
         assert!(form_xml.contains("<ExcludedCommand>Copy</ExcludedCommand>"));
         assert!(form_xml.contains("<ExcludedCommand>Create</ExcludedCommand>"));
+    }
+
+    #[test]
+    fn extracts_form_document_posting_options_auto_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,6,2,{"#",adeb08a0-415c-11d6-b9d1-0050bae0a95d,0},3,{"#",20d89b09-bd04-4304-a8c7-4d07fac6338a,3},4,{"B",1},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<AutoTime>DontUse</AutoTime>"));
+        assert!(form_xml.contains("<UsePostingMode>Auto</UsePostingMode>"));
+        assert!(form_xml.contains("<RepostOnWrite>true</RepostOnWrite>"));
+    }
+
+    #[test]
+    fn extracts_form_document_posting_options_regular_from_property_bag_layout() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,6,2,{"#",adeb08a0-415c-11d6-b9d1-0050bae0a95d,3},3,{"#",20d89b09-bd04-4304-a8c7-4d07fac6338a,0},4,{"B",0},24,{"B",0},25,{"U"},26,{"B",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<AutoTime>CurrentOrLast</AutoTime>"));
+        assert!(form_xml.contains("<UsePostingMode>Regular</UsePostingMode>"));
+        assert!(form_xml.contains("<RepostOnWrite>false</RepostOnWrite>"));
     }
 
     #[test]

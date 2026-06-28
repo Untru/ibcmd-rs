@@ -88,6 +88,9 @@ struct FormXmlBodyProperties {
     save_data_in_settings: Option<FormXmlSaveDataInSettings>,
     auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
     group: Option<FormXmlGroup>,
+    auto_time: Option<FormXmlAutoTime>,
+    use_posting_mode: Option<FormXmlUsePostingMode>,
+    repost_on_write: Option<bool>,
     command_set_excluded_commands: Vec<FormXmlExcludedCommand>,
     use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     customizable: Option<bool>,
@@ -291,6 +294,18 @@ enum FormXmlGroup {
     AlwaysHorizontal,
     HorizontalIfPossible,
     InCell,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlAutoTime {
+    DontUse,
+    CurrentOrLast,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlUsePostingMode {
+    Regular,
+    Auto,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3453,6 +3468,9 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.save_data_in_settings.is_some()
             || properties.auto_save_data_in_settings.is_some()
             || properties.group.is_some()
+            || properties.auto_time.is_some()
+            || properties.use_posting_mode.is_some()
+            || properties.repost_on_write.is_some()
             || !properties.command_set_excluded_commands.is_empty()
             || properties.use_for_folders_and_items.is_some()
             || properties.customizable.is_some()
@@ -3771,6 +3789,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SaveDataInSettings"
                         | "AutoSaveDataInSettings"
                         | "Group"
+                        | "AutoTime"
+                        | "UsePostingMode"
+                        | "RepostOnWrite"
                         | "ExcludedCommand"
                         | "UseForFoldersAndItems"
                         | "Customizable"
@@ -4017,6 +4038,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "AutoTime"])
+                    || path_ends_with(&path, &["Form", "UsePostingMode"])
+                    || path_ends_with(&path, &["Form", "RepostOnWrite"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
@@ -4410,6 +4434,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "SaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "AutoTime"])
+                    || path_ends_with(&path, &["Form", "UsePostingMode"])
+                    || path_ends_with(&path, &["Form", "RepostOnWrite"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
@@ -4794,6 +4821,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "AutoTime" if path_ends_with(&path, &["Form", "AutoTime"]) => {
+                        properties.auto_time = Some(parse_form_auto_time_xml(text_value.trim())?);
+                    }
+                    "UsePostingMode" if path_ends_with(&path, &["Form", "UsePostingMode"]) => {
+                        properties.use_posting_mode =
+                            Some(parse_form_use_posting_mode_xml(text_value.trim())?);
+                    }
+                    "RepostOnWrite" if path_ends_with(&path, &["Form", "RepostOnWrite"]) => {
+                        properties.repost_on_write =
+                            Some(parse_form_xml_bool("RepostOnWrite", text_value.trim())?);
                     }
                     "ExcludedCommand"
                         if path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"]) =>
@@ -6810,6 +6848,22 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     }
 }
 
+fn parse_form_auto_time_xml(value: &str) -> Result<FormXmlAutoTime> {
+    match value {
+        "DontUse" => Ok(FormXmlAutoTime::DontUse),
+        "CurrentOrLast" => Ok(FormXmlAutoTime::CurrentOrLast),
+        other => Err(anyhow!("unsupported Form AutoTime: {other}")),
+    }
+}
+
+fn parse_form_use_posting_mode_xml(value: &str) -> Result<FormXmlUsePostingMode> {
+    match value {
+        "Regular" => Ok(FormXmlUsePostingMode::Regular),
+        "Auto" => Ok(FormXmlUsePostingMode::Auto),
+        other => Err(anyhow!("unsupported Form UsePostingMode: {other}")),
+    }
+}
+
 fn parse_form_excluded_command_xml(value: &str) -> Result<FormXmlExcludedCommand> {
     match value {
         "Change" => Ok(FormXmlExcludedCommand::Change),
@@ -7011,6 +7065,15 @@ fn patch_form_layout_properties(
             FormXmlGroup::InCell => return Err(anyhow!("unsupported root Form Group: InCell")),
         }
     }
+    if let Some(value) = properties.auto_time {
+        replace_form_auto_time(layout, value)?;
+    }
+    if let Some(value) = properties.use_posting_mode {
+        replace_form_use_posting_mode(layout, value)?;
+    }
+    if let Some(value) = properties.repost_on_write {
+        replace_form_repost_on_write(layout, value)?;
+    }
     if !properties.command_set_excluded_commands.is_empty() {
         replace_form_command_set(layout, &properties.command_set_excluded_commands)?;
     }
@@ -7040,6 +7103,8 @@ fn patch_form_layout_properties(
 }
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
+const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
@@ -7058,6 +7123,54 @@ fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
     {
         layout.replace_range(range.clone(), if value { "1" } else { "0" });
     }
+    Ok(())
+}
+
+fn replace_form_auto_time(layout: &mut String, value: FormXmlAutoTime) -> Result<()> {
+    replace_form_property_bag_enum(layout, "2", FORM_AUTO_TIME_UUID, form_auto_time_code(value))
+}
+
+fn replace_form_use_posting_mode(layout: &mut String, value: FormXmlUsePostingMode) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "3",
+        FORM_USE_POSTING_MODE_UUID,
+        form_use_posting_mode_code(value),
+    )
+}
+
+fn replace_form_repost_on_write(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "4") else {
+        return Ok(());
+    };
+    if !is_form_property_bag_bool_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(range, if value { r#"{"B",1}"# } else { r#"{"B",0}"# });
+    Ok(())
+}
+
+fn replace_form_property_bag_enum(
+    layout: &mut String,
+    property_key: &str,
+    uuid: &str,
+    code: &str,
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, property_key) else {
+        return Ok(());
+    };
+    if !is_form_property_bag_enum_value(&layout[range.clone()], uuid) {
+        return Ok(());
+    }
+    layout.replace_range(range, &format!(r##"{{"#",{uuid},{code}}}"##));
     Ok(())
 }
 
@@ -7295,18 +7408,14 @@ fn form_root_command_set_range(layout: &str, fields: &[Range<usize>]) -> Option<
 }
 
 fn is_form_use_for_folders_and_items_value(value: &str) -> bool {
-    let value = value.trim();
-    let Ok(fields) = scan_braced_fields(value, 0) else {
-        return false;
-    };
-    fields.first().is_some_and(|range| {
-        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "#")
-    }) && fields
-        .get(1)
-        .is_some_and(|range| value[range.clone()].trim() == FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
+    is_form_property_bag_enum_value(value, FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
 }
 
 fn is_form_conversations_representation_value(value: &str) -> bool {
+    is_form_property_bag_enum_value(value, FORM_CONVERSATIONS_REPRESENTATION_UUID)
+}
+
+fn is_form_property_bag_enum_value(value: &str, uuid: &str) -> bool {
     let value = value.trim();
     let Ok(fields) = scan_braced_fields(value, 0) else {
         return false;
@@ -7315,7 +7424,19 @@ fn is_form_conversations_representation_value(value: &str) -> bool {
         parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "#")
     }) && fields
         .get(1)
-        .is_some_and(|range| value[range.clone()].trim() == FORM_CONVERSATIONS_REPRESENTATION_UUID)
+        .is_some_and(|range| value[range.clone()].trim() == uuid)
+}
+
+fn is_form_property_bag_bool_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "B")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| matches!(value[range.clone()].trim(), "0" | "1"))
 }
 
 fn format_form_title_value(title: &[LocalizedString]) -> String {
@@ -7355,6 +7476,20 @@ fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &
     match value {
         FormXmlUseForFoldersAndItems::Items => "0",
         FormXmlUseForFoldersAndItems::Folders => "1",
+    }
+}
+
+fn form_auto_time_code(value: FormXmlAutoTime) -> &'static str {
+    match value {
+        FormXmlAutoTime::DontUse => "0",
+        FormXmlAutoTime::CurrentOrLast => "3",
+    }
+}
+
+fn form_use_posting_mode_code(value: FormXmlUsePostingMode) -> &'static str {
+    match value {
+        FormXmlUsePostingMode::Regular => "0",
+        FormXmlUsePostingMode::Auto => "3",
     }
 }
 
@@ -17869,6 +18004,78 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(&parsed.layout[fields[13].clone()], "0");
         assert_eq!(&parsed.layout[fields[18].clone()], "4");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_document_posting_options_auto_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,6,2,{\"#\",adeb08a0-415c-11d6-b9d1-0050bae0a95d,3},3,{\"#\",20d89b09-bd04-4304-a8c7-4d07fac6338a,0},4,{\"B\",0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoTime>DontUse</AutoTime>
+	<UsePostingMode>Auto</UsePostingMode>
+	<RepostOnWrite>true</RepostOnWrite>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"2,{"#",adeb08a0-415c-11d6-b9d1-0050bae0a95d,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"3,{"#",20d89b09-bd04-4304-a8c7-4d07fac6338a,3}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains(r#"4,{"B",1}"#), "{}", parsed.layout);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_document_posting_options_regular_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,6,2,{\"#\",adeb08a0-415c-11d6-b9d1-0050bae0a95d,0},3,{\"#\",20d89b09-bd04-4304-a8c7-4d07fac6338a,3},4,{\"B\",1},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoTime>CurrentOrLast</AutoTime>
+	<UsePostingMode>Regular</UsePostingMode>
+	<RepostOnWrite>false</RepostOnWrite>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"2,{"#",adeb08a0-415c-11d6-b9d1-0050bae0a95d,3}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"3,{"#",20d89b09-bd04-4304-a8c7-4d07fac6338a,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains(r#"4,{"B",0}"#), "{}", parsed.layout);
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
