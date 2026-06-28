@@ -8439,6 +8439,22 @@ struct CatalogProperties {
     check_unique: bool,
     autonumbering: bool,
     default_presentation: Option<&'static str>,
+    default_object_form: Option<String>,
+    default_folder_form: Option<String>,
+    default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    default_folder_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_folder_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    auxiliary_folder_choice_form: Option<String>,
+    include_help_in_contents: bool,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
 }
 
 struct GeneratedTypeEntry {
@@ -8882,7 +8898,7 @@ fn extract_metadata_source_xml_with_refs(
             .with_extension("xml")
     };
     let xml = if kind == "Catalog" {
-        let catalog = parse_catalog_properties_from_text(text, uuid)?;
+        let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
@@ -9106,7 +9122,11 @@ fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonM
     })
 }
 
-fn parse_catalog_properties_from_text(text: &str, uuid: &str) -> Option<CatalogProperties> {
+fn parse_catalog_properties_from_text(
+    text: &str,
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<CatalogProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
     if fields.first().map(|value| value.trim()) != Some("57") {
@@ -9169,6 +9189,7 @@ fn parse_catalog_properties_from_text(text: &str, uuid: &str) -> Option<CatalogP
     let code_allowed_length =
         catalog_code_allowed_length_xml(parse_1c_u32_field(fields.get(20).copied()).unwrap_or(1));
     let use_standard_commands = parse_1c_bool_field(fields.get(33).copied()).unwrap_or(true);
+    let include_help_in_contents = parse_1c_bool_field(fields.get(31).copied()).unwrap_or(false);
 
     Some(CatalogProperties {
         generated_types,
@@ -9186,6 +9207,22 @@ fn parse_catalog_properties_from_text(text: &str, uuid: &str) -> Option<CatalogP
         check_unique,
         autonumbering,
         default_presentation: Some("AsDescription"),
+        default_object_form: parse_catalog_form_ref(fields.get(21).copied(), form_refs),
+        default_folder_form: parse_catalog_form_ref(fields.get(22).copied(), form_refs),
+        default_list_form: parse_catalog_form_ref(fields.get(23).copied(), form_refs),
+        default_choice_form: parse_catalog_form_ref(fields.get(24).copied(), form_refs),
+        default_folder_choice_form: parse_catalog_form_ref(fields.get(25).copied(), form_refs),
+        auxiliary_object_form: parse_catalog_form_ref(fields.get(26).copied(), form_refs),
+        auxiliary_folder_form: parse_catalog_form_ref(fields.get(27).copied(), form_refs),
+        auxiliary_list_form: parse_catalog_form_ref(fields.get(28).copied(), form_refs),
+        auxiliary_choice_form: parse_catalog_form_ref(fields.get(29).copied(), form_refs),
+        auxiliary_folder_choice_form: parse_catalog_form_ref(fields.get(30).copied(), form_refs),
+        include_help_in_contents,
+        object_presentation: parse_1c_synonyms(fields.get(46).copied().unwrap_or("{0}")),
+        extended_object_presentation: parse_1c_synonyms(fields.get(47).copied().unwrap_or("{0}")),
+        list_presentation: parse_1c_synonyms(fields.get(48).copied().unwrap_or("{0}")),
+        extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
+        explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
     })
 }
 
@@ -9227,6 +9264,55 @@ fn parse_catalog_owners_empty(field: Option<&str>) -> bool {
                 == "{0,0}"
         })
         .unwrap_or(false)
+}
+
+fn parse_catalog_form_ref(
+    field: Option<&str>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<String> {
+    let uuid = parse_non_zero_uuid(field?)?;
+    form_refs.get(&uuid).and_then(form_source_reference_name)
+}
+
+fn form_source_reference_name(form_ref: &FormSourceReference) -> Option<String> {
+    let parts = form_ref
+        .relative_path
+        .iter()
+        .filter_map(|part| part.to_str())
+        .collect::<Vec<_>>();
+    if parts.len() == 2 && parts.first() == Some(&"CommonForms") {
+        let form_name = Path::new(parts[1]).file_stem()?.to_str()?;
+        return Some(format!("CommonForm.{form_name}"));
+    }
+    if parts.len() == 4 && parts.get(2) == Some(&"Forms") {
+        let owner_kind = metadata_kind_for_source_folder(parts[0])?;
+        let owner_name = parts[1];
+        let form_name = Path::new(parts[3]).file_stem()?.to_str()?;
+        return Some(format!("{owner_kind}.{owner_name}.Form.{form_name}"));
+    }
+    None
+}
+
+fn metadata_kind_for_source_folder(folder: &str) -> Option<&'static str> {
+    match folder {
+        "Catalogs" => Some("Catalog"),
+        "Documents" => Some("Document"),
+        "DocumentJournals" => Some("DocumentJournal"),
+        "Enums" => Some("Enum"),
+        "Reports" => Some("Report"),
+        "DataProcessors" => Some("DataProcessor"),
+        "InformationRegisters" => Some("InformationRegister"),
+        "AccumulationRegisters" => Some("AccumulationRegister"),
+        "AccountingRegisters" => Some("AccountingRegister"),
+        "CalculationRegisters" => Some("CalculationRegister"),
+        "ChartsOfAccounts" => Some("ChartOfAccounts"),
+        "ChartsOfCharacteristicTypes" => Some("ChartOfCharacteristicTypes"),
+        "ChartsOfCalculationTypes" => Some("ChartOfCalculationTypes"),
+        "BusinessProcesses" => Some("BusinessProcess"),
+        "Tasks" => Some("Task"),
+        "ExchangePlans" => Some("ExchangePlan"),
+        _ => None,
+    }
 }
 
 fn parse_1c_bool_field(value: Option<&str>) -> Option<bool> {
@@ -10290,8 +10376,138 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
             "\t\t\t<DefaultPresentation>{value}</DefaultPresentation>\r\n"
         ));
     }
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultObjectForm",
+        catalog.default_object_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultFolderForm",
+        catalog.default_folder_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultListForm",
+        catalog.default_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultChoiceForm",
+        catalog.default_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultFolderChoiceForm",
+        catalog.default_folder_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryObjectForm",
+        catalog.auxiliary_object_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryFolderForm",
+        catalog.auxiliary_folder_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryListForm",
+        catalog.auxiliary_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryChoiceForm",
+        catalog.auxiliary_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryFolderChoiceForm",
+        catalog.auxiliary_folder_choice_form.as_deref(),
+    );
+    xml.push_str(&format!(
+        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+\t\t\t<BasedOn/>\r\n\
+\t\t\t<DataLockFields/>\r\n\
+\t\t\t<DataLockControlMode>Managed</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>Use</FullTextSearch>\r\n",
+        xml_bool(catalog.include_help_in_contents),
+    ));
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ObjectPresentation",
+        &catalog.object_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ExtendedObjectPresentation",
+        &catalog.extended_object_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ListPresentation",
+        &catalog.list_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ExtendedListPresentation",
+        &catalog.extended_list_presentation,
+    );
+    push_localized_property(&mut xml, "\t\t\t", "Explanation", &catalog.explanation);
     xml.push_str("\t\t</Properties>\r\n\t</Catalog>\r\n</MetaDataObject>");
     xml
+}
+
+fn push_optional_text_element(xml: &mut String, indent: &str, name: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        xml.push_str(&format!(
+            "{indent}<{name}>{}</{name}>\r\n",
+            escape_xml_text(value)
+        ));
+    } else {
+        xml.push_str(&format!("{indent}<{name}/>\r\n"));
+    }
+}
+
+fn push_localized_property(
+    xml: &mut String,
+    indent: &str,
+    name: &str,
+    values: &[(String, String)],
+) {
+    if values.is_empty() {
+        xml.push_str(&format!("{indent}<{name}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{indent}<{name}>\r\n"));
+    for (lang, content) in values {
+        xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_text(lang)
+        ));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_text(content)
+        ));
+        xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
+    }
+    xml.push_str(&format!("{indent}</{name}>\r\n"));
 }
 
 fn format_template_source_xml(kind: &str, header: &MetadataHeader, template_type: &str) -> String {
@@ -16191,6 +16407,77 @@ mod tests {
             index.get(manager_type_id).map(String::as_str),
             Some("cfg:CatalogManager.Products")
         );
+    }
+
+    #[test]
+    fn extracts_catalog_form_refs_and_presentations_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let list_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{object_form_uuid},{zero_uuid},{list_form_uuid},{list_form_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{1,{{0,2,{{\"#\",60ea359f-3a6e-48bb-8e71-d2a457572918,{{-3}}}},{{\"#\",60ea359f-3a6e-48bb-8e71-d2a457572918,{{-2}}}}}}}},1,1,{{0}},{{2,\"ru\",\"Товар\",\"en\",\"Product\"}},{{0}},{{0}},{{0}},{{2,\"ru\",\"Товары для продажи\",\"en\",\"Goods for sale\"}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_refs = BTreeMap::from([
+            (
+                object_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Catalogs/Products/Forms/ItemForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                list_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Catalogs/Products/Forms/ListForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(
+            xml.contains("<DefaultObjectForm>Catalog.Products.Form.ItemForm</DefaultObjectForm>")
+        );
+        assert!(xml.contains("<DefaultFolderForm/>"));
+        assert!(xml.contains("<DefaultListForm>Catalog.Products.Form.ListForm</DefaultListForm>"));
+        assert!(
+            xml.contains("<DefaultChoiceForm>Catalog.Products.Form.ListForm</DefaultChoiceForm>")
+        );
+        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+        assert!(xml.contains("<ObjectPresentation>"));
+        assert!(xml.contains("<v8:content>Товар</v8:content>"));
+        assert!(xml.contains("<v8:content>Product</v8:content>"));
+        assert!(xml.contains("<ExtendedObjectPresentation/>"));
+        assert!(xml.contains("<ListPresentation/>"));
+        assert!(xml.contains("<ExtendedListPresentation/>"));
+        assert!(xml.contains("<Explanation>"));
+        assert!(xml.contains("<v8:content>Товары для продажи</v8:content>"));
+        assert!(xml.contains("<v8:content>Goods for sale</v8:content>"));
     }
 
     #[test]
