@@ -3887,6 +3887,7 @@ struct FormBodyProperties {
     save_data_in_settings: Option<&'static str>,
     auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
+    customizable: Option<bool>,
     command_bar_location: Option<&'static str>,
     show_command_bar: Option<bool>,
 }
@@ -4051,6 +4052,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         save_data_in_settings: extract_form_save_data_in_settings(fields),
         auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
+        customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         show_command_bar: extract_form_show_command_bar(fields),
     }
@@ -4105,6 +4107,17 @@ fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     ) {
         ("0", _, _) => Some("Vertical"),
         ("1", Some("0"), Some("0")) => Some("Horizontal"),
+        _ => None,
+    }
+}
+
+fn extract_form_customizable(fields: &[&str]) -> Option<bool> {
+    match (
+        fields.get(11).map(|field| field.trim())?,
+        fields.get(13).map(|field| field.trim())?,
+        fields.get(14).map(|field| field.trim())?,
+    ) {
+        ("0", "1", "0") => Some(false),
         _ => None,
     }
 }
@@ -6286,6 +6299,9 @@ fn format_form_body_xml(
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
+    }
+    if properties.customizable == Some(false) {
+        xml.push_str("\t<Customizable>false</Customizable>\r\n");
     }
     if let Some(command_bar_location) = properties.command_bar_location {
         xml.push_str(&format!(
@@ -14052,6 +14068,18 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<AutoSaveDataInSettings>Use</AutoSaveDataInSettings>"));
+    }
+
+    #[test]
+    fn extracts_form_customizable_false_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,0,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Group>Vertical</Group>"));
+        assert!(form_xml.contains("<Customizable>false</Customizable>"));
     }
 
     #[test]
