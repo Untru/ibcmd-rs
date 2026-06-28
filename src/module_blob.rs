@@ -83,6 +83,7 @@ struct FormXmlBodyProperties {
     width: Option<String>,
     height: Option<String>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
+    save_window_settings: Option<bool>,
     auto_title: Option<bool>,
     auto_url: Option<bool>,
     save_data_in_settings: Option<FormXmlSaveDataInSettings>,
@@ -3491,6 +3492,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
         let properties = parse_form_xml_body_properties(form_xml)?;
         let form_command_uuids = form_command_uuids_for_pack(&plain, &properties.commands)?;
         if properties.window_opening_mode.is_some()
+            || properties.save_window_settings.is_some()
             || !properties.title.is_empty()
             || properties.width.is_some()
             || properties.height.is_some()
@@ -3821,6 +3823,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if matches!(
                     local.as_str(),
                     "WindowOpeningMode"
+                        | "SaveWindowSettings"
                         | "Width"
                         | "Height"
                         | "AutoTitle"
@@ -4076,6 +4079,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "SaveWindowSettings"])
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
@@ -4478,6 +4482,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "SaveWindowSettings"])
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
@@ -4846,6 +4851,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         properties.window_opening_mode =
                             Some(parse_form_window_opening_mode_xml(text_value.trim())?);
+                    }
+                    "SaveWindowSettings"
+                        if path_ends_with(&path, &["Form", "SaveWindowSettings"]) =>
+                    {
+                        properties.save_window_settings = Some(parse_form_xml_bool(
+                            "SaveWindowSettings",
+                            text_value.trim(),
+                        )?);
                     }
                     "Width" if path_ends_with(&path, &["Form", "Width"]) => {
                         properties.width =
@@ -7166,6 +7179,9 @@ fn patch_form_layout_properties(
             form_window_opening_mode_code(window_opening_mode),
         )?;
     }
+    if let Some(value) = properties.save_window_settings {
+        replace_form_save_window_settings(layout, value)?;
+    }
     if let Some(auto_title) = properties.auto_title {
         replace_braced_field(layout, 9, if auto_title { "1" } else { "0" })?;
     }
@@ -7287,6 +7303,20 @@ fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
         .is_some_and(|range| layout[range.clone()].trim() == "0")
         && let Some(range) = fields.get(13)
     {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
+fn replace_form_save_window_settings(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 23) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1") {
         layout.replace_range(range.clone(), if value { "1" } else { "0" });
     }
     Ok(())
@@ -18161,6 +18191,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_save_window_settings_false() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<SaveWindowSettings>false</SaveWindowSettings>
+</Form>
+"#;
+
+        assert_eq!(
+            super::parse_form_xml_body_properties(xml)?.save_window_settings,
+            Some(false)
+        );
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 23].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_true_text = base_text.replace("{59,0},1,{1,0}", "{59,0},0,{1,0}");
+        let base = super::deflate_raw(base_true_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<SaveWindowSettings>true</SaveWindowSettings>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 23].clone()], "1");
 
         Ok(())
     }

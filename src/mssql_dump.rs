@@ -3885,6 +3885,7 @@ struct FormBodyProperties {
     width: Option<String>,
     height: Option<String>,
     window_opening_mode: Option<&'static str>,
+    save_window_settings: Option<bool>,
     auto_title: Option<bool>,
     auto_url: Option<bool>,
     save_data_in_settings: Option<&'static str>,
@@ -4079,6 +4080,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         width: extract_form_dimension(fields, 3),
         height: extract_form_dimension(fields, 4),
         window_opening_mode: extract_form_window_opening_mode(fields),
+        save_window_settings: extract_form_save_window_settings(fields),
         auto_title: extract_form_auto_title(fields),
         auto_url: extract_form_auto_url(fields),
         save_data_in_settings: extract_form_save_data_in_settings(fields),
@@ -4117,6 +4119,14 @@ fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
         "0" => Some("DontBlock"),
         "1" => Some("LockOwner"),
         "2" => Some("LockWholeInterface"),
+        _ => None,
+    }
+}
+
+fn extract_form_save_window_settings(fields: &[&str]) -> Option<bool> {
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    match fields.get(tail_start + 23).map(|field| field.trim())? {
+        "0" => Some(false),
         _ => None,
     }
 }
@@ -6621,6 +6631,9 @@ fn format_form_body_xml(
             "\t<WindowOpeningMode>{}</WindowOpeningMode>\r\n",
             escape_xml_text(window_opening_mode)
         ));
+    }
+    if properties.save_window_settings == Some(false) {
+        xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
     }
     if properties.auto_title == Some(false) {
         xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
@@ -14470,6 +14483,17 @@ mod tests {
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
         assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
         assert!(form_xml.contains("<ShowCommandBar>true</ShowCommandBar>"));
+    }
+
+    #[test]
+    fn extracts_form_save_window_settings_false_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},0,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<SaveWindowSettings>false</SaveWindowSettings>"));
     }
 
     #[test]
