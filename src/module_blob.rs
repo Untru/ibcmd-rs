@@ -3737,6 +3737,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             path.last().map(String::as_str) == Some(item.tag.as_str())
                         }))
                 {
+                    if path.last().map(String::as_str) != Some("ChildItems")
+                        && let Some(parent) = current_child_items.last_mut()
+                    {
+                        parent.child_items_present = true;
+                    }
                     if let Some(mut item) = parse_form_child_item_xml(&local, &event)? {
                         item.depth = current_child_items.len();
                         current_child_items.push(item);
@@ -3807,6 +3812,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     item.depth = current_child_items.len();
                     if let Some(parent) = current_child_items.last_mut() {
+                        if path.last().map(String::as_str) != Some("ChildItems") {
+                            parent.child_items_present = true;
+                        }
                         parent.child_items.push(item.clone());
                     }
                     properties.child_items.push(item);
@@ -17289,6 +17297,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!parsed.layout.contains("OldSearch"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_direct_search_addition_removes_missing_table_children()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},2,22222222-2222-4222-8222-222222222222,{6,{134,33333333-3333-4333-8333-333333333333},0,0,0,0,"OldSearch",{1,0},{1,0},1,1,0,1,{1,0},0,0,0,0,0,{25,0}},44444444-4444-4444-8444-444444444444,{48,{40,55555555-5555-4555-8555-555555555555},0,0,0,2,"OldColumn",1,0,{1,0}}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<SearchStringAddition name="NewSearch" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+			</SearchStringAddition>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
+        assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
+        assert!(!parsed.layout.contains("OldColumn"), "{}", parsed.layout);
 
         Ok(())
     }
