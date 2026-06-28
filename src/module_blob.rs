@@ -209,6 +209,7 @@ struct FormXmlChildItem {
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
     data_path: Option<String>,
+    child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
 }
 
@@ -3680,6 +3681,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
                     properties.child_items_present = true;
                 }
+                if local == "ChildItems"
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.child_items_present = true;
+                }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
                 }
@@ -3772,8 +3781,28 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
                     properties.child_items_present = true;
                 }
+                if local == "ChildItems"
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.child_items_present = true;
+                }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                } else if is_form_child_item_xml_tag(&local)
+                    && (path.last().map(String::as_str) == Some("ChildItems")
+                        || current_child_items.last().is_some_and(|item| {
+                            path.last().map(String::as_str) == Some(item.tag.as_str())
+                        }))
+                    && let Some(mut item) = parse_form_child_item_xml(&local, &event)?
+                {
+                    item.depth = current_child_items.len();
+                    if let Some(parent) = current_child_items.last_mut() {
+                        parent.child_items.push(item.clone());
+                    }
+                    properties.child_items.push(item);
                 }
             }
             Ok(Event::Text(text)) => {
@@ -5481,6 +5510,7 @@ fn parse_form_child_item_xml(
         events: Vec::new(),
         command_name: None,
         data_path: None,
+        child_items_present: false,
         child_items: Vec::new(),
     }))
 }
@@ -6664,6 +6694,9 @@ fn patch_form_layout_direct_child_items(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    if item.child_items_present {
+        retain_form_layout_direct_child_items(text, &item.child_items)?;
+    }
     for child in &item.child_items {
         if !is_form_layout_creatable_nested_item(child) {
             continue;
@@ -6678,6 +6711,86 @@ fn patch_form_layout_direct_child_items(
             source,
         )?;
     }
+    Ok(())
+}
+
+fn retain_form_layout_direct_child_items(
+    text: &mut String,
+    children: &[FormXmlChildItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if !matches!(
+        fields.first().map(|range| text[range.clone()].trim()),
+        Some("22" | "73")
+    ) {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(10).cloned() else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() < 11 + count * 2 {
+        return Ok(());
+    }
+
+    let mut retained = Vec::<(String, String)>::new();
+    let mut changed = false;
+
+    for index in 0..count {
+        let uuid_index = 11 + index * 2;
+        let item_index = 12 + index * 2;
+        let Some(uuid_range) = fields.get(uuid_index).cloned() else {
+            return Ok(());
+        };
+        let Some(item_range) = fields.get(item_index).cloned() else {
+            return Ok(());
+        };
+        let uuid = text[uuid_range].trim().to_string();
+        if !is_uuid_text(&uuid) {
+            return Ok(());
+        }
+        let item_text = text[item_range].to_string();
+        let item_fields = scan_braced_fields(&item_text, 0)?;
+        let is_known_item = item_fields
+            .first()
+            .and_then(|range| {
+                form_layout_child_item_tag(
+                    item_text[range.clone()].trim(),
+                    &item_text,
+                    &item_fields,
+                )
+            })
+            .is_some();
+        let keep = !is_known_item
+            || children
+                .iter()
+                .any(|child| form_layout_child_item_matches(&item_text, &item_fields, child));
+        if keep {
+            retained.push((uuid, item_text));
+        } else {
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    let replace_end = if count == 0 {
+        count_range.end
+    } else {
+        fields[10 + count * 2].end
+    };
+    let mut replacement = retained.len().to_string();
+    for (uuid, item_text) in retained {
+        replacement.push(',');
+        replacement.push_str(&uuid);
+        replacement.push(',');
+        replacement.push_str(&item_text);
+    }
+    text.replace_range(count_range.start..replace_end, &replacement);
     Ok(())
 }
 
@@ -16583,6 +16696,46 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_removes_missing_nested_group_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{64,22222222-2222-4222-8222-222222222222},0,0,0,0,"Actions",{0},0,1,2,33333333-3333-4333-8333-333333333333,{34,{44,44444444-4444-4444-8444-444444444444},0,0,0,"KeepButton",{0},1,{0},{0}},55555555-5555-4555-8555-555555555555,{34,{45,66666666-6666-4666-8666-666666666666},0,0,0,"DropButton",{0},1,{0},{0}}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<Button name="KeepButton" id="44"/>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert!(parsed.layout.contains("KeepButton"));
+        assert!(!parsed.layout.contains("DropButton"));
+        assert!(
+            !parsed
+                .layout
+                .contains("55555555-5555-4555-8555-555555555555")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("66666666-6666-4666-8666-666666666666")
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_new_nested_input_field() -> anyhow::Result<()> {
         let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -16745,6 +16898,46 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             parsed
                 .layout
                 .contains(r#""OnChange","DescriptionOnChange""#)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_nested_table_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},2,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{48,{40,dddddddd-dddd-4ddd-8ddd-dddddddddddd},0,0,0,2,"KeepColumn",1,0,{0}},eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,{48,{41,ffffffff-ffff-4fff-8fff-ffffffffffff},0,0,0,2,"DropColumn",1,0,{0}}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<ChildItems>
+				<InputField name="KeepColumn" id="40"/>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert!(parsed.layout.contains("KeepColumn"));
+        assert!(!parsed.layout.contains("DropColumn"));
+        assert!(
+            !parsed
+                .layout
+                .contains("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("ffffffff-ffff-4fff-8fff-ffffffffffff")
         );
 
         Ok(())
