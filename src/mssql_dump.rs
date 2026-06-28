@@ -3993,6 +3993,7 @@ struct FormChildItem {
     button_representation: Option<&'static str>,
     default_button: Option<bool>,
     show_title: Option<bool>,
+    read_only: Option<bool>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
     title: Vec<(String, String)>,
@@ -5002,6 +5003,13 @@ fn parse_form_child_item(
                     .and_then(|field| parse_form_child_item_show_title(field))
             })
             .flatten(),
+        read_only: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            fields
+                .get(14)
+                .and_then(|field| parse_form_child_item_show_title(field))
+        } else {
+            None
+        },
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(4)
@@ -5146,6 +5154,10 @@ fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
 }
 
 fn form_button_layout_is_extended(fields: &[&str]) -> bool {
+    fields.len() > 20
+}
+
+fn form_input_field_layout_is_extended(fields: &[&str]) -> bool {
     fields.len() > 20
 }
 
@@ -5839,6 +5851,9 @@ fn format_form_child_item_xml(
     }
     if item.default_button == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultButton>true</DefaultButton>\r\n"));
+    }
+    if item.read_only == Some(true) {
+        xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
     if let Some(group) = item.group {
         xml.push_str(&format!(
@@ -13460,6 +13475,26 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_read_only_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.read_only, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ReadOnly>true</ReadOnly>"));
+    }
+
+    #[test]
     fn extracts_form_search_addition_type_from_layout_code() {
         let mut items = Vec::new();
         let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
@@ -13510,6 +13545,7 @@ mod tests {
             button_representation: None,
             default_button: None,
             show_title: None,
+            read_only: None,
             item_type: None,
             addition_source_item: None,
             title: Vec::new(),
@@ -13527,6 +13563,7 @@ mod tests {
                     button_representation: None,
                     default_button: None,
                     show_title: None,
+                    read_only: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
                     title: Vec::new(),
@@ -13545,6 +13582,7 @@ mod tests {
                     button_representation: None,
                     default_button: None,
                     show_title: None,
+                    read_only: None,
                     item_type: None,
                     addition_source_item: None,
                     title: Vec::new(),

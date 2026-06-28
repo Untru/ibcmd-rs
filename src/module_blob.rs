@@ -210,6 +210,7 @@ struct FormXmlChildItem {
     button_representation: Option<FormXmlButtonRepresentation>,
     default_button: Option<bool>,
     show_title: Option<bool>,
+    read_only: Option<bool>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
     title: Vec<LocalizedString>,
@@ -3681,6 +3682,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DataPath"
                         | "ShowTitle"
                         | "DefaultButton"
+                        | "ReadOnly"
                         | "Behavior"
                         | "Representation"
                         | "KeyParameter"
@@ -4091,6 +4093,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group_representation(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
+                    || path_ends_with_for_child_read_only(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -5434,6 +5437,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "ReadOnly"
+                        if path_ends_with_for_child_read_only(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.read_only = Some(parse_form_xml_bool(
+                                "ChildItem/ReadOnly",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ShowTitle"
                         if path_ends_with_for_child_show_title(&path, &current_child_items) =>
                     {
@@ -5517,6 +5530,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DataPath"
                         | "ShowTitle"
                         | "DefaultButton"
+                        | "ReadOnly"
                         | "Behavior"
                         | "Representation"
                         | "lang"
@@ -5625,6 +5639,7 @@ fn parse_form_child_item_xml(
         button_representation: None,
         default_button: None,
         show_title: None,
+        read_only: None,
         item_type: None,
         addition_source_item: None,
         title: Vec::new(),
@@ -5810,6 +5825,13 @@ fn path_ends_with_for_child_default_button(path: &[String], items: &[FormXmlChil
         return false;
     };
     item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "DefaultButton"])
+}
+
+fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
 }
 
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -6916,6 +6938,16 @@ fn patch_form_layout_child_item_entry(
             if default_button { "1" } else { "0" }.to_string(),
         ));
     }
+    if item.tag == "InputField"
+        && let Some(read_only) = item.read_only
+        && form_layout_input_field_is_extended(fields)
+        && let Some(read_only_range) = fields.get(14)
+    {
+        replacements.push((
+            read_only_range.clone(),
+            if read_only { "1" } else { "0" }.to_string(),
+        ));
+    }
     if item.tag.ends_with("Addition")
         && let Some(item_type) = &item.item_type
         && let Some(type_code) = form_search_addition_type_code(item_type)
@@ -7021,6 +7053,10 @@ fn patch_form_layout_child_item_entry(
 }
 
 fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
+    fields.len() > 20
+}
+
+fn form_layout_input_field_is_extended(fields: &[Range<usize>]) -> bool {
     fields.len() > 20
 }
 
@@ -17480,6 +17516,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains("66666666-6666-4666-8666-666666666666")
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_read_only() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ReadOnly>true</ReadOnly>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[14].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
