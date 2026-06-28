@@ -3884,6 +3884,7 @@ struct FormBodyProperties {
     height: Option<String>,
     window_opening_mode: Option<&'static str>,
     auto_title: Option<bool>,
+    auto_save_data_in_settings: Option<&'static str>,
     group: Option<&'static str>,
     command_bar_location: Option<&'static str>,
     show_command_bar: Option<bool>,
@@ -4046,6 +4047,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         height: extract_form_dimension(fields, 4),
         window_opening_mode: extract_form_window_opening_mode(fields),
         auto_title: extract_form_auto_title(fields),
+        auto_save_data_in_settings: extract_form_auto_save_data_in_settings(fields),
         group: extract_form_root_group(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         show_command_bar: extract_form_show_command_bar(fields),
@@ -4072,6 +4074,13 @@ fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
 fn extract_form_auto_title(fields: &[&str]) -> Option<bool> {
     match fields.get(9).map(|field| field.trim())? {
         "0" => Some(false),
+        _ => None,
+    }
+}
+
+fn extract_form_auto_save_data_in_settings(fields: &[&str]) -> Option<&'static str> {
+    match fields.get(7).map(|field| field.trim())? {
+        "1" => Some("Use"),
         _ => None,
     }
 }
@@ -6250,6 +6259,12 @@ fn format_form_body_xml(
     }
     if properties.auto_title == Some(false) {
         xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
+    }
+    if let Some(value) = properties.auto_save_data_in_settings {
+        xml.push_str(&format!(
+            "\t<AutoSaveDataInSettings>{}</AutoSaveDataInSettings>\r\n",
+            escape_xml_text(value)
+        ));
     }
     if let Some(group) = properties.group {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
@@ -14008,6 +14023,17 @@ mod tests {
 
         assert!(form_xml.contains("<CommandBarLocation>None</CommandBarLocation>"));
         assert!(form_xml.contains("<ShowCommandBar>false</ShowCommandBar>"));
+    }
+
+    #[test]
+    fn extracts_form_auto_save_data_in_settings_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,0,0,0,1,0,1,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<AutoSaveDataInSettings>Use</AutoSaveDataInSettings>"));
     }
 
     #[test]

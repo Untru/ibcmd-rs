@@ -84,6 +84,7 @@ struct FormXmlBodyProperties {
     height: Option<String>,
     window_opening_mode: Option<FormXmlWindowOpeningMode>,
     auto_title: Option<bool>,
+    auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
     group: Option<FormXmlGroup>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
     show_command_bar: Option<bool>,
@@ -264,6 +265,11 @@ enum FormXmlWindowOpeningMode {
     DontBlock,
     LockOwner,
     LockWholeInterface,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlAutoSaveDataInSettings {
+    Use,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3406,6 +3412,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.width.is_some()
             || properties.height.is_some()
             || properties.auto_title.is_some()
+            || properties.auto_save_data_in_settings.is_some()
             || properties.group.is_some()
             || properties.command_bar_location.is_some()
             || properties.show_command_bar.is_some()
@@ -3716,6 +3723,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Width"
                         | "Height"
                         | "AutoTitle"
+                        | "AutoSaveDataInSettings"
                         | "Group"
                         | "CommandBarLocation"
                         | "ShowCommandBar"
@@ -3954,6 +3962,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
+                    || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
@@ -4339,6 +4348,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Width"])
                     || path_ends_with(&path, &["Form", "Height"])
                     || path_ends_with(&path, &["Form", "AutoTitle"])
+                    || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
                     || path_ends_with(&path, &["Form", "Group"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
@@ -4699,6 +4709,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "AutoTitle" if path_ends_with(&path, &["Form", "AutoTitle"]) => {
                         properties.auto_title =
                             Some(parse_form_xml_bool("AutoTitle", text_value.trim())?);
+                    }
+                    "AutoSaveDataInSettings"
+                        if path_ends_with(&path, &["Form", "AutoSaveDataInSettings"]) =>
+                    {
+                        properties.auto_save_data_in_settings = Some(
+                            parse_form_auto_save_data_in_settings_xml(text_value.trim())?,
+                        );
                     }
                     "Group" if path_ends_with(&path, &["Form", "Group"]) => {
                         properties.group = Some(parse_form_group_xml(text_value.trim())?);
@@ -6690,6 +6707,13 @@ fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
     }
 }
 
+fn parse_form_auto_save_data_in_settings_xml(value: &str) -> Result<FormXmlAutoSaveDataInSettings> {
+    match value {
+        "Use" => Ok(FormXmlAutoSaveDataInSettings::Use),
+        other => Err(anyhow!("unsupported Form AutoSaveDataInSettings: {other}")),
+    }
+}
+
 fn parse_form_group_behavior_xml(value: &str) -> Result<FormXmlGroupBehavior> {
     match value {
         "Usual" => Ok(FormXmlGroupBehavior::Usual),
@@ -6813,6 +6837,9 @@ fn patch_form_layout_properties(
     if let Some(auto_title) = properties.auto_title {
         replace_braced_field(layout, 9, if auto_title { "1" } else { "0" })?;
     }
+    if let Some(value) = properties.auto_save_data_in_settings {
+        replace_braced_field(layout, 7, form_auto_save_data_in_settings_code(value))?;
+    }
     if let Some(group) = properties.group {
         match group {
             FormXmlGroup::Vertical => {
@@ -6894,6 +6921,12 @@ fn form_command_bar_location_code(value: FormXmlCommandBarLocation) -> &'static 
         FormXmlCommandBarLocation::None => "0",
         FormXmlCommandBarLocation::Top => "2",
         FormXmlCommandBarLocation::Bottom => "3",
+    }
+}
+
+fn form_auto_save_data_in_settings_code(value: FormXmlAutoSaveDataInSettings) -> &'static str {
+    match value {
+        FormXmlAutoSaveDataInSettings::Use => "1",
     }
 }
 
@@ -17214,6 +17247,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<Height>30</Height>
 	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
 	<AutoTitle>false</AutoTitle>
+	<AutoSaveDataInSettings>Use</AutoSaveDataInSettings>
 	<Group>Horizontal</Group>
 	<CommandBarLocation>Bottom</CommandBarLocation>
 	<ShowCommandBar>true</ShowCommandBar>
@@ -17228,6 +17262,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[fields[2].clone()], "2");
         assert_eq!(&parsed.layout[fields[3].clone()], "80");
         assert_eq!(&parsed.layout[fields[4].clone()], "30");
+        assert_eq!(&parsed.layout[fields[7].clone()], "1");
         assert_eq!(&parsed.layout[fields[9].clone()], "0");
         assert_eq!(
             &parsed.layout[fields[10].clone()],
