@@ -98,6 +98,7 @@ struct FormXmlBodyProperties {
     customizable: Option<bool>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
     vertical_scroll: Option<FormXmlVerticalScroll>,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
     conversations_representation: Option<FormXmlConversationsRepresentation>,
     show_command_bar: Option<bool>,
     show_close_button: Option<bool>,
@@ -3517,6 +3518,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.customizable.is_some()
             || properties.command_bar_location.is_some()
             || properties.vertical_scroll.is_some()
+            || properties.horizontal_align.is_some()
             || properties.conversations_representation.is_some()
             || properties.show_command_bar.is_some()
             || properties.show_close_button.is_some()
@@ -4107,6 +4109,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
+                    || path_ends_with(&path, &["Form", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "ShowCloseButton"])
@@ -4512,6 +4515,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
+                    || path_ends_with(&path, &["Form", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "ShowCloseButton"])
@@ -4948,6 +4952,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "VerticalScroll" if path_ends_with(&path, &["Form", "VerticalScroll"]) => {
                         properties.vertical_scroll =
                             Some(parse_form_vertical_scroll_xml(text_value.trim())?);
+                    }
+                    "HorizontalAlign" if path_ends_with(&path, &["Form", "HorizontalAlign"]) => {
+                        properties.horizontal_align =
+                            Some(parse_form_horizontal_align_xml(text_value.trim())?);
                     }
                     "ConversationsRepresentation"
                         if path_ends_with(&path, &["Form", "ConversationsRepresentation"]) =>
@@ -7273,6 +7281,9 @@ fn patch_form_layout_properties(
     if let Some(vertical_scroll) = properties.vertical_scroll {
         replace_form_vertical_scroll(layout, vertical_scroll)?;
     }
+    if let Some(horizontal_align) = properties.horizontal_align {
+        replace_form_horizontal_align(layout, horizontal_align)?;
+    }
     if let Some(conversations_representation) = properties.conversations_representation {
         replace_form_conversations_representation(layout, conversations_representation)?;
     }
@@ -7598,6 +7609,20 @@ fn replace_form_show_close_button(layout: &mut String, value: bool) -> Result<()
     };
     if matches!(layout[range.clone()].trim(), "0" | "1") {
         layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
+fn replace_form_horizontal_align(layout: &mut String, value: FormXmlHorizontalAlign) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 11) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1" | "2" | "3") {
+        layout.replace_range(range.clone(), form_horizontal_align_code(value));
     }
     Ok(())
 }
@@ -18329,6 +18354,43 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
 
         assert_eq!(&parsed.layout[fields[tail_start + 18].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_root_horizontal_align() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<HorizontalAlign>Center</HorizontalAlign>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 11].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<HorizontalAlign>Right</HorizontalAlign>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 11].clone()], "2");
 
         Ok(())
     }

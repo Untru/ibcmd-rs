@@ -3900,6 +3900,7 @@ struct FormBodyProperties {
     customizable: Option<bool>,
     command_bar_location: Option<&'static str>,
     vertical_scroll: Option<&'static str>,
+    horizontal_align: Option<&'static str>,
     conversations_representation: Option<&'static str>,
     show_command_bar: Option<bool>,
     show_close_button: Option<bool>,
@@ -4097,6 +4098,7 @@ fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
         customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         vertical_scroll: extract_form_vertical_scroll(fields),
+        horizontal_align: extract_form_horizontal_align(fields),
         conversations_representation: extract_form_conversations_representation(fields),
         show_command_bar: extract_form_show_command_bar(fields),
         show_close_button: extract_form_show_close_button(fields),
@@ -4377,6 +4379,16 @@ fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
         fields.get(tail_start + 15).map(|field| field.trim()),
     ) {
         (Some("2"), Some("2")) => Some("useIfNecessary"),
+        _ => None,
+    }
+}
+
+fn extract_form_horizontal_align(fields: &[&str]) -> Option<&'static str> {
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    match fields.get(tail_start + 11).map(|field| field.trim())? {
+        "0" => Some("Left"),
+        "1" => Some("Center"),
+        "2" => Some("Right"),
         _ => None,
     }
 }
@@ -6728,6 +6740,12 @@ fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<VerticalScroll>{}</VerticalScroll>\r\n",
             escape_xml_text(vertical_scroll)
+        ));
+    }
+    if let Some(horizontal_align) = properties.horizontal_align {
+        xml.push_str(&format!(
+            "\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+            escape_xml_text(horizontal_align)
         ));
     }
     if let Some(conversations_representation) = properties.conversations_representation {
@@ -14544,6 +14562,17 @@ mod tests {
         let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
         assert!(form_xml.contains("<ShowCloseButton>false</ShowCloseButton>"));
+    }
+
+    #[test]
+    fn extracts_form_horizontal_align_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,2,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<HorizontalAlign>Right</HorizontalAlign>"));
     }
 
     #[test]
