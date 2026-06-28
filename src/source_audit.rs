@@ -82,6 +82,7 @@ pub struct FormSourceAuditReport {
     pub child_item_elements: Vec<FormElementCount>,
     pub child_item_properties: Vec<FormElementCount>,
     pub child_item_property_contexts: Vec<FormElementCount>,
+    pub child_item_property_value_contexts: Vec<FormElementCount>,
     pub errors: Vec<FormSourceAuditError>,
 }
 
@@ -144,6 +145,7 @@ struct FormXmlShape {
     child_item_elements: BTreeMap<String, usize>,
     child_item_properties: BTreeMap<String, usize>,
     child_item_property_contexts: BTreeMap<String, usize>,
+    child_item_property_value_contexts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -653,6 +655,7 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     let mut child_item_elements = BTreeMap::new();
     let mut child_item_properties = BTreeMap::new();
     let mut child_item_property_contexts = BTreeMap::new();
+    let mut child_item_property_value_contexts = BTreeMap::new();
     let mut report = FormSourceAuditReport {
         root: root.clone(),
         form_xml_files: 0,
@@ -678,6 +681,7 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         child_item_elements: Vec::new(),
         child_item_properties: Vec::new(),
         child_item_property_contexts: Vec::new(),
+        child_item_property_value_contexts: Vec::new(),
         errors: Vec::new(),
     };
 
@@ -736,6 +740,10 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
                     &mut child_item_property_contexts,
                     shape.child_item_property_contexts,
                 );
+                merge_counts(
+                    &mut child_item_property_value_contexts,
+                    shape.child_item_property_value_contexts,
+                );
             }
             Err(error) => {
                 report.failed += 1;
@@ -761,6 +769,8 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     report.child_item_elements = sorted_element_counts(child_item_elements);
     report.child_item_properties = sorted_element_counts(child_item_properties);
     report.child_item_property_contexts = sorted_element_counts(child_item_property_contexts);
+    report.child_item_property_value_contexts =
+        sorted_element_counts(child_item_property_value_contexts);
     Ok(report)
 }
 
@@ -804,18 +814,28 @@ fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut path = Vec::<String>::new();
+    let mut text_value = String::new();
     let mut shape = FormXmlShape::default();
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
                 let name = push_form_element(&mut shape, &event, &path)?;
                 path.push(name);
+                text_value.clear();
             }
             Ok(Event::Empty(event)) => {
                 push_form_element(&mut shape, &event, &path)?;
             }
             Ok(Event::End(_)) => {
+                count_form_child_item_value_context(&mut shape, &path, text_value.trim());
                 path.pop();
+                text_value.clear();
+            }
+            Ok(Event::Text(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
             }
             Ok(Event::Eof) => break,
             Err(error) => return Err(anyhow!("invalid Form.xml: {error}")),
@@ -853,6 +873,58 @@ fn push_form_element(
         }
     }
     Ok(name)
+}
+
+fn count_form_child_item_value_context(shape: &mut FormXmlShape, path: &[String], value: &str) {
+    if value.is_empty() || value.len() > 120 {
+        return;
+    }
+    if value.chars().any(char::is_whitespace) {
+        return;
+    }
+    let Some(property) = path.last().map(String::as_str) else {
+        return;
+    };
+    if !is_form_child_item_scalar_property(property) {
+        return;
+    }
+    let Some((child_index, child_item)) = path
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, part)| is_form_child_item_xml_tag(part))
+    else {
+        return;
+    };
+    if child_index + 1 >= path.len() {
+        return;
+    }
+    let property_path = path[child_index + 1..].join("/");
+    *shape
+        .child_item_property_value_contexts
+        .entry(format!("{child_item}/{property_path}/{value}"))
+        .or_insert(0) += 1;
+}
+
+fn is_form_child_item_scalar_property(property: &str) -> bool {
+    matches!(
+        property,
+        "Group"
+            | "Behavior"
+            | "Representation"
+            | "ShowTitle"
+            | "Type"
+            | "DefaultButton"
+            | "EditMode"
+            | "AutoEditMode"
+            | "TitleLocation"
+            | "HorizontalStretch"
+            | "ReadOnly"
+            | "SkipOnInput"
+            | "AutoMaxWidth"
+            | "AutoMaxHeight"
+            | "LocationInCommandBar"
+    )
 }
 
 fn is_form_child_item_xml_tag(tag: &str) -> bool {
@@ -1265,6 +1337,9 @@ mod tests {
   <ChildItems>
     <UsualGroup name="Page" id="1">
       <Group>Vertical</Group>
+      <Behavior>Collapsible</Behavior>
+      <Representation>WeakSeparation</Representation>
+      <ShowTitle>false</ShowTitle>
       <ChildItems>
         <Table name="Rows" id="2">
           <DataPath>Items.Rows</DataPath>
@@ -1416,6 +1491,24 @@ mod tests {
                     count: 1
                 })
         );
+        for name in [
+            "UsualGroup/Group/Vertical",
+            "UsualGroup/Behavior/Collapsible",
+            "UsualGroup/Representation/WeakSeparation",
+            "UsualGroup/ShowTitle/false",
+            "SearchStringAddition/AdditionSource/Type/SearchStringRepresentation",
+            "Button/DefaultButton/true",
+        ] {
+            assert!(
+                report
+                    .child_item_property_value_contexts
+                    .contains(&FormElementCount {
+                        name: name.to_string(),
+                        count: 1
+                    }),
+                "missing {name}"
+            );
+        }
         assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
 
         let _ = fs::remove_dir_all(root);
