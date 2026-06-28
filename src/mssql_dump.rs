@@ -4710,6 +4710,7 @@ fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
         "OnActivate" => Some("OnActivate"),
         "OnMainServerAvailabilityChange" => Some("OnMainServerAvailabilityChange"),
         "3ccc650e-f631-4cae-8e33-3eaac610b5f9" => Some("OnOpen"),
+        "52dbb775-1631-4fd5-8c55-1615b5881dac" => Some("BeforeClose"),
         "1d632984-de3c-4b4b-ad9f-d69682a10182" => Some("ChoiceProcessing"),
         "3699f6a3-9a2a-4c82-a775-6ff4824a08ca" => Some("NotificationProcessing"),
         "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b" => Some("OnCreateAtServer"),
@@ -6416,6 +6417,7 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
         "OnActivateCell" => Some("OnActivateCell".to_string()),
         "OnActivateField" => Some("OnActivateField".to_string()),
         "OnActivateRow" => Some("OnActivateRow".to_string()),
+        "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange".to_string()),
         "97365900-eadf-4dfd-a9aa-fbb9ecabd079" => Some("OnGetDataAtServer".to_string()),
         "BeforeAddRow" => Some("BeforeAddRow".to_string()),
         "Creating" => Some("Creating".to_string()),
@@ -14646,6 +14648,19 @@ mod tests {
         );
         assert!(!form_xml.contains("NotAFormEvent"));
         assert!(!form_xml.contains(r#"<Event name="OnClose">"#));
+    }
+
+    #[test]
+    fn maps_form_event_uuid_aliases_to_names() {
+        assert_eq!(
+            form_event_name_from_identifier("52dbb775-1631-4fd5-8c55-1615b5881dac"),
+            Some("BeforeClose")
+        );
+        assert_eq!(
+            parse_form_child_item_event_identifier("fe115cc8-9e33-4684-a166-bd5136fe7a9f")
+                .as_deref(),
+            Some("OnChange")
+        );
     }
 
     #[test]

@@ -10214,10 +10214,12 @@ fn form_event_layout_identifiers(name: &str) -> Vec<&str> {
     let mut identifiers = vec![name];
     match name {
         "OnOpen" => identifiers.push("3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+        "BeforeClose" => identifiers.push("52dbb775-1631-4fd5-8c55-1615b5881dac"),
         "ChoiceProcessing" => identifiers.push("1d632984-de3c-4b4b-ad9f-d69682a10182"),
         "NotificationProcessing" => identifiers.push("3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
         "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
-        "OnGetDataAtServer" => {}
+        "OnChange" => identifiers.push("fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+        "OnGetDataAtServer" => identifiers.push("97365900-eadf-4dfd-a9aa-fbb9ecabd079"),
         _ => {}
     }
     identifiers
@@ -19346,7 +19348,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_events() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"},{2,\"AfterWrite\",\"OldAfterWrite\"},{3,\"BeforeWrite\",\"OldBeforeWrite\"},{4,\"OnWriteAtServer\",\"OldWriteAtServer\"},{5,\"FillCheckProcessingAtServer\",\"OldFillCheck\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"},{2,\"AfterWrite\",\"OldAfterWrite\"},{3,\"BeforeWrite\",\"OldBeforeWrite\"},{4,\"OnWriteAtServer\",\"OldWriteAtServer\"},{5,\"FillCheckProcessingAtServer\",\"OldFillCheck\"},{6,\"52dbb775-1631-4fd5-8c55-1615b5881dac\",\"OldBeforeClose\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
@@ -19357,7 +19359,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<Event name="BeforeWrite">NewBeforeWrite</Event>
 		<Event name="OnWriteAtServer">NewWriteAtServer</Event>
 		<Event name="FillCheckProcessingAtServer">NewFillCheck</Event>
-		<Event name="BeforeClose">ShouldNotBeAdded</Event>
+		<Event name="BeforeClose">NewBeforeClose</Event>
 	</Events>
 </Form>
 "#;
@@ -19379,13 +19381,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains("\"FillCheckProcessingAtServer\",\"NewFillCheck\"")
         );
+        assert!(
+            parsed
+                .layout
+                .contains("\"52dbb775-1631-4fd5-8c55-1615b5881dac\",\"NewBeforeClose\"")
+        );
         assert!(!parsed.layout.contains("OldOpen"));
         assert!(!parsed.layout.contains("OldChoice"));
         assert!(!parsed.layout.contains("OldAfterWrite"));
         assert!(!parsed.layout.contains("OldBeforeWrite"));
         assert!(!parsed.layout.contains("OldWriteAtServer"));
         assert!(!parsed.layout.contains("OldFillCheck"));
-        assert!(!parsed.layout.contains("ShouldNotBeAdded"));
+        assert!(!parsed.layout.contains("OldBeforeClose"));
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
         assert_eq!(
@@ -20287,7 +20294,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0},"OnChange","OldChange","StartChoice","OldChoice"},"OnGetDataAtServer","OldGetData"}},"Old module",{0}}"##
+            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0},"OnChange","OldChange","StartChoice","OldChoice"},"97365900-eadf-4dfd-a9aa-fbb9ecabd079","OldGetData"}},"Old module",{0}}"##
                 .as_bytes(),
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -20364,7 +20371,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             parsed
                 .layout
-                .contains(r#""OnGetDataAtServer","NewGetData""#)
+                .contains(r#""97365900-eadf-4dfd-a9aa-fbb9ecabd079","NewGetData""#)
         );
         assert!(parsed.layout.contains(r#""OnChange","NewChange""#));
         assert!(parsed.layout.contains(r#""StartChoice","NewChoice""#));
@@ -21000,6 +21007,40 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_event_uuid_alias() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{48,{40,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,2,"Name",1,0,{1,0},"fe115cc8-9e33-4684-a166-bd5136fe7a9f","OldChange"}},"Old module",{0}}"#
+                .as_bytes(),
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Name" id="40">
+			<Events>
+				<Event name="OnChange">NewChange</Event>
+			</Events>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r#""fe115cc8-9e33-4684-a166-bd5136fe7a9f","NewChange""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains("OldChange"));
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
