@@ -6774,7 +6774,10 @@ fn patch_form_body_parameters(
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     for parameter in parameters {
-        let _ = patch_form_body_parameter(text, parameter, source)?;
+        let patched = patch_form_body_parameter(text, parameter, source)?;
+        if !patched {
+            let _ = append_form_body_parameter(text, parameter, source)?;
+        }
     }
     Ok(())
 }
@@ -6837,6 +6840,50 @@ fn patch_form_body_parameter_entry(
         text.replace_range(range, &replacement);
     }
     Ok(true)
+}
+
+fn append_form_body_parameter(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() != 2 + count {
+        return Ok(false);
+    }
+
+    let entry = format_form_body_new_parameter(parameter, source)?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form parameters section is not closed"))?;
+    text.insert_str(insert_at, &format!(",{entry}"));
+    Ok(true)
+}
+
+fn format_form_body_new_parameter(
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    Ok(format!(
+        "{{0,{},{},{}}}",
+        format_1c_string(&parameter.name),
+        format_form_parameter_type_pattern(parameter, source)?,
+        if parameter.key_parameter == Some(true) {
+            "1"
+        } else {
+            "0"
+        }
+    ))
 }
 
 fn format_form_parameter_type_pattern(
@@ -14741,6 +14788,64 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .contains(r##""Счет",{"Pattern",{"#",99999999-9999-4999-8999-999999999999}},1"##)
         );
         assert!(!parsed.trailing[1].contains("88888888-8888-4888-8888-888888888888"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_parameter() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-new-parameter-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs").join("Products.xml"),
+            r#"<MetaDataObject><Catalog><InternalInfo><GeneratedType name="CatalogRef.Products"><TypeId>99999999-9999-4999-8999-999999999999</TypeId></GeneratedType></InternalInfo><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#
+                .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Product">
+			<Type>
+				<v8:Type>cfg:CatalogRef.Products</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let parameters_fields = super::scan_braced_fields(&parsed.trailing[1], 0)?;
+        let parameter_fields =
+            super::scan_braced_fields(&parsed.trailing[1], parameters_fields[2].start)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(&parsed.trailing[1][parameters_fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[1][parameters_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[1][parameter_fields[0].clone()], "0");
+        assert_eq!(
+            &parsed.trailing[1][parameter_fields[1].clone()],
+            r#""Product""#
+        );
+        assert!(
+            parsed.trailing[1].contains(
+                r##""Product",{"Pattern",{"#",99999999-9999-4999-8999-999999999999}},1"##
+            ),
+            "{}",
+            parsed.trailing[1]
+        );
         assert_eq!(parsed.trailing[0], "{0}");
         assert_eq!(parsed.trailing[2], "{0,0}");
         assert_eq!(parsed.trailing[3], "{0}");
