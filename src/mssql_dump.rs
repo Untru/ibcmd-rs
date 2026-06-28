@@ -529,21 +529,26 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
                 );
             }
         }
-        let main_section_interface_id = format!("{metadata_id}.9");
-        if let Some(row) = rows_by_file_name.get(main_section_interface_id.as_str())
-            && let Ok(bytes) = decode_hex(&row.binary_hex)
-            && parse_command_interface_blob(&bytes, &command_refs, &metadata_refs).is_some()
-        {
-            paths.insert(
-                main_section_interface_id,
-                SourceAsset {
-                    primary_path: PathBuf::from("Ext/MainSectionCommandInterface.xml"),
-                    kind: SourceAssetKind::CommandInterface {
-                        command_refs: command_refs.clone(),
-                        metadata_refs: metadata_refs.clone(),
+        for (suffix, path) in [
+            ("9", "Ext/MainSectionCommandInterface.xml"),
+            ("a", "Ext/CommandInterface.xml"),
+        ] {
+            let interface_id = format!("{metadata_id}.{suffix}");
+            if let Some(row) = rows_by_file_name.get(interface_id.as_str())
+                && let Ok(bytes) = decode_hex(&row.binary_hex)
+                && parse_command_interface_blob(&bytes, &command_refs, &metadata_refs).is_some()
+            {
+                paths.insert(
+                    interface_id,
+                    SourceAsset {
+                        primary_path: PathBuf::from(path),
+                        kind: SourceAssetKind::CommandInterface {
+                            command_refs: command_refs.clone(),
+                            metadata_refs: metadata_refs.clone(),
+                        },
                     },
-                },
-            );
+                );
+            }
         }
     }
     for row in rows {
@@ -667,14 +672,29 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
     ("4", "Ext/ParentConfigurations.bin", SourceAssetKind::Binary),
     (
+        "8",
+        "Ext/HomePageWorkArea.xml",
+        SourceAssetKind::InflatedBinary,
+    ),
+    (
         "10",
         "Ext/MobileClientSignature.bin",
+        SourceAssetKind::InflatedBinary,
+    ),
+    (
+        "b",
+        "Ext/ClientApplicationInterface.xml",
         SourceAssetKind::InflatedBinary,
     ),
     (
         "c",
         "Ext/MainSectionPicture.xml",
         SourceAssetKind::ExtPicture,
+    ),
+    (
+        "f",
+        "Ext/StandaloneConfigurationContent.bin",
+        SourceAssetKind::InflatedBinary,
     ),
 ];
 
@@ -758,6 +778,19 @@ fn source_assets_from_metadata_blob_inner(
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("Flowchart.xml"),
                     kind: SourceAssetKind::BusinessProcessFlowchart,
+                },
+            ));
+        }
+    }
+
+    if let Some(suffix) = additional_indexes_body_suffix(kind) {
+        let additional_indexes_id = format!("{uuid}.{suffix}");
+        if file_names.contains(additional_indexes_id.as_str()) {
+            assets.push((
+                additional_indexes_id,
+                SourceAsset {
+                    primary_path: object_path.join("Ext").join("AdditionalIndexes.xml"),
+                    kind: SourceAssetKind::InflatedBinary,
                 },
             ));
         }
@@ -881,6 +914,14 @@ fn source_assets_from_metadata_blob_inner(
     }
 
     Some(assets)
+}
+
+fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Document" => Some("3"),
+        "AccumulationRegister" => Some("4"),
+        _ => None,
+    }
 }
 
 fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
@@ -3153,10 +3194,10 @@ fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
     } else if bytes.starts_with(b"PK\x03\x04") {
         "Picture.zip"
     } else if let Ok(text) = std::str::from_utf8(bytes) {
-        let text = text.trim_start_matches('\u{feff}').trim_start();
-        if text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg") {
+        let trimmed = text.trim_start_matches('\u{feff}').trim_start();
+        if is_svg_text(text) {
             "Picture.svg"
-        } else if text.starts_with('<') {
+        } else if trimmed.starts_with('<') {
             "Picture.xml"
         } else {
             "Picture.txt"
@@ -3164,6 +3205,18 @@ fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
     } else {
         "Picture.bin"
     }
+}
+
+fn is_svg_content(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    is_svg_text(text)
+}
+
+fn is_svg_text(text: &str) -> bool {
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg")
 }
 
 fn extract_base64_payload(text: &str) -> Option<&str> {
@@ -3237,15 +3290,15 @@ fn format_ext_picture_xml(file_name: &str) -> String {
 
 fn format_help_xml(pages: &[HelpPage]) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
     );
     for page in pages {
         xml.push_str("\t<Page>");
         xml.push_str(&escape_xml_text(&page.page));
         xml.push_str("</Page>\r\n");
     }
-    xml.push_str("</Help>\r\n");
+    xml.push_str("</Help>");
     xml
 }
 
@@ -4241,6 +4294,9 @@ fn is_form_item_picture_content(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"GIF87a")
         || bytes.starts_with(b"GIF89a")
         || bytes.starts_with(b"\x00\x00\x01\x00")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"BM")
+        || is_svg_content(bytes)
 }
 
 fn nearest_form_item_name(text: &str, marker_start: usize) -> Option<String> {
@@ -5540,13 +5596,17 @@ fn format_form_child_items_xml(items: &[FormChildItem], indent: usize) -> String
     let tab = "\t".repeat(indent);
     let mut xml = format!("{tab}<ChildItems>\r\n");
     for item in items {
-        xml.push_str(&format_form_child_item_xml(item, indent + 1));
+        xml.push_str(&format_form_child_item_xml(item, indent + 1, false));
     }
     xml.push_str(&format!("{tab}</ChildItems>\r\n"));
     xml
 }
 
-fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
+fn format_form_child_item_xml(
+    item: &FormChildItem,
+    indent: usize,
+    table_addition_child: bool,
+) -> String {
     let tab = "\t".repeat(indent);
     let mut xml = format!(
         "{tab}<{} name=\"{}\" id=\"{}\">\r\n",
@@ -5611,7 +5671,19 @@ fn format_form_child_item_xml(item: &FormChildItem, indent: usize) -> String {
         }
         xml.push_str(&format!("{tab}\t</Events>\r\n"));
     }
-    xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
+    if item.tag == "Table" {
+        let mut regular_children = Vec::new();
+        for child in &item.child_items {
+            if child.tag.ends_with("Addition") {
+                xml.push_str(&format_form_child_item_xml(child, indent + 1, true));
+            } else {
+                regular_children.push(child.clone());
+            }
+        }
+        xml.push_str(&format_form_child_items_xml(&regular_children, indent + 1));
+    } else if !table_addition_child {
+        xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
+    }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
 }
@@ -8423,6 +8495,48 @@ enum ReturnValuesReuseValue {
     DuringSession,
 }
 
+struct CatalogProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    hierarchical: bool,
+    level_count: u32,
+    folders_on_top: bool,
+    owners_empty: bool,
+    subordination_use: Option<&'static str>,
+    use_standard_commands: bool,
+    code_length: u32,
+    description_length: u32,
+    code_type: Option<&'static str>,
+    code_allowed_length: Option<&'static str>,
+    code_series: Option<&'static str>,
+    check_unique: bool,
+    autonumbering: bool,
+    default_presentation: Option<&'static str>,
+    input_by_string_fields: Vec<String>,
+    default_object_form: Option<String>,
+    default_folder_form: Option<String>,
+    default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    default_folder_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_folder_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    auxiliary_folder_choice_form: Option<String>,
+    include_help_in_contents: bool,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+}
+
+struct GeneratedTypeEntry {
+    name: String,
+    category: &'static str,
+    type_id: String,
+    value_id: String,
+}
+
 struct ConstantProperties {
     value_type: ConstantValueType,
     use_standard_commands: bool,
@@ -8540,6 +8654,9 @@ fn parse_generated_type_entries_from_blob(
     if object_code == 57 {
         push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 3, "CatalogRef", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 5, "CatalogSelection", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 7, "CatalogList", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 34, "CatalogManager", &header.name);
     }
     let header_index = metadata_header_field_index(&fields, uuid);
 
@@ -8853,7 +8970,10 @@ fn extract_metadata_source_xml_with_refs(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let xml = if is_typed_metadata_source(kind) {
+    let xml = if kind == "Catalog" {
+        let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
+        format_catalog_source_xml(&header, &catalog).into_bytes()
+    } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed).into_bytes()
     } else {
@@ -9073,6 +9193,268 @@ fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonM
         return_values_reuse: parse_return_values_reuse_flag(flags[6])?,
         server_call: parse_1c_bool_flag(flags[7])?,
     })
+}
+
+fn parse_catalog_properties_from_text(
+    text: &str,
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<CatalogProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("57") {
+        return None;
+    }
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("CatalogObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("CatalogRef.{}", header.name),
+        "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        5,
+        6,
+        &format!("CatalogSelection.{}", header.name),
+        "Selection",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        7,
+        8,
+        &format!("CatalogList.{}", header.name),
+        "List",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        34,
+        35,
+        &format!("CatalogManager.{}", header.name),
+        "Manager",
+    );
+    let hierarchical = parse_catalog_hierarchical_flag(fields.get(9).copied()).unwrap_or(false);
+    let level_count = parse_1c_u32_field(fields.get(10).copied()).unwrap_or(2);
+    let folders_on_top = parse_1c_bool_field(fields.get(11).copied()).unwrap_or(true);
+    let owners_empty = parse_catalog_owners_empty(fields.get(12).copied());
+    let subordination_use =
+        catalog_subordination_use_xml(parse_1c_u32_field(fields.get(13).copied()).unwrap_or(1));
+    let check_unique = parse_1c_bool_field(fields.get(14).copied()).unwrap_or(false);
+    let autonumbering = parse_1c_bool_field(fields.get(15).copied()).unwrap_or(false);
+    let code_series =
+        catalog_code_series_xml(parse_1c_u32_field(fields.get(16).copied()).unwrap_or(0));
+    let code_length = parse_1c_u32_field(fields.get(17).copied()).unwrap_or(0);
+    let code_type = catalog_code_type_xml(parse_1c_u32_field(fields.get(18).copied()).unwrap_or(1));
+    let description_length = parse_1c_u32_field(fields.get(19).copied()).unwrap_or(0);
+    let code_allowed_length =
+        catalog_code_allowed_length_xml(parse_1c_u32_field(fields.get(20).copied()).unwrap_or(1));
+    let use_standard_commands = parse_1c_bool_field(fields.get(33).copied()).unwrap_or(true);
+    let include_help_in_contents = parse_1c_bool_field(fields.get(31).copied()).unwrap_or(false);
+
+    Some(CatalogProperties {
+        generated_types,
+        hierarchical,
+        level_count,
+        folders_on_top,
+        owners_empty,
+        subordination_use,
+        use_standard_commands,
+        code_length,
+        description_length,
+        code_type,
+        code_allowed_length,
+        code_series,
+        check_unique,
+        autonumbering,
+        default_presentation: Some("AsDescription"),
+        input_by_string_fields: parse_catalog_input_by_string_fields(
+            fields.get(42).copied(),
+            &header.name,
+        ),
+        default_object_form: parse_catalog_form_ref(fields.get(21).copied(), form_refs),
+        default_folder_form: parse_catalog_form_ref(fields.get(22).copied(), form_refs),
+        default_list_form: parse_catalog_form_ref(fields.get(23).copied(), form_refs),
+        default_choice_form: parse_catalog_form_ref(fields.get(24).copied(), form_refs),
+        default_folder_choice_form: parse_catalog_form_ref(fields.get(25).copied(), form_refs),
+        auxiliary_object_form: parse_catalog_form_ref(fields.get(26).copied(), form_refs),
+        auxiliary_folder_form: parse_catalog_form_ref(fields.get(27).copied(), form_refs),
+        auxiliary_list_form: parse_catalog_form_ref(fields.get(28).copied(), form_refs),
+        auxiliary_choice_form: parse_catalog_form_ref(fields.get(29).copied(), form_refs),
+        auxiliary_folder_choice_form: parse_catalog_form_ref(fields.get(30).copied(), form_refs),
+        include_help_in_contents,
+        object_presentation: parse_1c_synonyms(fields.get(46).copied().unwrap_or("{0}")),
+        extended_object_presentation: parse_1c_synonyms(fields.get(47).copied().unwrap_or("{0}")),
+        list_presentation: parse_1c_synonyms(fields.get(48).copied().unwrap_or("{0}")),
+        extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
+        explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
+    })
+}
+
+fn push_generated_type_entry(
+    entries: &mut Vec<GeneratedTypeEntry>,
+    fields: &[&str],
+    type_index: usize,
+    value_index: usize,
+    name: &str,
+    category: &'static str,
+) {
+    let Some(type_id) = fields.get(type_index).copied().and_then(parse_uuid_field) else {
+        return;
+    };
+    let Some(value_id) = fields.get(value_index).copied().and_then(parse_uuid_field) else {
+        return;
+    };
+    entries.push(GeneratedTypeEntry {
+        name: name.to_string(),
+        category,
+        type_id,
+        value_id,
+    });
+}
+
+fn parse_catalog_hierarchical_flag(header_field: Option<&str>) -> Option<bool> {
+    let outer = split_1c_braced_fields(header_field?, 0)?;
+    let header = split_1c_braced_fields(outer.get(1)?, 0)?;
+    parse_1c_bool_field(header.get(5).copied())
+}
+
+fn parse_catalog_owners_empty(field: Option<&str>) -> bool {
+    field
+        .map(|value| {
+            value
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                == "{0,0}"
+        })
+        .unwrap_or(false)
+}
+
+fn parse_catalog_form_ref(
+    field: Option<&str>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<String> {
+    let uuid = parse_non_zero_uuid(field?)?;
+    form_refs.get(&uuid).and_then(form_source_reference_name)
+}
+
+fn parse_catalog_input_by_string_fields(field: Option<&str>, catalog_name: &str) -> Vec<String> {
+    let Some(field) = field else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    for code in ["-3", "-2"] {
+        let marker = format!("{{{code}}}");
+        if field.contains(&marker) {
+            if let Some(name) = catalog_standard_attribute_name(code) {
+                values.push(format!("Catalog.{catalog_name}.StandardAttribute.{name}"));
+            }
+        }
+    }
+    values
+}
+
+fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
+    match code {
+        "-3" => Some("Description"),
+        "-2" => Some("Code"),
+        _ => None,
+    }
+}
+
+fn form_source_reference_name(form_ref: &FormSourceReference) -> Option<String> {
+    let parts = form_ref
+        .relative_path
+        .iter()
+        .filter_map(|part| part.to_str())
+        .collect::<Vec<_>>();
+    if parts.len() == 2 && parts.first() == Some(&"CommonForms") {
+        let form_name = Path::new(parts[1]).file_stem()?.to_str()?;
+        return Some(format!("CommonForm.{form_name}"));
+    }
+    if parts.len() == 4 && parts.get(2) == Some(&"Forms") {
+        let owner_kind = metadata_kind_for_source_folder(parts[0])?;
+        let owner_name = parts[1];
+        let form_name = Path::new(parts[3]).file_stem()?.to_str()?;
+        return Some(format!("{owner_kind}.{owner_name}.Form.{form_name}"));
+    }
+    None
+}
+
+fn metadata_kind_for_source_folder(folder: &str) -> Option<&'static str> {
+    match folder {
+        "Catalogs" => Some("Catalog"),
+        "Documents" => Some("Document"),
+        "DocumentJournals" => Some("DocumentJournal"),
+        "Enums" => Some("Enum"),
+        "Reports" => Some("Report"),
+        "DataProcessors" => Some("DataProcessor"),
+        "InformationRegisters" => Some("InformationRegister"),
+        "AccumulationRegisters" => Some("AccumulationRegister"),
+        "AccountingRegisters" => Some("AccountingRegister"),
+        "CalculationRegisters" => Some("CalculationRegister"),
+        "ChartsOfAccounts" => Some("ChartOfAccounts"),
+        "ChartsOfCharacteristicTypes" => Some("ChartOfCharacteristicTypes"),
+        "ChartsOfCalculationTypes" => Some("ChartOfCalculationTypes"),
+        "BusinessProcesses" => Some("BusinessProcess"),
+        "Tasks" => Some("Task"),
+        "ExchangePlans" => Some("ExchangePlan"),
+        _ => None,
+    }
+}
+
+fn parse_1c_bool_field(value: Option<&str>) -> Option<bool> {
+    parse_1c_bool_flag(value?.trim())
+}
+
+fn parse_1c_u32_field(value: Option<&str>) -> Option<u32> {
+    value?.trim().parse().ok()
+}
+
+fn catalog_subordination_use_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("ToFolders"),
+        1 => Some("ToItems"),
+        2 => Some("ToFoldersAndItems"),
+        _ => None,
+    }
+}
+
+fn catalog_code_type_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("Number"),
+        1 => Some("String"),
+        _ => None,
+    }
+}
+
+fn catalog_code_allowed_length_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("Fixed"),
+        1 => Some("Variable"),
+        _ => None,
+    }
+}
+
+fn catalog_code_series_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("WholeCatalog"),
+        1 => Some("WithinOwner"),
+        _ => None,
+    }
 }
 
 fn parse_1c_bool_flag(value: &str) -> Option<bool> {
@@ -9934,8 +10316,8 @@ fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
 
 fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
 \t<{kind} uuid=\"{uuid}\">\r\n\
 \t\t<Properties>\r\n\
 \t\t\t<Name>{name}</Name>\r\n",
@@ -9960,16 +10342,23 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
         }
         xml.push_str("\t\t\t</Synonym>\r\n");
     }
-    xml.push_str(&format!(
-        "\t\t\t<Comment>{}</Comment>\r\n\
-\t\t\t<FormType>Managed</FormType>\r\n\
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_text(&header.comment)
+        ));
+    }
+    xml.push_str(
+        "\t\t\t<FormType>Managed</FormType>\r\n\
 \t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n\
 \t\t\t<UsePurposes>\r\n\
 \t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>\r\n\
 \t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">MobilePlatformApplication</v8:Value>\r\n\
-\t\t\t</UsePurposes>\r\n",
-        escape_xml_text(&header.comment)
-    ));
+\t\t\t</UsePurposes>\r\n\
+\t\t\t<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>\r\n",
+    );
     if kind == "CommonForm" {
         xml.push_str(
             "\t\t\t<UseStandardCommands>false</UseStandardCommands>\r\n\
@@ -9980,9 +10369,439 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
     xml.push_str(&format!(
         "\t\t</Properties>\r\n\
 \t</{kind}>\r\n\
-</MetaDataObject>\r\n"
+</MetaDataObject>"
     ));
     xml
+}
+
+fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogProperties) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
+\t<Catalog uuid=\"{uuid}\">\r\n",
+        uuid = escape_xml_text(&header.uuid),
+    );
+
+    if !catalog.generated_types.is_empty() {
+        xml.push_str("\t\t<InternalInfo>\r\n");
+        for generated_type in &catalog.generated_types {
+            xml.push_str(&format!(
+                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+                escape_xml_text(&generated_type.name),
+                escape_xml_text(generated_type.category),
+                escape_xml_text(&generated_type.type_id),
+                escape_xml_text(&generated_type.value_id)
+            ));
+        }
+        xml.push_str("\t\t</InternalInfo>\r\n");
+    }
+
+    xml.push_str("\t\t<Properties>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&header.name)
+    ));
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_text(&header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<Hierarchical>{}</Hierarchical>\r\n\
+\t\t\t<HierarchyType>HierarchyFoldersAndItems</HierarchyType>\r\n\
+\t\t\t<LimitLevelCount>false</LimitLevelCount>\r\n\
+\t\t\t<LevelCount>{}</LevelCount>\r\n\
+\t\t\t<FoldersOnTop>{}</FoldersOnTop>\r\n\
+\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+        xml_bool(catalog.hierarchical),
+        catalog.level_count,
+        xml_bool(catalog.folders_on_top),
+        xml_bool(catalog.use_standard_commands),
+    ));
+    if catalog.owners_empty {
+        xml.push_str("\t\t\t<Owners/>\r\n");
+    }
+    if let Some(value) = catalog.subordination_use {
+        xml.push_str(&format!(
+            "\t\t\t<SubordinationUse>{value}</SubordinationUse>\r\n"
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<CodeLength>{}</CodeLength>\r\n\
+\t\t\t<DescriptionLength>{}</DescriptionLength>\r\n",
+        catalog.code_length, catalog.description_length
+    ));
+    if let Some(value) = catalog.code_type {
+        xml.push_str(&format!("\t\t\t<CodeType>{value}</CodeType>\r\n"));
+    }
+    if let Some(value) = catalog.code_allowed_length {
+        xml.push_str(&format!(
+            "\t\t\t<CodeAllowedLength>{value}</CodeAllowedLength>\r\n"
+        ));
+    }
+    if let Some(value) = catalog.code_series {
+        xml.push_str(&format!("\t\t\t<CodeSeries>{value}</CodeSeries>\r\n"));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<CheckUnique>{}</CheckUnique>\r\n\
+\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
+        xml_bool(catalog.check_unique),
+        xml_bool(catalog.autonumbering),
+    ));
+    if let Some(value) = catalog.default_presentation {
+        xml.push_str(&format!(
+            "\t\t\t<DefaultPresentation>{value}</DefaultPresentation>\r\n"
+        ));
+    }
+    push_catalog_standard_attributes_xml(&mut xml, catalog);
+    xml.push_str(
+        "\t\t\t<Characteristics/>\r\n\
+\t\t\t<PredefinedDataUpdate>Auto</PredefinedDataUpdate>\r\n\
+\t\t\t<EditType>InDialog</EditType>\r\n\
+\t\t\t<QuickChoice>true</QuickChoice>\r\n\
+\t\t\t<ChoiceMode>BothWays</ChoiceMode>\r\n",
+    );
+    push_catalog_input_by_string_xml(&mut xml, &catalog.input_by_string_fields);
+    xml.push_str(
+        "\t\t\t<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>\r\n",
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultObjectForm",
+        catalog.default_object_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultFolderForm",
+        catalog.default_folder_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultListForm",
+        catalog.default_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultChoiceForm",
+        catalog.default_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultFolderChoiceForm",
+        catalog.default_folder_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryObjectForm",
+        catalog.auxiliary_object_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryFolderForm",
+        catalog.auxiliary_folder_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryListForm",
+        catalog.auxiliary_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryChoiceForm",
+        catalog.auxiliary_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryFolderChoiceForm",
+        catalog.auxiliary_folder_choice_form.as_deref(),
+    );
+    xml.push_str(&format!(
+        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+\t\t\t<BasedOn/>\r\n\
+\t\t\t<DataLockFields/>\r\n\
+\t\t\t<DataLockControlMode>Managed</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>Use</FullTextSearch>\r\n",
+        xml_bool(catalog.include_help_in_contents),
+    ));
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ObjectPresentation",
+        &catalog.object_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ExtendedObjectPresentation",
+        &catalog.extended_object_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ListPresentation",
+        &catalog.list_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ExtendedListPresentation",
+        &catalog.extended_list_presentation,
+    );
+    push_localized_property(&mut xml, "\t\t\t", "Explanation", &catalog.explanation);
+    xml.push_str(
+        "\t\t\t<CreateOnInput>DontUse</CreateOnInput>\r\n\
+\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n\
+\t\t\t<DataHistory>DontUse</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+    );
+    xml.push_str("\t\t</Properties>\r\n\t</Catalog>\r\n</MetaDataObject>");
+    xml
+}
+
+fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
+    if fields.is_empty() {
+        xml.push_str("\t\t\t<InputByString/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<InputByString>\r\n");
+    for field in fields {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Field>{}</xr:Field>\r\n",
+            escape_xml_text(field)
+        ));
+    }
+    xml.push_str("\t\t\t</InputByString>\r\n");
+}
+
+fn push_catalog_standard_attributes_xml(xml: &mut String, catalog: &CatalogProperties) {
+    xml.push_str("\t\t\t<StandardAttributes>\r\n");
+    for attribute in catalog_standard_attributes() {
+        push_catalog_standard_attribute_xml(xml, attribute, catalog);
+    }
+    xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+struct CatalogStandardAttribute {
+    name: &'static str,
+    fill_checking: &'static str,
+    fill_from_filling_value: bool,
+    type_reduction_mode: &'static str,
+    fill_value: CatalogStandardAttributeFillValue,
+}
+
+enum CatalogStandardAttributeFillValue {
+    Nil,
+    EmptyString,
+    CodeString,
+}
+
+fn catalog_standard_attributes() -> &'static [CatalogStandardAttribute] {
+    &[
+        CatalogStandardAttribute {
+            name: "PredefinedDataName",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Predefined",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Ref",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "DeletionMark",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "IsFolder",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Owner",
+            fill_checking: "ShowError",
+            fill_from_filling_value: true,
+            type_reduction_mode: "Deny",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Parent",
+            fill_checking: "DontCheck",
+            fill_from_filling_value: true,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::Nil,
+        },
+        CatalogStandardAttribute {
+            name: "Description",
+            fill_checking: "ShowError",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::EmptyString,
+        },
+        CatalogStandardAttribute {
+            name: "Code",
+            fill_checking: "ShowError",
+            fill_from_filling_value: false,
+            type_reduction_mode: "TransformValues",
+            fill_value: CatalogStandardAttributeFillValue::CodeString,
+        },
+    ]
+}
+
+fn push_catalog_standard_attribute_xml(
+    xml: &mut String,
+    attribute: &CatalogStandardAttribute,
+    catalog: &CatalogProperties,
+) {
+    xml.push_str(&format!(
+        "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
+\t\t\t\t\t<xr:LinkByType/>\r\n\
+\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:ToolTip/>\r\n\
+\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:Format/>\r\n\
+\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+\t\t\t\t\t<xr:EditFormat/>\r\n\
+\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Synonym/>\r\n\
+\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n",
+        escape_xml_text(attribute.name),
+        attribute.fill_checking,
+        xml_bool(attribute.fill_from_filling_value),
+        attribute.type_reduction_mode
+    ));
+    push_catalog_standard_attribute_fill_value(xml, attribute, catalog);
+    xml.push_str(
+        "\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n",
+    );
+}
+
+fn push_catalog_standard_attribute_fill_value(
+    xml: &mut String,
+    attribute: &CatalogStandardAttribute,
+    catalog: &CatalogProperties,
+) {
+    match attribute.fill_value {
+        CatalogStandardAttributeFillValue::Nil => {
+            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+        }
+        CatalogStandardAttributeFillValue::EmptyString => {
+            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\"/>\r\n");
+        }
+        CatalogStandardAttributeFillValue::CodeString => {
+            if catalog.code_type == Some("String") {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\">{}</xr:FillValue>\r\n",
+                    " ".repeat(catalog.code_length as usize)
+                ));
+            } else {
+                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+            }
+        }
+    }
+}
+
+fn push_optional_text_element(xml: &mut String, indent: &str, name: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        xml.push_str(&format!(
+            "{indent}<{name}>{}</{name}>\r\n",
+            escape_xml_text(value)
+        ));
+    } else {
+        xml.push_str(&format!("{indent}<{name}/>\r\n"));
+    }
+}
+
+fn push_localized_property(
+    xml: &mut String,
+    indent: &str,
+    name: &str,
+    values: &[(String, String)],
+) {
+    if values.is_empty() {
+        xml.push_str(&format!("{indent}<{name}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{indent}<{name}>\r\n"));
+    for (lang, content) in values {
+        xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_text(lang)
+        ));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_text(content)
+        ));
+        xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
+    }
+    xml.push_str(&format!("{indent}</{name}>\r\n"));
 }
 
 fn format_template_source_xml(kind: &str, header: &MetadataHeader, template_type: &str) -> String {
@@ -11086,6 +11905,60 @@ mod tests {
     }
 
     #[test]
+    fn writes_document_additional_indexes_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let document_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,\r\n{{3,\r\n{{1,0,{uuid}}},\"Order\",{{1,\"en\",\"Order\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let additional_indexes =
+            b"\xef\xbb\xbf<AdditionalIndexes><AdditionalIndex id=\"idx\"/></AdditionalIndexes>"
+                .to_vec();
+        let additional_indexes_blob = deflate_for_test(&additional_indexes);
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: document_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&document_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.3"),
+                part_no: 0,
+                data_size: additional_indexes_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&additional_indexes_blob),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 1);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("Documents/Order/Ext/AdditionalIndexes.xml")).unwrap(),
+            additional_indexes
+        );
+        let row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.3"))
+            .unwrap();
+        assert_eq!(
+            row.source_asset_path.as_deref(),
+            Some("Documents/Order/Ext/AdditionalIndexes.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn quotes_sql_string_literals() {
         assert_eq!(quote_string("a'b"), "a''b");
     }
@@ -11263,12 +12136,22 @@ mod tests {
         let png = b"\x89PNG\r\n\x1a\n";
         let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let parent_blob = b"parent-cf".to_vec();
+        let home_page_work_area = b"\xEF\xBB\xBF<HomePageWorkArea/>".to_vec();
+        let home_page_work_area_blob = deflate_for_test(&home_page_work_area);
         let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
         let mobile_signature_blob = deflate_for_test(&mobile_signature);
         let main_section_command_interface = deflate_for_test(
             b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
         );
+        let command_interface = deflate_for_test(
+            b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
+        );
+        let client_application_interface = b"\xEF\xBB\xBF<ClientApplicationInterface/>".to_vec();
+        let client_application_interface_blob = deflate_for_test(&client_application_interface);
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
+        let standalone_configuration_content = b"\xEF\xBB\xBF<StandaloneContent/>".to_vec();
+        let standalone_configuration_content_blob =
+            deflate_for_test(&standalone_configuration_content);
         let rows = vec![
             ConfigRow {
                 file_name: format!("{uuid}.0"),
@@ -11287,6 +12170,12 @@ mod tests {
                 part_no: 0,
                 data_size: parent_blob.len() as i64,
                 binary_hex: encode_hex_for_test(&parent_blob),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.8"),
+                part_no: 0,
+                data_size: home_page_work_area_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&home_page_work_area_blob),
             },
             ConfigRow {
                 file_name: format!("{uuid}.5"),
@@ -11319,17 +12208,35 @@ mod tests {
                 binary_hex: encode_hex_for_test(&main_section_command_interface),
             },
             ConfigRow {
+                file_name: format!("{uuid}.a"),
+                part_no: 0,
+                data_size: command_interface.len() as i64,
+                binary_hex: encode_hex_for_test(&command_interface),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.b"),
+                part_no: 0,
+                data_size: client_application_interface_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&client_application_interface_blob),
+            },
+            ConfigRow {
                 file_name: format!("{uuid}.c"),
                 part_no: 0,
                 data_size: main_picture_blob.len() as i64,
                 binary_hex: encode_hex_for_test(&main_picture_blob),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.f"),
+                part_no: 0,
+                data_size: standalone_configuration_content_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&standalone_configuration_content_blob),
             },
         ];
 
         let dumped = dump_table_rows(&root, "Config", rows, false, true, false).unwrap();
 
         assert_eq!(dumped.module_text_rows, 4);
-        assert_eq!(dumped.source_asset_rows, 5);
+        assert_eq!(dumped.source_asset_rows, 9);
         assert_eq!(
             fs::read(root.join("Ext/OrdinaryApplicationModule.bsl")).unwrap(),
             ordinary_text
@@ -11356,14 +12263,33 @@ mod tests {
             parent_blob
         );
         assert_eq!(
+            fs::read(root.join("Ext/HomePageWorkArea.xml")).unwrap(),
+            home_page_work_area
+        );
+        assert_eq!(
             fs::read(root.join("Ext/MobileClientSignature.bin")).unwrap(),
             mobile_signature
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/ClientApplicationInterface.xml")).unwrap(),
+            client_application_interface
+        );
+        assert_eq!(
+            fs::read(root.join("Ext/StandaloneConfigurationContent.bin")).unwrap(),
+            standalone_configuration_content
         );
         let main_section_xml =
             fs::read_to_string(root.join("Ext/MainSectionCommandInterface.xml")).unwrap();
         assert!(main_section_xml.contains("<CommandInterface"));
         assert!(
             main_section_xml.contains(r#"<Command name="0:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#)
+        );
+        let command_interface_xml =
+            fs::read_to_string(root.join("Ext/CommandInterface.xml")).unwrap();
+        assert!(command_interface_xml.contains("<CommandInterface"));
+        assert!(
+            command_interface_xml
+                .contains(r#"<Command name="0:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#)
         );
         assert!(
             fs::read_to_string(root.join("Ext/Splash.xml"))
@@ -11381,6 +12307,11 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.4"))
             .unwrap();
+        let home_page_work_area_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.8"))
+            .unwrap();
         let main_picture_row = dumped
             .rows
             .iter()
@@ -11396,6 +12327,21 @@ mod tests {
             .iter()
             .find(|row| row.file_name == format!("{uuid}.9"))
             .unwrap();
+        let command_interface_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.a"))
+            .unwrap();
+        let client_application_interface_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.b"))
+            .unwrap();
+        let standalone_configuration_content_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.f"))
+            .unwrap();
         assert_eq!(
             splash_row.source_asset_path.as_deref(),
             Some("Ext/Splash.xml")
@@ -11403,6 +12349,10 @@ mod tests {
         assert_eq!(
             parent_row.source_asset_path.as_deref(),
             Some("Ext/ParentConfigurations.bin")
+        );
+        assert_eq!(
+            home_page_work_area_row.source_asset_path.as_deref(),
+            Some("Ext/HomePageWorkArea.xml")
         );
         assert_eq!(
             main_picture_row.source_asset_path.as_deref(),
@@ -11415,6 +12365,22 @@ mod tests {
         assert_eq!(
             main_section_interface_row.source_asset_path.as_deref(),
             Some("Ext/MainSectionCommandInterface.xml")
+        );
+        assert_eq!(
+            command_interface_row.source_asset_path.as_deref(),
+            Some("Ext/CommandInterface.xml")
+        );
+        assert_eq!(
+            client_application_interface_row
+                .source_asset_path
+                .as_deref(),
+            Some("Ext/ClientApplicationInterface.xml")
+        );
+        assert_eq!(
+            standalone_configuration_content_row
+                .source_asset_path
+                .as_deref(),
+            Some("Ext/StandaloneConfigurationContent.bin")
         );
 
         let _ = fs::remove_dir_all(root);
@@ -11855,12 +12821,30 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 4);
-        let owned_xml =
-            fs::read_to_string(root.join("Catalogs/Products/Forms/ListForm.xml")).unwrap();
+        let owned_xml_bytes = fs::read(root.join("Catalogs/Products/Forms/ListForm.xml")).unwrap();
+        assert!(owned_xml_bytes.starts_with(b"\xEF\xBB\xBF<?xml"));
+        assert!(owned_xml_bytes.ends_with(b"</MetaDataObject>"));
+        assert!(!owned_xml_bytes.ends_with(b"</MetaDataObject>\r\n"));
+        let owned_xml = String::from_utf8(owned_xml_bytes).unwrap();
         let common_xml = fs::read_to_string(root.join("CommonForms/SharedForm.xml")).unwrap();
         assert!(owned_xml.contains("<Form uuid=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
+        assert!(owned_xml.contains(r#"version="2.21""#));
+        assert!(
+            owned_xml.contains(r#"xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config""#)
+        );
+        assert!(owned_xml.contains(r#"xmlns:xr="http://v8.1c.ru/8.3/xcf/readable""#));
+        assert!(owned_xml.contains("<Comment/>"));
         assert!(owned_xml.contains("<FormType>Managed</FormType>"));
+        assert!(
+            owned_xml
+                .contains("<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>")
+        );
         assert!(common_xml.contains("<CommonForm uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">"));
+        assert!(common_xml.contains(r#"version="2.21""#));
+        assert!(
+            common_xml
+                .contains("<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>")
+        );
         assert!(common_xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
         assert!(!root.join("Catalogs/Products/Forms/SharedForm.xml").exists());
         assert!(!root.join("Catalogs/Services/Forms/SharedForm.xml").exists());
@@ -12266,6 +13250,58 @@ mod tests {
     }
 
     #[test]
+    fn formats_table_search_additions_as_direct_sections() {
+        let table = FormChildItem {
+            tag: "Table",
+            id: "25".to_string(),
+            name: "Rows".to_string(),
+            group: None,
+            item_type: None,
+            addition_source_item: None,
+            title: Vec::new(),
+            events: Vec::new(),
+            data_path: Some("List".to_string()),
+            command_name: None,
+            child_items: vec![
+                FormChildItem {
+                    tag: "SearchStringAddition",
+                    id: "26".to_string(),
+                    name: "RowsSearch".to_string(),
+                    group: None,
+                    item_type: Some("SearchStringRepresentation"),
+                    addition_source_item: Some("Rows".to_string()),
+                    title: Vec::new(),
+                    events: Vec::new(),
+                    data_path: None,
+                    command_name: None,
+                    child_items: Vec::new(),
+                },
+                FormChildItem {
+                    tag: "InputField",
+                    id: "40".to_string(),
+                    name: "Name".to_string(),
+                    group: None,
+                    item_type: None,
+                    addition_source_item: None,
+                    title: Vec::new(),
+                    events: Vec::new(),
+                    data_path: Some("List.Name".to_string()),
+                    command_name: None,
+                    child_items: Vec::new(),
+                },
+            ],
+        };
+
+        let xml = format_form_child_items_xml(&[table], 1);
+
+        let addition_at = xml.find("\t\t<SearchStringAddition").unwrap();
+        let nested_child_items_at = xml.rfind("\t\t<ChildItems>").unwrap();
+        assert!(addition_at < nested_child_items_at);
+        assert!(xml.contains("\t\t<SearchStringAddition name=\"RowsSearch\" id=\"26\">\r\n"));
+        assert!(!xml.contains("\t\t<ChildItems>\r\n\t\t\t<SearchStringAddition"));
+    }
+
+    #[test]
     fn extracts_form_command_interface_navigation_panel() {
         let first_command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let second_command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
@@ -12378,6 +13414,20 @@ mod tests {
             .exists());
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recognizes_form_item_picture_asset_formats() {
+        assert!(is_form_item_picture_content(b"\x89PNG\r\n\x1a\npayload"));
+        assert!(is_form_item_picture_content(b"GIF87apayload"));
+        assert!(is_form_item_picture_content(b"\x00\x00\x01\x00payload"));
+        assert!(is_form_item_picture_content(b"\xff\xd8\xff\xe0payload"));
+        assert!(is_form_item_picture_content(b"BMpayload"));
+        assert!(is_form_item_picture_content(b"<svg/>"));
+        assert!(is_form_item_picture_content(
+            b"<?xml version=\"1.0\"?><svg/>"
+        ));
+        assert!(!is_form_item_picture_content(b"plain text"));
     }
 
     #[test]
@@ -12742,11 +13792,13 @@ mod tests {
 
         assert_eq!(dumped.metadata_xml_rows, 1);
         assert_eq!(dumped.source_asset_rows, 1);
-        assert!(
-            fs::read_to_string(root.join("Catalogs/Products/Ext/Help.xml"))
-                .unwrap()
-                .contains("<Page>ru</Page>")
-        );
+        let help_xml = fs::read(root.join("Catalogs/Products/Ext/Help.xml")).unwrap();
+        assert!(help_xml.starts_with(b"\xEF\xBB\xBF<?xml"));
+        assert!(help_xml.ends_with(b"</Help>"));
+        assert!(!help_xml.ends_with(b"</Help>\r\n"));
+        let help_xml_text = String::from_utf8(help_xml).unwrap();
+        assert!(help_xml_text.contains(r#"version="2.21""#));
+        assert!(help_xml_text.contains("<Page>ru</Page>"));
         assert_eq!(
             fs::read(root.join("Catalogs/Products/Ext/Help/ru.html")).unwrap(),
             b"<html></html>"
@@ -15777,6 +16829,203 @@ mod tests {
             index.get(exchange_ref_type_id).map(String::as_str),
             Some("cfg:ExchangePlanRef.Sync")
         );
+    }
+
+    #[test]
+    fn extracts_catalog_generated_types_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<InternalInfo>"));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="CatalogObject.Products" category="Object">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="CatalogRef.Products" category="Ref">"#));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="CatalogSelection.Products" category="Selection">"#
+        ));
+        assert!(xml.contains(r#"<xr:GeneratedType name="CatalogList.Products" category="List">"#));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="CatalogManager.Products" category="Manager">"#)
+        );
+        assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(xml.contains(r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#));
+        assert!(xml.contains("<Comment/>"));
+        assert!(xml.contains("<Hierarchical>false</Hierarchical>"));
+        assert!(xml.contains("<HierarchyType>HierarchyFoldersAndItems</HierarchyType>"));
+        assert!(xml.contains("<LimitLevelCount>false</LimitLevelCount>"));
+        assert!(xml.contains("<LevelCount>2</LevelCount>"));
+        assert!(xml.contains("<FoldersOnTop>true</FoldersOnTop>"));
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert!(xml.contains("<Owners/>"));
+        assert!(xml.contains("<SubordinationUse>ToItems</SubordinationUse>"));
+        assert!(xml.contains("<CodeLength>3</CodeLength>"));
+        assert!(xml.contains("<DescriptionLength>10</DescriptionLength>"));
+        assert!(xml.contains("<CodeType>String</CodeType>"));
+        assert!(xml.contains("<CodeAllowedLength>Variable</CodeAllowedLength>"));
+        assert!(xml.contains("<CodeSeries>WholeCatalog</CodeSeries>"));
+        assert!(xml.contains("<CheckUnique>false</CheckUnique>"));
+        assert!(xml.contains("<Autonumbering>false</Autonumbering>"));
+        assert!(xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"));
+
+        let rows = vec![ConfigRow {
+            file_name: catalog_uuid.to_string(),
+            part_no: 0,
+            data_size: catalog_blob.len() as i64,
+            binary_hex: encode_hex_for_test(&catalog_blob),
+        }];
+        let index = build_metadata_type_index(&rows);
+        assert_eq!(
+            index.get(selection_type_id).map(String::as_str),
+            Some("cfg:CatalogSelection.Products")
+        );
+        assert_eq!(
+            index.get(list_type_id).map(String::as_str),
+            Some("cfg:CatalogList.Products")
+        );
+        assert_eq!(
+            index.get(manager_type_id).map(String::as_str),
+            Some("cfg:CatalogManager.Products")
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_form_refs_and_presentations_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let list_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{object_form_uuid},{zero_uuid},{list_form_uuid},{list_form_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{1,{{0,2,{{\"#\",60ea359f-3a6e-48bb-8e71-d2a457572918,{{-3}}}},{{\"#\",60ea359f-3a6e-48bb-8e71-d2a457572918,{{-2}}}}}}}},1,1,{{0}},{{2,\"ru\",\"Товар\",\"en\",\"Product\"}},{{0}},{{0}},{{0}},{{2,\"ru\",\"Товары для продажи\",\"en\",\"Goods for sale\"}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_refs = BTreeMap::from([
+            (
+                object_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Catalogs/Products/Forms/ItemForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                list_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Catalogs/Products/Forms/ListForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(
+            xml.contains("<DefaultObjectForm>Catalog.Products.Form.ItemForm</DefaultObjectForm>")
+        );
+        assert!(xml.contains("<Characteristics/>"));
+        assert!(xml.contains("<StandardAttributes>"));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="PredefinedDataName">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Owner">"#));
+        assert!(xml.contains("<xr:FillChecking>ShowError</xr:FillChecking>"));
+        assert!(xml.contains("<xr:FillFromFillingValue>true</xr:FillFromFillingValue>"));
+        assert!(xml.contains("<xr:TypeReductionMode>Deny</xr:TypeReductionMode>"));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Parent">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Description">"#));
+        assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:string"/>"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Code">"#));
+        assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:string">   </xr:FillValue>"#));
+        assert!(xml.contains("<PredefinedDataUpdate>Auto</PredefinedDataUpdate>"));
+        assert!(xml.contains("<EditType>InDialog</EditType>"));
+        assert!(xml.contains("<QuickChoice>true</QuickChoice>"));
+        assert!(xml.contains("<ChoiceMode>BothWays</ChoiceMode>"));
+        assert!(xml.contains("<InputByString>"));
+        assert!(
+            xml.contains("<xr:Field>Catalog.Products.StandardAttribute.Description</xr:Field>")
+        );
+        assert!(xml.contains("<xr:Field>Catalog.Products.StandardAttribute.Code</xr:Field>"));
+        assert!(
+            xml.contains(
+                "<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>"
+            )
+        );
+        assert!(
+            xml.contains("<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>")
+        );
+        assert!(xml.contains(
+            "<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>"
+        ));
+        assert!(xml.contains("<DefaultFolderForm/>"));
+        assert!(xml.contains("<DefaultListForm>Catalog.Products.Form.ListForm</DefaultListForm>"));
+        assert!(
+            xml.contains("<DefaultChoiceForm>Catalog.Products.Form.ListForm</DefaultChoiceForm>")
+        );
+        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+        assert!(xml.contains("<ObjectPresentation>"));
+        assert!(xml.contains("<v8:content>Товар</v8:content>"));
+        assert!(xml.contains("<v8:content>Product</v8:content>"));
+        assert!(xml.contains("<ExtendedObjectPresentation/>"));
+        assert!(xml.contains("<ListPresentation/>"));
+        assert!(xml.contains("<ExtendedListPresentation/>"));
+        assert!(xml.contains("<Explanation>"));
+        assert!(xml.contains("<v8:content>Товары для продажи</v8:content>"));
+        assert!(xml.contains("<v8:content>Goods for sale</v8:content>"));
+        assert!(xml.contains("<CreateOnInput>DontUse</CreateOnInput>"));
+        assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+        assert!(xml.contains("<DataHistory>DontUse</DataHistory>"));
+        assert!(xml.contains(
+            "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>"
+        ));
+        assert!(xml.contains(
+            "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
+        ));
     }
 
     #[test]

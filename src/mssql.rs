@@ -43,7 +43,7 @@ use crate::module_blob::{
     VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
     pack_help_blob_from_parts, pack_module_blob_bytes,
     pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
     pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
@@ -2306,7 +2306,46 @@ fn prepare_metadata_body_rows(
     rows.extend(prepare_command_interface_body_row(
         sqlcmd, server, database, xml_path, properties,
     )?);
+    rows.extend(prepare_additional_indexes_body_row(
+        sqlcmd, server, database, xml_path, properties,
+    )?);
     Ok(rows)
+}
+
+fn prepare_additional_indexes_body_row(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let Some(suffix) = additional_indexes_body_suffix(&properties.kind) else {
+        return Ok(Vec::new());
+    };
+    let body_path = infer_additional_indexes_body_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let bytes = fs::read(&body_path)
+        .with_context(|| format!("failed to read AdditionalIndexes {}", body_path.display()))?;
+    let packed = pack_raw_deflated_blob_from_bytes(&bytes)
+        .with_context(|| format!("failed to pack AdditionalIndexes {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Document" => Some("3"),
+        "AccumulationRegister" => Some("4"),
+        _ => None,
+    }
 }
 
 fn prepare_style_body_row(
@@ -2583,6 +2622,15 @@ fn prepare_configuration_asset_body_rows(
         server,
         database,
         properties,
+        infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
+        "8",
+        "HomePageWorkArea",
+    )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
         infer_configuration_ext_body_path(xml_path, "MobileClientSignature.bin"),
         "10",
         "MobileClientSignature",
@@ -2592,8 +2640,25 @@ fn prepare_configuration_asset_body_rows(
         server,
         database,
         properties,
+        infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
+        "a",
+    )?);
+    rows.extend(prepare_configuration_command_interface_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
         "9",
+    )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
+        "b",
+        "ClientApplicationInterface",
     )?);
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
@@ -2602,6 +2667,15 @@ fn prepare_configuration_asset_body_rows(
         properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
         "c",
+    )?);
+    rows.extend(prepare_configuration_raw_deflated_body_row(
+        sqlcmd,
+        server,
+        database,
+        properties,
+        infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
+        "f",
+        "StandaloneConfigurationContent",
     )?);
     Ok(rows)
 }
@@ -2879,11 +2953,13 @@ fn prepare_form_body_row(
     } else {
         None
     };
-    let packed = pack_form_body_blob_from_form_xml_with_source(
+    let form_item_assets_root = form_path.with_extension("").join("Items");
+    let packed = pack_form_body_blob_from_form_xml_with_source_and_assets(
         &base_body,
         &form_xml,
         module_text.as_deref(),
         source,
+        Some(&form_item_assets_root),
     )
     .with_context(|| format!("failed to pack Form body {}", form_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
@@ -4831,6 +4907,12 @@ fn infer_command_interface_body_path(xml: &Path) -> PathBuf {
         .join("CommandInterface.xml")
 }
 
+fn infer_additional_indexes_body_path(xml: &Path) -> PathBuf {
+    xml.with_extension("")
+        .join("Ext")
+        .join("AdditionalIndexes.xml")
+}
+
 fn infer_exchange_plan_content_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Content.xml")
 }
@@ -5572,6 +5654,20 @@ mod tests {
     }
 
     #[test]
+    fn maps_additional_indexes_body_suffixes_for_load() {
+        assert_eq!(super::additional_indexes_body_suffix("Document"), Some("3"));
+        assert_eq!(
+            super::additional_indexes_body_suffix("AccumulationRegister"),
+            Some("4")
+        );
+        assert_eq!(super::additional_indexes_body_suffix("Catalog"), None);
+        assert_eq!(
+            super::infer_additional_indexes_body_path(r"Documents\Order.xml".as_ref()),
+            std::path::PathBuf::from(r"Documents\Order\Ext\AdditionalIndexes.xml")
+        );
+    }
+
+    #[test]
     fn infers_object_module_body_paths() {
         assert_eq!(
             super::infer_object_module_body_path(
@@ -5608,6 +5704,34 @@ mod tests {
                 "ParentConfigurations.bin"
             ),
             std::path::PathBuf::from(r"Ext\ParentConfigurations.bin")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "CommandInterface.xml"
+            ),
+            std::path::PathBuf::from(r"Ext\CommandInterface.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "HomePageWorkArea.xml"
+            ),
+            std::path::PathBuf::from(r"Ext\HomePageWorkArea.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "ClientApplicationInterface.xml"
+            ),
+            std::path::PathBuf::from(r"Ext\ClientApplicationInterface.xml")
+        );
+        assert_eq!(
+            super::infer_configuration_ext_body_path(
+                r"Configuration.xml".as_ref(),
+                "StandaloneConfigurationContent.bin"
+            ),
+            std::path::PathBuf::from(r"Ext\StandaloneConfigurationContent.bin")
         );
     }
 
