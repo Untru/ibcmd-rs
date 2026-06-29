@@ -420,7 +420,15 @@ fn dump_table_rows_streamed(
         if selected_file_names.is_empty() {
             fetch_metadata_rows(sqlcmd, server, user, password, database, table)?
         } else {
-            fetch_rows(sqlcmd, server, user, password, database, table, &metadata_file_names)?
+            fetch_rows(
+                sqlcmd,
+                server,
+                user,
+                password,
+                database,
+                table,
+                &metadata_file_names,
+            )?
         }
     } else {
         Vec::new()
@@ -661,7 +669,8 @@ fn dynamic_source_asset(
 
     if context.configuration_module_groups.contains(owner_uuid)
         && matches!(suffix, "9" | "a")
-        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs).is_some()
+        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
+            .is_some()
     {
         let path = if suffix == "9" {
             "Ext/MainSectionCommandInterface.xml"
@@ -691,7 +700,8 @@ fn dynamic_source_asset(
         });
     }
     if matches!(suffix, "0" | "1")
-        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs).is_some()
+        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
+            .is_some()
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join("Ext").join("CommandInterface.xml"),
@@ -2087,7 +2097,7 @@ fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, 
 
 fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, FormSourceReference> {
     let mut forms = Vec::<MetadataHeader>::new();
-    let mut owner_paths_by_ref = BTreeMap::<String, Vec<PathBuf>>::new();
+    let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
 
     for row in rows {
         if row.file_name.contains('.') {
@@ -2123,25 +2133,33 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
             continue;
         };
         let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        for reference in uuid_like_values(text) {
+        let Some(references) = owned_form_uuid_values(text) else {
+            continue;
+        };
+        for reference in references {
             owner_paths_by_ref
                 .entry(reference)
                 .or_default()
-                .push(owner_path.clone());
+                .insert(owner_path.clone());
         }
     }
 
     let mut index = BTreeMap::new();
     for form in forms {
-        let owner_matches = owner_paths_by_ref
-            .get(&form.uuid)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let relative_path = if let [owner_path] = owner_matches {
-            owner_path
-                .join("Forms")
-                .join(sanitize_source_path_segment(&form.name))
-                .with_extension("xml")
+        let owner_matches = owner_paths_by_ref.get(&form.uuid).map(BTreeSet::iter);
+        let relative_path = if let Some(mut owner_paths) = owner_matches {
+            let first = owner_paths.next();
+            let second = owner_paths.next();
+            if let (Some(owner_path), None) = (first, second) {
+                owner_path
+                    .join("Forms")
+                    .join(sanitize_source_path_segment(&form.name))
+                    .with_extension("xml")
+            } else {
+                PathBuf::from("CommonForms")
+                    .join(sanitize_source_path_segment(&form.name))
+                    .with_extension("xml")
+            }
         } else {
             PathBuf::from("CommonForms")
                 .join(sanitize_source_path_segment(&form.name))
@@ -2162,6 +2180,61 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
     }
 
     index
+}
+
+fn owned_form_uuid_values(text: &str) -> Option<BTreeSet<String>> {
+    const FORM_LIST_MARKERS: &[&str] = &[
+        "fdf816d2-1ead-11d5-b975-0050bae0a95d",
+        "fb880e93-47d7-4127-9357-a20e69c17545",
+        "13134204-f60b-11d5-a3c7-0050bae0a776",
+        "87c509ab-3d38-4d67-b379-aca796298578",
+        "b64d9a44-1642-11d6-a3c7-0050bae0a776",
+        "d5b0e5ed-256d-401c-9c36-f630cafd8a62",
+        "a3b368c0-29e2-11d6-a3c7-0050bae0a776",
+        "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
+        "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+        "b8533c0c-2342-4db3-91a2-c2b08cbf6b23",
+        "ec81ad10-ca07-11d5-b9a5-0050bae0a95d",
+        "33f2e54b-37ce-4a7a-a569-b648d7aa4634",
+        "3f58cbfb-4172-4e54-be49-561a579bb38b",
+    ];
+
+    let mut refs = BTreeSet::new();
+    let mut found_marker = false;
+    for marker in FORM_LIST_MARKERS {
+        let Some(marker_index) = text.find(marker) else {
+            continue;
+        };
+        found_marker = true;
+        let Some(block_start) = text[..marker_index].rfind('{') else {
+            continue;
+        };
+        let Some(block_end) = text[marker_index..]
+            .find('}')
+            .map(|offset| marker_index + offset + 1)
+        else {
+            continue;
+        };
+        let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
+            continue;
+        };
+        if fields.first().map(|field| field.trim()) != Some(*marker) {
+            continue;
+        }
+        let Some(count) = fields
+            .get(1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        for field in fields.iter().skip(2).take(count) {
+            let value = field.trim().trim_matches('"').to_ascii_lowercase();
+            if is_uuid_like_ascii(value.as_bytes()) {
+                refs.insert(value);
+            }
+        }
+    }
+    found_marker.then_some(refs)
 }
 
 fn build_template_source_reference_index(
@@ -2774,6 +2847,19 @@ fn parse_flowchart_item(
             events = parse_flowchart_activity_events(fields.get(5)?)?;
             "Activity"
         }
+        "7" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            "Split"
+        }
+        "8" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            "Join"
+        }
+        "9" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            events = parse_flowchart_named_events(fields.get(3)?, &["Processing"])?;
+            "Processing"
+        }
         _ => return None,
     };
 
@@ -2792,13 +2878,13 @@ fn parse_flowchart_item(
 fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
     let fields = split_1c_braced_fields(body, 0)?;
     let head = split_1c_braced_fields(fields.first()?, 0)?;
-    let uuid = if matches!(code, "2" | "3" | "4" | "5") {
+    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9") {
         head.get(2).map(|value| value.trim().to_string())
     } else {
         None
     }
     .filter(|value| is_uuid_text(value));
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9") {
         split_1c_braced_fields(head.first()?, 0)?
     } else {
         head
@@ -3058,7 +3144,10 @@ fn parse_role_rights_blob(
         if !is_uuid_text(object_uuid) {
             return None;
         }
-        let object_name = object_refs.get(object_uuid)?.clone();
+        let object_name = object_refs
+            .get(object_uuid)
+            .cloned()
+            .unwrap_or_else(|| object_uuid.to_string());
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
         objects.push(RoleObjectRights {
@@ -3130,7 +3219,7 @@ fn parse_role_right_pairs(
 
 fn parse_role_bool_field(value: &str) -> Option<bool> {
     match value.trim() {
-        "0" => Some(false),
+        "0" | "4294967295" => Some(false),
         "1" => Some(true),
         _ => None,
     }
@@ -4054,7 +4143,10 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
             escape_xml_text(&location.right)
         ));
     }
-    if matches!(item.tag, "Start" | "Activity" | "Condition" | "Completion") {
+    if matches!(
+        item.tag,
+        "Start" | "Activity" | "Condition" | "Completion" | "Processing" | "Split" | "Join"
+    ) {
         xml.push_str("\t\t\t\t<Border width=\"1\" gap=\"false\">\r\n");
         xml.push_str(
             "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">Solid</v8ui:style>\r\n",
@@ -11686,7 +11778,7 @@ fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> b
 }
 
 fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
-    matches!(parse_metadata_object_code(text), Some(0 | 4))
+    matches!(parse_metadata_object_code(text), Some(0 | 1 | 4 | 13))
         && (contains_wrapped_metadata_object_code(text, 13, uuid)
             || contains_wrapped_metadata_object_code(text, 14, uuid))
 }
@@ -12379,6 +12471,10 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
             item_type: "Font",
             value_xml: parse_style_font_value_xml(value),
         }),
+        2 => Some(StyleItemProperties {
+            item_type: "Border",
+            value_xml: parse_style_border_value_xml(value)?,
+        }),
         _ => None,
     }
 }
@@ -12655,21 +12751,51 @@ fn parse_style_color_value(value: &str) -> Option<String> {
     }
 }
 
+fn parse_style_border_value_xml(value: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r##""#""## {
+        return None;
+    }
+    let border_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
+    if border_fields.first()?.trim() != "3" {
+        return None;
+    }
+    let style = match border_fields.get(3)?.trim() {
+        "0" => "WithoutBorder",
+        "1" => "Single",
+        _ => return None,
+    };
+    Some(format!(
+        "<Value xsi:type=\"v8ui:Border\" width=\"1\">\r\n\
+\t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
+\t\t\t</Value>"
+    ))
+}
+
 fn style_web_color_name(code: i32) -> Option<&'static str> {
     match code {
         8 => Some("web:Black"),
         10 => Some("web:Blue"),
         20 => Some("web:Cream"),
+        21 => Some("web:Crimson"),
+        26 => Some("web:DarkGray"),
+        27 => Some("web:DarkGray"),
+        31 => Some("web:DarkGreen"),
         23 => Some("web:DarkBlue"),
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
         44 => Some("web:FireBrick"),
         45 => Some("web:FloralWhite"),
         46 => Some("web:ForestGreen"),
+        50 => Some("web:Gold"),
+        51 => Some("web:Goldenrod"),
         48 => Some("web:Gainsboro"),
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
+        64 => Some("web:LightCoral"),
+        65 => Some("web:LightBlue"),
+        66 => Some("web:LightCoral"),
         67 => Some("web:LightCyan"),
         68 => Some("web:LightGoldenRod"),
         69 => Some("web:LightGoldenRodYellow"),
@@ -12677,10 +12803,17 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         72 => Some("web:LightPink"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
+        86 => Some("web:MediumBlue"),
+        87 => Some("web:MediumGray"),
+        94 => Some("web:Orange"),
+        105 => Some("web:Orange"),
         97 => Some("web:MintCream"),
         98 => Some("web:MistyRose"),
+        96 => Some("web:Moccasin"),
+        99 => Some("web:Moccasin"),
         119 => Some("web:Red"),
         120 => Some("web:RosyBrown"),
+        121 => Some("web:RoyalBlue"),
         128 => Some("web:Silver"),
         130 => Some("web:SlateBlue"),
         134 => Some("web:SteelBlue"),
@@ -15827,7 +15960,7 @@ mod tests {
         let common_form_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{common_form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{owned_form_uuid},{common_form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{owned_form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -15921,6 +16054,57 @@ mod tests {
     }
 
     #[test]
+    fn extracts_owned_form_refs_from_form_list_marker() {
+        let refs = owned_form_uuid_values(
+            "{1,{0},1183ecbe-255b-4a2e-a148-17c5249498c1,\
+             {fdf816d2-1ead-11d5-b975-0050bae0a95d,2,\
+             1183ecbe-255b-4a2e-a148-17c5249498c1,\
+             039772b1-a494-4618-b613-8ff21bad9890},\
+             {13134204-f60b-11d5-a3c7-0050bae0a776,1,\
+             0074aea8-6dd8-4e09-b6f0-017f96173e87}}",
+        )
+        .unwrap();
+
+        assert_eq!(refs.len(), 3);
+        assert!(refs.contains("1183ecbe-255b-4a2e-a148-17c5249498c1"));
+        assert!(refs.contains("039772b1-a494-4618-b613-8ff21bad9890"));
+        assert!(refs.contains("0074aea8-6dd8-4e09-b6f0-017f96173e87"));
+    }
+
+    #[test]
+    fn recognizes_wrapped_code1_owned_form_metadata() {
+        let form_uuid = "72abba2e-e78a-44a5-9879-4944113429eb";
+        let text = format!(
+            "{{1,\r\n{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"Form\",{{1,\"ru\",\"Form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}\r\n}},0}}"
+        );
+
+        assert!(is_form_metadata_text(&text, form_uuid));
+        assert_eq!(parse_metadata_object_code(&text), Some(1));
+    }
+
+    #[test]
+    fn recognizes_direct_code13_form_metadata() {
+        let form_uuid = "f0620d5a-e1fe-419f-af37-e0f462f97e8d";
+        let text = format!(
+            "{{1,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"Form\",{{1,\"ru\",\"Form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}},0}}"
+        );
+
+        assert!(is_form_metadata_text(&text, form_uuid));
+        assert_eq!(parse_metadata_object_code(&text), Some(13));
+    }
+
+    #[test]
+    fn does_not_treat_direct_code14_filter_criterion_as_form() {
+        let criterion_uuid = "4c9dd3d1-067f-4e9e-8771-dbe1fb357a0b";
+        let text = format!(
+            "{{1,\r\n{{14,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\r\n{{2,\r\n{{3,\r\n{{1,0,{criterion_uuid}}},\"RelatedDocuments\",{{1,\"en\",\"Related documents\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\"}}\r\n}}\r\n}},0}}"
+        );
+
+        assert!(!is_form_metadata_text(&text, criterion_uuid));
+        assert_eq!(parse_metadata_object_code(&text), Some(14));
+    }
+
+    #[test]
     fn writes_code4_common_form_to_common_forms_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -15996,7 +16180,7 @@ mod tests {
         let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -18609,7 +18793,7 @@ mod tests {
         let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -19324,7 +19508,7 @@ mod tests {
         let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -21010,6 +21194,35 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parses_business_process_flowchart_processing_split_and_join_items() {
+        let style = "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+        let processing_uuid = "11111111-1111-4111-8111-111111111111";
+        let split_uuid = "22222222-2222-4222-8222-222222222222";
+        let join_uuid = "33333333-3333-4333-8333-333333333333";
+        let processing_head =
+            format!("{{{{4,10,{{1,0}},\"Processing\",1}},4,{processing_uuid},0}}");
+        let split_head = format!("{{{{4,20,{{1,0}},\"Split\",2}},4,{split_uuid},0}}");
+        let join_head = format!("{{{{4,30,{{1,0}},\"Join\",3}},4,{join_uuid},0}}");
+        let shape = format!("{{{{{{{style},5,10,20,50,60}},1}}}}");
+        let processing_item = format!("{{{processing_head},0,{shape},{{1,{{0,\"OnProcess\"}}}}}}");
+        let split_item = format!("{{{split_head},1,{shape}}}");
+        let join_item = format!("{{{join_head},1,{shape}}}");
+        let text = format!(
+            "{{5,{{{{1,{style},1,20,20}}}},3,9,{processing_item},7,{split_item},8,{join_item}}}"
+        );
+
+        let flowchart = parse_business_process_flowchart_text(&text).unwrap();
+
+        assert_eq!(flowchart.items[0].tag, "Processing");
+        assert_eq!(
+            flowchart.items[0].events[0].handler.as_deref(),
+            Some("OnProcess")
+        );
+        assert_eq!(flowchart.items[1].tag, "Split");
+        assert_eq!(flowchart.items[2].tag, "Join");
     }
 
     #[test]

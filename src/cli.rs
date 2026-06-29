@@ -232,6 +232,15 @@ pub struct InfobaseConfigExportArgs {
     /// Environment variable containing the database password.
     #[arg(long, default_value = "IBCMD_DB_PSW")]
     pub db_pwd_env: String,
+    /// Infobase user name. Accepted for ibcmd CLI compatibility; direct SQL export does not use it.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase user password. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase user password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
@@ -268,6 +277,15 @@ pub struct InfobaseConfigImportArgs {
     /// Environment variable containing the database password.
     #[arg(long, default_value = "IBCMD_DB_PSW")]
     pub db_pwd_env: String,
+    /// Infobase user name. Accepted for ibcmd CLI compatibility; direct SQL import does not use it.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase user password. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase user password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
@@ -411,6 +429,15 @@ pub struct DumpSourcesArgs {
     /// Environment variable containing the database password.
     #[arg(long, default_value = "IBCMD_DB_PSW")]
     pub db_pwd_env: String,
+    /// Infobase user passed to ibcmd.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase password passed to ibcmd. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
     /// Output directory for hierarchical XML sources.
     #[arg(short, long)]
     pub output_dir: PathBuf,
@@ -3031,6 +3058,10 @@ mod tests {
             r"C:\repo\src\cfe\EmergingTravelGroup",
             "--timeout-sec",
             "180",
+            "--user",
+            "ws",
+            "--password-env",
+            "IBCMD_USER_PSW",
             "--overwrite",
             "--normalize-taxi-old",
         ]);
@@ -3047,6 +3078,8 @@ mod tests {
                     PathBuf::from(r"C:\repo\src\cfe\EmergingTravelGroup")
                 );
                 assert_eq!(args.timeout_sec, 180);
+                assert_eq!(args.user.as_deref(), Some("ws"));
+                assert_eq!(args.password_env, "IBCMD_USER_PSW");
                 assert!(args.overwrite);
                 assert!(args.normalize_taxi_old);
             }
@@ -3065,6 +3098,8 @@ mod tests {
             "--db-name=servicedesk",
             "--db-user=sa",
             "--db-pwd=secret",
+            "--user=ws",
+            "--password=4677473",
             "--format=ibcmd-xml",
             "--force",
             r"C:\repo\src\cf",
@@ -3078,6 +3113,8 @@ mod tests {
                         assert_eq!(args.db_name.as_deref(), Some("servicedesk"));
                         assert_eq!(args.db_user.as_deref(), Some("sa"));
                         assert_eq!(args.db_pwd.as_deref(), Some("secret"));
+                        assert_eq!(args.user.as_deref(), Some("ws"));
+                        assert_eq!(args.password.as_deref(), Some("4677473"));
                         assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
                         assert!(args.overwrite);
                         assert_eq!(args.output_dir, PathBuf::from(r"C:\repo\src\cf"));
@@ -3102,6 +3139,10 @@ mod tests {
             "--replace-config-save",
             "--allow-non-lab",
             "--batch-size=3",
+            "-u",
+            "ws",
+            "-P",
+            "4677473",
             "--path-prefix",
             "CommonModules",
             r"C:\repo\src\cf",
@@ -3119,6 +3160,8 @@ mod tests {
                         assert!(args.replace_config_save);
                         assert!(args.allow_non_lab);
                         assert_eq!(args.batch_size, Some(3));
+                        assert_eq!(args.user.as_deref(), Some("ws"));
+                        assert_eq!(args.password.as_deref(), Some("4677473"));
                         assert_eq!(args.path_prefix, vec!["CommonModules"]);
                         assert_eq!(args.source_dir, PathBuf::from(r"C:\repo\src\cf"));
                     }
