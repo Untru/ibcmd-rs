@@ -1,8 +1,6 @@
 use std::env;
-use std::ffi::OsStr;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
@@ -31,6 +29,7 @@ pub struct InfobaseConfigExportReport {
     pub metadata_xml_rows: usize,
     pub module_text_rows: usize,
     pub source_asset_rows: usize,
+    pub dump_timings: crate::mssql_dump::MssqlDumpTimingReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,7 +71,8 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
     )?;
     ensure_mssql(&config.dbms)?;
 
-    let temp_dump_dir = make_temp_dir("ibcmd-rs-config-export")?;
+    let output_dir = absolute_path(&args.output_dir)?;
+    prepare_output_dir(&output_dir, args.overwrite)?;
     let dump_args = MssqlDumpConfigArgs {
         sqlcmd: args.sqlcmd.clone(),
         server: config.db_server.clone(),
@@ -80,19 +80,18 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         sql_pwd: config.db_pwd.clone(),
         sql_pwd_env: args.db_pwd_env.clone(),
         database: config.db_name.clone(),
-        output_dir: temp_dump_dir.clone(),
-        overwrite: true,
+        output_dir: output_dir.clone(),
+        overwrite: false,
         include_config_save: false,
         file_names: Vec::new(),
         inflate: false,
         extract_module_text: true,
         extract_metadata_xml: true,
+        write_binary_rows: false,
+        write_manifest: false,
     };
     let dump = crate::mssql_dump::dump_config(&dump_args)?;
 
-    let output_dir = absolute_path(&args.output_dir)?;
-    prepare_output_dir(&output_dir, args.overwrite)?;
-    copy_source_layout(&temp_dump_dir, &output_dir)?;
     let exported_files = count_files(&output_dir)?;
 
     Ok(InfobaseConfigExportReport {
@@ -105,12 +104,13 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         db_user: config.db_user,
         password_source: config.password_source,
         output_dir,
-        temp_dump_dir,
+        temp_dump_dir: dump_args.output_dir,
         exported_files,
         raw_rows: dump.total_rows,
         metadata_xml_rows: dump.total_metadata_xml_rows,
         module_text_rows: dump.total_module_text_rows,
         source_asset_rows: dump.total_source_asset_rows,
+        dump_timings: dump.timings,
     })
 }
 
@@ -286,13 +286,6 @@ fn absolute_path(path: &Path) -> Result<PathBuf> {
     }
 }
 
-fn make_temp_dir(prefix: &str) -> Result<PathBuf> {
-    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-    let path = env::temp_dir().join(format!("{prefix}-{}-{now_ms}", std::process::id()));
-    fs::create_dir_all(&path).with_context(|| format!("failed to create {}", path.display()))?;
-    Ok(path)
-}
-
 fn prepare_output_dir(path: &Path, overwrite: bool) -> Result<()> {
     if path.exists() {
         if !path.is_dir() {
@@ -329,33 +322,11 @@ fn clear_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn copy_source_layout(source: &Path, target: &Path) -> Result<()> {
-    for entry in WalkDir::new(source).min_depth(1) {
-        let entry = entry?;
-        let relative = entry.path().strip_prefix(source)?;
-        if is_internal_dump_path(relative) {
-            continue;
-        }
-        let destination = target.join(relative);
-        if entry.file_type().is_dir() {
-            fs::create_dir_all(&destination)?;
-        } else {
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::copy(entry.path(), &destination).with_context(|| {
-                format!(
-                    "failed to copy {} to {}",
-                    entry.path().display(),
-                    destination.display()
-                )
-            })?;
-        }
-    }
-    Ok(())
-}
-
+#[cfg(test)]
 fn is_internal_dump_path(relative: &Path) -> bool {
+    use std::ffi::OsStr;
+    use std::path::Component;
+
     if relative == Path::new("manifest.json") {
         return true;
     }

@@ -499,6 +499,12 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Write raw Config/ConfigSave BinaryData rows under <table>/*.bin.
+    #[arg(long, default_value_t = true, hide = true)]
+    pub write_binary_rows: bool,
+    /// Write manifest.json with row-level dump details.
+    #[arg(long, default_value_t = true, hide = true)]
+    pub write_manifest: bool,
 }
 
 #[derive(Debug, Args)]

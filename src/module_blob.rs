@@ -636,8 +636,7 @@ impl MetadataSourceContext {
         {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml")
-            {
+            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
                 continue;
             }
             let xml = fs::read(&path)
@@ -924,11 +923,9 @@ pub fn pack_module_blob_bytes(
 }
 
 pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
-    let elements = read_base_elements_from_blob(blob)?;
-    let text = elements
-        .get("text")
-        .ok_or_else(|| anyhow!("module blob does not contain text element"))?;
-    Ok(text.data.clone())
+    read_element_from_blob(blob, "text")
+        .context("failed to read module blob text element")?
+        .ok_or_else(|| anyhow!("module blob does not contain text element"))
 }
 
 pub fn module_blob_text_sha256(blob: &[u8]) -> Result<String> {
@@ -17840,6 +17837,47 @@ fn read_base_elements_from_blob(blob: &[u8]) -> Result<BTreeMap<String, ParsedEl
         .into_iter()
         .map(|element| (element.name.clone(), element))
         .collect())
+}
+
+fn read_element_from_blob(blob: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
+    let inner = inflate_raw(blob).context("failed to inflate base blob")?;
+    read_element_from_v8_container(&inner, target_name).context("failed to parse base blob")
+}
+
+fn read_element_from_v8_container(bytes: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
+    if bytes.len() < FILE_HEADER_SIZE + BLOCK_HEADER_SIZE {
+        return Err(anyhow!("container is too short"));
+    }
+    if read_u32(bytes, 0)? != V8_MAGIC_NUMBER {
+        return Err(anyhow!("unexpected file header next page marker"));
+    }
+    if read_u32(bytes, 8)? != 1 {
+        return Err(anyhow!("unsupported module container storage version"));
+    }
+
+    let toc_header = read_block_header(bytes, FILE_HEADER_SIZE)?;
+    let toc_start = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
+    let toc_end = toc_start + toc_header.data_size;
+    if toc_end > bytes.len() {
+        return Err(anyhow!("TOC block exceeds container length"));
+    }
+    if toc_header.data_size % ELEM_ADDR_SIZE != 0 {
+        return Err(anyhow!("TOC size is not divisible by element address size"));
+    }
+
+    for entry in bytes[toc_start..toc_end].chunks_exact(ELEM_ADDR_SIZE) {
+        let header_addr = read_u32(entry, 0)? as usize;
+        let data_addr = read_u32(entry, 4)? as usize;
+        let marker = read_u32(entry, 8)?;
+        if marker != V8_MAGIC_NUMBER {
+            continue;
+        }
+        let header = read_block_payload(bytes, header_addr)?;
+        if element_name(&header)? == target_name {
+            return read_block_payload(bytes, data_addr).map(Some);
+        }
+    }
+    Ok(None)
 }
 
 fn build_module_inner(elements: &[ModuleElement; 2]) -> Result<Vec<u8>> {
