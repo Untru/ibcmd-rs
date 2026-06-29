@@ -17,6 +17,7 @@ use crate::parallel;
 
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
 const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
+const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 
 #[derive(Debug, Serialize)]
 pub struct MssqlDumpConfigReport {
@@ -67,12 +68,19 @@ struct MssqlDumpRowManifest {
     source_asset_path: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ConfigRow {
     file_name: String,
     part_no: i32,
     data_size: i64,
     binary_hex: String,
+}
+
+#[derive(Debug, Clone)]
+struct ConfigRowHeader {
+    file_name: String,
+    part_no: i32,
+    data_size: i64,
 }
 
 #[derive(Debug)]
@@ -96,17 +104,20 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     let mut manifest_tables = Vec::new();
     let selected_file_names = expand_selected_file_names(&args.file_names);
     for table in table_names {
-        let rows = fetch_rows(
+        let dumped = dump_table_rows_streamed(
             &args.sqlcmd,
             &args.server,
+            args.sql_user.as_deref(),
+            sql_password(
+                args.sql_user.as_deref(),
+                args.sql_pwd.as_deref(),
+                &args.sql_pwd_env,
+            )
+            .as_deref(),
             &args.database,
             table,
             &selected_file_names,
-        )?;
-        let dumped = dump_table_rows(
             &args.output_dir,
-            table,
-            rows,
             args.inflate,
             args.extract_module_text,
             args.extract_metadata_xml,
@@ -151,6 +162,39 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     })
 }
 
+#[allow(dead_code)]
+fn dump_table_rows_eager(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    output_dir: &Path,
+    inflate: bool,
+    extract_module_text: bool,
+    extract_metadata_xml: bool,
+) -> Result<DumpedTable> {
+    let rows = fetch_rows(
+        sqlcmd,
+        server,
+        user,
+        password,
+        database,
+        table,
+        selected_file_names,
+    )?;
+    dump_table_rows(
+        output_dir,
+        table,
+        rows,
+        inflate,
+        extract_module_text,
+        extract_metadata_xml,
+    )
+}
+
 struct DumpedTable {
     rows: Vec<MssqlDumpRowManifest>,
     binary_bytes: usize,
@@ -177,11 +221,23 @@ struct DumpRowContext<'a> {
     extract_metadata_xml: bool,
     module_text_paths: &'a BTreeMap<String, PathBuf>,
     source_assets: &'a BTreeMap<String, SourceAsset>,
+    command_refs: &'a BTreeMap<String, String>,
+    metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
     object_refs: &'a BTreeMap<String, String>,
+    field_refs: &'a BTreeMap<String, String>,
     form_refs: &'a BTreeMap<String, FormSourceReference>,
     template_refs: &'a BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &'a BTreeMap<String, SubsystemSourceReference>,
+    file_names: &'a BTreeSet<String>,
+    body_owners: &'a BTreeMap<String, BodyOwnerSourceReference>,
+    configuration_module_groups: &'a BTreeSet<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BodyOwnerSourceReference {
+    kind: String,
+    object_path: PathBuf,
 }
 
 fn dump_table_rows(
@@ -207,6 +263,20 @@ fn dump_table_rows(
     }
     let module_text_paths = if extract_module_text {
         module_body_paths(&rows)
+    } else {
+        BTreeMap::new()
+    };
+    let file_names_owned = rows
+        .iter()
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    let command_refs = if extract_metadata_xml {
+        build_command_interface_reference_index(&rows)
+    } else {
+        BTreeMap::new()
+    };
+    let metadata_refs = if extract_metadata_xml {
+        build_metadata_command_reference_index(&rows)
     } else {
         BTreeMap::new()
     };
@@ -236,6 +306,17 @@ fn dump_table_rows(
     } else {
         BTreeMap::new()
     };
+    let field_refs = if extract_metadata_xml {
+        build_metadata_field_reference_index(&rows)
+    } else {
+        BTreeMap::new()
+    };
+    let body_owners = if extract_metadata_xml {
+        build_body_owner_source_index(&rows, &subsystem_refs)
+    } else {
+        BTreeMap::new()
+    };
+    let configuration_module_groups = configuration_module_groups(&file_names_owned);
     ensure_unique_source_asset_paths(&source_assets)?;
 
     let context = DumpRowContext {
@@ -246,11 +327,17 @@ fn dump_table_rows(
         extract_metadata_xml,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
+        command_refs: &command_refs,
+        metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        field_refs: &field_refs,
         form_refs: &form_refs,
         template_refs: &template_refs,
         subsystem_refs: &subsystem_refs,
+        file_names: &file_names_owned,
+        body_owners: &body_owners,
+        configuration_module_groups: &configuration_module_groups,
     };
     let dumped_rows = parallel::install(|| {
         rows.par_iter()
@@ -282,6 +369,362 @@ fn dump_table_rows(
         metadata_xml_rows,
         source_asset_rows,
     })
+}
+
+fn dump_table_rows_streamed(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    output_dir: &Path,
+    inflate: bool,
+    extract_module_text: bool,
+    extract_metadata_xml: bool,
+) -> Result<DumpedTable> {
+    let table_dir = output_dir.join(table);
+    fs::create_dir_all(&table_dir)
+        .with_context(|| format!("failed to create {}", table_dir.display()))?;
+    let inflated_dir = output_dir.join(format!("{table}_inflated"));
+    if inflate {
+        fs::create_dir_all(&inflated_dir)
+            .with_context(|| format!("failed to create {}", inflated_dir.display()))?;
+    }
+    let module_text_dir = output_dir.join(format!("{table}_module_text"));
+    if extract_module_text {
+        fs::create_dir_all(&module_text_dir)
+            .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
+    }
+
+    let headers = fetch_row_headers(
+        sqlcmd,
+        server,
+        user,
+        password,
+        database,
+        table,
+        selected_file_names,
+    )?;
+    let file_names = headers
+        .iter()
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    let metadata_file_names = file_names
+        .iter()
+        .filter(|file_name| !file_name.contains('.'))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let metadata_rows = if extract_metadata_xml || extract_module_text {
+        if selected_file_names.is_empty() {
+            fetch_metadata_rows(sqlcmd, server, user, password, database, table)?
+        } else {
+            fetch_rows(sqlcmd, server, user, password, database, table, &metadata_file_names)?
+        }
+    } else {
+        Vec::new()
+    };
+    let index_rows = rows_for_source_indexes(&headers, &metadata_rows);
+
+    let module_text_paths = if extract_module_text {
+        module_body_paths(&index_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let command_refs = if extract_metadata_xml {
+        build_command_interface_reference_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let metadata_refs = if extract_metadata_xml {
+        build_metadata_command_reference_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let source_assets = source_asset_paths(&index_rows);
+    let type_index = if extract_metadata_xml {
+        build_metadata_type_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let form_refs = if extract_metadata_xml {
+        build_form_source_reference_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let template_refs = if extract_metadata_xml {
+        build_template_source_reference_index(&index_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let subsystem_refs = if extract_metadata_xml {
+        build_subsystem_source_reference_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let object_refs = if extract_metadata_xml {
+        build_metadata_object_reference_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let field_refs = if extract_metadata_xml {
+        build_metadata_field_reference_index(&metadata_rows)
+    } else {
+        BTreeMap::new()
+    };
+    let body_owners = if extract_metadata_xml {
+        build_body_owner_source_index(&metadata_rows, &subsystem_refs)
+    } else {
+        BTreeMap::new()
+    };
+    let configuration_module_groups = configuration_module_groups(&file_names);
+    ensure_unique_source_asset_paths(&source_assets)?;
+
+    let context = DumpRowContext {
+        output_dir,
+        table,
+        inflate,
+        extract_module_text,
+        extract_metadata_xml,
+        module_text_paths: &module_text_paths,
+        source_assets: &source_assets,
+        command_refs: &command_refs,
+        metadata_refs: &metadata_refs,
+        type_index: &type_index,
+        object_refs: &object_refs,
+        field_refs: &field_refs,
+        form_refs: &form_refs,
+        template_refs: &template_refs,
+        subsystem_refs: &subsystem_refs,
+        file_names: &file_names,
+        body_owners: &body_owners,
+        configuration_module_groups: &configuration_module_groups,
+    };
+
+    let mut manifests = Vec::with_capacity(file_names.len());
+    let mut binary_bytes = 0;
+    let mut inflated_rows = 0;
+    let mut module_text_rows = 0;
+    let mut metadata_xml_rows = 0;
+    let mut source_asset_rows = 0;
+    let file_name_batches = file_names.iter().cloned().collect::<Vec<_>>();
+    for chunk in file_name_batches.chunks(SQLCMD_DUMP_FILE_BATCH_SIZE) {
+        let selected = chunk.iter().cloned().collect::<BTreeSet<_>>();
+        let rows = fetch_rows(sqlcmd, server, user, password, database, table, &selected)?;
+        let dumped_rows = parallel::install(|| {
+            rows.par_iter()
+                .map(|row| dump_table_row(&context, row))
+                .collect::<Vec<_>>()
+        })?;
+        for dumped in dumped_rows {
+            let dumped = dumped?;
+            binary_bytes += dumped.binary_bytes;
+            inflated_rows += dumped.inflated_rows;
+            module_text_rows += dumped.module_text_rows;
+            metadata_xml_rows += dumped.metadata_xml_rows;
+            source_asset_rows += dumped.source_asset_rows;
+            manifests.push(dumped.manifest);
+        }
+    }
+
+    Ok(DumpedTable {
+        rows: manifests,
+        binary_bytes,
+        inflated_rows,
+        module_text_rows,
+        metadata_xml_rows,
+        source_asset_rows,
+    })
+}
+
+fn rows_for_source_indexes(
+    headers: &[ConfigRowHeader],
+    metadata_rows: &[ConfigRow],
+) -> Vec<ConfigRow> {
+    let metadata_file_names = metadata_rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut rows = metadata_rows.to_vec();
+    let mut seen = BTreeSet::<&str>::new();
+    for header in headers {
+        if metadata_file_names.contains(header.file_name.as_str())
+            || !seen.insert(header.file_name.as_str())
+        {
+            continue;
+        }
+        rows.push(ConfigRow {
+            file_name: header.file_name.clone(),
+            part_no: header.part_no,
+            data_size: header.data_size,
+            binary_hex: String::new(),
+        });
+    }
+    rows
+}
+
+fn build_body_owner_source_index(
+    rows: &[ConfigRow],
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, BodyOwnerSourceReference> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        if row.file_name.contains('.') {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        let text = text.trim_start_matches('\u{feff}');
+        let Some(object_code) = parse_metadata_object_code(text) else {
+            continue;
+        };
+        let Some((kind, folder)) = metadata_source_for_text(object_code, text, &row.file_name)
+        else {
+            continue;
+        };
+        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
+            continue;
+        };
+        let object_path = if kind == "Subsystem" {
+            subsystem_refs
+                .get(&row.file_name)
+                .map(|subsystem_ref| subsystem_ref.relative_path.with_extension(""))
+                .unwrap_or_else(|| {
+                    PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
+                })
+        } else {
+            PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
+        };
+        index.insert(
+            row.file_name.clone(),
+            BodyOwnerSourceReference {
+                kind: kind.to_string(),
+                object_path,
+            },
+        );
+    }
+    index
+}
+
+fn configuration_module_groups(file_names: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for file_name in file_names {
+        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            continue;
+        };
+        if metadata_id.is_empty() {
+            continue;
+        }
+        suffixes_by_id
+            .entry(metadata_id)
+            .or_default()
+            .insert(suffix);
+    }
+    suffixes_by_id
+        .into_iter()
+        .filter(|(metadata_id, suffixes)| {
+            !file_names.contains(*metadata_id) && is_configuration_module_group(suffixes)
+        })
+        .map(|(metadata_id, _)| metadata_id.to_string())
+        .collect()
+}
+
+fn dynamic_source_asset(
+    context: &DumpRowContext<'_>,
+    file_name: &str,
+    bytes: &[u8],
+) -> Option<SourceAsset> {
+    let (owner_uuid, suffix) = file_name.rsplit_once('.')?;
+    if owner_uuid.is_empty() {
+        return None;
+    }
+
+    if let Some(form_ref) = context.form_refs.get(owner_uuid)
+        && suffix != "0"
+        && parse_help_blob_pages(bytes).is_some()
+    {
+        let mut form_dir = form_ref.relative_path.clone();
+        form_dir.set_extension("");
+        return Some(SourceAsset {
+            primary_path: form_dir.join("Ext").join("Help.xml"),
+            kind: SourceAssetKind::Help,
+        });
+    }
+
+    if context.configuration_module_groups.contains(owner_uuid)
+        && matches!(suffix, "9" | "a")
+        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs).is_some()
+    {
+        let path = if suffix == "9" {
+            "Ext/MainSectionCommandInterface.xml"
+        } else {
+            "Ext/CommandInterface.xml"
+        };
+        return Some(SourceAsset {
+            primary_path: PathBuf::from(path),
+            kind: SourceAssetKind::CommandInterface {
+                command_refs: context.command_refs.clone(),
+                metadata_refs: context.metadata_refs.clone(),
+            },
+        });
+    }
+
+    let owner = context.body_owners.get(owner_uuid)?;
+    if owner.kind == "Role"
+        && suffix == "0"
+        && parse_role_rights_blob(bytes, context.object_refs, context.field_refs).is_some()
+    {
+        return Some(SourceAsset {
+            primary_path: owner.object_path.join("Ext").join("Rights.xml"),
+            kind: SourceAssetKind::RoleRights {
+                object_refs: context.object_refs.clone(),
+                field_refs: context.field_refs.clone(),
+            },
+        });
+    }
+    if matches!(suffix, "0" | "1")
+        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs).is_some()
+    {
+        return Some(SourceAsset {
+            primary_path: owner.object_path.join("Ext").join("CommandInterface.xml"),
+            kind: SourceAssetKind::CommandInterface {
+                command_refs: context.command_refs.clone(),
+                metadata_refs: context.metadata_refs.clone(),
+            },
+        });
+    }
+    if parse_help_blob_pages(bytes).is_some() {
+        let preferred_help_body_id = preferred_help_body_id(&owner.kind, owner_uuid);
+        if context.file_names.contains(preferred_help_body_id.as_str())
+            && file_name != preferred_help_body_id
+        {
+            return None;
+        }
+        return Some(SourceAsset {
+            primary_path: owner.object_path.join("Ext").join("Help.xml"),
+            kind: SourceAssetKind::Help,
+        });
+    }
+    if let Some(xsi_type) = predefined_data_xsi_type(&owner.kind)
+        && parse_predefined_data_blob(bytes, context.type_index).is_some()
+    {
+        return Some(SourceAsset {
+            primary_path: owner.object_path.join("Ext").join("Predefined.xml"),
+            kind: SourceAssetKind::PredefinedData {
+                xsi_type,
+                type_index: context.type_index.clone(),
+            },
+        });
+    }
+    None
 }
 
 fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<DumpedRow> {
@@ -386,7 +829,15 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
 
     let mut source_asset_rows = 0;
     let source_asset_relative = if metadata_xml_relative.is_none() {
-        match context.source_assets.get(&row.file_name) {
+        let dynamic_asset;
+        let asset = match context.source_assets.get(&row.file_name) {
+            Some(asset) => Some(asset),
+            None => {
+                dynamic_asset = dynamic_source_asset(context, &row.file_name, &bytes);
+                dynamic_asset.as_ref()
+            }
+        };
+        match asset {
             Some(asset) => {
                 let relative = write_source_asset(context.output_dir, asset, &bytes)?;
                 source_asset_rows = 1;
@@ -1636,7 +2087,7 @@ fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, 
 
 fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, FormSourceReference> {
     let mut forms = Vec::<MetadataHeader>::new();
-    let mut owners = Vec::<(String, PathBuf)>::new();
+    let mut owner_paths_by_ref = BTreeMap::<String, Vec<PathBuf>>::new();
 
     for row in rows {
         if row.file_name.contains('.') {
@@ -1672,16 +2123,21 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
             continue;
         };
         let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        owners.push((text.to_string(), owner_path));
+        for reference in uuid_like_values(text) {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .push(owner_path.clone());
+        }
     }
 
     let mut index = BTreeMap::new();
     for form in forms {
-        let owner_matches = owners
-            .iter()
-            .filter(|(owner_text, _)| owner_text.contains(&form.uuid))
-            .collect::<Vec<_>>();
-        let relative_path = if let [(_, owner_path)] = owner_matches.as_slice() {
+        let owner_matches = owner_paths_by_ref
+            .get(&form.uuid)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let relative_path = if let [owner_path] = owner_matches {
             owner_path
                 .join("Forms")
                 .join(sanitize_source_path_segment(&form.name))
@@ -1716,7 +2172,7 @@ fn build_template_source_reference_index(
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let mut templates = Vec::<MetadataHeader>::new();
-    let mut owners = Vec::<(String, PathBuf)>::new();
+    let mut owner_paths_by_ref = BTreeMap::<String, Vec<PathBuf>>::new();
 
     for row in rows {
         if row.file_name.contains('.') {
@@ -1752,16 +2208,21 @@ fn build_template_source_reference_index(
             continue;
         };
         let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        owners.push((text.to_string(), owner_path));
+        for reference in uuid_like_values(text) {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .push(owner_path.clone());
+        }
     }
 
     let mut index = BTreeMap::new();
     for template in templates {
-        let owner_matches = owners
-            .iter()
-            .filter(|(owner_text, _)| owner_text.contains(&template.uuid))
-            .collect::<Vec<_>>();
-        let relative_path = if let [(_, owner_path)] = owner_matches.as_slice() {
+        let owner_matches = owner_paths_by_ref
+            .get(&template.uuid)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let relative_path = if let [owner_path] = owner_matches {
             owner_path
                 .join("Templates")
                 .join(sanitize_source_path_segment(&template.name))
@@ -1833,17 +2294,22 @@ fn build_subsystem_source_reference_index(
         subsystems.insert(header.uuid.clone(), (header, text.to_string()));
     }
 
+    let subsystem_uuids = subsystems.keys().cloned().collect::<BTreeSet<_>>();
+    let mut owners_by_child = BTreeMap::<String, Vec<String>>::new();
+    for (owner_uuid, (_, owner_text)) in &subsystems {
+        for reference in uuid_like_values(owner_text) {
+            if reference != *owner_uuid && subsystem_uuids.contains(&reference) {
+                owners_by_child
+                    .entry(reference)
+                    .or_default()
+                    .push(owner_uuid.clone());
+            }
+        }
+    }
     let mut parent_by_child = BTreeMap::<String, String>::new();
-    for child_uuid in subsystems.keys() {
-        let owners = subsystems
-            .iter()
-            .filter(|(owner_uuid, (_, owner_text))| {
-                owner_uuid.as_str() != child_uuid.as_str() && owner_text.contains(child_uuid)
-            })
-            .map(|(owner_uuid, _)| owner_uuid.clone())
-            .collect::<Vec<_>>();
+    for (child_uuid, owners) in owners_by_child {
         if let [owner_uuid] = owners.as_slice() {
-            parent_by_child.insert(child_uuid.clone(), owner_uuid.clone());
+            parent_by_child.insert(child_uuid, owner_uuid.clone());
         }
     }
 
@@ -1901,6 +2367,37 @@ fn resolve_subsystem_source_path(
     visiting.remove(uuid);
     memo.insert(uuid.to_string(), relative_path.clone());
     Some(relative_path)
+}
+
+fn uuid_like_values(text: &str) -> BTreeSet<String> {
+    let bytes = text.as_bytes();
+    let mut values = BTreeSet::new();
+    if bytes.len() < 36 {
+        return values;
+    }
+    for start in 0..=bytes.len() - 36 {
+        let value = &bytes[start..start + 36];
+        if is_uuid_like_ascii(value) {
+            values.insert(String::from_utf8_lossy(value).to_ascii_lowercase());
+        }
+    }
+    values
+}
+
+fn is_uuid_like_ascii(value: &[u8]) -> bool {
+    if value.len() != 36 {
+        return false;
+    }
+    for (index, byte) in value.iter().copied().enumerate() {
+        if matches!(index, 8 | 13 | 18 | 23) {
+            if byte != b'-' {
+                return false;
+            }
+        } else if !byte.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
 }
 
 fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
@@ -10600,6 +11097,19 @@ struct DefinedTypeProperties {
     value_types: Vec<ConstantValueType>,
 }
 
+struct CommonCommandProperties {
+    representation: &'static str,
+    picture_ref: Option<String>,
+    picture_load_transparent: bool,
+    tooltip: Vec<(String, String)>,
+    include_help_in_contents: bool,
+    group: Option<String>,
+    command_parameter_types: Vec<String>,
+    parameter_use_mode: &'static str,
+    modifies_data: bool,
+    on_main_server_unavailable_behavior: &'static str,
+}
+
 struct CommandGroupProperties {
     representation: &'static str,
     picture_ref: Option<String>,
@@ -10952,6 +11462,18 @@ fn extract_metadata_source_xml_with_refs(
         let xml = format_command_group_source_xml(&header, &command_group).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
+    if metadata_source_for_text(object_code, text, uuid)
+        .is_some_and(|(kind, _)| kind == "CommonCommand")
+    {
+        let header = parse_metadata_header_from_text(text, uuid)?;
+        let common_command =
+            parse_common_command_properties_from_text(text, uuid, type_index, object_refs)?;
+        let relative_path = PathBuf::from("CommonCommands")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_common_command_source_xml(&header, &common_command).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
     if object_code == 3
         && metadata_source_for_text(object_code, text, uuid)
             .is_some_and(|(kind, _)| kind == "StyleItem")
@@ -11024,7 +11546,12 @@ fn extract_metadata_source_xml_with_refs(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let xml = if kind == "Catalog" {
+    let nested_commands = if metadata_kind_can_own_commands(kind) {
+        nested_command_headers_from_text(text, uuid)
+    } else {
+        Vec::new()
+    };
+    let mut xml = if kind == "Catalog" {
         let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if is_typed_metadata_source(kind) {
@@ -11033,6 +11560,11 @@ fn extract_metadata_source_xml_with_refs(
     } else {
         format_metadata_source_xml(kind, &header).into_bytes()
     };
+    if !nested_commands.is_empty() {
+        let mut xml_text = String::from_utf8(xml).ok()?;
+        insert_metadata_child_commands_xml(&mut xml_text, kind, &nested_commands);
+        xml = xml_text.into_bytes();
+    }
 
     Some(ExtractedMetadataSourceXml { relative_path, xml })
 }
@@ -11622,6 +12154,58 @@ fn parse_command_group_properties_from_text(
     })
 }
 
+fn parse_common_command_properties_from_text(
+    text: &str,
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<CommonCommandProperties> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let base_object_start = text[..marker_start].rfind("{3,")?;
+    let command_start = text[..base_object_start].rfind("{9,")?;
+    let fields = split_1c_braced_fields(text, command_start)?;
+    if fields.len() < 13 {
+        return None;
+    }
+    let (picture_ref, picture_load_transparent) =
+        parse_common_command_picture_value(fields.get(1)?, object_refs)?;
+    let representation = common_command_representation_xml(fields.get(2)?.trim().parse().ok()?);
+    let tooltip = parse_1c_synonyms(fields.get(3).copied().unwrap_or("{0}"));
+    let include_help_in_contents = fields
+        .get(6)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    let group = fields
+        .get(7)
+        .and_then(|field| parse_common_command_group_value(field, object_refs));
+    let command_parameter_types =
+        parse_common_command_parameter_type_names(fields.get(8)?, type_index);
+    let parameter_use_mode =
+        common_command_parameter_use_mode_xml(fields.get(11)?.trim().parse().ok()?);
+    let modifies_data = fields
+        .get(10)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    let on_main_server_unavailable_behavior =
+        common_command_on_main_server_unavailable_behavior_xml(
+            fields.get(12)?.trim().parse().ok()?,
+        );
+
+    Some(CommonCommandProperties {
+        representation,
+        picture_ref,
+        picture_load_transparent,
+        tooltip,
+        include_help_in_contents,
+        group,
+        command_parameter_types,
+        parameter_use_mode,
+        modifies_data,
+        on_main_server_unavailable_behavior,
+    })
+}
+
 fn parse_command_group_picture_value(
     value: &str,
     object_refs: &BTreeMap<String, String>,
@@ -11655,6 +12239,92 @@ fn parse_command_group_picture_value(
     Some((None, load_transparent))
 }
 
+fn parse_common_command_picture_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(Option<String>, bool)> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "4" {
+        return None;
+    }
+    let picture_kind = fields.get(1)?.trim().parse::<i32>().ok()?;
+    let load_transparent = fields
+        .get(6)
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .unwrap_or(false);
+    if picture_kind == 0 {
+        return Some((None, load_transparent));
+    }
+    if picture_kind == 1 {
+        let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+        if ref_fields.first()?.trim() == "0" {
+            let uuid = ref_fields.get(1)?.trim();
+            if uuid.eq_ignore_ascii_case(STD_PICTURE_USER_UUID) {
+                return Some((Some("StdPicture.User".to_string()), load_transparent));
+            }
+            if let Some(reference) = object_refs.get(uuid)
+                && reference.starts_with("CommonPicture.")
+            {
+                return Some((Some(reference.clone()), load_transparent));
+            }
+        }
+    }
+    Some((None, load_transparent))
+}
+
+fn parse_common_command_group_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let uuid = fields.get(1)?.trim();
+    if let Some(reference) = object_refs.get(uuid)
+        && reference.starts_with("CommandGroup.")
+    {
+        return Some(reference.clone());
+    }
+    common_command_group_name(uuid).map(str::to_string)
+}
+
+fn parse_common_command_parameter_type_names(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(fields) = split_1c_braced_fields(value, 0) else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .skip(1)
+        .filter_map(|field| {
+            let type_id = field
+                .trim()
+                .trim_start_matches('{')
+                .trim_end_matches('}')
+                .trim();
+            type_index.get(type_id).cloned()
+        })
+        .collect()
+}
+
+fn common_command_group_name(uuid: &str) -> Option<&'static str> {
+    match uuid.to_ascii_lowercase().as_str() {
+        "77ea1b8f-dd79-4717-9dba-5628e7f348cf" => Some("NavigationPanelOrdinary"),
+        "bc80566a-86a5-4e87-acd4-872239385a2e" => Some("NavigationPanelSeeAlso"),
+        "4f499c31-050b-47c5-aa84-d0366c0a0da8" => Some("ActionsPanelCreate"),
+        "5b360bff-01a1-49b6-93d2-26e7e8e3a038" => Some("ActionsPanelReports"),
+        "aabb34e1-98c1-4bd0-bf7f-243f95437b44" => Some("ActionsPanelTools"),
+        "dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0" => Some("FormCommandBarCreateBasedOn"),
+        "cb50f5c0-8013-4262-93a2-f0db379d6b6b" => Some("FormCommandBarImportant"),
+        "eacad741-96b9-4b3a-bf79-dde9ecead1a1" => Some("FormNavigationPanelGoTo"),
+        "dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2" => Some("FormNavigationPanelImportant"),
+        _ => None,
+    }
+}
+
 fn command_group_representation_xml(value: u8) -> &'static str {
     match value {
         0 => "Text",
@@ -11663,6 +12333,21 @@ fn command_group_representation_xml(value: u8) -> &'static str {
         3 => "Auto",
         _ => "Auto",
     }
+}
+
+fn common_command_representation_xml(value: u8) -> &'static str {
+    command_group_representation_xml(value)
+}
+
+fn common_command_parameter_use_mode_xml(value: u8) -> &'static str {
+    match value {
+        1 => "Multiple",
+        _ => "Single",
+    }
+}
+
+fn common_command_on_main_server_unavailable_behavior_xml(_value: u8) -> &'static str {
+    "Auto"
 }
 
 fn command_group_category_xml(value: u8) -> &'static str {
@@ -11819,6 +12504,9 @@ fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
         -36 => "TableHeaderTextColor",
         -37 => "TableFooterBackColor",
         -38 => "TableFooterTextColor",
+        -42 => "NavigationColor",
+        -43 => "AuxiliaryNavigationColor",
+        -44 => "ActivityColor",
         _ => return None,
     };
     let order = STANDARD_STYLE_ITEM_CODES
@@ -11829,7 +12517,7 @@ fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
 
 const STANDARD_STYLE_ITEM_CODES: &[i32] = &[
     -1, -11, -3, -15, -7, -13, -21, -10, -14, -23, -24, -16, -17, -22, -25, -26, -27, -28, -18,
-    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38,
+    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -42, -43, -44,
 ];
 
 fn parse_style_body_color_value(
@@ -12030,6 +12718,8 @@ fn style_system_color_name(code: i32) -> Option<&'static str> {
         -37 => Some("style:TableFooterBackColor"),
         -38 => Some("style:TableFooterTextColor"),
         -42 => Some("style:NavigationColor"),
+        -43 => Some("style:AuxiliaryNavigationColor"),
+        -44 => Some("style:ActivityColor"),
         _ => None,
     }
 }
@@ -12869,6 +13559,153 @@ fn format_template_source_xml(kind: &str, header: &MetadataHeader, template_type
     xml
 }
 
+fn insert_metadata_child_commands_xml(
+    xml: &mut String,
+    owner_kind: &str,
+    commands: &[MetadataHeader],
+) {
+    if commands.is_empty() {
+        return;
+    }
+    let marker = format!("\t</{owner_kind}>");
+    let Some(index) = xml.find(&marker) else {
+        return;
+    };
+    let mut child_objects = String::from("\t\t<ChildObjects>\r\n");
+    for command in commands {
+        child_objects.push_str(&format!(
+            "\t\t\t<Command uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+            escape_xml_text(&command.uuid),
+            escape_xml_text(&command.name),
+        ));
+        if command.synonyms.is_empty() {
+            child_objects.push_str("\t\t\t\t\t<Synonym/>\r\n");
+        } else {
+            child_objects.push_str("\t\t\t\t\t<Synonym>\r\n");
+            for (lang, content) in &command.synonyms {
+                child_objects.push_str("\t\t\t\t\t\t<v8:item>\r\n");
+                child_objects.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                    escape_xml_text(lang)
+                ));
+                child_objects.push_str(&format!(
+                    "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                    escape_xml_text(content)
+                ));
+                child_objects.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+            }
+            child_objects.push_str("\t\t\t\t\t</Synonym>\r\n");
+        }
+        if command.comment.is_empty() {
+            child_objects.push_str("\t\t\t\t\t<Comment/>\r\n");
+        } else {
+            child_objects.push_str(&format!(
+                "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+                escape_xml_text(&command.comment)
+            ));
+        }
+        child_objects.push_str("\t\t\t\t</Properties>\r\n\t\t\t</Command>\r\n");
+    }
+    child_objects.push_str("\t\t</ChildObjects>\r\n");
+    xml.insert_str(index, &child_objects);
+}
+
+fn format_common_command_source_xml(
+    header: &MetadataHeader,
+    properties: &CommonCommandProperties,
+) -> String {
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<CommonCommand uuid=\"{}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&header.uuid),
+        escape_xml_text(&header.name)
+    );
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    xml.push_str(&format!(
+        "\t\t\t<Comment>{}</Comment>\r\n\
+\t\t\t<Group>{}</Group>\r\n",
+        escape_xml_text(&header.comment),
+        escape_xml_text(properties.group.as_deref().unwrap_or("ActionsPanelTools")),
+    ));
+    format_common_command_picture_xml(&mut xml, properties);
+    xml.push_str(&format!(
+        "\t\t\t<Representation>{}</Representation>\r\n",
+        properties.representation
+    ));
+    push_localized_property(&mut xml, "\t\t\t", "ToolTip", &properties.tooltip);
+    xml.push_str(&format!(
+        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+        xml_bool(properties.include_help_in_contents)
+    ));
+    format_common_command_parameter_type_xml(&mut xml, &properties.command_parameter_types);
+    xml.push_str(&format!(
+        "\t\t\t<ParameterUseMode>{}</ParameterUseMode>\r\n\
+\t\t\t<ModifiesData>{}</ModifiesData>\r\n\
+\t\t\t<OnMainServerUnavalableBehavior>{}</OnMainServerUnavalableBehavior>\r\n\
+\t\t</Properties>\r\n\
+\t</CommonCommand>\r\n\
+</MetaDataObject>\r\n",
+        properties.parameter_use_mode,
+        xml_bool(properties.modifies_data),
+        properties.on_main_server_unavailable_behavior,
+    ));
+    xml
+}
+
+fn format_common_command_picture_xml(xml: &mut String, properties: &CommonCommandProperties) {
+    let Some(reference) = properties.picture_ref.as_deref() else {
+        xml.push_str("\t\t\t<Picture/>\r\n");
+        return;
+    };
+    xml.push_str("\t\t\t<Picture>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n",
+        escape_xml_text(reference)
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+        xml_bool(properties.picture_load_transparent)
+    ));
+    xml.push_str("\t\t\t</Picture>\r\n");
+}
+
+fn format_common_command_parameter_type_xml(xml: &mut String, types: &[String]) {
+    if types.is_empty() {
+        xml.push_str("\t\t\t<CommandParameterType/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<CommandParameterType>\r\n");
+    for value_type in types {
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:Type>{}</v8:Type>\r\n",
+            escape_xml_text(value_type)
+        ));
+    }
+    xml.push_str("\t\t\t</CommandParameterType>\r\n");
+}
+
 fn format_command_group_source_xml(
     header: &MetadataHeader,
     properties: &CommandGroupProperties,
@@ -13078,7 +13915,6 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
             metadata_type_xml_name(value_type)
         ));
     }
-    xml.push_str("\t\t\t</Type>\r\n");
 
     if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
         ConstantValueType::String {
@@ -13087,13 +13923,16 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         } => Some((*length, *allowed_length_flag)),
         _ => None,
     }) {
-        xml.push_str("\t\t\t<StringQualifiers>\r\n");
-        xml.push_str(&format!("\t\t\t\t<v8:Length>{}</v8:Length>\r\n", string.0));
+        xml.push_str("\t\t\t\t<StringQualifiers>\r\n");
         xml.push_str(&format!(
-            "\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            "\t\t\t\t\t<v8:Length>{}</v8:Length>\r\n",
+            string.0
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
             string_allowed_length_xml(string.1)
         ));
-        xml.push_str("\t\t\t</StringQualifiers>\r\n");
+        xml.push_str("\t\t\t\t</StringQualifiers>\r\n");
     }
 
     if let Some(number) = value_types.iter().find_map(|value_type| match value_type {
@@ -13104,19 +13943,23 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         } => Some((*digits, *fraction_digits, *allowed_sign_flag)),
         _ => None,
     }) {
-        xml.push_str("\t\t\t<NumberQualifiers>\r\n");
-        xml.push_str(&format!("\t\t\t\t<v8:Digits>{}</v8:Digits>\r\n", number.0));
+        xml.push_str("\t\t\t\t<NumberQualifiers>\r\n");
         xml.push_str(&format!(
-            "\t\t\t\t<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
+            "\t\t\t\t\t<v8:Digits>{}</v8:Digits>\r\n",
+            number.0
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
             number.1
         ));
         xml.push_str(&format!(
-            "\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            "\t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
             number_allowed_sign_xml(number.2)
         ));
-        xml.push_str("\t\t\t</NumberQualifiers>\r\n");
+        xml.push_str("\t\t\t\t</NumberQualifiers>\r\n");
     }
 
+    xml.push_str("\t\t\t</Type>\r\n");
     xml
 }
 
@@ -13139,18 +13982,17 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
             length,
             allowed_length_flag,
         } => {
-            let mut xml =
-                "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n\t\t\t</Type>\r\n"
-                    .to_string();
+            let mut xml = "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n".to_string();
             if let Some(length) = length {
-                xml.push_str("\t\t\t<StringQualifiers>\r\n");
-                xml.push_str(&format!("\t\t\t\t<v8:Length>{length}</v8:Length>\r\n"));
+                xml.push_str("\t\t\t\t<StringQualifiers>\r\n");
+                xml.push_str(&format!("\t\t\t\t\t<v8:Length>{length}</v8:Length>\r\n"));
                 xml.push_str(&format!(
-                    "\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+                    "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
                     string_allowed_length_xml(*allowed_length_flag)
                 ));
-                xml.push_str("\t\t\t</StringQualifiers>\r\n");
+                xml.push_str("\t\t\t\t</StringQualifiers>\r\n");
             }
+            xml.push_str("\t\t\t</Type>\r\n");
             xml
         }
         ConstantValueType::Number {
@@ -13160,12 +14002,12 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
         } => format!(
             "\t\t\t<Type>\r\n\
 \t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
-\t\t\t</Type>\r\n\
-\t\t\t<NumberQualifiers>\r\n\
-\t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
-\t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
-\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
-\t\t\t</NumberQualifiers>\r\n",
+\t\t\t\t<NumberQualifiers>\r\n\
+\t\t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
+\t\t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
+\t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
+\t\t\t\t</NumberQualifiers>\r\n\
+\t\t\t</Type>\r\n",
             number_allowed_sign_xml(*allowed_sign_flag)
         ),
         ConstantValueType::DateTime => {
@@ -13251,16 +14093,145 @@ fn sanitize_source_path_segment(value: &str) -> String {
 fn fetch_rows(
     sqlcmd: &Path,
     server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
     database: &str,
     table: &str,
     selected_file_names: &BTreeSet<String>,
 ) -> Result<Vec<ConfigRow>> {
     let sql = build_fetch_rows_sql(database, table, selected_file_names);
-    let stdout = run_sql_capture_tsv(sqlcmd, server, &sql)?;
+    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
     let chunks = parse_config_chunk_rows(&stdout)
         .with_context(|| format!("failed to parse {table} row chunks for {database}"))?;
     assemble_config_rows(chunks)
         .with_context(|| format!("failed to assemble {table} row chunks for {database}"))
+}
+
+fn fetch_metadata_rows(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+) -> Result<Vec<ConfigRow>> {
+    let sql = build_fetch_metadata_rows_sql(database, table);
+    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
+    let chunks = parse_config_chunk_rows(&stdout)
+        .with_context(|| format!("failed to parse {table} metadata row chunks for {database}"))?;
+    assemble_config_rows(chunks)
+        .with_context(|| format!("failed to assemble {table} metadata rows for {database}"))
+}
+
+fn build_fetch_metadata_rows_sql(database: &str, table: &str) -> String {
+    format!(
+        "SET NOCOUNT ON;\n\
+         DECLARE @chunk_size int = {chunk_size};\n\
+         WITH SourceRows AS (\n\
+             SELECT FileName, PartNo, DataSize, BinaryData\n\
+             FROM {qualified_table}\n\
+             WHERE CHARINDEX(N'.', FileName) = 0\n\
+         )\n\
+         SELECT rows.FileName AS file_name,\n\
+                rows.PartNo AS part_no,\n\
+                rows.DataSize AS data_size,\n\
+                chunks.chunk_index,\n\
+                CONVERT(varchar(max), SUBSTRING(rows.BinaryData, chunks.chunk_index * @chunk_size + 1, @chunk_size), 2) AS binary_hex\n\
+         FROM SourceRows rows\n\
+         CROSS APPLY (\n\
+             SELECT chunk_count = CASE\n\
+                 WHEN DATALENGTH(rows.BinaryData) = 0 THEN 1\n\
+                 ELSE (DATALENGTH(rows.BinaryData) + @chunk_size - 1) / @chunk_size\n\
+             END\n\
+         ) counts\n\
+         CROSS APPLY (\n\
+             SELECT TOP (counts.chunk_count)\n\
+                    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS chunk_index\n\
+             FROM sys.all_objects a CROSS JOIN sys.all_objects b\n\
+         ) chunks\n\
+         ORDER BY rows.FileName, rows.PartNo, chunks.chunk_index\n\
+         ;",
+        chunk_size = SQLCMD_BINARY_CHUNK_SIZE,
+        qualified_table = qualified_storage_table(database, table),
+    )
+}
+
+fn fetch_row_headers(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<Vec<ConfigRowHeader>> {
+    let sql = build_fetch_row_headers_sql(database, table, selected_file_names);
+    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
+    parse_config_row_headers(&stdout)
+        .with_context(|| format!("failed to parse {table} row headers for {database}"))
+}
+
+fn build_fetch_row_headers_sql(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> String {
+    let filter = if selected_file_names.is_empty() {
+        String::new()
+    } else {
+        let values = selected_file_names
+            .iter()
+            .map(|value| format!("N'{}'", quote_string(value)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("WHERE FileName IN ({values})\n")
+    };
+
+    format!(
+        "SET NOCOUNT ON;\n\
+         SELECT FileName AS file_name,\n\
+                PartNo AS part_no,\n\
+                DataSize AS data_size\n\
+         FROM {qualified_table}\n\
+         {filter}\
+         ORDER BY FileName, PartNo\n\
+         ;",
+        qualified_table = qualified_storage_table(database, table),
+        filter = filter,
+    )
+}
+
+fn parse_config_row_headers(stdout: &str) -> Result<Vec<ConfigRowHeader>> {
+    let mut rows = Vec::new();
+    for (line_index, line) in stdout.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if is_sqlcmd_header_or_separator(line) {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 3 {
+            bail!(
+                "unexpected sqlcmd row header line {}: expected 3 tab-separated fields, got {}",
+                line_index + 1,
+                fields.len()
+            );
+        }
+        rows.push(ConfigRowHeader {
+            file_name: fields[0].trim_end().to_string(),
+            part_no: fields[1]
+                .trim()
+                .parse()
+                .with_context(|| format!("invalid part_no on header line {}", line_index + 1))?,
+            data_size: fields[2]
+                .trim()
+                .parse()
+                .with_context(|| format!("invalid data_size on header line {}", line_index + 1))?,
+        });
+    }
+    Ok(rows)
 }
 
 fn build_fetch_rows_sql(
@@ -13437,6 +14408,7 @@ fn assemble_config_rows(chunks: Vec<ConfigChunkRow>) -> Result<Vec<ConfigRow>> {
 }
 
 const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
+const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 25;
 
 fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
     let mut selected = BTreeSet::new();
@@ -13467,11 +14439,22 @@ fn metadata_id_from_module_file_name(file_name: &str) -> Option<&str> {
 
 const MODULE_BODY_SUFFIXES: &[&str] = &["0", "1", "2", "3", "5", "6", "7", "8", "15", "16"];
 
-fn run_sql_capture_tsv(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
-    let output = Command::new(sqlcmd)
-        .arg("-C")
-        .arg("-S")
-        .arg(server)
+fn run_sql_capture_tsv(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    sql: &str,
+) -> Result<String> {
+    let mut command = Command::new(sqlcmd);
+    command.arg("-C").arg("-S").arg(server);
+    if let Some(user) = user {
+        command.arg("-U").arg(user);
+        if let Some(password) = password {
+            command.arg("-P").arg(password);
+        }
+    }
+    let output = command
         .arg("-s")
         .arg("\t")
         .arg("-w")
@@ -13493,6 +14476,14 @@ fn run_sql_capture_tsv(sqlcmd: &Path, server: &str, sql: &str) -> Result<String>
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn sql_password(user: Option<&str>, password: Option<&str>, password_env: &str) -> Option<String> {
+    user?;
+    password
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| std::env::var(password_env).ok())
 }
 
 #[cfg(test)]
@@ -14605,6 +15596,18 @@ mod tests {
         let expected =
             root.join("DataProcessors/Scanning/Commands/ScanSheet/Ext/CommandModule.bsl");
         assert_eq!(fs::read(expected).unwrap(), text);
+        let owner_xml = fs::read_to_string(root.join("DataProcessors/Scanning.xml")).unwrap();
+        assert!(owner_xml.contains("<ChildObjects>"), "{}", owner_xml);
+        assert!(
+            owner_xml.contains(r#"<Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#),
+            "{}",
+            owner_xml
+        );
+        assert!(
+            owner_xml.contains("<Name>ScanSheet</Name>"),
+            "{}",
+            owner_xml
+        );
         let body_row = dumped
             .rows
             .iter()
@@ -17737,6 +18740,33 @@ mod tests {
         assert_eq!(properties.kind, "CommonCommand");
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "OpenSettings");
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        assert!(xml.contains("<Group>ActionsPanelTools</Group>"), "{}", xml);
+        assert!(
+            xml.contains("<Representation>Auto</Representation>"),
+            "{}",
+            xml
+        );
+        assert!(
+            xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"),
+            "{}",
+            xml
+        );
+        assert!(
+            xml.contains("<ParameterUseMode>Single</ParameterUseMode>"),
+            "{}",
+            xml
+        );
+        assert!(
+            xml.contains("<ModifiesData>false</ModifiesData>"),
+            "{}",
+            xml
+        );
+        assert!(
+            xml.contains("<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>"),
+            "{}",
+            xml
+        );
     }
 
     #[test]
@@ -20769,7 +21799,7 @@ mod tests {
         );
         let style_body = deflate_for_test(
             format!(
-                "{{2,5,{{{{-1}},0,{{4,2,{{20}},2}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{8,2,0,{{-20}},1,100}}}},{{{{0,{color_uuid}}},0,{{4,0,{{13158655}},0}}}},{{{{0,{font_uuid}}},1,{{8,2,60,{{-20}},400,0,0,1,1,100}}}},{{0}}}}"
+                "{{2,8,{{{{-1}},0,{{4,2,{{20}},2}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{8,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{4,0,{{14474460}},0}}}},{{{{-43}},0,{{4,0,{{15658734}},0}}}},{{{{-44}},0,{{4,3,{{-44}},3}}}},{{{{0,{color_uuid}}},0,{{4,0,{{13158655}},0}}}},{{{{0,{font_uuid}}},1,{{8,2,60,{{-20}},400,0,0,1,1,100}}}},{{0}}}}"
             )
             .as_bytes(),
         );
@@ -20811,6 +21841,12 @@ mod tests {
         assert!(xml.contains("<Border ref=\"style:ControlBorder\"/>"));
         assert!(xml.contains("<Item name=\"TextFont\">"));
         assert!(xml.contains("<Font ref=\"style:TextFont\" kind=\"StyleItem\"/>"));
+        assert!(xml.contains("<Item name=\"NavigationColor\">"));
+        assert!(xml.contains("<Color>#DCDCDC</Color>"));
+        assert!(xml.contains("<Item name=\"AuxiliaryNavigationColor\">"));
+        assert!(xml.contains("<Color>#EEEEEE</Color>"));
+        assert!(xml.contains("<Item name=\"ActivityColor\">"));
+        assert!(xml.contains("<Color>style:ActivityColor</Color>"));
         assert!(xml.contains("<Item name=\"StyleItem.ErrorBackColor\">"));
         assert!(xml.contains("<Color>#FFC8C8</Color>"));
         assert!(xml.contains("<Item name=\"StyleItem.StrikeFont\">"));

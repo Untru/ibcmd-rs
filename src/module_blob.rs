@@ -614,6 +614,43 @@ impl MetadataSourceContext {
         Self { source_root }
     }
 
+    pub fn moxel_object_refs(&self) -> Result<BTreeMap<String, String>> {
+        let mut refs = BTreeMap::new();
+        self.collect_simple_metadata_refs("CommonPictures", "CommonPicture", &mut refs)?;
+        self.collect_simple_metadata_refs("StyleItems", "StyleItem", &mut refs)?;
+        Ok(refs)
+    }
+
+    fn collect_simple_metadata_refs(
+        &self,
+        folder: &str,
+        kind: &str,
+        refs: &mut BTreeMap<String, String>,
+    ) -> Result<()> {
+        let dir = self.source_root.join(folder);
+        if !dir.is_dir() {
+            return Ok(());
+        }
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml")
+            {
+                continue;
+            }
+            let xml = fs::read(&path)
+                .with_context(|| format!("failed to read metadata XML {}", path.display()))?;
+            let properties = parse_simple_metadata_xml_properties(&xml)
+                .with_context(|| format!("failed to parse metadata XML {}", path.display()))?;
+            if properties.kind == kind {
+                refs.insert(properties.uuid, format!("{}.{}", kind, properties.name));
+            }
+        }
+        Ok(())
+    }
+
     fn resolve_common_picture_uuid(&self, reference: &str) -> Result<String> {
         let name = reference
             .trim()
@@ -894,6 +931,11 @@ pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
     Ok(text.data.clone())
 }
 
+pub fn module_blob_text_sha256(blob: &[u8]) -> Result<String> {
+    let text = unpack_module_blob_text(blob)?;
+    Ok(hex_sha256(&text))
+}
+
 pub fn pack_common_module_metadata_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
@@ -946,6 +988,7 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
             let command_group = parse_command_group_xml_properties(xml, source)?;
             patch_command_group_metadata_text(text, &command_group)?
         }
+        "Configuration" => patch_configuration_metadata_text(text, &properties)?,
         _ => patch_simple_metadata_header_text(text, &properties)?,
     };
     let plain = patched.into_bytes();
@@ -964,7 +1007,66 @@ pub fn pack_style_body_blob_from_xml(
     xml: &[u8],
     source: Option<&MetadataSourceContext>,
 ) -> Result<PackedStyleBodyBlob> {
+    pack_style_body_blob_from_xml_with_base(&[], xml, source)
+}
+
+pub fn pack_style_body_blob_from_xml_with_base(
+    base_blob: &[u8],
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedStyleBodyBlob> {
     let items = parse_style_body_xml_items(xml)?;
+    if !base_blob.is_empty() {
+        let formatted_by_key = items
+            .iter()
+            .map(|item| {
+                let formatted = format_style_body_item(item, source)?;
+                let key = style_body_item_key(&formatted)?;
+                Ok((key, formatted))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let inflated = inflate_raw(base_blob).context("failed to inflate base Style body blob")?;
+        let mut plain =
+            String::from_utf8(inflated).context("base Style body blob is not valid UTF-8")?;
+        let body_start = plain
+            .find('{')
+            .ok_or_else(|| anyhow!("base Style body has no braced payload"))?;
+        let fields = scan_braced_fields(&plain, body_start)?;
+        if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+            return Err(anyhow!("base Style body does not start with type marker 2"));
+        }
+        let count = fields
+            .get(1)
+            .and_then(|range| plain[range.clone()].trim().parse::<usize>().ok())
+            .ok_or_else(|| anyhow!("base Style body item count is missing"))?;
+        if fields.len() < 2 + count {
+            return Err(anyhow!(
+                "base Style body has {} fields, expected at least {}",
+                fields.len(),
+                2 + count
+            ));
+        }
+        let mut replacements = Vec::<(Range<usize>, String)>::new();
+        for item_range in fields.iter().skip(2).take(count) {
+            let key = style_body_item_key(&plain[item_range.clone()])?;
+            if let Some(formatted) = formatted_by_key.get(&key) {
+                replacements.push((item_range.clone(), formatted.clone()));
+            }
+        }
+        replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+        for (range, replacement) in replacements {
+            replace_1c_value_if_different(&mut plain, range, &replacement);
+        }
+        let blob = deflate_raw(plain.as_bytes())?;
+        let output_sha256 = hex_sha256(&blob);
+
+        return Ok(PackedStyleBodyBlob {
+            blob,
+            plain_bytes: plain.len(),
+            output_sha256,
+        });
+    }
+
     let mut fields = Vec::with_capacity(items.len() + 3);
     fields.push("2".to_string());
     fields.push(items.len().to_string());
@@ -981,6 +1083,14 @@ pub fn pack_style_body_blob_from_xml(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn style_body_item_key(value: &str) -> Result<String> {
+    let fields = scan_braced_fields(value.trim(), 0)?;
+    let key = fields
+        .first()
+        .ok_or_else(|| anyhow!("Style body item has no key"))?;
+    Ok(compact_1c_value(&value.trim()[key.clone()]))
 }
 
 #[derive(Debug, Clone)]
@@ -1263,6 +1373,9 @@ fn style_body_standard_code_for_name(name: &str) -> Option<i32> {
         "TableHeaderTextColor" => Some(-36),
         "TableFooterBackColor" => Some(-37),
         "TableFooterTextColor" => Some(-38),
+        "NavigationColor" => Some(-42),
+        "AuxiliaryNavigationColor" => Some(-43),
+        "ActivityColor" => Some(-44),
         _ => None,
     }
 }
@@ -1323,8 +1436,10 @@ pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
     fields.extend(schedule.months);
     fields.push(schedule.weeks_period);
     fields.push(schedule.days_repeat_period);
+    fields.push("0".to_string());
 
-    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let mut plain = b"\xEF\xBB\xBF".to_vec();
+    plain.extend_from_slice(format!("{{{}}}", fields.join(",")).as_bytes());
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
 
@@ -1343,6 +1458,128 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
         plain_bytes: bytes.len(),
         output_sha256,
     })
+}
+
+pub fn raw_deflated_plain_sha256(blob: &[u8]) -> Result<String> {
+    let plain = inflate_raw(blob).context("failed to inflate raw deflated blob")?;
+    Ok(hex_sha256(&plain))
+}
+
+pub fn raw_deflated_first_base64_payload_sha256(blob: &[u8]) -> Result<String> {
+    let plain =
+        String::from_utf8(inflate_raw(blob).context("failed to inflate raw deflated base64 blob")?)
+            .context("raw deflated base64 blob is not valid UTF-8")?;
+    let prefix = "{#base64:";
+    let payload_start = plain
+        .find(prefix)
+        .map(|index| index + prefix.len())
+        .ok_or_else(|| anyhow!("raw deflated blob has no base64 payload"))?;
+    let payload_end = plain[payload_start..]
+        .find('}')
+        .map(|relative| payload_start + relative)
+        .ok_or_else(|| anyhow!("raw deflated blob base64 payload is not closed"))?;
+    let payload = decode_base64_mime(&plain[payload_start..payload_end])
+        .ok_or_else(|| anyhow!("raw deflated blob base64 payload is invalid"))?;
+    Ok(hex_sha256(&payload))
+}
+
+pub fn raw_deflated_looks_like_help_blob(blob: &[u8]) -> bool {
+    raw_deflated_help_content_sha256(blob).is_ok()
+}
+
+pub fn raw_deflated_help_content_sha256(blob: &[u8]) -> Result<String> {
+    let plain = String::from_utf8(inflate_raw(blob).context("failed to inflate Help blob")?)
+        .context("Help blob is not valid UTF-8")?;
+    let text = plain.trim_start_matches('\u{feff}');
+    let fields = scan_braced_fields(text, 0).context("Help blob is not a 1C braced value")?;
+    if fields
+        .first()
+        .is_none_or(|range| text[range.clone()].trim() != "5")
+    {
+        return Err(anyhow!("Help blob marker is not 5"));
+    }
+    let page_count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Help blob page count is missing"))?;
+    if page_count == 0 {
+        return Err(anyhow!("Help blob has no pages"));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"ibcmd-rs-help-v1");
+    let mut index = 2usize;
+    hash_usize(&mut hasher, page_count);
+    for _ in 0..page_count {
+        let page_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob page name is missing"))?;
+        let page = parse_1c_quoted_string(text[page_range.clone()].trim())
+            .context("Help blob page name is not a 1C string")?;
+        index += 1;
+        let payload_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob page payload is missing"))?;
+        let payload = decode_base64_payload_field(text[payload_range.clone()].trim())
+            .context("Help blob page payload is not valid base64")?;
+        index += 1;
+        hash_bytes(&mut hasher, page.as_bytes());
+        hash_bytes(&mut hasher, &payload);
+    }
+
+    let file_count = fields
+        .get(index)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if fields.get(index).is_some() {
+        index += 1;
+    }
+    hash_usize(&mut hasher, file_count);
+    for _ in 0..file_count {
+        let file_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob file name is missing"))?;
+        let file_name = parse_1c_quoted_string(text[file_range.clone()].trim())
+            .context("Help blob file name is not a 1C string")?;
+        index += 1;
+        if fields.get(index).is_some_and(|range| {
+            text[range.clone()]
+                .trim()
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+        }) {
+            index += 1;
+        }
+        let payload_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob file payload is missing"))?;
+        let payload = decode_base64_payload_field(text[payload_range.clone()].trim())
+            .context("Help blob file payload is not valid base64")?;
+        index += 1;
+        hash_bytes(&mut hasher, file_name.as_bytes());
+        hash_bytes(&mut hasher, &payload);
+    }
+
+    Ok(format!("{:X}", hasher.finalize()))
+}
+
+fn decode_base64_payload_field(field: &str) -> Result<Vec<u8>> {
+    let Some(payload) = field
+        .strip_prefix("{#base64:")
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return Err(anyhow!("base64 payload wrapper is missing"));
+    };
+    decode_base64_mime(payload).ok_or_else(|| anyhow!("base64 payload is invalid"))
+}
+
+fn hash_usize(hasher: &mut Sha256, value: usize) {
+    hasher.update((value as u64).to_le_bytes());
+}
+
+fn hash_bytes(hasher: &mut Sha256, bytes: &[u8]) {
+    hash_usize(hasher, bytes.len());
+    hasher.update(bytes);
 }
 
 pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
@@ -3566,7 +3803,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
         {
             let container = FormBodyContainer::parse(&plain)?;
             let mut layout = plain[container.layout_range.clone()].trim().to_string();
-            patch_form_layout_properties(&mut layout, &properties)?;
+            patch_form_layout_properties(&mut layout, &properties)
+                .context("failed to patch Form layout properties")?;
             if let Some(auto_command_bar) = &properties.auto_command_bar {
                 let _ = patch_form_layout_auto_command_bar(
                     &mut layout,
@@ -3574,9 +3812,11 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                     &properties.commands,
                     &form_command_uuids,
                     source,
-                )?;
+                )
+                .context("failed to patch Form layout AutoCommandBar")?;
             }
-            patch_form_layout_events(&mut layout, &properties.events, properties.events_present)?;
+            patch_form_layout_events(&mut layout, &properties.events, properties.events_present)
+                .context("failed to patch Form layout events")?;
             patch_form_layout_child_items(
                 &mut layout,
                 &properties.child_items,
@@ -3585,7 +3825,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 &form_command_uuids,
                 source,
                 properties.child_items_present,
-            )?;
+            )
+            .context("failed to patch Form layout child items")?;
             plain.replace_range(container.layout_range, &layout);
         }
         if properties.commands_present {
@@ -3597,7 +3838,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                     &properties.commands,
                     &form_command_uuids,
                     source,
-                )?;
+                )
+                .context("failed to patch Form body commands")?;
                 plain.replace_range(commands_range, &commands);
             }
         }
@@ -3605,7 +3847,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(parameters_range) = container.trailing_ranges.get(1).cloned() {
                 let mut parameters = plain[parameters_range.clone()].trim().to_string();
-                patch_form_body_parameters(&mut parameters, &properties.parameters, source)?;
+                patch_form_body_parameters(&mut parameters, &properties.parameters, source)
+                    .context("failed to patch Form body parameters")?;
                 plain.replace_range(parameters_range, &parameters);
             }
         }
@@ -3613,7 +3856,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             let container = FormBodyContainer::parse(&plain)?;
             if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
                 let mut attributes = plain[attributes_range.clone()].trim().to_string();
-                patch_form_body_attributes(&mut attributes, &properties.attributes, source)?;
+                patch_form_body_attributes(&mut attributes, &properties.attributes, source)
+                    .context("failed to patch Form body attributes")?;
                 plain.replace_range(attributes_range, &attributes);
             }
         }
@@ -3626,7 +3870,8 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                     &mut command_interface,
                     &properties.command_interface_items,
                     source,
-                )?;
+                )
+                .context("failed to patch Form command interface")?;
                 plain.replace_range(command_interface_range, &command_interface);
             }
         }
@@ -3677,7 +3922,7 @@ fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Res
                 let content = fs::read(&path).with_context(|| {
                     format!("failed to read Form item asset {}", path.display())
                 })?;
-                if is_form_item_picture_asset_content(&content) {
+                if is_form_item_picture_asset_content(&content) && content != current_content {
                     replacements.push((payload_start..payload_end, encode_base64(&content)));
                 }
             }
@@ -4488,6 +4733,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Attributes",
                             "Attribute",
+                            "Type",
                             "StringQualifiers",
                             "Length",
                         ],
@@ -4498,6 +4744,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Attributes",
                             "Attribute",
+                            "Type",
                             "StringQualifiers",
                             "AllowedLength",
                         ],
@@ -4508,6 +4755,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Attributes",
                             "Attribute",
+                            "Type",
                             "NumberQualifiers",
                             "Digits",
                         ],
@@ -4518,6 +4766,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Attributes",
                             "Attribute",
+                            "Type",
                             "NumberQualifiers",
                             "FractionDigits",
                         ],
@@ -4528,6 +4777,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Attributes",
                             "Attribute",
+                            "Type",
                             "NumberQualifiers",
                             "AllowedSign",
                         ],
@@ -4540,6 +4790,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Parameters",
                             "Parameter",
+                            "Type",
                             "StringQualifiers",
                             "Length",
                         ],
@@ -4550,6 +4801,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Parameters",
                             "Parameter",
+                            "Type",
                             "StringQualifiers",
                             "AllowedLength",
                         ],
@@ -4560,6 +4812,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Parameters",
                             "Parameter",
+                            "Type",
                             "NumberQualifiers",
                             "Digits",
                         ],
@@ -4570,6 +4823,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Parameters",
                             "Parameter",
+                            "Type",
                             "NumberQualifiers",
                             "FractionDigits",
                         ],
@@ -4580,6 +4834,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "Form",
                             "Parameters",
                             "Parameter",
+                            "Type",
                             "NumberQualifiers",
                             "AllowedSign",
                         ],
@@ -4966,6 +5221,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
             }
+            Ok(Event::GeneralRef(reference)) => {
+                if form_localized_text_path_allows_entity_ref(&path, &current_child_items)
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text_value.push_str(&value);
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 match local.as_str() {
@@ -5290,6 +5563,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Parameters",
                                 "Parameter",
+                                "Type",
                                 "StringQualifiers",
                                 "Length",
                             ],
@@ -5306,6 +5580,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Parameters",
                                 "Parameter",
+                                "Type",
                                 "StringQualifiers",
                                 "AllowedLength",
                             ],
@@ -5322,6 +5597,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Parameters",
                                 "Parameter",
+                                "Type",
                                 "NumberQualifiers",
                                 "Digits",
                             ],
@@ -5338,6 +5614,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Parameters",
                                 "Parameter",
+                                "Type",
                                 "NumberQualifiers",
                                 "FractionDigits",
                             ],
@@ -5354,6 +5631,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Parameters",
                                 "Parameter",
+                                "Type",
                                 "NumberQualifiers",
                                 "AllowedSign",
                             ],
@@ -5388,6 +5666,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Attributes",
                                 "Attribute",
+                                "Type",
                                 "StringQualifiers",
                                 "Length",
                             ],
@@ -5404,6 +5683,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Attributes",
                                 "Attribute",
+                                "Type",
                                 "StringQualifiers",
                                 "AllowedLength",
                             ],
@@ -5420,6 +5700,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Attributes",
                                 "Attribute",
+                                "Type",
                                 "NumberQualifiers",
                                 "Digits",
                             ],
@@ -5436,6 +5717,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Attributes",
                                 "Attribute",
+                                "Type",
                                 "NumberQualifiers",
                                 "FractionDigits",
                             ],
@@ -5452,6 +5734,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form",
                                 "Attributes",
                                 "Attribute",
+                                "Type",
                                 "NumberQualifiers",
                                 "AllowedSign",
                             ],
@@ -6910,6 +7193,34 @@ fn path_ends_with_for_child_tooltip_content(path: &[String], items: &[FormXmlChi
     path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item", "content"])
 }
 
+fn form_localized_text_path_allows_entity_ref(
+    path: &[String],
+    child_items: &[FormXmlChildItem],
+) -> bool {
+    path_ends_with(path, &["Form", "Title", "item", "lang"])
+        || path_ends_with(path, &["Form", "Title", "item", "content"])
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "Title", "item", "lang"],
+        )
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "Title", "item", "content"],
+        )
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+        )
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+        )
+        || path_ends_with_for_child_title_lang(path, child_items)
+        || path_ends_with_for_child_title_content(path, child_items)
+        || path_ends_with_for_child_tooltip_lang(path, child_items)
+        || path_ends_with_for_child_tooltip_content(path, child_items)
+}
+
 fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -7575,7 +7886,18 @@ fn patch_form_layout_properties(
     properties: &FormXmlBodyProperties,
 ) -> Result<()> {
     if !properties.title.is_empty() {
-        replace_braced_field(layout, 10, &format_form_title_value(&properties.title))?;
+        let fields = scan_braced_fields(layout, 0)?;
+        if let Some(title_range) = fields.get(10)
+            && parse_1c_localized_strings(&layout[title_range.clone()])
+                .ok()
+                .as_deref()
+                != Some(properties.title.as_slice())
+        {
+            layout.replace_range(
+                title_range.clone(),
+                &format_form_title_value(&properties.title),
+            );
+        }
     }
     if let Some(width) = &properties.width {
         replace_braced_field(layout, 3, width)?;
@@ -8635,7 +8957,8 @@ fn patch_form_layout_child_items(
             &table_column_ids_by_name,
             command_uuids,
             source,
-        )?;
+        )
+        .with_context(|| format!("failed to patch Form layout child item {}", item.name))?;
         if !patched {
             let _ = append_form_layout_top_level_child_item(
                 layout,
@@ -8646,7 +8969,8 @@ fn patch_form_layout_child_items(
                 &table_column_ids_by_name,
                 command_uuids,
                 source,
-            )?;
+            )
+            .with_context(|| format!("failed to append Form layout child item {}", item.name))?;
         }
     }
     Ok(())
@@ -8752,7 +9076,8 @@ fn patch_form_layout_child_item(
             table_column_ids_by_name,
             command_uuids,
             source,
-        )?;
+        )
+        .with_context(|| format!("failed to patch Form layout child item entry {}", item.name))?;
         return Ok(true);
     }
 
@@ -9385,13 +9710,17 @@ fn patch_form_layout_child_item_entry(
     }
     if !item.title.is_empty()
         && let Some(title_range) = form_layout_child_item_title_range(text, wrapper, fields)
+        && let Some(replacement) =
+            form_localized_replacement(&text[title_range.clone()], &item.title)
     {
-        replacements.push((title_range, format_1c_synonyms(&item.title)));
+        replacements.push((title_range, replacement));
     }
     if !item.tooltip.is_empty()
         && let Some(tooltip_range) = form_layout_child_item_tooltip_range(text, wrapper, fields)
+        && let Some(replacement) =
+            form_localized_replacement(&text[tooltip_range.clone()], &item.tooltip)
     {
-        replacements.push((tooltip_range, format_1c_synonyms(&item.tooltip)));
+        replacements.push((tooltip_range, replacement));
     }
     if let Some(extended_tooltip) = &item.extended_tooltip
         && let Some(tooltip_range) = form_layout_child_item_extended_tooltip_range(text, fields)?
@@ -9412,8 +9741,12 @@ fn patch_form_layout_child_item_entry(
         if let Some(data_path) = &item.data_path
             && let Some(data_path_range) = fields.get(11)
             && text[data_path_range.clone()].trim_start().starts_with('{')
-            && let Some(data_path_ref) =
-                format_form_attribute_data_path(data_path, attribute_ids_by_name)
+            && let Some(data_path_ref) = form_attribute_data_path_replacement(
+                &text[data_path_range.clone()],
+                data_path,
+                attribute_ids_by_name,
+            )
+            && !one_c_values_equal_ignoring_ws(&text[data_path_range.clone()], &data_path_ref)
         {
             replacements.push((data_path_range.clone(), data_path_ref));
         }
@@ -9579,7 +9912,13 @@ fn patch_form_layout_child_item_entry(
         && form_layout_input_field_is_extended(fields)
         && let Some(options_range) = form_layout_input_field_extended_options_range(text, fields)?
         && let Some(options) =
-            patch_form_layout_input_field_extended_options(&text[options_range.clone()], item)?
+            patch_form_layout_input_field_extended_options(&text[options_range.clone()], item)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form layout input options for {}",
+                        item.name
+                    )
+                })?
     {
         replacements.push((options_range.clone(), options));
     }
@@ -9646,8 +9985,11 @@ fn patch_form_layout_child_item_entry(
     if item.tag == "TextDocumentField"
         && let Some(data_path) = &item.data_path
         && let Some(data_path_range) = fields.get(11)
-        && let Some(data_path_ref) =
-            format_form_attribute_data_path(data_path, attribute_ids_by_name)
+        && let Some(data_path_ref) = form_attribute_data_path_replacement(
+            &text[data_path_range.clone()],
+            data_path,
+            attribute_ids_by_name,
+        )
     {
         replacements.push((data_path_range.clone(), data_path_ref));
     }
@@ -9672,7 +10014,13 @@ fn patch_form_layout_child_item_entry(
         && (item.group.is_some() || item.behavior.is_some() || item.representation.is_some())
         && let Some(options_range) = form_layout_usual_group_extended_options_range(text, fields)
         && let Some(options) =
-            patch_form_layout_usual_group_extended_options(&text[options_range.clone()], item)?
+            patch_form_layout_usual_group_extended_options(&text[options_range.clone()], item)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form layout group options for {}",
+                        item.name
+                    )
+                })?
     {
         replacements.push((options_range, options));
     }
@@ -9684,14 +10032,18 @@ fn patch_form_layout_child_item_entry(
                 FormXmlGroupBehavior::PopUp => "{4,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f},3}",
                 FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{4,4,{0},4}",
             };
-            replacements.push((style_range.clone(), replacement.to_string()));
+            if !one_c_values_equal_ignoring_ws(&text[style_range.clone()], replacement) {
+                replacements.push((style_range.clone(), replacement.to_string()));
+            }
         }
         if let Some(size_range) = fields.get(17) {
             let replacement = match behavior {
                 FormXmlGroupBehavior::PopUp => "{8,2,0,{-31},1,100}",
                 FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{8,3,0,1,100}",
             };
-            replacements.push((size_range.clone(), replacement.to_string()));
+            if !one_c_values_equal_ignoring_ws(&text[size_range.clone()], replacement) {
+                replacements.push((size_range.clone(), replacement.to_string()));
+            }
         }
     }
     if matches!(
@@ -9716,7 +10068,13 @@ fn patch_form_layout_child_item_entry(
         && (item.group.is_some() || item.show_in_header.is_some())
         && let Some(options_range) = form_layout_column_group_options_range(text, fields)
         && let Some(options) =
-            patch_form_layout_column_group_options(&text[options_range.clone()], item)?
+            patch_form_layout_column_group_options(&text[options_range.clone()], item)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form layout column group options for {}",
+                        item.name
+                    )
+                })?
     {
         replacements.push((options_range, options));
     }
@@ -9725,7 +10083,8 @@ fn patch_form_layout_child_item_entry(
     for (range, replacement) in replacements.into_iter().rev() {
         text.replace_range(range, &replacement);
     }
-    patch_form_layout_events(text, &item.events, false)?;
+    patch_form_layout_events(text, &item.events, false)
+        .with_context(|| format!("failed to patch Form layout events for {}", item.name))?;
     patch_form_layout_direct_child_items(
         text,
         item,
@@ -9735,7 +10094,13 @@ fn patch_form_layout_child_item_entry(
         table_column_ids_by_name,
         command_uuids,
         source,
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "failed to patch Form layout direct child items for {}",
+            item.name
+        )
+    })?;
     patch_form_layout_single_child_items(
         text,
         item,
@@ -9745,7 +10110,13 @@ fn patch_form_layout_child_item_entry(
         table_column_ids_by_name,
         command_uuids,
         source,
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "failed to patch Form layout single child items for {}",
+            item.name
+        )
+    })?;
     Ok(())
 }
 
@@ -9901,16 +10272,6 @@ fn patch_form_layout_usual_group_extended_options(
         replacements.push((22, group_code));
         replacements.push((27, layout_code));
         replacements.push((36, mirror_code));
-        if item.behavior.is_none() {
-            replacements.push((
-                4,
-                if group == FormXmlGroup::AlwaysHorizontal {
-                    "1"
-                } else {
-                    "0"
-                },
-            ));
-        }
     }
     if let Some(behavior) = item.behavior {
         let (marker_code, flag10, flag11, flag24, flag28) =
@@ -10181,7 +10542,20 @@ fn form_layout_direct_child_items_span_at(
 ) -> Option<FormLayoutDirectChildItemsSpan> {
     let count_range = fields.get(count_index)?.clone();
     let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
-    (fields.len() >= first_uuid_index + count * 2).then_some(FormLayoutDirectChildItemsSpan {
+    if fields.len() < first_uuid_index + count * 2 {
+        return None;
+    }
+    for index in 0..count {
+        let uuid_range = fields.get(first_uuid_index + index * 2)?.clone();
+        if !is_uuid_text(text[uuid_range].trim()) {
+            return None;
+        }
+        let item_range = fields.get(first_uuid_index + 1 + index * 2)?.clone();
+        if !text[item_range].trim_start().starts_with('{') {
+            return None;
+        }
+    }
+    Some(FormLayoutDirectChildItemsSpan {
         count_range,
         count,
         first_uuid_index,
@@ -10214,7 +10588,13 @@ fn patch_form_layout_direct_child_items(
             table_column_ids_by_name,
             command_uuids,
             source,
-        )?;
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch or append Form layout direct child item {}",
+                child.name
+            )
+        })?;
     }
     Ok(())
 }
@@ -10245,7 +10625,13 @@ fn patch_form_layout_single_child_items(
             table_column_ids_by_name,
             command_uuids,
             source,
-        )?;
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch or append Form layout single child item {}",
+                child.name
+            )
+        })?;
     }
     Ok(())
 }
@@ -10261,10 +10647,12 @@ fn form_layout_single_child_item_slot(
     let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
     match count {
         0 => Some((count_range, None)),
-        1 => fields
-            .get(42)
-            .cloned()
-            .map(|item_range| (count_range, Some(item_range))),
+        1 => fields.get(42).cloned().and_then(|item_range| {
+            text[item_range.clone()]
+                .trim_start()
+                .starts_with('{')
+                .then_some((count_range, Some(item_range)))
+        }),
         _ => None,
     }
 }
@@ -10328,7 +10716,13 @@ fn patch_or_append_form_layout_single_child_item(
             table_column_ids_by_name,
             command_uuids,
             source,
-        )?;
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch Form layout single child item entry {}",
+                child.name
+            )
+        })?;
         text.replace_range(item_range, &nested);
         return Ok(true);
     }
@@ -10465,7 +10859,13 @@ fn patch_or_append_form_layout_direct_child_item(
             table_column_ids_by_name,
             command_uuids,
             source,
-        )?;
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch Form layout direct child item entry {}",
+                child.name
+            )
+        })?;
         text.replace_range(item_range, &nested);
         return Ok(true);
     }
@@ -10713,6 +11113,44 @@ fn format_form_attribute_data_path(
     Some(format!("{{1,{{{attribute_id}}}}}"))
 }
 
+fn form_attribute_data_path_replacement(
+    existing: &str,
+    data_path: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> Option<String> {
+    if data_path.trim() == "Объект" && compact_1c_value(existing) == "{0}" {
+        return None;
+    }
+    let attribute_id = attribute_ids_by_name.get(data_path.trim())?;
+    if form_data_path_ref_points_to_attribute(existing, attribute_id) {
+        return None;
+    }
+    Some(format!("{{1,{{{attribute_id}}}}}"))
+}
+
+fn form_data_path_ref_points_to_attribute(existing: &str, attribute_id: &str) -> bool {
+    let text = existing.trim();
+    let Ok(fields) = scan_braced_fields(text, 0) else {
+        return false;
+    };
+    let Some(marker) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return false;
+    };
+    if !matches!(marker, "1" | "2") {
+        return false;
+    }
+    let Some(path_range) = fields.get(1).cloned() else {
+        return false;
+    };
+    let path_text = text[path_range].trim();
+    let Ok(path_fields) = scan_braced_fields(path_text, 0) else {
+        return false;
+    };
+    path_fields
+        .first()
+        .is_some_and(|range| path_text[range.clone()].trim() == attribute_id)
+}
+
 fn format_form_button_command_reference(
     existing: &str,
     command_name: &str,
@@ -10826,10 +11264,20 @@ fn form_layout_child_item_title_range(
         "48" => &[9, 10],
         _ => &[7],
     };
-    indexes.iter().find_map(|index| {
-        let range = fields.get(*index)?.clone();
-        scan_braced_fields(text, range.start).ok().map(|_| range)
-    })
+    indexes
+        .iter()
+        .find_map(|index| {
+            let range = fields.get(*index)?.clone();
+            parse_1c_localized_strings(text[range.clone()].trim())
+                .is_ok_and(|values| !values.is_empty())
+                .then_some(range)
+        })
+        .or_else(|| {
+            indexes.iter().find_map(|index| {
+                let range = fields.get(*index)?.clone();
+                scan_braced_fields(text, range.start).ok().map(|_| range)
+            })
+        })
 }
 
 fn form_layout_child_item_tooltip_range(
@@ -10874,12 +11322,16 @@ fn patch_form_layout_child_item_extended_tooltip(
     }
     if let Some(identity_range) = fields.get(1).cloned() {
         let mut identity = text[identity_range.clone()].to_string();
-        if scan_braced_fields(&identity, 0)?.get(1).is_some() {
+        if identity.trim_start().starts_with('{')
+            && scan_braced_fields(&identity, 0)?.get(1).is_some()
+        {
             replace_braced_field(&mut identity, 0, &tooltip.id)?;
             text.replace_range(identity_range, &identity);
         }
     }
-    if fields.get(6).is_some() {
+    if let Some(name_range) = fields.get(6).cloned()
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
         replace_braced_field(&mut text, 6, &format_1c_string(&tooltip.name))?;
     }
     Ok(Some(text))
@@ -11310,10 +11762,10 @@ fn patch_form_body_parameter_entry(
     if !parameter.types.is_empty()
         && let Some(type_range) = fields.get(2)
     {
-        replacements.push((
-            type_range.clone(),
-            format_form_parameter_type_pattern(parameter, source)?,
-        ));
+        let type_pattern = format_form_parameter_type_pattern(parameter, source)?;
+        if !one_c_values_equal_ignoring_ws(&text[type_range.clone()], &type_pattern) {
+            replacements.push((type_range.clone(), type_pattern));
+        }
     }
     if let Some(key_parameter) = parameter.key_parameter
         && let Some(key_range) = fields.get(3)
@@ -11729,8 +12181,15 @@ fn patch_form_dynamic_list_settings(
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
     if let Some(query_text) = &settings.query_text {
-        let _ =
-            patch_form_setting_value(text, "QueryText", &format_form_setting_string(query_text))?;
+        let current_matches = find_form_setting_value_range(text, "QueryText")
+            .is_some_and(|range| form_setting_string_matches(&text[range], query_text));
+        if !current_matches {
+            let _ = patch_form_setting_value(
+                text,
+                "QueryText",
+                &format_form_setting_string(query_text),
+            )?;
+        }
     }
     if let Some(manual_query) = settings.manual_query {
         let _ =
@@ -11747,32 +12206,29 @@ fn patch_form_dynamic_list_settings(
     if let Some(main_table) = &settings.main_table
         && let Some(source) = source
     {
-        let _ = patch_form_setting_value(
-            text,
-            "MainTable",
-            &format_form_setting_metadata_ref(source, main_table)?,
-        )?;
+        let uuid = source.resolve_metadata_reference_uuid(main_table)?;
+        let current_matches = find_form_setting_value_range(text, "MainTable")
+            .is_some_and(|range| form_setting_metadata_ref_contains_uuid(&text[range], &uuid));
+        if !current_matches {
+            let _ = patch_form_setting_value(text, "MainTable", &format!("{{\"#\",{uuid}}}"))?;
+        }
     }
     let mut list_replacements = Vec::new();
     let list_settings_text = text.clone();
     if let Some(order) = &settings.list_settings.order {
-        push_form_setting_replacement(
+        push_form_setting_dcs_order_replacement(
             &list_settings_text,
             "Order",
-            format_form_setting_dcs_order(order, &list_settings_text, "Order")?,
+            order,
             &mut list_replacements,
         )?;
     }
     if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
-        push_form_setting_replacement(
+        push_form_setting_dcs_standard_replacement(
             &list_settings_text,
             "ConditionalAppearance",
-            format_form_setting_dcs_standard_section(
-                conditional_appearance,
-                "ConditionalAppearance",
-                &list_settings_text,
-                "ConditionalAppearance",
-            )?,
+            conditional_appearance,
+            "ConditionalAppearance",
             &mut list_replacements,
         )?;
     }
@@ -11793,15 +12249,11 @@ fn patch_form_dynamic_list_settings(
         )?;
     }
     if let Some(filter) = &settings.list_settings.filter {
-        push_form_setting_replacement(
+        push_form_setting_dcs_standard_replacement(
             &list_settings_text,
             "Filter",
-            format_form_setting_dcs_standard_section(
-                filter,
-                "Filter",
-                &list_settings_text,
-                "Filter",
-            )?,
+            filter,
+            "Filter",
             &mut list_replacements,
         )?;
     }
@@ -11830,6 +12282,42 @@ fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> 
     Ok(false)
 }
 
+fn form_setting_metadata_ref_contains_uuid(value: &str, uuid: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields
+        .first()
+        .is_some_and(|range| value[range.clone()].trim() == "\"#\"")
+        && fields
+            .iter()
+            .skip(1)
+            .any(|range| value[range.clone()].trim().eq_ignore_ascii_case(uuid))
+}
+
+fn form_setting_string_matches(existing: &str, expected: &str) -> bool {
+    let existing = existing.trim();
+    let Ok(fields) = scan_braced_fields(existing, 0) else {
+        return false;
+    };
+    let text = existing.trim();
+    if fields.first().map(|range| text[range.clone()].trim()) != Some(r#""S""#) {
+        return false;
+    }
+    let Some(value) = fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+    else {
+        return false;
+    };
+    normalize_newlines(&value) == normalize_newlines(expected)
+}
+
+fn normalize_newlines(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 fn push_form_setting_replacement(
     text: &str,
     key: &str,
@@ -11851,6 +12339,277 @@ fn push_form_setting_replacement(
         }
     }
     Ok(())
+}
+
+fn push_form_setting_dcs_standard_replacement(
+    text: &str,
+    key: &str,
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key)
+        && form_existing_dcs_standard_section_matches(&text[range.clone()], section)?
+    {
+        return Ok(());
+    }
+    push_form_setting_replacement(
+        text,
+        key,
+        format_form_setting_dcs_standard_section(section, root_name, text, key)?,
+        replacements,
+    )
+}
+
+fn push_form_setting_dcs_order_replacement(
+    text: &str,
+    key: &str,
+    order: &FormXmlListSettingsOrder,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key)
+        && form_existing_dcs_order_matches(&text[range.clone()], order)?
+    {
+        return Ok(());
+    }
+    push_form_setting_replacement(
+        text,
+        key,
+        format_form_setting_dcs_order(order, text, key)?,
+        replacements,
+    )
+}
+
+fn form_existing_dcs_order_matches(
+    existing: &str,
+    order: &FormXmlListSettingsOrder,
+) -> Result<bool> {
+    let Some(xml) = form_setting_base64_xml(existing)? else {
+        return Ok(false);
+    };
+    let parsed = parse_form_dcs_order_xml(&xml)?;
+    if parsed.items.len() != order.items.len() {
+        return Ok(false);
+    }
+    let items_match = order
+        .items
+        .iter()
+        .zip(parsed.items.iter())
+        .all(|(expected, actual)| {
+            expected
+                .field
+                .as_deref()
+                .is_none_or(|field| actual.field.as_deref() == Some(field))
+                && expected
+                    .order_type
+                    .as_deref()
+                    .is_none_or(|order_type| actual.order_type.as_deref() == Some(order_type))
+        });
+    let view_mode_matches = order
+        .view_mode
+        .as_deref()
+        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
+    let user_setting_matches = order
+        .user_setting_id
+        .as_deref()
+        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
+    Ok(items_match && view_mode_matches && user_setting_matches)
+}
+
+fn form_existing_dcs_standard_section_matches(
+    existing: &str,
+    section: &FormXmlListSettingsStandardSection,
+) -> Result<bool> {
+    let Some(xml) = form_setting_base64_xml(existing)? else {
+        return Ok(false);
+    };
+    let parsed = parse_form_dcs_standard_section_xml(&xml)?;
+    let view_mode_matches = section
+        .view_mode
+        .as_deref()
+        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
+    let user_setting_matches = section
+        .user_setting_id
+        .as_deref()
+        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
+    Ok(view_mode_matches && user_setting_matches)
+}
+
+fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
+    let text = existing.trim();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some(r##""#""##) {
+        return Ok(None);
+    }
+    for range in fields.iter().skip(1) {
+        let value = text[range.clone()].trim();
+        if !value.starts_with("{#base64:") {
+            continue;
+        }
+        let bytes = decode_base64_payload_field(value)?;
+        let xml = String::from_utf8(bytes)
+            .context("Form DCS setting base64 payload is not valid UTF-8")?;
+        return Ok(Some(xml.trim_start_matches('\u{feff}').to_string()));
+    }
+    Ok(None)
+}
+
+#[derive(Default)]
+struct ParsedFormDcsStandardSection {
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Default)]
+struct ParsedFormDcsOrder {
+    items: Vec<ParsedFormDcsOrderItem>,
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Default)]
+struct ParsedFormDcsOrderItem {
+    field: Option<String>,
+    order_type: Option<String>,
+}
+
+fn parse_form_dcs_order_xml(xml: &str) -> Result<ParsedFormDcsOrder> {
+    let mut reader = Reader::from_reader(xml.as_bytes());
+    let mut buffer = Vec::new();
+    let mut current = None::<String>;
+    let mut text = String::new();
+    let mut parsed = ParsedFormDcsOrder::default();
+    let mut current_item = None::<ParsedFormDcsOrderItem>;
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "item" {
+                    current_item = Some(ParsedFormDcsOrderItem::default());
+                } else if matches!(
+                    local.as_str(),
+                    "field" | "orderType" | "viewMode" | "userSettingID"
+                ) {
+                    current = Some(local);
+                    text.clear();
+                }
+            }
+            Ok(Event::Text(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if current.is_some() {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if current.as_deref() == Some(local.as_str()) {
+                    match local.as_str() {
+                        "field" => {
+                            if let Some(item) = current_item.as_mut() {
+                                item.field = Some(text.trim().to_string());
+                            }
+                        }
+                        "orderType" => {
+                            if let Some(item) = current_item.as_mut() {
+                                item.order_type = Some(text.trim().to_string());
+                            }
+                        }
+                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
+                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
+                        _ => {}
+                    }
+                    current = None;
+                    text.clear();
+                }
+                if local == "item"
+                    && let Some(item) = current_item.take()
+                {
+                    parsed.items.push(item);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(error.into()),
+            _ => {}
+        }
+        buffer.clear();
+    }
+    Ok(parsed)
+}
+
+fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandardSection> {
+    let mut reader = Reader::from_reader(xml.as_bytes());
+    let mut buffer = Vec::new();
+    let mut current = None::<String>;
+    let mut text = String::new();
+    let mut parsed = ParsedFormDcsStandardSection::default();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if matches!(local.as_str(), "viewMode" | "userSettingID") {
+                    current = Some(local);
+                    text.clear();
+                }
+            }
+            Ok(Event::Text(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if current.is_some() {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if current.as_deref() == Some(local.as_str()) {
+                    match local.as_str() {
+                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
+                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
+                        _ => {}
+                    }
+                    current = None;
+                    text.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(error.into()),
+            _ => {}
+        }
+        buffer.clear();
+    }
+    Ok(parsed)
 }
 
 fn find_form_setting_value_range(text: &str, key: &str) -> Option<Range<usize>> {
@@ -12170,13 +12929,17 @@ fn patch_form_body_command_entry(
     }
     if !command.title.is_empty()
         && let Some(title_range) = fields.get(3)
+        && let Some(replacement) =
+            form_command_localized_replacement(&text[title_range.clone()], &command.title)
     {
-        replacements.push((title_range.clone(), format_1c_synonyms(&command.title)));
+        replacements.push((title_range.clone(), replacement));
     }
     if !command.tooltip.is_empty()
         && let Some(tooltip_range) = fields.get(4)
+        && let Some(replacement) =
+            form_command_localized_replacement(&text[tooltip_range.clone()], &command.tooltip)
     {
-        replacements.push((tooltip_range.clone(), format_1c_synonyms(&command.tooltip)));
+        replacements.push((tooltip_range.clone(), replacement));
     }
     if let Some(action) = &command.action
         && let Some(action_range) = fields.get(8)
@@ -12208,6 +12971,137 @@ fn patch_form_body_command_entry(
     }
 
     Ok(true)
+}
+
+fn form_command_localized_replacement(
+    existing: &str,
+    values: &[LocalizedString],
+) -> Option<String> {
+    form_localized_replacement(existing, values)
+}
+
+fn form_localized_replacement(existing: &str, values: &[LocalizedString]) -> Option<String> {
+    if parse_1c_localized_strings(existing).ok().as_deref() == Some(values) {
+        return None;
+    }
+    Some(if form_localized_uses_nested_pairs(existing) {
+        format_form_title_value(values)
+    } else {
+        format_1c_synonyms(values)
+    })
+}
+
+fn form_localized_uses_nested_pairs(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields
+        .first()
+        .is_some_and(|range| value[range.clone()].trim() == "1")
+        && fields
+            .get(1)
+            .is_some_and(|range| value[range.clone()].trim().parse::<usize>().is_ok())
+        && fields
+            .get(2)
+            .is_some_and(|range| value[range.clone()].trim_start().starts_with('{'))
+}
+
+fn parse_1c_localized_strings(value: &str) -> Result<Vec<LocalizedString>> {
+    let value = value.trim();
+    let fields = scan_braced_fields(value, 0)?;
+    if fields
+        .first()
+        .is_some_and(|range| value[range.clone()].trim() == "0")
+    {
+        return Ok(Vec::new());
+    }
+    let first = fields
+        .first()
+        .ok_or_else(|| anyhow!("localized value is empty"))?;
+    let first_value = value[first.clone()].trim();
+    if first_value != "1" {
+        let count = first_value.parse::<usize>()?;
+        return parse_1c_flat_localized_strings(value, &fields, count);
+    }
+    if fields
+        .get(1)
+        .is_some_and(|range| value[range.clone()].trim().parse::<usize>().is_ok())
+        && fields
+            .get(2)
+            .is_some_and(|range| value[range.clone()].trim_start().starts_with('{'))
+    {
+        let count = value[fields[1].clone()].trim().parse::<usize>()?;
+        parse_1c_nested_localized_strings(value, &fields, count)
+    } else {
+        parse_1c_flat_localized_strings(value, &fields, 1)
+    }
+}
+
+fn parse_1c_flat_localized_strings(
+    value: &str,
+    fields: &[Range<usize>],
+    count: usize,
+) -> Result<Vec<LocalizedString>> {
+    if fields.len() != 1 + count * 2 {
+        return Err(anyhow!("flat localized value field count mismatch"));
+    }
+    let mut output = Vec::with_capacity(count);
+    let mut index = 1usize;
+    for _ in 0..count {
+        let lang = parse_1c_quoted_string(&value[fields[index].clone()])?;
+        let content = parse_1c_quoted_string(&value[fields[index + 1].clone()])?;
+        output.push(LocalizedString { lang, content });
+        index += 2;
+    }
+    Ok(output)
+}
+
+fn parse_1c_nested_localized_strings(
+    value: &str,
+    fields: &[Range<usize>],
+    count: usize,
+) -> Result<Vec<LocalizedString>> {
+    if fields.len() != 2 + count {
+        return Err(anyhow!("nested localized value field count mismatch"));
+    }
+    let mut output = Vec::with_capacity(count);
+    for range in fields.iter().skip(2) {
+        let pair = scan_braced_fields(value, range.start)?;
+        if pair.len() != 2 {
+            return Err(anyhow!("nested localized pair field count mismatch"));
+        }
+        let lang = parse_1c_quoted_string(&value[pair[0].clone()])?;
+        let content = parse_1c_quoted_string(&value[pair[1].clone()])?;
+        output.push(LocalizedString { lang, content });
+    }
+    Ok(output)
+}
+
+fn one_c_values_equal_ignoring_ws(left: &str, right: &str) -> bool {
+    compact_1c_value(left) == compact_1c_value(right)
+}
+
+fn compact_1c_value(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    let mut in_string = false;
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            output.push(ch);
+            if in_string && chars.peek() == Some(&'"') {
+                output.push(chars.next().unwrap());
+            } else {
+                in_string = !in_string;
+            }
+            continue;
+        }
+        if !in_string && ch.is_ascii_whitespace() {
+            continue;
+        }
+        output.push(ch);
+    }
+    output
 }
 
 fn append_form_body_command(
@@ -12464,14 +13358,11 @@ pub fn pack_command_interface_blob_from_xml(
     for (index, entry) in entries.iter().enumerate() {
         let common_range = fields[3 + index * 2 + 1].clone();
         let common = if entry.common { "1" } else { "0" };
-        replacements.push((
-            common_range,
-            format!("{{{{0,{{{{0,{{{{\"B\",{common}}}}},0}}}}}}}}"),
-        ));
+        replacements.push((common_range, format!("{{0,{{0,{{\"B\",{common}}},0}}}}")));
     }
     replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
     for (range, replacement) in replacements {
-        plain.replace_range(range, &replacement);
+        replace_1c_value_if_different(&mut plain, range, &replacement);
     }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
@@ -12686,7 +13577,10 @@ fn role_right_value_replacements(
     }
 
     let mut replacements = Vec::new();
-    for (object_index, object) in objects.iter().enumerate() {
+    for object_index in 0..base_count {
+        let object = objects.get(base_count - object_index - 1).ok_or_else(|| {
+            anyhow!("Role Rights.xml has no object for base entry {object_index}")
+        })?;
         let entry_range = object_fields[object_index + 1].clone();
         let entry_fields = scan_braced_fields(plain, entry_range.start)?;
         let rights_range = entry_fields.get(1).ok_or_else(|| {
@@ -12725,14 +13619,6 @@ fn role_object_right_value_replacements(
         }
         _ => return Err(anyhow!("unsupported base Role rights marker {marker}")),
     };
-    if object.rights.len() != count {
-        return Err(anyhow!(
-            "Role Rights.xml object {} right count {} does not match base blob right count {}",
-            object.name,
-            object.rights.len(),
-            count
-        ));
-    }
     let required_fields = start + count * 2;
     if fields.len() < required_fields {
         return Err(anyhow!(
@@ -12741,16 +13627,185 @@ fn role_object_right_value_replacements(
             required_fields
         ));
     }
+    let rights_by_name = object
+        .rights
+        .iter()
+        .map(|right| (right.name.as_str(), right.value))
+        .collect::<BTreeMap<_, _>>();
     let mut replacements = Vec::with_capacity(count);
-    for (right_index, right) in object.rights.iter().enumerate() {
+    for right_index in 0..count {
+        let uuid = plain[fields[start + right_index * 2].clone()].trim();
+        let name = role_right_name(uuid)
+            .ok_or_else(|| anyhow!("unsupported base Role right UUID {uuid}"))?;
+        let value = rights_by_name.get(name).copied().ok_or_else(|| {
+            anyhow!(
+                "Role Rights.xml object {} has no right {}",
+                object.name,
+                name
+            )
+        })?;
         let value_range = fields[start + right_index * 2 + 1].clone();
-        replacements.push((
-            value_range,
-            if right.value { "1" } else { "-1" }.to_string(),
-        ));
+        replacements.push((value_range, if value { "1" } else { "-1" }.to_string()));
     }
     Ok(replacements)
 }
+
+fn role_right_name(uuid: &str) -> Option<&'static str> {
+    ROLE_RIGHT_NAMES
+        .iter()
+        .find_map(|(right_uuid, name)| (*right_uuid == uuid).then_some(*name))
+}
+
+const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
+    ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
+    ("900e3c92-6e18-4874-846a-b28780b5b54c", "Administration"),
+    (
+        "f7c6a0bb-bca6-4cd3-9146-832971cd7073",
+        "AnalyticsSystemClient",
+    ),
+    ("07ef4641-f7da-417a-bd75-35c40a17c2f7", "Automation"),
+    (
+        "399d7390-8d83-4a57-b4d7-c902c15b701f",
+        "ConfigurationExtensionsAdministration",
+    ),
+    ("10b8ce49-ae3d-4a2e-afe7-1e3648bd59f7", "DataAdministration"),
+    ("c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4", "Delete"),
+    ("b7bab52d-c1b1-4bd8-8276-02db08d42352", "Edit"),
+    (
+        "8497054a-ffd1-4ca7-bdfe-340b9ddc050a",
+        "EditDataHistoryVersionComment",
+    ),
+    ("1c799cf9-342d-4bf7-9b6f-951a009228ce", "EventLog"),
+    ("8fb221e3-0d4f-43f2-ad71-1984cad63375", "ExclusiveMode"),
+    ("74fd69fa-368e-4292-956a-65eb2f9877bd", "Execute"),
+    ("02119c69-f08a-4142-9426-3725d74b7719", "ExternalConnection"),
+    ("499e8968-ca89-43f0-9955-8756058b1b53", "Get"),
+    ("b5f861d3-d9c5-45ec-98bf-0ed4d489a351", "InputByString"),
+    ("33200740-82b0-4de7-8556-d3fb25ca4328", "Insert"),
+    (
+        "3b869658-ebc9-49ff-9bb3-e7c59686f538",
+        "InteractiveActivate",
+    ),
+    (
+        "b0c0cbfc-f2cc-4b80-8460-5d5d7a599d9d",
+        "InteractiveChangeOfPosted",
+    ),
+    (
+        "798cf688-ad74-44fe-a464-236b49e910e0",
+        "InteractiveClearDeletionMark",
+    ),
+    (
+        "e7f9daf9-eac2-4ada-9c26-c380858f3589",
+        "InteractiveClearDeletionMarkPredefinedData",
+    ),
+    ("b53db6ed-6e5b-4035-8d24-f10083d646ed", "InteractiveDelete"),
+    (
+        "fa6dbe86-856a-4ac4-b8ac-bce99f8b8b22",
+        "InteractiveDeleteMarked",
+    ),
+    (
+        "65e5f92c-40ff-4130-9652-c0e7612d0609",
+        "InteractiveDeleteMarkedPredefinedData",
+    ),
+    (
+        "013a262e-165f-4815-bdae-7a1bed6a68e4",
+        "InteractiveDeletePredefinedData",
+    ),
+    ("fb88c756-91c9-4351-9cdf-e027879886c6", "InteractiveInsert"),
+    (
+        "7b8359dd-7d4e-4bcd-a61c-b4b26eae19c6",
+        "InteractiveOpenExtDataProcessors",
+    ),
+    (
+        "eb29e198-c338-4a20-a253-be6fc3dd44d9",
+        "InteractiveOpenExtReports",
+    ),
+    ("5d167fcc-b11f-403a-9a37-1eda64c19df1", "InteractivePosting"),
+    (
+        "21b4742a-d335-4234-bf0f-a3074a0e31ac",
+        "InteractivePostingRegular",
+    ),
+    (
+        "d76b72ba-5388-4b7f-af64-1b351f63a1e1",
+        "InteractiveSetDeletionMark",
+    ),
+    (
+        "408c56c0-e210-4e2e-8e82-610050a08a39",
+        "InteractiveSetDeletionMarkPredefinedData",
+    ),
+    (
+        "4d0d77ec-8511-430d-bd77-8407f27bc8f4",
+        "InteractiveUndoPosting",
+    ),
+    ("5e664189-f0ee-439c-bdc5-eb81cca41ddf", "InteractiveExecute"),
+    (
+        "b9b44b51-3ac9-47cd-8b5a-df51afdcceb0",
+        "MainWindowModeEmbeddedWorkplace",
+    ),
+    (
+        "818fc6c3-4691-44e3-a80c-e8d424730ead",
+        "MainWindowModeFullscreenWorkplace",
+    ),
+    (
+        "155a0b35-4343-4047-989b-d385373b063e",
+        "MainWindowModeKiosk",
+    ),
+    (
+        "d066966a-ff6a-4a41-bd68-6191cab083bc",
+        "MainWindowModeNormal",
+    ),
+    (
+        "f6168734-8b8d-4a88-ab39-ef6b51758e83",
+        "MainWindowModeWorkplace",
+    ),
+    ("1e50809b-73ed-4935-bb77-2616c4cabdf5", "MobileClient"),
+    ("31c3d4f6-7d02-4654-a14e-06aacafcb4fa", "Output"),
+    ("e060de25-bffd-42fd-bb09-f3a788d65760", "Posting"),
+    ("1c87578f-9e09-4ec0-a991-5629c87b1588", "Read"),
+    ("64319ca1-f3d8-472e-82ce-5da233e6daaa", "ReadDataHistory"),
+    (
+        "1b762bf9-df7f-4255-bbe6-f7578f41368d",
+        "ReadDataHistoryOfMissingData",
+    ),
+    ("d8682bbb-7800-4aa0-8590-d3cb11fe2a29", "SaveUserData"),
+    ("1d306db2-d97e-4b57-9b28-5d21e838cd9e", "Set"),
+    ("65b6855f-85d5-4d33-ab75-be4485326dd5", "Start"),
+    ("84487e82-eb6c-4c51-ae16-3a6db17e886d", "InteractiveStart"),
+    (
+        "479a42c0-c3e9-4ae7-bf4a-75cebc14fec4",
+        "SwitchToDataHistoryVersion",
+    ),
+    (
+        "265eec41-3ce1-4a07-bc3b-253d44c9a4f4",
+        "TechnicalSpecialistMode",
+    ),
+    ("29da0973-3b85-40e5-89da-bce02dbab08e", "ThickClient"),
+    ("3c00c6ee-844e-4620-85e4-671e72f114d9", "ThinClient"),
+    ("24abfe06-289a-48c5-8bb4-032c733e45c5", "TotalsControl"),
+    ("f55a8f7f-2c65-404f-b530-093d9006adba", "UndoPosting"),
+    ("287b74b8-3a66-4a76-ba27-4f1f6a93770e", "Update"),
+    (
+        "4d87a22d-ca7f-40ba-a367-a4eae62f4a7f",
+        "UpdateDataBaseConfiguration",
+    ),
+    ("b162ff57-0296-483e-9af8-dc37576802cb", "UpdateDataHistory"),
+    (
+        "c4ab1331-e58d-4a46-ad2e-fe6d80b72aa4",
+        "UpdateDataHistoryOfMissingData",
+    ),
+    (
+        "a679c969-8ea1-4b8b-9e61-8a414ba448f4",
+        "UpdateDataHistorySettings",
+    ),
+    (
+        "5b3ea0e2-fdb9-41f6-bf6c-25747906b4cb",
+        "UpdateDataHistoryVersionComment",
+    ),
+    ("c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1", "Use"),
+    ("aa6448f2-be0f-42ea-ba26-1af7f52b5b65", "View"),
+    ("9342b152-a7ae-4c79-9b7b-f4f028a36479", "ViewDataHistory"),
+    ("bd33c881-192c-4ef7-a51d-b146e38c5078", "WebClient"),
+];
 
 fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
     let mut reader = Reader::from_reader(xml);
@@ -13315,11 +14370,11 @@ fn parse_predefined_string_value_from_plain(plain: &str, range: Range<usize>) ->
 }
 
 fn format_predefined_bool_value(value: bool) -> String {
-    format!(r#"{{{{"B",{}}}}}"#, if value { "1" } else { "0" })
+    format!(r#"{{"B",{}}}"#, if value { "1" } else { "0" })
 }
 
 fn format_predefined_string_value(value: &str) -> String {
-    format!(r#"{{{{"S",{}}}}}"#, format_1c_string(value))
+    format!(r#"{{"S",{}}}"#, format_1c_string(value))
 }
 
 fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
@@ -13739,8 +14794,27 @@ pub fn pack_base64_payload_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDefl
 }
 
 pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPictureBlob> {
+    pack_ext_picture_blob_from_bytes_with_base(None, bytes)
+}
+
+pub fn pack_ext_picture_blob_from_bytes_with_base(
+    base_blob: Option<&[u8]>,
+    bytes: &[u8],
+) -> Result<PackedExtPictureBlob> {
     let payload = encode_base64(bytes);
-    let plain = format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes();
+    let plain = if let Some(base_blob) = base_blob {
+        let mut plain = String::from_utf8(
+            inflate_raw(base_blob).context("failed to inflate base ExtPicture blob")?,
+        )
+        .context("base ExtPicture blob is not valid UTF-8")?;
+        if replace_first_base64_payload(&mut plain, &payload) {
+            plain.into_bytes()
+        } else {
+            format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes()
+        }
+    } else {
+        format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes()
+    };
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedExtPictureBlob {
@@ -13748,6 +14822,20 @@ pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPicture
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn replace_first_base64_payload(text: &mut String, payload: &str) -> bool {
+    let prefix = "{#base64:";
+    let Some(start) = text.find(prefix) else {
+        return false;
+    };
+    let payload_start = start + prefix.len();
+    let Some(relative_end) = text[payload_start..].find('}') else {
+        return false;
+    };
+    let payload_end = payload_start + relative_end;
+    text.replace_range(payload_start..payload_end, payload);
+    true
 }
 
 pub fn parse_ext_picture_file_name_from_xml(xml: &[u8]) -> Result<String> {
@@ -15171,6 +16259,37 @@ fn patch_simple_metadata_header_text(
     Ok(text)
 }
 
+fn patch_configuration_metadata_text(
+    text: String,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<String> {
+    let marker = "{1,0,";
+    let marker_start = text
+        .find(marker)
+        .ok_or_else(|| anyhow!("configuration metadata tuple not found"))?;
+    let uuid_start = marker_start + marker.len();
+    let uuid_end = uuid_start + 36;
+    let header_uuid = text
+        .get(uuid_start..uuid_end)
+        .ok_or_else(|| anyhow!("configuration metadata tuple UUID is truncated"))?;
+    if !is_uuid_text(header_uuid) {
+        return Err(anyhow!(
+            "configuration metadata tuple UUID is invalid: {header_uuid}"
+        ));
+    }
+    let header_uuid = header_uuid.to_string();
+    patch_simple_metadata_header_text(
+        text,
+        &SimpleMetadataXmlProperties {
+            kind: properties.kind.clone(),
+            uuid: header_uuid,
+            name: properties.name.clone(),
+            synonyms: properties.synonyms.clone(),
+            comment: properties.comment.clone(),
+        },
+    )
+}
+
 fn patch_constant_metadata_text(
     mut text: String,
     properties: &ConstantXmlProperties,
@@ -15193,7 +16312,13 @@ fn patch_constant_metadata_text(
         ));
     }
     let type_text = format_constant_type_pattern(&properties.value_type);
-    text.replace_range(fields[2].clone(), &type_text);
+    if !metadata_type_pattern_matches_existing(
+        &text[fields[2].clone()],
+        &type_text,
+        std::slice::from_ref(&properties.value_type),
+    ) {
+        text.replace_range(fields[2].clone(), &type_text);
+    }
 
     let marker_start = text
         .find(&marker)
@@ -15238,7 +16363,13 @@ fn patch_defined_type_metadata_text(
     }
 
     let type_text = format_metadata_type_pattern(&properties.value_types);
-    text.replace_range(fields[4].clone(), &type_text);
+    if !metadata_type_pattern_matches_existing(
+        &text[fields[4].clone()],
+        &type_text,
+        &properties.value_types,
+    ) {
+        text.replace_range(fields[4].clone(), &type_text);
+    }
 
     Ok(text)
 }
@@ -15267,47 +16398,52 @@ fn patch_common_command_metadata_text(
         ));
     }
 
-    let replacements = [
-        (
-            fields[12].clone(),
-            common_command_on_main_server_unavailable_behavior_code(
-                properties.on_main_server_unavailable_behavior,
-            )
-            .to_string(),
-        ),
-        (
-            fields[11].clone(),
-            common_command_parameter_use_mode_code(properties.parameter_use_mode).to_string(),
-        ),
-        (
-            fields[10].clone(),
-            bool_flag(properties.modifies_data).to_string(),
-        ),
-        (
+    text.replace_range(
+        fields[12].clone(),
+        &common_command_on_main_server_unavailable_behavior_code(
+            properties.on_main_server_unavailable_behavior,
+        )
+        .to_string(),
+    );
+    text.replace_range(
+        fields[11].clone(),
+        &common_command_parameter_use_mode_code(properties.parameter_use_mode).to_string(),
+    );
+    text.replace_range(fields[10].clone(), &bool_flag(properties.modifies_data));
+    if !matches!(
+        properties.command_parameter_type,
+        CommonCommandParameterType::Empty
+    ) {
+        replace_1c_value_if_different(
+            &mut text,
             fields[8].clone(),
-            format_common_command_parameter_type(&properties.command_parameter_type),
-        ),
-        (
-            fields[7].clone(),
-            format_common_command_group_reference(&properties.group),
-        ),
-        (
-            fields[6].clone(),
-            bool_flag(properties.include_help_in_contents).to_string(),
-        ),
-        (fields[3].clone(), format_1c_synonyms(&properties.tooltip)),
-        (
-            fields[2].clone(),
-            common_command_representation_code(properties.representation).to_string(),
-        ),
-        (
+            &format_common_command_parameter_type(&properties.command_parameter_type),
+        );
+    }
+    replace_1c_value_if_different(
+        &mut text,
+        fields[7].clone(),
+        &format_common_command_group_reference(&properties.group),
+    );
+    text.replace_range(
+        fields[6].clone(),
+        &bool_flag(properties.include_help_in_contents),
+    );
+    replace_1c_value_if_different(
+        &mut text,
+        fields[3].clone(),
+        &format_1c_synonyms(&properties.tooltip),
+    );
+    text.replace_range(
+        fields[2].clone(),
+        &common_command_representation_code(properties.representation).to_string(),
+    );
+    if !matches!(properties.picture, CommonCommandPicture::Empty) {
+        replace_1c_value_if_different(
+            &mut text,
             fields[1].clone(),
-            format_common_command_picture(&properties.picture),
-        ),
-    ];
-
-    for (range, replacement) in replacements {
-        text.replace_range(range, &replacement);
+            &format_common_command_picture(&properties.picture),
+        );
     }
 
     Ok(text)
@@ -15339,29 +16475,68 @@ fn patch_command_group_metadata_text(
 
     let inner_text = text[fields[6].clone()].to_string();
     let inner_text = patch_simple_metadata_header_text(inner_text, &properties.simple)?;
-    let replacements = [
-        (fields[6].clone(), inner_text),
-        (fields[5].clone(), r#"{0}"#.to_string()),
-        (fields[4].clone(), format_1c_synonyms(&properties.tooltip)),
-        (
-            fields[3].clone(),
-            common_command_representation_code(properties.representation).to_string(),
-        ),
-        (
-            fields[2].clone(),
-            command_group_category_code(properties.category).to_string(),
-        ),
-        (
-            fields[1].clone(),
-            format_command_group_picture(&properties.picture),
-        ),
-    ];
-
-    for (range, replacement) in replacements {
-        text.replace_range(range, &replacement);
-    }
+    text.replace_range(fields[6].clone(), &inner_text);
+    replace_1c_value_if_different(&mut text, fields[5].clone(), r#"{0}"#);
+    replace_1c_value_if_different(
+        &mut text,
+        fields[4].clone(),
+        &format_1c_synonyms(&properties.tooltip),
+    );
+    text.replace_range(
+        fields[3].clone(),
+        &common_command_representation_code(properties.representation).to_string(),
+    );
+    text.replace_range(
+        fields[2].clone(),
+        &command_group_category_code(properties.category).to_string(),
+    );
+    replace_1c_value_if_different(
+        &mut text,
+        fields[1].clone(),
+        &format_command_group_picture(&properties.picture),
+    );
 
     Ok(text)
+}
+
+fn replace_1c_value_if_different(text: &mut String, range: Range<usize>, replacement: &str) {
+    if !one_c_values_equal_ignoring_ws(&text[range.clone()], replacement) {
+        text.replace_range(range, replacement);
+    }
+}
+
+fn metadata_type_pattern_matches_existing(
+    existing: &str,
+    formatted: &str,
+    expected: &[MetadataTypePatternElement],
+) -> bool {
+    if one_c_values_equal_ignoring_ws(existing, formatted) {
+        return true;
+    }
+
+    let Ok(fields) = scan_braced_fields(existing.trim(), 0) else {
+        return false;
+    };
+    if fields.len() != expected.len() + 1 {
+        return false;
+    }
+    if existing[fields[0].clone()].trim() != r#""Pattern""# {
+        return false;
+    }
+
+    expected
+        .iter()
+        .zip(fields.iter().skip(1))
+        .all(|(expected, range)| match expected {
+            MetadataTypePatternElement::DateTime => {
+                let compact = compact_1c_value(&existing[range.clone()]);
+                compact == r#"{"D"}"# || compact.starts_with(r#"{"D","#)
+            }
+            _ => one_c_values_equal_ignoring_ws(
+                &existing[range.clone()],
+                &format_metadata_type_pattern_element(expected),
+            ),
+        })
 }
 
 fn parse_required_xml_bool(name: &str, value: Option<String>) -> Result<bool> {
@@ -15494,6 +16669,13 @@ fn parse_metadata_type_pattern_element(
             allowed_sign_flag: parse_number_allowed_sign_flag(number_allowed_sign)?,
         }),
         "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime),
+        other if other.starts_with("v8:") => {
+            let type_id = builtin_v8_type_id(other)
+                .ok_or_else(|| anyhow!("{kind} type is not supported yet: {other}"))?;
+            Ok(MetadataTypePatternElement::Reference {
+                type_id: type_id.to_string(),
+            })
+        }
         other if other.starts_with("cfg:") => {
             let source = source.ok_or_else(|| {
                 anyhow!("{kind} type {other} requires --source-root to resolve TypeId")
@@ -15503,6 +16685,13 @@ fn parse_metadata_type_pattern_element(
             })
         }
         other => Err(anyhow!("{kind} type is not supported yet: {other}")),
+    }
+}
+
+fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
+    match type_name.trim() {
+        "v8:ValueStorage" => Some("e199ca70-93cf-46ce-a54b-6edc88c3a296"),
+        _ => None,
     }
 }
 
@@ -15773,8 +16962,8 @@ fn parse_required_u32(name: &str, value: Option<&str>) -> Result<u32> {
 
 fn parse_string_allowed_length_flag(value: Option<&str>) -> Result<u8> {
     match value.map(str::trim).unwrap_or("Variable") {
-        "Fixed" => Ok(0),
-        "Variable" => Ok(1),
+        "Variable" => Ok(0),
+        "Fixed" => Ok(1),
         other => Err(anyhow!(
             "unsupported metadata StringQualifiers/AllowedLength: {other}"
         )),
@@ -17278,6 +18467,40 @@ mod tests {
     }
 
     #[test]
+    fn patches_configuration_header_with_root_uuid_xml() {
+        let root_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let base_text = format!(
+            "{{2,{{{root_uuid}}},1,{{9cd510cd-abfc-11d4-9434-004095e12fc7,{{1,{{68,{{0,{{3,{{1,0,{header_uuid}}},\"OldApp\",{{1,\"en\",\"Old app\"}},\"Old comment\",0,0,00000000-0000-0000-0000-000000000000,0}}}}}}}}}}}}"
+        );
+        let base_blob = deflate_raw(base_text.as_bytes()).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Configuration uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>NewApp</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>New app</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>New comment</Comment>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains(&format!("{{1,0,{header_uuid}}}")));
+        assert!(inflated.contains("\"NewApp\""));
+        assert!(inflated.contains("{1,\"en\",\"New app\"}"));
+        assert!(inflated.contains("\"New comment\""));
+    }
+
+    #[test]
     fn patches_simple_metadata_blob_from_xml() {
         let mut active = b"\xEF\xBB\xBF".to_vec();
         active.extend_from_slice(
@@ -17935,8 +19158,146 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("\"NewConstant\""));
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
         assert!(inflated.contains("\"New comment\""));
-        assert!(inflated.contains(r#"{"Pattern",{"S",50,1}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"S",50,0}}"#));
         assert!(inflated.contains(",1,1,{0}"));
+    }
+
+    #[test]
+    fn patches_constant_preserving_equivalent_type_pattern_format() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            r#"{1,
+{16,
+{27,
+{2,
+{3,
+{1,0,cccccccc-cccc-4ccc-cccc-cccccccccccc},"OldName",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",
+{"S",4,1}
+}
+},0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,0,{5006,0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0},
+aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddddd-dddd-dddddddddddd,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee,1,0,{0},{0},00000000-0000-0000-0000-000000000000,0,0,ffffffff-ffff-4fff-ffff-ffffffffffff,99999999-9999-4999-9999-999999999999,0,0},0}"#
+                .as_bytes(),
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Constant uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties>
+      <Name>NewConstant</Name>
+      <Synonym/>
+      <Comment/>
+      <Type>
+        <v8:Type>xs:string</v8:Type>
+        <v8:StringQualifiers>
+          <v8:Length>4</v8:Length>
+          <v8:AllowedLength>Fixed</v8:AllowedLength>
+        </v8:StringQualifiers>
+      </Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{\"Pattern\",\n{\"S\",4,1}\n}"));
+    }
+
+    #[test]
+    fn patches_constant_preserving_datetime_type_qualifier() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            r#"{1,
+{16,
+{27,
+{2,
+{3,
+{1,0,cccccccc-cccc-4ccc-cccc-cccccccccccc},"OldConstant",
+{1,"ru","Old constant"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",
+{"D","T"}
+}
+},0,
+{1,"ru","ДФ=HH"},
+{0},0,"",0,
+{"U"},
+{"U"},0,00000000-0000-0000-0000-000000000000,2,0,
+{5006,0},
+{3,0,0},
+{0,0},0,
+{1,"ru","ДФ=HH"},
+{"S",""},0,0,0},
+aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddddd-dddd-4ddd-dddd-dddddddddddd,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee,1,0,{0},{0},00000000-0000-0000-0000-000000000000,0,0,ffffffff-ffff-4fff-ffff-ffffffffffff,99999999-9999-4999-9999-999999999999,0,0},0}"#
+                .as_bytes(),
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Constant uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties>
+      <Name>OldConstant</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old constant</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Old comment</Comment>
+      <Type>
+        <v8:Type>xs:dateTime</v8:Type>
+      </Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{\"Pattern\",\n{\"D\",\"T\"}\n}"));
+    }
+
+    #[test]
+    fn patches_constant_valuestorage_type_pattern() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{16,
+{27,
+{2,
+{3,
+{1,0,cccccccc-cccc-4ccc-cccc-cccccccccccc},"OldName",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",{"B"}}
+},0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,0,{5006,0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0},
+aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddddd-dddd-4ddd-dddd-dddddddddddd,eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee,1,0,{0},{0},00000000-0000-0000-0000-000000000000,0,0,ffffffff-ffff-4fff-ffff-ffffffffffff,99999999-9999-4999-9999-999999999999,0,0},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Constant uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties>
+      <Name>ValueStorageConstant</Name>
+      <Synonym/>
+      <Comment/>
+      <Type>
+        <v8:Type>v8:ValueStorage</v8:Type>
+      </Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains(r##"{"Pattern",{"#",e199ca70-93cf-46ce-a54b-6edc88c3a296}}"##));
     }
 
     #[test]
@@ -17983,7 +19344,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(packed.properties.kind, "DefinedType");
         assert!(inflated.contains("\"NewType\""), "{inflated}");
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
-        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,1}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,0}}"#));
     }
 
     #[test]
@@ -18114,6 +19475,173 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("{4,0,{0},\"\",-1,-1,1,0,\"\"},2,"));
         assert!(inflated.contains("{0,0,0},1,"));
         assert!(inflated.contains("},1,0,0}"));
+    }
+
+    #[test]
+    fn patches_common_command_preserving_equivalent_picture_format() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,
+{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>OldCommand</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>NavigationPanelOrdinary</Group>
+      <Representation>Auto</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>true</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{4,0,\n{0},\"\",-1,-1,1,0,\"\"},3,"));
+    }
+
+    #[test]
+    fn patches_common_command_preserving_existing_picture_when_xml_empty() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,1,
+{0,1f046bc2-d6c5-46a3-a459-b2c0508f86fb},"",-1,-1,1,0,""},2,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>OldCommand</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>NavigationPanelOrdinary</Group>
+      <Representation>PictureAndText</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>true</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{0,1f046bc2-d6c5-46a3-a459-b2c0508f86fb}"));
+    }
+
+    #[test]
+    fn patches_common_command_preserving_existing_parameter_type_when_xml_empty() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br##"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern",
+{"#",225a597b-50b5-499c-b93b-9cd248b3f18e},
+{"#",2c2dfd96-3d8c-4420-b46c-e87260ddb55a}},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"##,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>OldCommand</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>NavigationPanelOrdinary</Group>
+      <Representation>Auto</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>true</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains(r##"{"#",225a597b-50b5-499c-b93b-9cd248b3f18e}"##));
+        assert!(inflated.contains(r##"{"#",2c2dfd96-3d8c-4420-b46c-e87260ddb55a}"##));
     }
 
     #[test]
@@ -18499,6 +20027,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_style_body_xml_preserving_base_order_and_format() -> anyhow::Result<()> {
+        let mut base_text = b"\xEF\xBB\xBF".to_vec();
+        base_text.extend_from_slice(
+            b"{2,3,\n{\n{-44},0,\n{4,3,\n{-44},3}\n},\n{\n{-42},0,\n{4,0,\n{14474460},0}\n},\n{\n{-43},0,\n{4,0,\n{15658734},0}\n},\n{0}\n}",
+        );
+        let base = super::deflate_raw(&base_text)?;
+        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
+<Style xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" version="2.21">
+	<Item name="NavigationColor">
+		<Color>#DCDCDC</Color>
+	</Item>
+	<Item name="AuxiliaryNavigationColor">
+		<Color>#EEEEEE</Color>
+	</Item>
+	<Item name="ActivityColor">
+		<Color>style:ActivityColor</Color>
+	</Item>
+</Style>
+"##;
+
+        let packed = super::pack_style_body_blob_from_xml_with_base(&base, xml, None)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text.as_bytes(), base_text.as_slice());
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_scheduled_job_schedule_xml() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <JobSchedule xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" version="2.17">
@@ -18514,7 +20071,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0}"
+            "\u{feff}{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -19198,6 +20755,40 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_item_picture_assets_preserving_equal_wrapped_payload() -> anyhow::Result<()>
+    {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-item-assets-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let assets_root = root.join("Items");
+        std::fs::create_dir_all(assets_root.join("ДеревоТоваров"))?;
+        let png = b"\x89PNG\r\n\x1a\n";
+        std::fs::write(
+            assets_root.join("ДеревоТоваров").join("RowsPicture.png"),
+            png,
+        )?;
+        let base = super::deflate_raw(
+            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBOR\r\nw0KGgo=}}}}"
+                .as_bytes(),
+        )?;
+
+        let packed = super::pack_form_body_blob_from_form_xml_with_source_and_assets(
+            &base,
+            b"",
+            None,
+            None,
+            Some(&assets_root),
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{#base64:iVBOR\r\nw0KGgo=}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_top_level_properties() -> anyhow::Result<()> {
         let base = super::deflate_raw(
             b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,1,1,0,1,1,1},\"Old module\",{0}}",
@@ -19254,6 +20845,31 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_preserves_equivalent_root_title_format() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,1,
+{"ru","Title"}
+},1,0,1,1,1,0,1,1,1},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Title>
+		<v8:item>
+			<v8:lang>ru</v8:lang>
+			<v8:content>Title</v8:content>
+		</v8:item>
+	</Title>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("{1,1,\n{\"ru\",\"Title\"}\n}"));
         Ok(())
     }
 
@@ -20371,6 +21987,162 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_existing_dynamic_filter_preserves_unspecified_items()
+    -> anyhow::Result<()> {
+        let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item xsi:type=\"FilterItemComparison\">\r\n\
+\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<comparisonType>Equal</comparisonType>\r\n\
+\t\t<right>false</right>\r\n\
+\t</item>\r\n\
+\t<viewMode>Normal</viewMode>\r\n\
+\t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
+</Filter>";
+        let mut filter_bytes = b"\xEF\xBB\xBF".to_vec();
+        filter_bytes.extend_from_slice(filter_xml.as_bytes());
+        let filter_payload = super::encode_base64(&filter_bytes);
+        let base_text = format!(
+            r##"{{4,{{7,{{"layout"}}}},"Old module",{{4,1,{{9,{{1}},0,"List",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,2,"Filter",{{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:{filter_payload}}}}},"DynamicalDataSelection",{{"B",1}}}},{{0,0}}}}}},{{0,0}},{{0,0}},{{0}}}}"##
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<DynamicDataRead>true</DynamicDataRead>
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
+					</dcsset:filter>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+
+        assert!(
+            filter_after.contains("FilterItemComparison"),
+            "{filter_after}"
+        );
+        assert!(
+            filter_after.contains("<left>ЭтоГруппа</left>"),
+            "{filter_after}"
+        );
+        assert!(
+            filter_after
+                .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_order_preserves_equivalent_wrapped_payload()
+    -> anyhow::Result<()> {
+        let order_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item xsi:type=\"OrderItemField\">\r\n\
+\t\t<field>Код</field>\r\n\
+\t\t<orderType>Asc</orderType>\r\n\
+\t</item>\r\n\
+\t<viewMode>Normal</viewMode>\r\n\
+\t<userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</userSettingID>\r\n\
+</Order>";
+        let mut order_bytes = b"\xEF\xBB\xBF".to_vec();
+        order_bytes.extend_from_slice(order_xml.as_bytes());
+        let order_payload = super::encode_base64(&order_bytes);
+        let base_text = format!(
+            r##"{{4,{{7,{{"layout"}}}},"Old module",{{4,1,{{9,{{1}},0,"List",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,1,"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,
+{{#base64:{order_payload}
+}}
+}}}},{{0,0}}}}}},{{0,0}},{{0,0}},{{0}}}}"##
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<ListSettings>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Код</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
+					</dcsset:order>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let order_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+
+        assert!(order_after.contains("<field>Код</field>"), "{order_after}");
+        assert!(
+            order_after
+                .contains("<userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,\n{#base64:"),
+            "{}",
+            parsed.trailing[0]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_query_text_preserves_crlf_and_entity_ref()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{4,1,{9,{1},0,\"List\",{1,0},{\"Pattern\",{\"#\",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},{0,0},0,0,0,0,{0,1,\"QueryText\",{\"S\",\"SELECT\r\n\t&Param\"}},{0,0}}},{0,0},{0,0},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<QueryText>SELECT
+	&amp;Param</QueryText>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[0].contains("SELECT\r\n\t&Param"));
+        assert!(!parsed.trailing[0].contains("&amp;Param"));
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_removes_missing_events() -> anyhow::Result<()> {
         let base = super::deflate_raw(
             b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{0}}",
@@ -20425,11 +22197,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<Attribute name="Description" id="1">
 			<Type>
 				<v8:Type>xs:string</v8:Type>
-			</Type>
 			<v8:StringQualifiers>
 				<v8:Length>80</v8:Length>
 				<v8:AllowedLength>Variable</v8:AllowedLength>
 			</v8:StringQualifiers>
+			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>
 	</Attributes>
@@ -20696,6 +22468,65 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_existing_parameter_preserves_equivalent_type_format()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Text",{"Pattern",
+{"S"}
+},1}},{0,0},{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Text">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[1].contains("\"Text\",{\"Pattern\",\n{\"S\"}\n},1"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_parameter_string_qualifiers() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Text">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+				<v8:StringQualifiers>
+					<v8:Length>30</v8:Length>
+					<v8:AllowedLength>Fixed</v8:AllowedLength>
+				</v8:StringQualifiers>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.trailing[1].contains(r#""Text",{"Pattern",{"S",30,1}},1"#),
+            "{}",
+            parsed.trailing[1]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_new_parameter() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-form-new-parameter-source-{}",
@@ -20875,6 +22706,43 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_command_preserves_nested_localized_values() -> anyhow::Result<()>
+    {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,1,{\"ru\",\"Title\"}},{1,1,{\"ru\",\"Tip\"}},0,0,0,\"Do\",0,0,0,{0,0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Title</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>Do</Action>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[2].contains(r#""Do",{1,1,{"ru","Title"}},{1,1,{"ru","Tip"}}"#));
+        assert!(!parsed.trailing[2].contains(r#"{1,"ru","Title"}"#));
+        assert!(!parsed.trailing[2].contains(r#"{1,"ru","Tip"}"#));
         Ok(())
     }
 
@@ -21174,6 +23042,121 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_checkbox_preserves_shifted_title_slot() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{48,{104,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"RequiredApproval",1,0,{1,0},{1,1,{"ru","""Approval"" text"}},{2,{1},{0,5651130b-3653-479e-ac26-905647417c29}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{8,3,0,1,100},{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{12,{106,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"RequiredApprovalExtendedTooltip",{1,0},{1,0},1,0,0,2,2},{0},0,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CheckBoxField name="RequiredApproval" id="104">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>&quot;Approval&quot; text</v8:content>
+				</v8:item>
+			</Title>
+			<ExtendedTooltip name="RequiredApprovalExtendedTooltip" id="106"/>
+		</CheckBoxField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r#""RequiredApproval",1,0,{1,0},{1,1,{"ru","""Approval"" text"}}"#)
+        );
+        assert!(!parsed.layout.contains(
+            r#""RequiredApproval",1,0,{1,"ru","""Approval"" text"},{1,1,{"ru","""Approval"" text"}}"#
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_table_preserves_extended_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{52,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},{1,0},{2,{1},{0,573cf342-5482-4ff7-ae70-2b91deaeaf0d}},0,1,0,0,0,1,1,0,0,0,{0}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="52">
+			<DataPath>Object</DataPath>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Object" id="1"/>
+	</Attributes>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{2,{1},{0,573cf342-5482-4ff7-ae70-2b91deaeaf0d}}")
+        );
+        assert!(!parsed.layout.contains("{1,{1}},0,1,0,0,0"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_table_preserves_root_object_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{52,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},{1,0},{0},0,1,0,0,0,1,1,0,0,0,{0}}},"Old module",{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="52">
+			<DataPath>Объект</DataPath>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1"/>
+	</Attributes>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""Rows",0,0,1,{1,0},{1,0},{0}"#));
+        assert!(!parsed.layout.contains("{1,{1}},0,1,0,0,0"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_extended_tooltip_preserves_empty_name_slot()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"InfoLabel",1,0,{1,0},{1,0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{8,3,0,1,100},{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{12,0,0,2,2,2,{1,0},0,{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},2,{0,1,0},{4,4,{0},4},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0,2},{0},0,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<LabelField name="InfoLabel" id="20">
+			<ExtendedTooltip name="InfoLabelExtendedTooltip" id="22"/>
+		</LabelField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("{12,0,0,2,2,2,{1,0},0"));
+        assert!(!parsed.layout.contains("InfoLabelExtendedTooltip"));
         Ok(())
     }
 
@@ -21652,7 +23635,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     fn packs_form_body_xml_existing_extended_usual_group_properties_and_children()
     -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            r#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupРасширеннаяПодсказка",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}},"Old module",{0}}"#
+            r#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,
+{0},4},{8,3,0,1,100},{0,0,0},1,{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupРасширеннаяПодсказка",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}},"Old module",{0}}"#
                 .as_bytes(),
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
@@ -21695,6 +23679,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[options_fields[28].clone()], "1");
         assert_eq!(&parsed.layout[options_fields[35].clone()], "3");
         assert_eq!(&parsed.layout[options_fields[36].clone()], "2");
+        assert!(parsed.layout.contains("{4,4,\n{0},4}"));
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
@@ -24030,23 +26015,24 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_role_rights_xml_preserving_base_identifiers() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,11111111-1111-4111-8111-111111111111,1,22222222-2222-4222-8222-222222222222,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,33333333-3333-4333-8333-333333333333,-1,0}}},{0},4294967295,0,0,4294967295}",
+            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,499e8968-ca89-43f0-9955-8756058b1b53,-1,0}}},{0},4294967295,0,0,4294967295}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
 	<setForNewObjects>true</setForNewObjects>
 	<object>
-		<name>Catalog.Products</name>
-		<right><name>Read</name><value>false</value></right>
-		<right><name>Update</name><value>true</value></right>
-	</object>
-	<object>
 		<name>InformationRegister.Prices</name>
 		<right>
-			<name>Read</name>
+			<name>Get</name>
 			<value>true</value>
 			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
 		</right>
+	</object>
+	<object>
+		<name>Catalog.Products</name>
+		<right><name>View</name><value>true</value></right>
+		<right><name>Read</name><value>false</value></right>
+		<right><name>Update</name><value>true</value></right>
 	</object>
 </Rights>
 "#;
@@ -24055,9 +26041,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
-        assert!(text.contains("11111111-1111-4111-8111-111111111111,-1"));
-        assert!(text.contains("22222222-2222-4222-8222-222222222222,1"));
-        assert!(text.contains("33333333-3333-4333-8333-333333333333,1"));
+        assert!(text.contains("1c87578f-9e09-4ec0-a991-5629c87b1588,-1"));
+        assert!(text.contains("aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1"));
+        assert!(text.contains("499e8968-ca89-43f0-9955-8756058b1b53,1"));
         assert!(text.ends_with(",4294967295,1,0,4294967295}"));
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -24067,7 +26053,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_command_interface_xml_preserving_command_refs() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{7,1,2,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{{0,{{0,{{\"B\",0}},0}}}},{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
+            b"{7,1,2,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",0},0}},{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",1},0}},0,0,0,0,0}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
@@ -24085,13 +26071,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_command_interface_blob_from_xml(&base, xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(
-            text.contains("{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{{0,{{0,{{\"B\",1}},0}}}}")
-        );
-        assert!(
-            text.contains("{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",0}},0}}}}")
-        );
+        assert!(text.contains("{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}}"));
+        assert!(text.contains("{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}}"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_command_interface_xml_preserving_equivalent_visibility_format() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{7,1,1,\n{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\n{0,\n{0,\n{\"B\",0},0}\n},0,0,0,0,0}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="Catalog.Products.StandardCommand.OpenList">
+			<Visibility><xr:Common>false</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#;
+
+        let packed = super::pack_command_interface_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{0,\n{0,\n{\"B\",0},0}\n}"), "{text:?}");
 
         Ok(())
     }
@@ -24173,12 +26178,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_predefined_data_blob_from_xml(&base, xml.as_bytes())?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains(r#"{{"S","NewFolder"}}"#));
-        assert!(text.contains(r#"{{"S","NF"}}"#));
-        assert!(text.contains(r#"{{"S","New folder description"}}"#));
-        assert!(text.contains(r#"{{"S","NewItem"}}"#));
-        assert!(text.contains(r#"{{"S","NI"}}"#));
-        assert!(text.contains(r#"{{"S","New item description"}}"#));
+        assert!(text.contains(r#"{"S","NewFolder"}"#));
+        assert!(text.contains(r#"{"S","NF"}"#));
+        assert!(text.contains(r#"{"S","New folder description"}"#));
+        assert!(text.contains(r#"{"S","NewItem"}"#));
+        assert!(text.contains(r#"{"S","NI"}"#));
+        assert!(text.contains(r#"{"S","New item description"}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -24292,6 +26297,29 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn recognizes_raw_deflated_help_blob_shape() -> anyhow::Result<()> {
+        let help = super::pack_help_blob_from_parts(&[("ru".to_string(), b"body".to_vec())], &[])?;
+        let module_like = super::deflate_raw(b"{4,{59,0},\"module\",{0}}")?;
+
+        assert!(super::raw_deflated_looks_like_help_blob(&help.blob));
+        assert!(!super::raw_deflated_looks_like_help_blob(&module_like));
+        Ok(())
+    }
+
+    #[test]
+    fn hashes_help_content_without_base64_format_noise() -> anyhow::Result<()> {
+        let packed =
+            super::pack_help_blob_from_parts(&[("ru".to_string(), b"body".to_vec())], &[])?;
+        let legacy = super::deflate_raw(b"{5,1,\"ru\",\r\n{#base64:Ym9k\r\neQ==}}")?;
+
+        assert_eq!(
+            super::raw_deflated_help_content_sha256(&packed.blob)?,
+            super::raw_deflated_help_content_sha256(&legacy)?
+        );
+        Ok(())
+    }
+
+    #[test]
     fn packs_ext_picture_blob_from_xml_referenced_bytes() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <ExtPicture xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.17">
@@ -24311,6 +26339,31 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(text, "{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_ext_picture_blob_preserving_base_wrapper() -> anyhow::Result<()> {
+        let base = super::deflate_raw(b"{1,{7,8,9,10},{{#base64:T0xE}},\"tail\"}")?;
+        let packed = super::pack_ext_picture_blob_from_bytes_with_base(Some(&base), b"PK\x03\x04")?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text, "{1,{7,8,9,10},{{#base64:UEsDBA==}},\"tail\"}");
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn hashes_first_base64_payload_from_raw_deflated_blob() -> anyhow::Result<()> {
+        let left = super::deflate_raw(b"{1,{0},{{#base64:UEsDBA==}}}")?;
+        let right = super::deflate_raw(b"{9,\"wrapper\",{#base64:UEsDBA==}}")?;
+
+        assert_eq!(
+            super::raw_deflated_first_base64_payload_sha256(&left)?,
+            super::raw_deflated_first_base64_payload_sha256(&right)?
+        );
 
         Ok(())
     }

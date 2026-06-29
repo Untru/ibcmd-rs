@@ -40,18 +40,22 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, hex_sha256, pack_base64_payload_blob_from_bytes,
+    VersionReplacement, hex_sha256, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
-    pack_help_blob_from_parts, pack_module_blob_bytes,
-    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    pack_ext_picture_blob_from_bytes_with_base,
+    pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
+    pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source,
+    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
+    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml_with_base,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
+    raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
+    raw_deflated_looks_like_help_blob, raw_deflated_plain_sha256,
 };
+use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
 use crate::source_audit::{
@@ -85,6 +89,7 @@ pub struct MssqlSourceParityAuditReport {
     pub version_patch_category: Option<String>,
     pub version_patch_error: Option<String>,
     pub version_replacements: Vec<VersionReplacement>,
+    pub config_digest_parity: MssqlSourceConfigDigestParityReport,
     pub batches: Vec<MssqlSourceParityBatchReport>,
 }
 
@@ -113,6 +118,31 @@ pub struct MssqlSourceParityBatchReport {
     pub include_stable_rows: bool,
     pub include_versions_row: bool,
     pub expected_total_rows: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceConfigDigestParityReport {
+    pub expected_rows: usize,
+    pub matched_rows: usize,
+    pub missing_rows: usize,
+    pub different_rows: usize,
+    pub plain_matched_rows: usize,
+    pub plain_different_rows: usize,
+    pub plain_compare_errors: usize,
+    pub extra_config_rows: usize,
+    pub differences: Vec<MssqlSourceConfigDigestDifference>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceConfigDigestDifference {
+    pub file_name: String,
+    pub kind: String,
+    pub path: String,
+    pub expected_sha256: String,
+    pub actual_sha256: Option<String>,
+    pub expected_plain_sha256: Option<String>,
+    pub actual_plain_sha256: Option<String>,
+    pub category: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -578,32 +608,59 @@ pub fn audit_source_parity(
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
     let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
-    let (versions_blob_report, version_replacements, version_patch_category, version_patch_error) =
-        match patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true) {
-            Ok(patched_versions) => (
-                GeneratedBlobReport {
-                    bytes: patched_versions.blob.len(),
-                    sha256: patched_versions.output_sha256,
-                },
-                patched_versions.replacements,
-                None,
-                None,
-            ),
-            Err(error) => (
-                GeneratedBlobReport {
-                    bytes: versions_blob.len(),
-                    sha256: hex_sha256(&versions_blob),
-                },
-                Vec::new(),
-                Some(classify_version_patch_error(&error.to_string())),
-                Some(error.to_string()),
-            ),
-        };
+    let (
+        versions_blob_report,
+        versions_blob_for_digest,
+        version_replacements,
+        version_patch_category,
+        version_patch_error,
+    ) = match patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true) {
+        Ok(patched_versions) => (
+            GeneratedBlobReport {
+                bytes: patched_versions.blob.len(),
+                sha256: patched_versions.output_sha256,
+            },
+            patched_versions.blob,
+            patched_versions.replacements,
+            None,
+            None,
+        ),
+        Err(error) => (
+            GeneratedBlobReport {
+                bytes: versions_blob.len(),
+                sha256: hex_sha256(&versions_blob),
+            },
+            versions_blob.clone(),
+            Vec::new(),
+            Some(classify_version_patch_error(&error.to_string())),
+            Some(error.to_string()),
+        ),
+    };
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
     let batches =
         build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size);
     let batch_reports = source_stage_batch_reports(&batches);
+    let mut expected_config_file_names =
+        source_stage_change_ids(&metadata_objects, &common_modules);
+    expected_config_file_names.push("versions".to_string());
+    let config_blobs = fetch_config_blobs_for_files(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        &expected_config_file_names,
+    )?;
+    let config_digest_parity = source_config_digest_parity_report(
+        &metadata_objects,
+        &common_modules,
+        Some((
+            "versions".to_string(),
+            versions_blob_report.sha256.clone(),
+            versions_blob_for_digest,
+        )),
+        &config_blobs,
+        &args.source_root,
+    );
     let prepared_metadata_body_rows = metadata_objects
         .iter()
         .map(|object| object.body_rows.len())
@@ -628,6 +685,7 @@ pub fn audit_source_parity(
         version_patch_category,
         version_patch_error,
         version_replacements,
+        config_digest_parity,
         batches: batch_reports,
     })
 }
@@ -637,8 +695,9 @@ fn source_parity_prepare_failure(
     path: String,
     error: anyhow::Error,
 ) -> MssqlSourceParityPrepareFailure {
-    let message = error.to_string();
-    let (category, config_file_name) = classify_source_parity_error(&message);
+    let top_message = error.to_string();
+    let message = format_source_parity_error_chain(&error);
+    let (category, config_file_name) = classify_source_parity_error(&top_message);
     MssqlSourceParityPrepareFailure {
         kind: kind.to_string(),
         path,
@@ -646,6 +705,14 @@ fn source_parity_prepare_failure(
         config_file_name,
         message,
     }
+}
+
+fn format_source_parity_error_chain(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .map(|cause| cause.to_string())
+        .collect::<Vec<_>>()
+        .join(": ")
 }
 
 fn source_parity_failure_summary(
@@ -2345,10 +2412,10 @@ fn prepare_style_body_row(
         )
     })?;
     let body_id = format!("{}.0", properties.uuid);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read Style body XML {}", body_path.display()))?;
-    let packed = pack_style_body_blob_from_xml(&xml, Some(source))
+    let packed = pack_style_body_blob_from_xml_with_base(&base_body, &xml, Some(source))
         .with_context(|| format!("failed to pack Style body {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
@@ -2464,7 +2531,7 @@ fn prepare_spreadsheet_template_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read SpreadsheetDocument Template body {}",
@@ -2478,12 +2545,45 @@ fn prepare_spreadsheet_template_body_row(
                 body_path.display()
             )
         })?;
+    let (blob, blob_sha256) =
+        preserve_moxel_base_blob_if_semantically_equal(&base_body, &xml, &packed, source)
+            .with_context(|| {
+                format!(
+                    "failed to compare SpreadsheetDocument Template body {} with base",
+                    body_path.display()
+                )
+            })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
+        blob,
+        blob_sha256,
     }])
+}
+
+fn preserve_moxel_base_blob_if_semantically_equal(
+    base_body: &[u8],
+    source_xml: &[u8],
+    packed: &crate::module_blob::PackedRawDeflatedBlob,
+    source: Option<&MetadataSourceContext>,
+) -> Result<(Vec<u8>, String)> {
+    let object_refs = match source {
+        Some(source) => source.moxel_object_refs()?,
+        None => BTreeMap::new(),
+    };
+    if let Some(base_xml) = extract_moxel_spreadsheet_xml(base_body, &object_refs)
+        && base_xml.as_bytes() == source_xml
+    {
+        return Ok((base_body.to_vec(), hex_sha256(base_body)));
+    }
+    if let (Some(base_xml), Some(packed_xml)) = (
+        extract_moxel_spreadsheet_xml(base_body, &object_refs),
+        extract_moxel_spreadsheet_xml(&packed.blob, &object_refs),
+    ) && base_xml == packed_xml
+    {
+        return Ok((base_body.to_vec(), hex_sha256(base_body)));
+    }
+    Ok((packed.blob.clone(), packed.output_sha256.clone()))
 }
 
 fn prepare_html_template_body_row(
@@ -2553,7 +2653,7 @@ fn prepare_common_picture_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read ExtPicture XML {}", body_path.display()))?;
     let file_name = parse_ext_picture_file_name_from_xml(&xml)
@@ -2561,7 +2661,7 @@ fn prepare_common_picture_body_row(
     let picture_path = body_path.with_extension("").join(&file_name);
     let picture = fs::read(&picture_path)
         .with_context(|| format!("failed to read ExtPicture file {}", picture_path.display()))?;
-    let packed = pack_ext_picture_blob_from_bytes(&picture)
+    let packed = pack_ext_picture_blob_from_bytes_with_base(Some(&base_body), &picture)
         .with_context(|| format!("failed to pack ExtPicture {}", picture_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
@@ -2670,7 +2770,7 @@ fn prepare_configuration_ext_picture_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read Configuration ExtPicture {}",
@@ -2690,12 +2790,13 @@ fn prepare_configuration_ext_picture_body_row(
             picture_path.display()
         )
     })?;
-    let packed = pack_ext_picture_blob_from_bytes(&picture).with_context(|| {
-        format!(
-            "failed to pack Configuration ExtPicture {}",
-            picture_path.display()
-        )
-    })?;
+    let packed = pack_ext_picture_blob_from_bytes_with_base(Some(&base_body), &picture)
+        .with_context(|| {
+            format!(
+                "failed to pack Configuration ExtPicture {}",
+                picture_path.display()
+            )
+        })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -3020,7 +3121,8 @@ fn prepare_object_help_body_row(
     if !body_path.exists() {
         return Ok(Vec::new());
     }
-    let body_id = infer_help_body_id(properties);
+    let body_id = resolve_help_body_id(sqlcmd, server, database, properties)
+        .with_context(|| format!("failed to resolve Help body id for {}", body_path.display()))?;
     prepare_help_blob_body_row(sqlcmd, server, database, body_id, body_path, "Help")
 }
 
@@ -3080,12 +3182,65 @@ fn prepare_help_blob_body_row(
 }
 
 fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
-    let suffix = if matches!(properties.kind.as_str(), "Form" | "CommonForm") {
+    infer_help_body_id_for_kind(&properties.kind, &properties.uuid)
+}
+
+fn infer_help_body_id_for_kind(kind: &str, uuid: &str) -> String {
+    let suffix = if matches!(kind, "Form" | "CommonForm") {
         "1"
     } else {
         "5"
     };
-    format!("{}.{}", properties.uuid, suffix)
+    format!("{uuid}.{suffix}")
+}
+
+fn resolve_help_body_id(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<String> {
+    let rows = fetch_config_blobs_by_file_name_prefix(
+        sqlcmd,
+        server,
+        database,
+        &format!("{}.", properties.uuid),
+    )?;
+    Ok(
+        resolve_help_body_id_from_config_rows(&properties.kind, &properties.uuid, &rows)
+            .unwrap_or_else(|| infer_help_body_id(properties)),
+    )
+}
+
+fn resolve_help_body_id_from_config_rows(
+    kind: &str,
+    uuid: &str,
+    rows: &[BinaryBlobRow],
+) -> Option<String> {
+    let preferred = infer_help_body_id_for_kind(kind, uuid);
+    if rows.iter().any(|row| {
+        row.file_name == preferred
+            && decode_hex(&row.binary_hex)
+                .is_ok_and(|blob| raw_deflated_looks_like_help_blob(&blob))
+    }) {
+        return Some(preferred);
+    }
+
+    let prefix = format!("{uuid}.");
+    let mut candidates = rows
+        .iter()
+        .filter(|row| row.file_name.starts_with(&prefix))
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.file_name.cmp(&right.file_name));
+    candidates.into_iter().find_map(|row| {
+        if row.file_name == preferred {
+            return None;
+        }
+        decode_hex(&row.binary_hex)
+            .ok()
+            .filter(|blob| raw_deflated_looks_like_help_blob(blob))
+            .map(|_| row.file_name.clone())
+    })
 }
 
 fn prepare_object_module_body_rows(
@@ -3863,6 +4018,79 @@ fn configsave_row_digests(
     let json = extract_json_array(&stdout, &format!("configsave_row_digests({database})"))?;
     serde_json::from_str(&json)
         .with_context(|| format!("failed to parse ConfigSave digests JSON for {database}"))
+}
+
+fn fetch_config_blobs_for_files(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    file_names: &[String],
+) -> Result<Vec<BinaryBlobRow>> {
+    let mut rows = Vec::new();
+    let unique = file_names
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    for chunk in unique.chunks(100) {
+        let selected = chunk
+            .iter()
+            .map(|file_name| format!("N'{}'", quote_string(file_name)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SET NOCOUNT ON; USE {db};\n\
+             SELECT COALESCE((\n\
+                 SELECT FileName AS file_name,\n\
+                        DataSize AS data_size,\n\
+                        CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
+                 FROM Config\n\
+                 WHERE PartNo = 0 AND FileName IN ({selected})\n\
+                 ORDER BY FileName\n\
+                 FOR JSON PATH\n\
+             ), '[]');",
+            db = quote_ident(database),
+        );
+        let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+        let json = extract_json_array(
+            &stdout,
+            &format!("fetch_config_blobs_for_files({database})"),
+        )?;
+        let mut chunk_rows: Vec<BinaryBlobRow> = serde_json::from_str(&json)
+            .with_context(|| format!("failed to parse Config blob JSON for {database}"))?;
+        rows.append(&mut chunk_rows);
+    }
+    Ok(rows)
+}
+
+fn fetch_config_blobs_by_file_name_prefix(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    file_name_prefix: &str,
+) -> Result<Vec<BinaryBlobRow>> {
+    let sql = format!(
+        "SET NOCOUNT ON; USE {db};\n\
+         SELECT COALESCE((\n\
+             SELECT FileName AS file_name,\n\
+                    DataSize AS data_size,\n\
+                    CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
+             FROM Config\n\
+             WHERE PartNo = 0 AND FileName LIKE N'{file_name_prefix}%'\n\
+             ORDER BY FileName\n\
+             FOR JSON PATH\n\
+         ), '[]');",
+        db = quote_ident(database),
+        file_name_prefix = quote_string(file_name_prefix),
+    );
+    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let json = extract_json_array(
+        &stdout,
+        &format!("fetch_config_blobs_by_file_name_prefix({file_name_prefix})"),
+    )?;
+    serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse Config blob JSON for {file_name_prefix}"))
 }
 
 fn fetch_config_blob(
@@ -4658,6 +4886,204 @@ fn source_stage_change_ids(
         .collect()
 }
 
+#[derive(Debug, Clone)]
+struct ExpectedSourceConfigDigest {
+    file_name: String,
+    kind: String,
+    path: PathBuf,
+    sha256: String,
+    blob: Vec<u8>,
+}
+
+fn source_config_digest_parity_report(
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+    versions: Option<(String, String, Vec<u8>)>,
+    config_blobs: &[BinaryBlobRow],
+    source_root: &Path,
+) -> MssqlSourceConfigDigestParityReport {
+    let expected =
+        expected_source_config_digests(metadata_objects, common_modules, versions, source_root);
+    compare_expected_source_config_digests(&expected, config_blobs, source_root)
+}
+
+fn expected_source_config_digests(
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+    versions: Option<(String, String, Vec<u8>)>,
+    source_root: &Path,
+) -> Vec<ExpectedSourceConfigDigest> {
+    let mut rows = Vec::new();
+    for object in metadata_objects {
+        rows.push(ExpectedSourceConfigDigest {
+            file_name: object.object_id.clone(),
+            kind: format!("metadata:{}", object.kind),
+            path: object.xml.clone(),
+            sha256: object.metadata_blob_sha256.clone(),
+            blob: object.metadata_blob.clone(),
+        });
+        for body in &object.body_rows {
+            rows.push(ExpectedSourceConfigDigest {
+                file_name: body.body_id.clone(),
+                kind: "metadata_body".to_string(),
+                path: body.path.clone(),
+                sha256: body.blob_sha256.clone(),
+                blob: body.blob.clone(),
+            });
+        }
+    }
+    for module in common_modules {
+        rows.push(ExpectedSourceConfigDigest {
+            file_name: module.module_id.clone(),
+            kind: "common_module_metadata".to_string(),
+            path: module.xml.clone(),
+            sha256: module.metadata_blob_sha256.clone(),
+            blob: module.metadata_blob.clone(),
+        });
+        rows.push(ExpectedSourceConfigDigest {
+            file_name: module.module_body_id.clone(),
+            kind: "common_module_body".to_string(),
+            path: module.text.clone(),
+            sha256: module.module_blob_sha256.clone(),
+            blob: module.module_blob.clone(),
+        });
+    }
+    if let Some((file_name, sha256, blob)) = versions {
+        rows.push(ExpectedSourceConfigDigest {
+            file_name,
+            kind: "versions".to_string(),
+            path: source_root.join("versions"),
+            sha256,
+            blob,
+        });
+    }
+    rows.sort_by(|left, right| left.file_name.cmp(&right.file_name));
+    rows
+}
+
+fn compare_expected_source_config_digests(
+    expected: &[ExpectedSourceConfigDigest],
+    config_blobs: &[BinaryBlobRow],
+    source_root: &Path,
+) -> MssqlSourceConfigDigestParityReport {
+    let actual_by_file = config_blobs
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let expected_files = expected
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+
+    let mut matched_rows = 0usize;
+    let mut missing_rows = 0usize;
+    let mut different_rows = 0usize;
+    let mut plain_matched_rows = 0usize;
+    let mut plain_different_rows = 0usize;
+    let mut plain_compare_errors = 0usize;
+    let mut differences = Vec::new();
+    for row in expected {
+        match actual_by_file.get(row.file_name.as_str()).copied() {
+            Some(actual_row) => {
+                let actual_blob = decode_hex(&actual_row.binary_hex);
+                let actual_sha256 = actual_blob.as_ref().ok().map(|blob| hex_sha256(blob));
+                let compressed_matches = actual_sha256
+                    .as_deref()
+                    .is_some_and(|actual| actual.eq_ignore_ascii_case(&row.sha256));
+                if compressed_matches {
+                    matched_rows += 1;
+                } else {
+                    different_rows += 1;
+                }
+
+                let expected_plain_sha256 = source_config_semantic_sha256(row, &row.blob).ok();
+                let actual_plain_sha256 = actual_blob
+                    .as_ref()
+                    .ok()
+                    .and_then(|blob| source_config_semantic_sha256(row, blob).ok());
+                let plain_matches = expected_plain_sha256
+                    .as_deref()
+                    .zip(actual_plain_sha256.as_deref())
+                    .is_some_and(|(expected, actual)| expected.eq_ignore_ascii_case(actual));
+                if plain_matches {
+                    plain_matched_rows += 1;
+                } else if expected_plain_sha256.is_some() && actual_plain_sha256.is_some() {
+                    plain_different_rows += 1;
+                } else {
+                    plain_compare_errors += 1;
+                }
+
+                if compressed_matches && plain_matches {
+                    continue;
+                }
+                differences.push(MssqlSourceConfigDigestDifference {
+                    file_name: row.file_name.clone(),
+                    kind: row.kind.clone(),
+                    path: source_relative_path(source_root, &row.path),
+                    expected_sha256: row.sha256.clone(),
+                    actual_sha256,
+                    expected_plain_sha256,
+                    actual_plain_sha256,
+                    category: if compressed_matches {
+                        "plain_different".to_string()
+                    } else if plain_matches {
+                        "compressed_different".to_string()
+                    } else {
+                        "different".to_string()
+                    },
+                });
+            }
+            None => {
+                missing_rows += 1;
+                differences.push(MssqlSourceConfigDigestDifference {
+                    file_name: row.file_name.clone(),
+                    kind: row.kind.clone(),
+                    path: source_relative_path(source_root, &row.path),
+                    expected_sha256: row.sha256.clone(),
+                    actual_sha256: None,
+                    expected_plain_sha256: source_config_semantic_sha256(row, &row.blob).ok(),
+                    actual_plain_sha256: None,
+                    category: "missing".to_string(),
+                });
+            }
+        }
+    }
+    differences.sort_by(|left, right| {
+        left.category
+            .cmp(&right.category)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.file_name.cmp(&right.file_name))
+    });
+
+    MssqlSourceConfigDigestParityReport {
+        expected_rows: expected.len(),
+        matched_rows,
+        missing_rows,
+        different_rows,
+        plain_matched_rows,
+        plain_different_rows,
+        plain_compare_errors,
+        extra_config_rows: actual_by_file
+            .keys()
+            .filter(|file_name| !expected_files.contains(**file_name))
+            .count(),
+        differences,
+    }
+}
+
+fn source_config_semantic_sha256(row: &ExpectedSourceConfigDigest, blob: &[u8]) -> Result<String> {
+    if row.path.extension().and_then(|value| value.to_str()) == Some("bsl") {
+        return module_blob_text_sha256(blob);
+    }
+    if row.path.file_name().and_then(|value| value.to_str()) == Some("Picture.xml") {
+        return raw_deflated_first_base64_payload_sha256(blob);
+    }
+    if row.path.file_name().and_then(|value| value.to_str()) == Some("Help.xml") {
+        return raw_deflated_help_content_sha256(blob);
+    }
+    raw_deflated_plain_sha256(blob)
+}
+
 fn source_stage_batch_reports(batches: &[SourceStageBatch]) -> Vec<MssqlSourceParityBatchReport> {
     let mut running_rows = 0usize;
     batches
@@ -4973,17 +5399,19 @@ fn quote_string_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest, DeltaBundleManifest,
-        PreparedCommonModuleObjectStage, PreparedCommonModuleStage, PreparedMetadataBodyStage,
-        PreparedMetadataObjectStage, StorageBundleManifest, StorageTableManifest, TableShape,
-        build_source_stage_batches, compare_shapes, compare_storage_table_manifests,
-        filter_source_paths_by_prefix, infer_common_module_text_path, is_root_common_module_xml,
-        is_root_metadata_xml, is_stage_metadata_xml, quote_ident, quote_string,
-        require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
-        source_stage_batch_reports, validate_delta_manifest, validate_storage_manifest,
+        BinaryBlobRow, ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest,
+        DeltaBundleManifest, PreparedCommonModuleObjectStage, PreparedCommonModuleStage,
+        PreparedMetadataBodyStage, PreparedMetadataObjectStage, StorageBundleManifest,
+        StorageTableManifest, TableShape, build_source_stage_batches, compare_shapes,
+        compare_storage_table_manifests, encode_hex, filter_source_paths_by_prefix,
+        infer_common_module_text_path, is_root_common_module_xml, is_root_metadata_xml,
+        is_stage_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
+        source_common_module_xmls, source_metadata_xmls, source_stage_batch_reports,
+        validate_delta_manifest, validate_storage_manifest,
     };
     use crate::module_blob::{
-        CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties,
+        CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties, hex_sha256,
+        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::path::PathBuf;
@@ -5528,6 +5956,43 @@ mod tests {
     }
 
     #[test]
+    fn resolves_legacy_object_help_body_id_when_preferred_is_absent() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let module = pack_raw_deflated_blob_from_bytes(b"{4,{59,0},\"module\",{0}}").unwrap();
+        let legacy_help =
+            pack_help_blob_from_parts(&[("ru".to_string(), b"old".to_vec())], &[]).unwrap();
+        let current_help =
+            pack_help_blob_from_parts(&[("ru".to_string(), b"new".to_vec())], &[]).unwrap();
+        let mut rows = vec![
+            BinaryBlobRow {
+                file_name: format!("{uuid}.0"),
+                data_size: module.blob.len() as i64,
+                binary_hex: encode_hex(&module.blob),
+            },
+            BinaryBlobRow {
+                file_name: format!("{uuid}.1"),
+                data_size: legacy_help.blob.len() as i64,
+                binary_hex: encode_hex(&legacy_help.blob),
+            },
+        ];
+
+        assert_eq!(
+            super::resolve_help_body_id_from_config_rows("Catalog", uuid, &rows).as_deref(),
+            Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1")
+        );
+
+        rows.push(BinaryBlobRow {
+            file_name: format!("{uuid}.5"),
+            data_size: current_help.blob.len() as i64,
+            binary_hex: encode_hex(&current_help.blob),
+        });
+        assert_eq!(
+            super::resolve_help_body_id_from_config_rows("Catalog", uuid, &rows).as_deref(),
+            Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5")
+        );
+    }
+
+    #[test]
     fn maps_object_module_body_suffixes_for_load() {
         assert_eq!(
             super::object_module_body_suffixes("Catalog"),
@@ -5672,6 +6137,76 @@ mod tests {
     }
 
     #[test]
+    fn compares_expected_source_config_digests() {
+        let root = PathBuf::from("C:/src");
+        let expected_a = pack_raw_deflated_blob_from_bytes(b"a").unwrap().blob;
+        let expected_b = pack_raw_deflated_blob_from_bytes(b"b").unwrap().blob;
+        let expected_c = pack_raw_deflated_blob_from_bytes(b"c").unwrap().blob;
+        let expected = vec![
+            super::ExpectedSourceConfigDigest {
+                file_name: "a.0".to_string(),
+                kind: "metadata:Catalog".to_string(),
+                path: root.join("Catalogs/A.xml"),
+                sha256: hex_sha256(&expected_a),
+                blob: expected_a.clone(),
+            },
+            super::ExpectedSourceConfigDigest {
+                file_name: "b.0".to_string(),
+                kind: "metadata_body".to_string(),
+                path: root.join("Catalogs/B/Ext/Form.xml"),
+                sha256: hex_sha256(&expected_b),
+                blob: expected_b,
+            },
+            super::ExpectedSourceConfigDigest {
+                file_name: "c.0".to_string(),
+                kind: "common_module_body".to_string(),
+                path: root.join("CommonModules/C/Ext/Module.bsl"),
+                sha256: hex_sha256(&expected_c),
+                blob: expected_c,
+            },
+        ];
+        let actual_a = expected_a;
+        let actual_b = pack_raw_deflated_blob_from_bytes(b"other").unwrap().blob;
+        let actual = vec![
+            BinaryBlobRow {
+                file_name: "a.0".to_string(),
+                data_size: actual_a.len() as i64,
+                binary_hex: encode_hex(&actual_a),
+            },
+            BinaryBlobRow {
+                file_name: "b.0".to_string(),
+                data_size: actual_b.len() as i64,
+                binary_hex: encode_hex(&actual_b),
+            },
+            BinaryBlobRow {
+                file_name: "extra.0".to_string(),
+                data_size: 1,
+                binary_hex: "EE".to_string(),
+            },
+        ];
+
+        let report = super::compare_expected_source_config_digests(&expected, &actual, &root);
+
+        assert_eq!(report.expected_rows, 3);
+        assert_eq!(report.matched_rows, 1);
+        assert_eq!(report.missing_rows, 1);
+        assert_eq!(report.different_rows, 1);
+        assert_eq!(report.plain_matched_rows, 1);
+        assert_eq!(report.plain_different_rows, 1);
+        assert_eq!(report.extra_config_rows, 1);
+        assert_eq!(
+            report
+                .differences
+                .iter()
+                .map(|difference| difference.category.as_str())
+                .collect::<Vec<_>>(),
+            vec!["different", "missing"]
+        );
+        assert_eq!(report.differences[0].path, "Catalogs/B/Ext/Form.xml");
+        assert_eq!(report.differences[1].path, "CommonModules/C/Ext/Module.bsl");
+    }
+
+    #[test]
     fn reports_source_stage_batch_accounting() {
         let metadata_objects = vec![
             PreparedMetadataObjectStage {
@@ -5803,6 +6338,16 @@ mod tests {
             super::classify_version_patch_error("versions entry not found: root"),
             "unsupported_versions_shape"
         );
+    }
+
+    #[test]
+    fn source_parity_prepare_failure_keeps_error_chain_in_message() {
+        let error = anyhow::anyhow!("inner failure").context("outer context");
+        let failure =
+            super::source_parity_prepare_failure("metadata_object", "A.xml".into(), error);
+
+        assert_eq!(failure.message, "outer context: inner failure");
+        assert_eq!(failure.category, "other");
     }
 
     #[test]
