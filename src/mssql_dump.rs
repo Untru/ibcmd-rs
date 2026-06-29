@@ -1,8 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
@@ -12,7 +14,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::cli::MssqlDumpConfigArgs;
-use crate::module_blob::{parse_form_body_blob, unpack_module_blob_text};
+use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
 
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
@@ -30,6 +32,7 @@ pub struct MssqlDumpConfigReport {
     pub total_module_text_rows: usize,
     pub total_metadata_xml_rows: usize,
     pub total_source_asset_rows: usize,
+    pub timings: MssqlDumpTimingReport,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +44,125 @@ pub struct MssqlDumpedTableReport {
     pub module_text_rows: usize,
     pub metadata_xml_rows: usize,
     pub source_asset_rows: usize,
+    pub timings: MssqlDumpTimingReport,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MssqlDumpTimingReport {
+    pub fetch_headers_ms: u64,
+    pub prepare_indexes_ms: u64,
+    pub fetch_rows_ms: u64,
+    pub process_rows_wall_ms: u64,
+    pub binary_write_cpu_ms: u64,
+    pub inflate_cpu_ms: u64,
+    pub form_body_parse_cpu_ms: u64,
+    pub module_text_cpu_ms: u64,
+    pub metadata_xml_cpu_ms: u64,
+    pub source_asset_cpu_ms: u64,
+    pub source_asset_form_cpu_ms: u64,
+    pub source_asset_form_xml_cpu_ms: u64,
+    pub source_asset_form_split_cpu_ms: u64,
+    pub source_asset_form_properties_cpu_ms: u64,
+    pub source_asset_form_events_cpu_ms: u64,
+    pub source_asset_form_attributes_cpu_ms: u64,
+    pub source_asset_form_parameters_cpu_ms: u64,
+    pub source_asset_form_commands_cpu_ms: u64,
+    pub source_asset_form_auto_command_bar_cpu_ms: u64,
+    pub source_asset_form_child_items_cpu_ms: u64,
+    pub source_asset_form_command_interface_cpu_ms: u64,
+    pub source_asset_form_format_cpu_ms: u64,
+    pub source_asset_form_items_cpu_ms: u64,
+    pub source_asset_help_cpu_ms: u64,
+    pub source_asset_moxel_cpu_ms: u64,
+    pub source_asset_inflated_cpu_ms: u64,
+    pub source_asset_command_interface_cpu_ms: u64,
+    pub source_asset_ext_picture_cpu_ms: u64,
+    pub source_asset_predefined_data_cpu_ms: u64,
+    pub source_asset_role_rights_cpu_ms: u64,
+    pub source_asset_standalone_content_cpu_ms: u64,
+    pub source_asset_style_body_cpu_ms: u64,
+    pub source_asset_exchange_plan_cpu_ms: u64,
+    pub source_asset_business_process_cpu_ms: u64,
+    pub source_asset_schedule_cpu_ms: u64,
+    pub source_asset_config_dump_info_cpu_ms: u64,
+    pub source_asset_other_cpu_ms: u64,
+}
+
+impl MssqlDumpTimingReport {
+    fn add_assign(&mut self, other: &Self) {
+        self.fetch_headers_ms += other.fetch_headers_ms;
+        self.prepare_indexes_ms += other.prepare_indexes_ms;
+        self.fetch_rows_ms += other.fetch_rows_ms;
+        self.process_rows_wall_ms += other.process_rows_wall_ms;
+        self.binary_write_cpu_ms += other.binary_write_cpu_ms;
+        self.inflate_cpu_ms += other.inflate_cpu_ms;
+        self.form_body_parse_cpu_ms += other.form_body_parse_cpu_ms;
+        self.module_text_cpu_ms += other.module_text_cpu_ms;
+        self.metadata_xml_cpu_ms += other.metadata_xml_cpu_ms;
+        self.source_asset_cpu_ms += other.source_asset_cpu_ms;
+        self.source_asset_form_cpu_ms += other.source_asset_form_cpu_ms;
+        self.source_asset_form_xml_cpu_ms += other.source_asset_form_xml_cpu_ms;
+        self.source_asset_form_split_cpu_ms += other.source_asset_form_split_cpu_ms;
+        self.source_asset_form_properties_cpu_ms += other.source_asset_form_properties_cpu_ms;
+        self.source_asset_form_events_cpu_ms += other.source_asset_form_events_cpu_ms;
+        self.source_asset_form_attributes_cpu_ms += other.source_asset_form_attributes_cpu_ms;
+        self.source_asset_form_parameters_cpu_ms += other.source_asset_form_parameters_cpu_ms;
+        self.source_asset_form_commands_cpu_ms += other.source_asset_form_commands_cpu_ms;
+        self.source_asset_form_auto_command_bar_cpu_ms +=
+            other.source_asset_form_auto_command_bar_cpu_ms;
+        self.source_asset_form_child_items_cpu_ms += other.source_asset_form_child_items_cpu_ms;
+        self.source_asset_form_command_interface_cpu_ms +=
+            other.source_asset_form_command_interface_cpu_ms;
+        self.source_asset_form_format_cpu_ms += other.source_asset_form_format_cpu_ms;
+        self.source_asset_form_items_cpu_ms += other.source_asset_form_items_cpu_ms;
+        self.source_asset_help_cpu_ms += other.source_asset_help_cpu_ms;
+        self.source_asset_moxel_cpu_ms += other.source_asset_moxel_cpu_ms;
+        self.source_asset_inflated_cpu_ms += other.source_asset_inflated_cpu_ms;
+        self.source_asset_command_interface_cpu_ms += other.source_asset_command_interface_cpu_ms;
+        self.source_asset_ext_picture_cpu_ms += other.source_asset_ext_picture_cpu_ms;
+        self.source_asset_predefined_data_cpu_ms += other.source_asset_predefined_data_cpu_ms;
+        self.source_asset_role_rights_cpu_ms += other.source_asset_role_rights_cpu_ms;
+        self.source_asset_standalone_content_cpu_ms += other.source_asset_standalone_content_cpu_ms;
+        self.source_asset_style_body_cpu_ms += other.source_asset_style_body_cpu_ms;
+        self.source_asset_exchange_plan_cpu_ms += other.source_asset_exchange_plan_cpu_ms;
+        self.source_asset_business_process_cpu_ms += other.source_asset_business_process_cpu_ms;
+        self.source_asset_schedule_cpu_ms += other.source_asset_schedule_cpu_ms;
+        self.source_asset_config_dump_info_cpu_ms += other.source_asset_config_dump_info_cpu_ms;
+        self.source_asset_other_cpu_ms += other.source_asset_other_cpu_ms;
+    }
+
+    fn add_source_asset_kind(&mut self, kind: &SourceAssetKind, elapsed_ms: u64) {
+        match kind {
+            SourceAssetKind::Form => self.source_asset_form_cpu_ms += elapsed_ms,
+            SourceAssetKind::Help => self.source_asset_help_cpu_ms += elapsed_ms,
+            SourceAssetKind::MoxelSpreadsheet => self.source_asset_moxel_cpu_ms += elapsed_ms,
+            SourceAssetKind::InflatedBinary | SourceAssetKind::InflatedBase64OrBinary => {
+                self.source_asset_inflated_cpu_ms += elapsed_ms;
+            }
+            SourceAssetKind::CommandInterface => {
+                self.source_asset_command_interface_cpu_ms += elapsed_ms;
+            }
+            SourceAssetKind::ExtPicture => self.source_asset_ext_picture_cpu_ms += elapsed_ms,
+            SourceAssetKind::PredefinedData { .. } => {
+                self.source_asset_predefined_data_cpu_ms += elapsed_ms;
+            }
+            SourceAssetKind::RoleRights => self.source_asset_role_rights_cpu_ms += elapsed_ms,
+            SourceAssetKind::StandaloneContent => {
+                self.source_asset_standalone_content_cpu_ms += elapsed_ms;
+            }
+            SourceAssetKind::StyleBody => self.source_asset_style_body_cpu_ms += elapsed_ms,
+            SourceAssetKind::ExchangePlanContent => {
+                self.source_asset_exchange_plan_cpu_ms += elapsed_ms;
+            }
+            SourceAssetKind::BusinessProcessFlowchart => {
+                self.source_asset_business_process_cpu_ms += elapsed_ms;
+            }
+            SourceAssetKind::Schedule => self.source_asset_schedule_cpu_ms += elapsed_ms,
+            SourceAssetKind::ConfigDumpInfo => {
+                self.source_asset_config_dump_info_cpu_ms += elapsed_ms;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +205,15 @@ struct ConfigRowHeader {
     data_size: i64,
 }
 
+struct MetadataTextRow {
+    file_name: String,
+    text: String,
+    object_code: Option<u32>,
+    header: Option<MetadataHeader>,
+    kind: Option<String>,
+    folder: Option<&'static str>,
+}
+
 #[derive(Debug)]
 struct ConfigChunkRow {
     file_name: String,
@@ -90,6 +221,14 @@ struct ConfigChunkRow {
     data_size: i64,
     chunk_index: i32,
     binary_hex: String,
+}
+
+#[derive(Debug)]
+struct BinaryConfigRow {
+    file_name: String,
+    part_no: i32,
+    data_size: i64,
+    binary: Vec<u8>,
 }
 
 pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
@@ -102,6 +241,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
 
     let mut reports = Vec::new();
     let mut manifest_tables = Vec::new();
+    let mut total_timings = MssqlDumpTimingReport::default();
     let selected_file_names = expand_selected_file_names(&args.file_names);
     for table in table_names {
         let dumped = dump_table_rows_streamed(
@@ -118,6 +258,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             table,
             &selected_file_names,
             &args.output_dir,
+            args.write_binary_rows,
             args.inflate,
             args.extract_module_text,
             args.extract_metadata_xml,
@@ -130,24 +271,30 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             module_text_rows: dumped.module_text_rows,
             metadata_xml_rows: dumped.metadata_xml_rows,
             source_asset_rows: dumped.source_asset_rows,
+            timings: dumped.timings.clone(),
         });
-        manifest_tables.push(MssqlDumpTableManifest {
-            table: table.to_string(),
-            rows: dumped.rows,
-        });
+        total_timings.add_assign(&dumped.timings);
+        if args.write_manifest {
+            manifest_tables.push(MssqlDumpTableManifest {
+                table: table.to_string(),
+                rows: dumped.rows,
+            });
+        }
     }
 
-    let manifest = MssqlDumpManifest {
-        database: args.database.clone(),
-        tables: manifest_tables,
-    };
-    let manifest_json = serde_json::to_string_pretty(&manifest)?;
-    fs::write(args.output_dir.join("manifest.json"), manifest_json).with_context(|| {
-        format!(
-            "failed to write {}",
-            args.output_dir.join("manifest.json").display()
-        )
-    })?;
+    if args.write_manifest {
+        let manifest = MssqlDumpManifest {
+            database: args.database.clone(),
+            tables: manifest_tables,
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest)?;
+        fs::write(args.output_dir.join("manifest.json"), manifest_json).with_context(|| {
+            format!(
+                "failed to write {}",
+                args.output_dir.join("manifest.json").display()
+            )
+        })?;
+    }
 
     Ok(MssqlDumpConfigReport {
         database: args.database.clone(),
@@ -158,6 +305,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         total_module_text_rows: reports.iter().map(|table| table.module_text_rows).sum(),
         total_metadata_xml_rows: reports.iter().map(|table| table.metadata_xml_rows).sum(),
         total_source_asset_rows: reports.iter().map(|table| table.source_asset_rows).sum(),
+        timings: total_timings,
         tables: reports,
     })
 }
@@ -172,6 +320,7 @@ fn dump_table_rows_eager(
     table: &str,
     selected_file_names: &BTreeSet<String>,
     output_dir: &Path,
+    write_binary_rows: bool,
     inflate: bool,
     extract_module_text: bool,
     extract_metadata_xml: bool,
@@ -185,10 +334,11 @@ fn dump_table_rows_eager(
         table,
         selected_file_names,
     )?;
-    dump_table_rows(
+    dump_table_rows_with_options(
         output_dir,
         table,
         rows,
+        write_binary_rows,
         inflate,
         extract_module_text,
         extract_metadata_xml,
@@ -202,6 +352,7 @@ struct DumpedTable {
     module_text_rows: usize,
     metadata_xml_rows: usize,
     source_asset_rows: usize,
+    timings: MssqlDumpTimingReport,
 }
 
 struct DumpedRow {
@@ -211,21 +362,26 @@ struct DumpedRow {
     module_text_rows: usize,
     metadata_xml_rows: usize,
     source_asset_rows: usize,
+    timings: MssqlDumpTimingReport,
 }
 
 struct DumpRowContext<'a> {
     output_dir: &'a Path,
     table: &'a str,
+    write_binary_rows: bool,
     inflate: bool,
     extract_module_text: bool,
     extract_metadata_xml: bool,
     module_text_paths: &'a BTreeMap<String, PathBuf>,
     source_assets: &'a BTreeMap<String, SourceAsset>,
+    metadata_texts_by_file_name: &'a BTreeMap<&'a str, &'a MetadataTextRow>,
     command_refs: &'a BTreeMap<String, String>,
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
     object_refs: &'a BTreeMap<String, String>,
     field_refs: &'a BTreeMap<String, String>,
+    help_refs: &'a BTreeMap<String, String>,
+    standalone_refs: &'a StandaloneContentReferences,
     form_refs: &'a BTreeMap<String, FormSourceReference>,
     template_refs: &'a BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &'a BTreeMap<String, SubsystemSourceReference>,
@@ -240,6 +396,7 @@ struct BodyOwnerSourceReference {
     object_path: PathBuf,
 }
 
+#[allow(dead_code)]
 fn dump_table_rows(
     output_dir: &Path,
     table: &str,
@@ -248,9 +405,31 @@ fn dump_table_rows(
     extract_module_text: bool,
     extract_metadata_xml: bool,
 ) -> Result<DumpedTable> {
+    dump_table_rows_with_options(
+        output_dir,
+        table,
+        rows,
+        true,
+        inflate,
+        extract_module_text,
+        extract_metadata_xml,
+    )
+}
+
+fn dump_table_rows_with_options(
+    output_dir: &Path,
+    table: &str,
+    rows: Vec<ConfigRow>,
+    write_binary_rows: bool,
+    inflate: bool,
+    extract_module_text: bool,
+    extract_metadata_xml: bool,
+) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
-    fs::create_dir_all(&table_dir)
-        .with_context(|| format!("failed to create {}", table_dir.display()))?;
+    if write_binary_rows {
+        fs::create_dir_all(&table_dir)
+            .with_context(|| format!("failed to create {}", table_dir.display()))?;
+    }
     let inflated_dir = output_dir.join(format!("{table}_inflated"));
     if inflate {
         fs::create_dir_all(&inflated_dir)
@@ -261,58 +440,98 @@ fn dump_table_rows(
         fs::create_dir_all(&module_text_dir)
             .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
     }
-    let module_text_paths = if extract_module_text {
-        module_body_paths(&rows)
-    } else {
-        BTreeMap::new()
-    };
     let file_names_owned = rows
         .iter()
         .map(|row| row.file_name.clone())
         .collect::<BTreeSet<_>>();
+    let metadata_texts = if extract_metadata_xml || extract_module_text {
+        build_metadata_text_rows(&rows)
+    } else {
+        Vec::new()
+    };
+    let metadata_texts_by_file_name = metadata_texts
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let module_text_paths = if extract_module_text {
+        module_body_paths_from_texts(&rows, &metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
     let command_refs = if extract_metadata_xml {
-        build_command_interface_reference_index(&rows)
+        build_command_interface_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let metadata_refs = if extract_metadata_xml {
-        build_metadata_command_reference_index(&rows)
+        build_metadata_command_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let source_assets = source_asset_paths(&rows);
     let type_index = if extract_metadata_xml {
-        build_metadata_type_index(&rows)
+        build_metadata_type_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let form_refs = if extract_metadata_xml {
-        build_form_source_reference_index(&rows)
+        build_form_source_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let template_refs = if extract_metadata_xml {
-        build_template_source_reference_index(&rows)
+        build_template_source_reference_index_from_texts(&rows, &metadata_texts)
     } else {
         BTreeMap::new()
     };
     let subsystem_refs = if extract_metadata_xml {
-        build_subsystem_source_reference_index(&rows)
+        build_subsystem_source_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let object_refs = if extract_metadata_xml {
-        build_metadata_object_reference_index(&rows)
+        build_metadata_object_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let field_refs = if extract_metadata_xml {
-        build_metadata_field_reference_index(&rows)
+        build_metadata_field_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
+    let source_assets = source_asset_paths_with_indexes(
+        &rows,
+        &metadata_texts,
+        &command_refs,
+        &metadata_refs,
+        &object_refs,
+        &field_refs,
+        &type_index,
+        &form_refs,
+        &template_refs,
+        &subsystem_refs,
+    );
+    let help_refs = if extract_metadata_xml {
+        build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
+    } else {
+        BTreeMap::new()
+    };
+    let standalone_refs = if extract_metadata_xml
+        && source_assets
+            .values()
+            .any(|asset| matches!(asset.kind, SourceAssetKind::StandaloneContent))
+    {
+        build_standalone_content_references(
+            &metadata_texts,
+            &object_refs,
+            &form_refs,
+            &template_refs,
+            &subsystem_refs,
+        )
+    } else {
+        StandaloneContentReferences::default()
+    };
     let body_owners = if extract_metadata_xml {
-        build_body_owner_source_index(&rows, &subsystem_refs)
+        build_body_owner_source_index_from_texts(&metadata_texts, &subsystem_refs)
     } else {
         BTreeMap::new()
     };
@@ -322,16 +541,20 @@ fn dump_table_rows(
     let context = DumpRowContext {
         output_dir,
         table,
+        write_binary_rows,
         inflate,
         extract_module_text,
         extract_metadata_xml,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
+        metadata_texts_by_file_name: &metadata_texts_by_file_name,
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
         field_refs: &field_refs,
+        help_refs: &help_refs,
+        standalone_refs: &standalone_refs,
         form_refs: &form_refs,
         template_refs: &template_refs,
         subsystem_refs: &subsystem_refs,
@@ -368,6 +591,7 @@ fn dump_table_rows(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        timings: MssqlDumpTimingReport::default(),
     })
 }
 
@@ -380,13 +604,16 @@ fn dump_table_rows_streamed(
     table: &str,
     selected_file_names: &BTreeSet<String>,
     output_dir: &Path,
+    write_binary_rows: bool,
     inflate: bool,
     extract_module_text: bool,
     extract_metadata_xml: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
-    fs::create_dir_all(&table_dir)
-        .with_context(|| format!("failed to create {}", table_dir.display()))?;
+    if write_binary_rows {
+        fs::create_dir_all(&table_dir)
+            .with_context(|| format!("failed to create {}", table_dir.display()))?;
+    }
     let inflated_dir = output_dir.join(format!("{table}_inflated"));
     if inflate {
         fs::create_dir_all(&inflated_dir)
@@ -398,6 +625,7 @@ fn dump_table_rows_streamed(
             .with_context(|| format!("failed to create {}", module_text_dir.display()))?;
     }
 
+    let headers_started = Instant::now();
     let headers = fetch_row_headers(
         sqlcmd,
         server,
@@ -407,6 +635,11 @@ fn dump_table_rows_streamed(
         table,
         selected_file_names,
     )?;
+    let mut timings = MssqlDumpTimingReport {
+        fetch_headers_ms: elapsed_ms(headers_started),
+        ..MssqlDumpTimingReport::default()
+    };
+    let prepare_started = Instant::now();
     let file_names = headers
         .iter()
         .map(|row| row.file_name.clone())
@@ -420,80 +653,138 @@ fn dump_table_rows_streamed(
         if selected_file_names.is_empty() {
             fetch_metadata_rows(sqlcmd, server, user, password, database, table)?
         } else {
-            fetch_rows(sqlcmd, server, user, password, database, table, &metadata_file_names)?
+            fetch_rows(
+                sqlcmd,
+                server,
+                user,
+                password,
+                database,
+                table,
+                &metadata_file_names,
+            )?
         }
     } else {
         Vec::new()
     };
     let index_rows = rows_for_source_indexes(&headers, &metadata_rows);
+    let metadata_texts = if extract_metadata_xml || extract_module_text {
+        build_metadata_text_rows(&metadata_rows)
+    } else {
+        Vec::new()
+    };
+    let metadata_texts_by_file_name = metadata_texts
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let index_metadata_texts = if extract_metadata_xml || extract_module_text {
+        build_metadata_text_rows(&index_rows)
+    } else {
+        Vec::new()
+    };
 
     let module_text_paths = if extract_module_text {
-        module_body_paths(&index_rows)
+        module_body_paths_from_texts(&index_rows, &index_metadata_texts)
     } else {
         BTreeMap::new()
     };
     let command_refs = if extract_metadata_xml {
-        build_command_interface_reference_index(&metadata_rows)
+        build_command_interface_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let metadata_refs = if extract_metadata_xml {
-        build_metadata_command_reference_index(&metadata_rows)
+        build_metadata_command_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let source_assets = source_asset_paths(&index_rows);
     let type_index = if extract_metadata_xml {
-        build_metadata_type_index(&metadata_rows)
+        build_metadata_type_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let form_refs = if extract_metadata_xml {
-        build_form_source_reference_index(&metadata_rows)
+        build_form_source_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let template_refs = if extract_metadata_xml {
-        build_template_source_reference_index(&index_rows)
+        build_template_source_reference_index_from_texts(&index_rows, &index_metadata_texts)
     } else {
         BTreeMap::new()
     };
     let subsystem_refs = if extract_metadata_xml {
-        build_subsystem_source_reference_index(&metadata_rows)
+        build_subsystem_source_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let object_refs = if extract_metadata_xml {
-        build_metadata_object_reference_index(&metadata_rows)
+        build_metadata_object_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let field_refs = if extract_metadata_xml {
-        build_metadata_field_reference_index(&metadata_rows)
+        build_metadata_field_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
+    let source_assets = source_asset_paths_with_indexes(
+        &index_rows,
+        &index_metadata_texts,
+        &command_refs,
+        &metadata_refs,
+        &object_refs,
+        &field_refs,
+        &type_index,
+        &form_refs,
+        &template_refs,
+        &subsystem_refs,
+    );
+    let help_refs = if extract_metadata_xml {
+        build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
+    } else {
+        BTreeMap::new()
+    };
+    let standalone_refs = if extract_metadata_xml
+        && source_assets
+            .values()
+            .any(|asset| matches!(asset.kind, SourceAssetKind::StandaloneContent))
+    {
+        build_standalone_content_references(
+            &metadata_texts,
+            &object_refs,
+            &form_refs,
+            &template_refs,
+            &subsystem_refs,
+        )
+    } else {
+        StandaloneContentReferences::default()
+    };
     let body_owners = if extract_metadata_xml {
-        build_body_owner_source_index(&metadata_rows, &subsystem_refs)
+        build_body_owner_source_index_from_texts(&metadata_texts, &subsystem_refs)
     } else {
         BTreeMap::new()
     };
     let configuration_module_groups = configuration_module_groups(&file_names);
     ensure_unique_source_asset_paths(&source_assets)?;
+    timings.prepare_indexes_ms = elapsed_ms(prepare_started);
 
     let context = DumpRowContext {
         output_dir,
         table,
+        write_binary_rows,
         inflate,
         extract_module_text,
         extract_metadata_xml,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
+        metadata_texts_by_file_name: &metadata_texts_by_file_name,
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
         field_refs: &field_refs,
+        help_refs: &help_refs,
+        standalone_refs: &standalone_refs,
         form_refs: &form_refs,
         template_refs: &template_refs,
         subsystem_refs: &subsystem_refs,
@@ -508,15 +799,33 @@ fn dump_table_rows_streamed(
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
-    let file_name_batches = file_names.iter().cloned().collect::<Vec<_>>();
-    for chunk in file_name_batches.chunks(SQLCMD_DUMP_FILE_BATCH_SIZE) {
+    let file_name_batches = build_dump_file_name_batches(&headers, &file_names);
+    for chunk in file_name_batches {
         let selected = chunk.iter().cloned().collect::<BTreeSet<_>>();
-        let rows = fetch_rows(sqlcmd, server, user, password, database, table, &selected)?;
+        let fetch_started = Instant::now();
+        let rows = fetch_binary_rows_bcp(
+            sqlcmd,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &selected,
+            selected_file_names.is_empty(),
+        )
+        .with_context(|| {
+            let first = chunk.first().map(String::as_str).unwrap_or("<empty>");
+            let last = chunk.last().map(String::as_str).unwrap_or("<empty>");
+            format!("failed to fetch {table} rows batch {first}..{last}")
+        })?;
+        timings.fetch_rows_ms += elapsed_ms(fetch_started);
+        let process_started = Instant::now();
         let dumped_rows = parallel::install(|| {
             rows.par_iter()
-                .map(|row| dump_table_row(&context, row))
+                .map(|row| dump_table_binary_row(&context, row))
                 .collect::<Vec<_>>()
         })?;
+        timings.process_rows_wall_ms += elapsed_ms(process_started);
         for dumped in dumped_rows {
             let dumped = dumped?;
             binary_bytes += dumped.binary_bytes;
@@ -524,6 +833,7 @@ fn dump_table_rows_streamed(
             module_text_rows += dumped.module_text_rows;
             metadata_xml_rows += dumped.metadata_xml_rows;
             source_asset_rows += dumped.source_asset_rows;
+            timings.add_assign(&dumped.timings);
             manifests.push(dumped.manifest);
         }
     }
@@ -535,7 +845,48 @@ fn dump_table_rows_streamed(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        timings,
     })
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn build_dump_file_name_batches(
+    headers: &[ConfigRowHeader],
+    file_names: &BTreeSet<String>,
+) -> Vec<Vec<String>> {
+    let mut file_sizes = BTreeMap::<&str, u64>::new();
+    for header in headers {
+        file_sizes
+            .entry(header.file_name.as_str())
+            .and_modify(|size| *size = (*size).max(header.data_size.max(0) as u64))
+            .or_insert(header.data_size.max(0) as u64);
+    }
+
+    let mut batches = Vec::new();
+    let mut current = Vec::new();
+    let mut current_bytes = 0u64;
+    for file_name in file_names {
+        let file_bytes = file_sizes
+            .get(file_name.as_str())
+            .copied()
+            .unwrap_or_default();
+        let would_exceed_bytes = current_bytes > 0
+            && current_bytes.saturating_add(file_bytes) > SQLCMD_DUMP_BATCH_MAX_DATA_BYTES;
+        let would_exceed_count = current.len() >= SQLCMD_DUMP_FILE_BATCH_SIZE;
+        if !current.is_empty() && (would_exceed_bytes || would_exceed_count) {
+            batches.push(std::mem::take(&mut current));
+            current_bytes = 0;
+        }
+        current.push(file_name.clone());
+        current_bytes = current_bytes.saturating_add(file_bytes);
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+    batches
 }
 
 fn rows_for_source_indexes(
@@ -564,33 +915,57 @@ fn rows_for_source_indexes(
     rows
 }
 
+fn build_metadata_text_rows(rows: &[ConfigRow]) -> Vec<MetadataTextRow> {
+    rows.iter()
+        .filter(|row| !row.file_name.contains('.'))
+        .filter_map(|row| {
+            let bytes = decode_hex(&row.binary_hex).ok()?;
+            metadata_text_row_from_blob(&row.file_name, &bytes)
+        })
+        .collect()
+}
+
+fn metadata_text_row_from_blob(file_name: &str, blob: &[u8]) -> Option<MetadataTextRow> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}').to_string();
+    let object_code = parse_metadata_object_code(&text);
+    let header = parse_metadata_header_from_text(&text, file_name);
+    let (kind, folder) = match object_code {
+        Some(12) => (Some("CommonModule".to_string()), Some("CommonModules")),
+        Some(code) => metadata_source_for_text(code, &text, file_name)
+            .map(|(kind, folder)| (Some(kind.to_string()), Some(folder)))
+            .unwrap_or((None, None)),
+        None => (None, None),
+    };
+    Some(MetadataTextRow {
+        file_name: file_name.to_string(),
+        text,
+        object_code,
+        header,
+        kind,
+        folder,
+    })
+}
+
+#[allow(dead_code)]
 fn build_body_owner_source_index(
     rows: &[ConfigRow],
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> BTreeMap<String, BodyOwnerSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_body_owner_source_index_from_texts(&metadata_texts, subsystem_refs)
+}
+
+fn build_body_owner_source_index_from_texts(
+    rows: &[MetadataTextRow],
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, BodyOwnerSourceReference> {
     let mut index = BTreeMap::new();
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
-            continue;
-        };
-        let Ok(text) = String::from_utf8(inflated) else {
-            continue;
-        };
-        let text = text.trim_start_matches('\u{feff}');
-        let Some(object_code) = parse_metadata_object_code(text) else {
-            continue;
-        };
-        let Some((kind, folder)) = metadata_source_for_text(object_code, text, &row.file_name)
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
         else {
-            continue;
-        };
-        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
             continue;
         };
         let object_path = if kind == "Subsystem" {
@@ -661,7 +1036,8 @@ fn dynamic_source_asset(
 
     if context.configuration_module_groups.contains(owner_uuid)
         && matches!(suffix, "9" | "a")
-        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs).is_some()
+        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
+            .is_some()
     {
         let path = if suffix == "9" {
             "Ext/MainSectionCommandInterface.xml"
@@ -670,10 +1046,7 @@ fn dynamic_source_asset(
         };
         return Some(SourceAsset {
             primary_path: PathBuf::from(path),
-            kind: SourceAssetKind::CommandInterface {
-                command_refs: context.command_refs.clone(),
-                metadata_refs: context.metadata_refs.clone(),
-            },
+            kind: SourceAssetKind::CommandInterface,
         });
     }
 
@@ -684,21 +1057,16 @@ fn dynamic_source_asset(
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join("Ext").join("Rights.xml"),
-            kind: SourceAssetKind::RoleRights {
-                object_refs: context.object_refs.clone(),
-                field_refs: context.field_refs.clone(),
-            },
+            kind: SourceAssetKind::RoleRights,
         });
     }
     if matches!(suffix, "0" | "1")
-        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs).is_some()
+        && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
+            .is_some()
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join("Ext").join("CommandInterface.xml"),
-            kind: SourceAssetKind::CommandInterface {
-                command_refs: context.command_refs.clone(),
-                metadata_refs: context.metadata_refs.clone(),
-            },
+            kind: SourceAssetKind::CommandInterface,
         });
     }
     if parse_help_blob_pages(bytes).is_some() {
@@ -718,36 +1086,170 @@ fn dynamic_source_asset(
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join("Ext").join("Predefined.xml"),
-            kind: SourceAssetKind::PredefinedData {
-                xsi_type,
-                type_index: context.type_index.clone(),
-            },
+            kind: SourceAssetKind::PredefinedData { xsi_type },
+        });
+    }
+    if let Some(module_file) = module_owner_module_file(&owner.kind, suffix)
+        && unpack_module_blob_text(bytes).is_err()
+        && is_binary_module_container(bytes)
+    {
+        return Some(SourceAsset {
+            primary_path: owner
+                .object_path
+                .join("Ext")
+                .join(Path::new(module_file).with_extension("bin")),
+            kind: SourceAssetKind::InflatedBinary,
         });
     }
     None
 }
 
+fn is_binary_module_container(bytes: &[u8]) -> bool {
+    let Ok(inflated) = inflate_raw_deflate(bytes) else {
+        return false;
+    };
+    let Some(names) = v8_container_element_names(&inflated) else {
+        return false;
+    };
+    names.contains("image") && names.contains("info") && !names.contains("text")
+}
+
+fn v8_container_element_names(bytes: &[u8]) -> Option<BTreeSet<String>> {
+    const V8_MAGIC_NUMBER: u32 = 0x7fff_ffff;
+    const FILE_HEADER_SIZE: usize = 16;
+    const BLOCK_HEADER_SIZE: usize = 31;
+    const ELEM_ADDR_SIZE: usize = 12;
+    const ELEM_HEADER_PREFIX_SIZE: usize = 20;
+
+    if bytes.len() < FILE_HEADER_SIZE + BLOCK_HEADER_SIZE {
+        return None;
+    }
+    if read_le_u32(bytes, 0)? != V8_MAGIC_NUMBER {
+        return None;
+    }
+    if !matches!(read_le_u32(bytes, 8)?, 1 | 2) {
+        return None;
+    }
+    let toc_header = read_v8_block_header(bytes, FILE_HEADER_SIZE)?;
+    let toc_start = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
+    let toc_end = toc_start.checked_add(toc_header.0)?;
+    if toc_end > bytes.len() || toc_header.0 % ELEM_ADDR_SIZE != 0 {
+        return None;
+    }
+    let mut names = BTreeSet::new();
+    for entry in bytes[toc_start..toc_end].chunks_exact(ELEM_ADDR_SIZE) {
+        if read_le_u32(entry, 8)? != V8_MAGIC_NUMBER {
+            continue;
+        }
+        let header_addr = read_le_u32(entry, 0)? as usize;
+        let header = read_v8_block_payload(bytes, header_addr)?;
+        if header.len() < ELEM_HEADER_PREFIX_SIZE {
+            return None;
+        }
+        let mut units = Vec::new();
+        for pair in header[ELEM_HEADER_PREFIX_SIZE..].chunks_exact(2) {
+            let unit = u16::from_le_bytes([pair[0], pair[1]]);
+            if unit == 0 {
+                break;
+            }
+            units.push(unit);
+        }
+        names.insert(String::from_utf16(&units).ok()?);
+    }
+    Some(names)
+}
+
+fn read_v8_block_payload(bytes: &[u8], offset: usize) -> Option<&[u8]> {
+    let header = read_v8_block_header(bytes, offset)?;
+    let start = offset.checked_add(31)?;
+    let data_end = start.checked_add(header.0)?;
+    let page_end = start.checked_add(header.1)?;
+    if data_end > bytes.len() || page_end > bytes.len() || header.2 != 0x7fff_ffff {
+        return None;
+    }
+    Some(&bytes[start..data_end])
+}
+
+fn read_v8_block_header(bytes: &[u8], offset: usize) -> Option<(usize, usize, u32)> {
+    let end = offset.checked_add(31)?;
+    let raw = bytes.get(offset..end)?;
+    if raw[0] != b'\r'
+        || raw[1] != b'\n'
+        || raw[10] != b' '
+        || raw[19] != b' '
+        || raw[28] != b' '
+        || raw[29] != b'\r'
+        || raw[30] != b'\n'
+    {
+        return None;
+    }
+    Some((
+        parse_hex_usize(&raw[2..10])?,
+        parse_hex_usize(&raw[11..19])?,
+        parse_hex_u32_bytes(&raw[20..28])?,
+    ))
+}
+
+fn read_le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    let slice = bytes.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes(slice.try_into().ok()?))
+}
+
+fn parse_hex_usize(bytes: &[u8]) -> Option<usize> {
+    usize::from_str_radix(std::str::from_utf8(bytes).ok()?, 16).ok()
+}
+
+fn parse_hex_u32_bytes(bytes: &[u8]) -> Option<u32> {
+    u32::from_str_radix(std::str::from_utf8(bytes).ok()?, 16).ok()
+}
+
 fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<DumpedRow> {
     let bytes = decode_hex(&row.binary_hex)
         .with_context(|| format!("failed to decode {} row {}", context.table, row.file_name))?;
-    if bytes.len() != row.data_size as usize {
+    dump_table_row_bytes(context, &row.file_name, row.part_no, row.data_size, &bytes)
+}
+
+fn dump_table_binary_row(context: &DumpRowContext<'_>, row: &BinaryConfigRow) -> Result<DumpedRow> {
+    dump_table_row_bytes(
+        context,
+        &row.file_name,
+        row.part_no,
+        row.data_size,
+        &row.binary,
+    )
+}
+
+fn dump_table_row_bytes(
+    context: &DumpRowContext<'_>,
+    file_name: &str,
+    part_no: i32,
+    data_size: i64,
+    bytes: &[u8],
+) -> Result<DumpedRow> {
+    let mut timings = MssqlDumpTimingReport::default();
+    if bytes.len() != data_size as usize {
         bail!(
             "{} row {} DataSize {} does not match BinaryData length {}",
             context.table,
-            row.file_name,
-            row.data_size,
+            file_name,
+            data_size,
             bytes.len()
         );
     }
 
-    let safe_name = safe_storage_file_name(&row.file_name, row.part_no);
+    let safe_name = safe_storage_file_name(file_name, part_no);
     let binary_relative = PathBuf::from(context.table).join(format!("{safe_name}.bin"));
-    let binary_path = context.output_dir.join(&binary_relative);
-    fs::write(&binary_path, &bytes)
-        .with_context(|| format!("failed to write {}", binary_path.display()))?;
+    if context.write_binary_rows {
+        let started = Instant::now();
+        let binary_path = context.output_dir.join(&binary_relative);
+        fs::write(&binary_path, &bytes)
+            .with_context(|| format!("failed to write {}", binary_path.display()))?;
+        timings.binary_write_cpu_ms += elapsed_ms(started);
+    }
 
     let mut inflated_rows = 0;
     let inflated_relative = if context.inflate {
+        let started = Instant::now();
         match inflate_raw_deflate(&bytes) {
             Ok(inflated) => {
                 let relative = PathBuf::from(format!("{}_inflated", context.table))
@@ -756,19 +1258,40 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
                 fs::write(&path, inflated)
                     .with_context(|| format!("failed to write {}", path.display()))?;
                 inflated_rows = 1;
+                timings.inflate_cpu_ms += elapsed_ms(started);
                 Some(relative.to_string_lossy().replace('\\', "/"))
             }
-            Err(_) => None,
+            Err(_) => {
+                timings.inflate_cpu_ms += elapsed_ms(started);
+                None
+            }
         }
+    } else {
+        None
+    };
+
+    let static_source_asset = context.source_assets.get(file_name);
+    let parsed_form_body = if matches!(
+        static_source_asset.map(|asset| &asset.kind),
+        Some(SourceAssetKind::Form)
+    ) {
+        let started = Instant::now();
+        let parsed = parse_form_body_blob(bytes).ok();
+        timings.form_body_parse_cpu_ms += elapsed_ms(started);
+        parsed
     } else {
         None
     };
 
     let mut module_text_rows = 0;
     let module_text_relative = if context.extract_module_text {
+        let started = Instant::now();
         let module_text = match unpack_module_blob_text(&bytes) {
             Ok(text) => Some(text),
-            Err(_) if context.module_text_paths.contains_key(&row.file_name) => {
+            Err(_) if let Some(body) = parsed_form_body.as_ref() => {
+                form_body_module_text_bytes(body)
+            }
+            Err(_) if context.module_text_paths.contains_key(file_name) => {
                 unpack_form_body_module_text(&bytes)
             }
             Err(_) => None,
@@ -777,7 +1300,7 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
             Some(text) => {
                 let relative = context
                     .module_text_paths
-                    .get(&row.file_name)
+                    .get(file_name)
                     .cloned()
                     .unwrap_or_else(|| {
                         PathBuf::from(format!("{}_module_text", context.table))
@@ -791,9 +1314,13 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
                 fs::write(&path, text)
                     .with_context(|| format!("failed to write {}", path.display()))?;
                 module_text_rows = 1;
+                timings.module_text_cpu_ms += elapsed_ms(started);
                 Some(relative.to_string_lossy().replace('\\', "/"))
             }
-            None => None,
+            None => {
+                timings.module_text_cpu_ms += elapsed_ms(started);
+                None
+            }
         }
     } else {
         None
@@ -801,15 +1328,28 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
 
     let mut metadata_xml_rows = 0;
     let metadata_xml_relative = if context.extract_metadata_xml {
-        match extract_metadata_source_xml_with_refs(
-            &bytes,
-            &row.file_name,
-            context.type_index,
-            context.object_refs,
-            context.form_refs,
-            context.template_refs,
-            context.subsystem_refs,
-        ) {
+        let started = Instant::now();
+        let extracted = if let Some(row) = context.metadata_texts_by_file_name.get(file_name) {
+            extract_metadata_source_xml_from_text_row(
+                row,
+                context.type_index,
+                context.object_refs,
+                context.form_refs,
+                context.template_refs,
+                context.subsystem_refs,
+            )
+        } else {
+            extract_metadata_source_xml_with_refs(
+                &bytes,
+                file_name,
+                context.type_index,
+                context.object_refs,
+                context.form_refs,
+                context.template_refs,
+                context.subsystem_refs,
+            )
+        };
+        match extracted {
             Some(extracted) => {
                 let path = context.output_dir.join(&extracted.relative_path);
                 if let Some(parent) = path.parent() {
@@ -819,9 +1359,13 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
                 fs::write(&path, extracted.xml)
                     .with_context(|| format!("failed to write {}", path.display()))?;
                 metadata_xml_rows = 1;
+                timings.metadata_xml_cpu_ms += elapsed_ms(started);
                 Some(extracted.relative_path.to_string_lossy().replace('\\', "/"))
             }
-            None => None,
+            None => {
+                timings.metadata_xml_cpu_ms += elapsed_ms(started);
+                None
+            }
         }
     } else {
         None
@@ -829,21 +1373,34 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
 
     let mut source_asset_rows = 0;
     let source_asset_relative = if metadata_xml_relative.is_none() {
+        let started = Instant::now();
         let dynamic_asset;
-        let asset = match context.source_assets.get(&row.file_name) {
+        let asset = match context.source_assets.get(file_name) {
             Some(asset) => Some(asset),
             None => {
-                dynamic_asset = dynamic_source_asset(context, &row.file_name, &bytes);
+                dynamic_asset = dynamic_source_asset(context, file_name, &bytes);
                 dynamic_asset.as_ref()
             }
         };
         match asset {
             Some(asset) => {
-                let relative = write_source_asset(context.output_dir, asset, &bytes)?;
+                let relative = write_source_asset(
+                    context,
+                    asset,
+                    &bytes,
+                    parsed_form_body.as_ref(),
+                    &mut timings,
+                )?;
                 source_asset_rows = 1;
+                let elapsed = elapsed_ms(started);
+                timings.source_asset_cpu_ms += elapsed;
+                timings.add_source_asset_kind(&asset.kind, elapsed);
                 Some(relative.to_string_lossy().replace('\\', "/"))
             }
-            None => None,
+            None => {
+                timings.source_asset_cpu_ms += elapsed_ms(started);
+                None
+            }
         }
     } else {
         None
@@ -851,9 +1408,9 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
 
     Ok(DumpedRow {
         manifest: MssqlDumpRowManifest {
-            file_name: row.file_name.clone(),
-            part_no: row.part_no,
-            data_size: row.data_size,
+            file_name: file_name.to_string(),
+            part_no,
+            data_size,
             binary_bytes: bytes.len(),
             binary_path: binary_relative.to_string_lossy().replace('\\', "/"),
             inflated_path: inflated_relative,
@@ -866,6 +1423,7 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        timings,
     })
 }
 
@@ -884,38 +1442,26 @@ fn ensure_unique_source_asset_paths(source_assets: &BTreeMap<String, SourceAsset
 
 #[derive(Clone)]
 enum SourceAssetKind {
-    Binary,
-    CommandInterface {
-        command_refs: BTreeMap<String, String>,
-        metadata_refs: BTreeMap<String, MetadataCommandReference>,
-    },
+    CommandInterface,
     ConfigDumpInfo,
-    ExchangePlanContent {
-        object_refs: BTreeMap<String, String>,
-    },
+    ExchangePlanContent,
     BusinessProcessFlowchart,
     ExtPicture,
-    Form {
-        object_refs: BTreeMap<String, String>,
-    },
+    Form,
     Help,
     InflatedBase64OrBinary,
     InflatedBinary,
-    MoxelSpreadsheet {
-        object_refs: BTreeMap<String, String>,
-    },
-    PredefinedData {
-        xsi_type: &'static str,
-        type_index: BTreeMap<String, String>,
-    },
-    RoleRights {
-        object_refs: BTreeMap<String, String>,
-        field_refs: BTreeMap<String, String>,
-    },
+    MoxelSpreadsheet,
+    PredefinedData { xsi_type: &'static str },
+    RoleRights,
     Schedule,
-    StyleBody {
-        object_refs: BTreeMap<String, String>,
-    },
+    StandaloneContent,
+    StyleBody,
+}
+
+#[derive(Clone, Default)]
+struct StandaloneContentReferences {
+    object_refs: BTreeMap<String, String>,
 }
 
 struct SourceAsset {
@@ -923,15 +1469,18 @@ struct SourceAsset {
     kind: SourceAssetKind,
 }
 
-fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
-    let command_refs = build_command_interface_reference_index(rows);
-    let metadata_refs = build_metadata_command_reference_index(rows);
-    let object_refs = build_metadata_object_reference_index(rows);
-    let field_refs = build_metadata_field_reference_index(rows);
-    let type_index = build_metadata_type_index(rows);
-    let form_refs = build_form_source_reference_index(rows);
-    let template_refs = build_template_source_reference_index(rows);
-    let subsystem_refs = build_subsystem_source_reference_index(rows);
+fn source_asset_paths_with_indexes(
+    rows: &[ConfigRow],
+    metadata_texts: &[MetadataTextRow],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, SourceAsset> {
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -980,6 +1529,16 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
                 );
             }
         }
+        let standalone_id = format!("{metadata_id}.f");
+        if file_names.contains(standalone_id.as_str()) {
+            paths.insert(
+                standalone_id,
+                SourceAsset {
+                    primary_path: PathBuf::from("Ext/StandaloneConfigurationContent.bin"),
+                    kind: SourceAssetKind::StandaloneContent,
+                },
+            );
+        }
         for (suffix, path) in [
             ("9", "Ext/MainSectionCommandInterface.xml"),
             ("a", "Ext/CommandInterface.xml"),
@@ -993,25 +1552,15 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
                     interface_id,
                     SourceAsset {
                         primary_path: PathBuf::from(path),
-                        kind: SourceAssetKind::CommandInterface {
-                            command_refs: command_refs.clone(),
-                            metadata_refs: metadata_refs.clone(),
-                        },
+                        kind: SourceAssetKind::CommandInterface,
                     },
                 );
             }
         }
     }
-    for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        for (body_id, asset) in source_assets_from_metadata_blob(
-            &bytes,
-            &row.file_name,
+    for row in metadata_texts {
+        for (body_id, asset) in source_assets_from_metadata_text(
+            row,
             &file_names,
             &rows_by_file_name,
             &command_refs,
@@ -1025,12 +1574,8 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
         }
     }
     paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
-    paths.extend(form_body_asset_paths(rows, &file_names, &object_refs));
-    paths.extend(template_body_asset_paths(
-        &template_refs,
-        &file_names,
-        &object_refs,
-    ));
+    paths.extend(form_body_asset_paths(&form_refs, &file_names));
+    paths.extend(template_body_asset_paths(&template_refs, &file_names));
 
     paths
 }
@@ -1038,7 +1583,6 @@ fn source_asset_paths(rows: &[ConfigRow]) -> BTreeMap<String, SourceAsset> {
 fn template_body_asset_paths(
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     file_names: &BTreeSet<&str>,
-    object_refs: &BTreeMap<String, String>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (uuid, template_ref) in template_refs {
@@ -1046,15 +1590,9 @@ fn template_body_asset_paths(
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
-        let Some((file_name, mut kind)) = template_body_source_asset(template_ref.template_type)
-        else {
+        let Some((file_name, kind)) = template_body_source_asset(template_ref.template_type) else {
             continue;
         };
-        if matches!(kind, SourceAssetKind::MoxelSpreadsheet { .. }) {
-            kind = SourceAssetKind::MoxelSpreadsheet {
-                object_refs: object_refs.clone(),
-            };
-        }
         paths.insert(
             body_id,
             SourceAsset {
@@ -1082,36 +1620,28 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
         "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
-        "SpreadsheetDocument" => Some((
-            "Template.xml",
-            SourceAssetKind::MoxelSpreadsheet {
-                object_refs: BTreeMap::new(),
-            },
-        )),
+        "SpreadsheetDocument" => Some(("Template.xml", SourceAssetKind::MoxelSpreadsheet)),
         _ => None,
     }
 }
 
 fn form_body_asset_paths(
-    rows: &[ConfigRow],
+    form_refs: &BTreeMap<String, FormSourceReference>,
     file_names: &BTreeSet<&str>,
-    object_refs: &BTreeMap<String, String>,
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
-    for (form_uuid, form_ref) in build_form_source_reference_index(rows) {
+    for (form_uuid, form_ref) in form_refs {
         let body_id = format!("{form_uuid}.0");
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
-        let mut form_dir = form_ref.relative_path;
+        let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
         paths.insert(
             body_id,
             SourceAsset {
                 primary_path: form_dir.join("Ext").join("Form.xml"),
-                kind: SourceAssetKind::Form {
-                    object_refs: object_refs.clone(),
-                },
+                kind: SourceAssetKind::Form,
             },
         );
     }
@@ -1121,7 +1651,11 @@ fn form_body_asset_paths(
 
 const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
-    ("4", "Ext/ParentConfigurations.bin", SourceAssetKind::Binary),
+    (
+        "4",
+        "Ext/ParentConfigurations.bin",
+        SourceAssetKind::InflatedBinary,
+    ),
     (
         "8",
         "Ext/HomePageWorkArea.xml",
@@ -1142,13 +1676,9 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
         "Ext/MainSectionPicture.xml",
         SourceAssetKind::ExtPicture,
     ),
-    (
-        "f",
-        "Ext/StandaloneConfigurationContent.bin",
-        SourceAssetKind::InflatedBinary,
-    ),
 ];
 
+#[allow(dead_code)]
 fn source_assets_from_metadata_blob(
     blob: &[u8],
     uuid: &str,
@@ -1161,9 +1691,36 @@ fn source_assets_from_metadata_blob(
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Vec<(String, SourceAsset)> {
-    source_assets_from_metadata_blob_inner(
-        blob,
-        uuid,
+    metadata_text_row_from_blob(uuid, blob)
+        .and_then(|row| {
+            source_assets_from_metadata_text_inner(
+                &row,
+                file_names,
+                rows_by_file_name,
+                command_refs,
+                metadata_refs,
+                object_refs,
+                field_refs,
+                type_index,
+                subsystem_refs,
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn source_assets_from_metadata_text(
+    row: &MetadataTextRow,
+    file_names: &BTreeSet<&str>,
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> Vec<(String, SourceAsset)> {
+    source_assets_from_metadata_text_inner(
+        row,
         file_names,
         rows_by_file_name,
         command_refs,
@@ -1176,9 +1733,8 @@ fn source_assets_from_metadata_blob(
     .unwrap_or_default()
 }
 
-fn source_assets_from_metadata_blob_inner(
-    blob: &[u8],
-    uuid: &str,
+fn source_assets_from_metadata_text_inner(
+    row: &MetadataTextRow,
     file_names: &BTreeSet<&str>,
     rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
     command_refs: &BTreeMap<String, String>,
@@ -1188,12 +1744,10 @@ fn source_assets_from_metadata_blob_inner(
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<Vec<(String, SourceAsset)>> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}');
-    let object_code = parse_metadata_object_code(text)?;
-    let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
-    let header = parse_metadata_header_from_text(text, uuid)?;
+    let uuid = row.file_name.as_str();
+    let kind = row.kind.as_deref()?;
+    let folder = row.folder?;
+    let header = row.header.as_ref()?;
     let object_path = if kind == "Subsystem" {
         subsystem_refs
             .get(uuid)
@@ -1213,9 +1767,7 @@ fn source_assets_from_metadata_blob_inner(
                 content_id,
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("Content.xml"),
-                    kind: SourceAssetKind::ExchangePlanContent {
-                        object_refs: object_refs.clone(),
-                    },
+                    kind: SourceAssetKind::ExchangePlanContent,
                 },
             ));
         }
@@ -1264,9 +1816,7 @@ fn source_assets_from_metadata_blob_inner(
             }),
             "Style" => Some(SourceAsset {
                 primary_path: object_path.join("Ext").join("Style.xml"),
-                kind: SourceAssetKind::StyleBody {
-                    object_refs: object_refs.clone(),
-                },
+                kind: SourceAssetKind::StyleBody,
             }),
             "WSReference" => Some(SourceAsset {
                 primary_path: object_path.join("Ext").join("WSDefinition.xml"),
@@ -1281,10 +1831,7 @@ fn source_assets_from_metadata_blob_inner(
             {
                 Some(SourceAsset {
                     primary_path: object_path.join("Ext").join("Rights.xml"),
-                    kind: SourceAssetKind::RoleRights {
-                        object_refs: object_refs.clone(),
-                        field_refs: field_refs.clone(),
-                    },
+                    kind: SourceAssetKind::RoleRights,
                 })
             }
             _ => None,
@@ -1311,10 +1858,7 @@ fn source_assets_from_metadata_blob_inner(
                 body_id,
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("CommandInterface.xml"),
-                    kind: SourceAssetKind::CommandInterface {
-                        command_refs: command_refs.clone(),
-                        metadata_refs: metadata_refs.clone(),
-                    },
+                    kind: SourceAssetKind::CommandInterface,
                 },
             ));
         }
@@ -1355,10 +1899,7 @@ fn source_assets_from_metadata_blob_inner(
                 (*body_id).to_string(),
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("Predefined.xml"),
-                    kind: SourceAssetKind::PredefinedData {
-                        xsi_type,
-                        type_index: type_index.clone(),
-                    },
+                    kind: SourceAssetKind::PredefinedData { xsi_type },
                 },
             ));
         }
@@ -1383,17 +1924,15 @@ fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
     };
     format!("{uuid}.{suffix}")
 }
-fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> Result<PathBuf> {
+fn write_source_asset(
+    context: &DumpRowContext<'_>,
+    asset: &SourceAsset,
+    bytes: &[u8],
+    parsed_form_body: Option<&ParsedFormBodyBlob>,
+    timings: &mut MssqlDumpTimingReport,
+) -> Result<PathBuf> {
+    let output_dir = context.output_dir;
     match &asset.kind {
-        SourceAssetKind::Binary => {
-            let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
-            }
-            fs::write(&path, bytes)
-                .with_context(|| format!("failed to write {}", path.display()))?;
-        }
         SourceAssetKind::ExtPicture => {
             let picture = extract_ext_picture(bytes).with_context(|| {
                 format!(
@@ -1410,12 +1949,15 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             let picture_dir = output_dir.join(asset.primary_path.with_extension(""));
             fs::create_dir_all(&picture_dir)
                 .with_context(|| format!("failed to create {}", picture_dir.display()))?;
-            let picture_file_name = ext_picture_file_name(&picture);
+            let picture_file_name = ext_picture_file_name(&picture.content);
             let picture_path = picture_dir.join(picture_file_name);
-            fs::write(&picture_path, &picture)
+            fs::write(&picture_path, &picture.content)
                 .with_context(|| format!("failed to write {}", picture_path.display()))?;
-            fs::write(&xml_path, format_ext_picture_xml(picture_file_name))
-                .with_context(|| format!("failed to write {}", xml_path.display()))?;
+            fs::write(
+                &xml_path,
+                format_ext_picture_xml(picture_file_name, picture.transparent_pixel),
+            )
+            .with_context(|| format!("failed to write {}", xml_path.display()))?;
         }
         SourceAssetKind::Schedule => {
             let xml = extract_schedule_xml(bytes).with_context(|| {
@@ -1431,8 +1973,24 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::StyleBody { object_refs } => {
-            let xml = extract_style_body_xml(bytes, object_refs).with_context(|| {
+        SourceAssetKind::StandaloneContent => {
+            let xml = extract_standalone_content_xml(bytes, context.standalone_refs).with_context(
+                || {
+                    format!(
+                        "failed to extract standalone content from source asset {}",
+                        asset.primary_path.display()
+                    )
+                },
+            )?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+        }
+        SourceAssetKind::StyleBody => {
+            let xml = extract_style_body_xml(bytes, context.object_refs).with_context(|| {
                 format!(
                     "failed to extract style body from source asset {}",
                     asset.primary_path.display()
@@ -1445,19 +2003,37 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::Form { object_refs } => {
-            let xml = extract_form_body_xml(bytes, object_refs).with_context(|| {
-                format!(
-                    "failed to extract form xml from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+        SourceAssetKind::Form => {
+            let form_xml_started = Instant::now();
+            let owned_body;
+            let body = if let Some(body) = parsed_form_body {
+                body
+            } else {
+                owned_body = parse_form_body_blob(bytes).with_context(|| {
+                    format!(
+                        "failed to parse form body from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+                &owned_body
+            };
+            let xml =
+                extract_form_body_xml_from_body_timed(body, context.object_refs, Some(timings))
+                    .with_context(|| {
+                        format!(
+                            "failed to extract form xml from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
             fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
+
+            let form_items_started = Instant::now();
             for item_asset in extract_form_item_assets(bytes) {
                 let item_path = output_dir
                     .join(asset.primary_path.with_extension(""))
@@ -1471,6 +2047,7 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                 fs::write(&item_path, &item_asset.content)
                     .with_context(|| format!("failed to write {}", item_path.display()))?;
             }
+            timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
         }
         SourceAssetKind::Help => {
             let help = parse_help_blob(bytes).with_context(|| {
@@ -1490,8 +2067,11 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
                 .with_context(|| format!("failed to create {}", help_dir.display()))?;
             for page in &help.pages {
                 let page_path = help_dir.join(&page.file_name);
-                fs::write(&page_path, &page.content)
-                    .with_context(|| format!("failed to write {}", page_path.display()))?;
+                fs::write(
+                    &page_path,
+                    rewrite_help_links(&page.content, context.help_refs),
+                )
+                .with_context(|| format!("failed to write {}", page_path.display()))?;
             }
             if !help.files.is_empty() {
                 let files_dir = help_dir.join("_files");
@@ -1543,16 +2123,14 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, content)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::PredefinedData {
-            xsi_type,
-            type_index,
-        } => {
-            let items = parse_predefined_data_blob(bytes, type_index).with_context(|| {
-                format!(
-                    "failed to extract predefined data from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+        SourceAssetKind::PredefinedData { xsi_type } => {
+            let items =
+                parse_predefined_data_blob(bytes, context.type_index).with_context(|| {
+                    format!(
+                        "failed to extract predefined data from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1561,12 +2139,9 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_predefined_data_xml(xsi_type, &items))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::RoleRights {
-            object_refs,
-            field_refs,
-        } => {
-            let rights =
-                parse_role_rights_blob(bytes, object_refs, field_refs).with_context(|| {
+        SourceAssetKind::RoleRights => {
+            let rights = parse_role_rights_blob(bytes, context.object_refs, context.field_refs)
+                .with_context(|| {
                     format!(
                         "failed to extract role rights from source asset {}",
                         asset.primary_path.display()
@@ -1580,17 +2155,15 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_role_rights_xml(&rights))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::CommandInterface {
-            command_refs,
-            metadata_refs,
-        } => {
-            let entries = parse_command_interface_blob(bytes, command_refs, metadata_refs)
-                .with_context(|| {
-                    format!(
-                        "failed to extract command interface from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+        SourceAssetKind::CommandInterface => {
+            let entries =
+                parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
+                    .with_context(|| {
+                        format!(
+                            "failed to extract command interface from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1614,14 +2187,15 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_config_dump_info_xml())
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::ExchangePlanContent { object_refs } => {
-            let items =
-                parse_exchange_plan_content_blob(bytes, object_refs).with_context(|| {
+        SourceAssetKind::ExchangePlanContent => {
+            let items = parse_exchange_plan_content_blob(bytes, context.object_refs).with_context(
+                || {
                     format!(
                         "failed to extract exchange plan content from source asset {}",
                         asset.primary_path.display()
                     )
-                })?;
+                },
+            )?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1645,13 +2219,14 @@ fn write_source_asset(output_dir: &Path, asset: &SourceAsset, bytes: &[u8]) -> R
             fs::write(&path, format_business_process_flowchart_xml(&flowchart))
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
-        SourceAssetKind::MoxelSpreadsheet { object_refs } => {
-            let xml = extract_moxel_spreadsheet_xml(bytes, object_refs).with_context(|| {
-                format!(
-                    "failed to extract spreadsheet template from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+        SourceAssetKind::MoxelSpreadsheet => {
+            let xml =
+                extract_moxel_spreadsheet_xml(bytes, context.object_refs).with_context(|| {
+                    format!(
+                        "failed to extract spreadsheet template from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -2000,60 +2575,62 @@ struct MetadataCommandReference {
     name: String,
 }
 
+#[allow(dead_code)]
 fn build_metadata_command_reference_index(
     rows: &[ConfigRow],
 ) -> BTreeMap<String, MetadataCommandReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_command_reference_index_from_texts(&metadata_texts)
+}
+
+fn build_metadata_command_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, MetadataCommandReference> {
     let mut index = BTreeMap::new();
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Some((kind, header, _text)) =
-            parse_metadata_command_reference_blob(&bytes, &row.file_name)
-        else {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;
         };
         index.insert(
             row.file_name.clone(),
             MetadataCommandReference {
-                kind,
-                name: header.name,
+                kind: kind.to_string(),
+                name: header.name.clone(),
             },
         );
     }
     index
 }
 
+#[allow(dead_code)]
 fn build_metadata_object_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_object_reference_index_from_texts(&metadata_texts)
+}
+
+fn build_metadata_object_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
     let mut index = BTreeMap::new();
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        if let Some(name) = parse_configuration_reference_blob(&bytes) {
+        if let Some(name) = parse_configuration_reference_text(&row.text) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
             continue;
         }
-        let Some((kind, header, text)) =
-            parse_metadata_command_reference_blob(&bytes, &row.file_name)
-        else {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;
         };
         index.insert(row.file_name.clone(), format!("{kind}.{}", header.name));
-        for command in nested_command_headers_from_text(&text, &row.file_name) {
+        for command in nested_command_headers_from_text(&row.text, &row.file_name) {
             index.insert(
                 command.uuid,
                 format!("{}.{}.Command.{}", kind, header.name, command.name),
             );
         }
         if kind == "WebService" {
-            for operation in nested_web_service_operation_headers_from_text(&text, &row.file_name) {
+            for operation in
+                nested_web_service_operation_headers_from_text(&row.text, &row.file_name)
+            {
                 index.insert(
                     operation.uuid,
                     format!("WebService.{}.Operation.{}", header.name, operation.name),
@@ -2064,84 +2641,295 @@ fn build_metadata_object_reference_index(rows: &[ConfigRow]) -> BTreeMap<String,
     index
 }
 
-fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
-    let mut index = BTreeMap::new();
+fn build_standalone_content_references(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> StandaloneContentReferences {
+    let mut standalone_object_refs = object_refs.clone();
+    for (uuid, form_ref) in form_refs {
+        if let Some(reference) = form_source_reference_name(form_ref) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, template_ref) in template_refs {
+        if let Some(reference) = template_source_reference_name(template_ref) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, subsystem_ref) in subsystem_refs {
+        if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+
     for row in rows {
-        if row.file_name.contains('.') {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        let mut seen = BTreeSet::new();
+        for (child, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) && seen.insert(child.uuid.clone())
+            {
+                standalone_object_refs.insert(child.uuid, reference);
+            }
+        }
+        for uuid in uuid_like_values(&row.text) {
+            if standalone_object_refs.contains_key(&uuid) {
+                continue;
+            }
+            if let Some(reference) = form_refs.get(&uuid).and_then(form_source_reference_name) {
+                standalone_object_refs.insert(uuid, reference);
+            } else if let Some(reference) = template_refs
+                .get(&uuid)
+                .and_then(template_source_reference_name)
+            {
+                standalone_object_refs.insert(uuid, reference);
+            }
+        }
+    }
+
+    StandaloneContentReferences {
+        object_refs: standalone_object_refs,
+    }
+}
+
+fn build_help_reference_index(
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut refs = object_refs.clone();
+    for (uuid, form_ref) in form_refs {
+        if let Some(reference) = form_source_reference_name(form_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, template_ref) in template_refs {
+        if let Some(reference) = template_source_reference_name(template_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, subsystem_ref) in subsystem_refs {
+        if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    refs
+}
+
+fn standalone_child_reference(
+    owner_kind: &str,
+    owner_name: &str,
+    text: &str,
+    marker_start: usize,
+    child: &MetadataHeader,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<String> {
+    if let Some(reference) = form_refs
+        .get(&child.uuid)
+        .and_then(form_source_reference_name)
+    {
+        return Some(reference);
+    }
+    if let Some(reference) = template_refs
+        .get(&child.uuid)
+        .and_then(template_source_reference_name)
+    {
+        return Some(reference);
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 9) {
+        return Some(format!("{owner_kind}.{owner_name}.Command.{}", child.name));
+    }
+    if owner_kind == "WebService" && is_offset_inside_metadata_object_code(text, marker_start, 1) {
+        return Some(format!("WebService.{owner_name}.Operation.{}", child.name));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 11) {
+        if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        return Some(format!(
+            "{owner_kind}.{owner_name}.TabularSection.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 5) {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 6) {
+        if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 8) {
+        if owner_kind == "Document"
+            && let Some(tabular_section) =
+                preceding_metadata_header_for_code(text, marker_start, 11)
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 10) {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
+    None
+}
+
+fn template_source_reference_name(template_ref: &TemplateSourceReference) -> Option<String> {
+    let parts = template_ref
+        .relative_path
+        .iter()
+        .filter_map(|part| part.to_str())
+        .collect::<Vec<_>>();
+    if parts.len() == 2 && parts.first() == Some(&"CommonTemplates") {
+        let template_name = Path::new(parts[1]).file_stem()?.to_str()?;
+        return Some(format!("CommonTemplate.{template_name}"));
+    }
+    if parts.len() == 4 && parts.get(2) == Some(&"Templates") {
+        let owner_kind = metadata_kind_for_source_folder(parts[0])?;
+        let owner_name = parts[1];
+        let template_name = Path::new(parts[3]).file_stem()?.to_str()?;
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Template.{template_name}"
+        ));
+    }
+    None
+}
+
+fn subsystem_source_reference_name(subsystem_ref: &SubsystemSourceReference) -> Option<String> {
+    let mut names = Vec::new();
+    for part in subsystem_ref
+        .relative_path
+        .iter()
+        .filter_map(|part| part.to_str())
+    {
+        if part == "Subsystems" {
             continue;
         }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Some((_kind, _header, text)) =
-            parse_metadata_command_reference_blob(&bytes, &row.file_name)
-        else {
-            continue;
-        };
-        for header in nested_metadata_headers_from_text(&text, &row.file_name) {
+        let name = Path::new(part).file_stem()?.to_str()?;
+        names.push(name.to_string());
+    }
+    let mut names = names.into_iter();
+    let first = names.next()?;
+    let mut reference = format!("Subsystem.{first}");
+    for name in names {
+        reference.push_str(".Subsystem.");
+        reference.push_str(&name);
+    }
+    Some(reference)
+}
+
+#[allow(dead_code)]
+fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_field_reference_index_from_texts(&metadata_texts)
+}
+
+fn build_metadata_field_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        for header in nested_metadata_headers_from_text(&row.text, &row.file_name) {
             index.insert(header.uuid, header.name);
         }
     }
     index
 }
 
+#[allow(dead_code)]
 fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, FormSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_form_source_reference_index_from_texts(&metadata_texts)
+}
+
+fn build_form_source_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, FormSourceReference> {
     let mut forms = Vec::<MetadataHeader>::new();
-    let mut owner_paths_by_ref = BTreeMap::<String, Vec<PathBuf>>::new();
+    let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
 
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
-            continue;
-        };
-        let Ok(text) = String::from_utf8(inflated) else {
-            continue;
-        };
-        let text = text.trim_start_matches('\u{feff}');
-        let Some(object_code) = parse_metadata_object_code(text) else {
-            continue;
-        };
-        if is_form_metadata_text(text, &row.file_name) {
-            if let Some(header) = parse_metadata_header_from_text(text, &row.file_name) {
-                forms.push(header);
+        if is_form_metadata_text(&row.text, &row.file_name) {
+            if let Some(header) = row.header.as_ref() {
+                forms.push(header.clone());
             }
             continue;
         }
-        let Some((kind, folder)) = metadata_source_for_text(object_code, text, &row.file_name)
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
         else {
             continue;
         };
         if !metadata_kind_can_own_forms(kind) {
             continue;
         }
-        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        let Some(references) = owned_form_uuid_values(&row.text) else {
             continue;
         };
-        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        for reference in uuid_like_values(text) {
+        for reference in references {
             owner_paths_by_ref
                 .entry(reference)
                 .or_default()
-                .push(owner_path.clone());
+                .insert(owner_path.clone());
         }
     }
 
     let mut index = BTreeMap::new();
     for form in forms {
-        let owner_matches = owner_paths_by_ref
-            .get(&form.uuid)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let relative_path = if let [owner_path] = owner_matches {
-            owner_path
-                .join("Forms")
-                .join(sanitize_source_path_segment(&form.name))
-                .with_extension("xml")
+        let owner_matches = owner_paths_by_ref.get(&form.uuid).map(BTreeSet::iter);
+        let relative_path = if let Some(mut owner_paths) = owner_matches {
+            let first = owner_paths.next();
+            let second = owner_paths.next();
+            if let (Some(owner_path), None) = (first, second) {
+                owner_path
+                    .join("Forms")
+                    .join(sanitize_source_path_segment(&form.name))
+                    .with_extension("xml")
+            } else {
+                PathBuf::from("CommonForms")
+                    .join(sanitize_source_path_segment(&form.name))
+                    .with_extension("xml")
+            }
         } else {
             PathBuf::from("CommonForms")
                 .join(sanitize_source_path_segment(&form.name))
@@ -2164,8 +2952,72 @@ fn build_form_source_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, For
     index
 }
 
+fn owned_form_uuid_values(text: &str) -> Option<BTreeSet<String>> {
+    const FORM_LIST_MARKERS: &[&str] = &[
+        "fdf816d2-1ead-11d5-b975-0050bae0a95d",
+        "fb880e93-47d7-4127-9357-a20e69c17545",
+        "13134204-f60b-11d5-a3c7-0050bae0a776",
+        "87c509ab-3d38-4d67-b379-aca796298578",
+        "b64d9a44-1642-11d6-a3c7-0050bae0a776",
+        "d5b0e5ed-256d-401c-9c36-f630cafd8a62",
+        "a3b368c0-29e2-11d6-a3c7-0050bae0a776",
+        "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
+        "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+        "b8533c0c-2342-4db3-91a2-c2b08cbf6b23",
+        "ec81ad10-ca07-11d5-b9a5-0050bae0a95d",
+        "33f2e54b-37ce-4a7a-a569-b648d7aa4634",
+        "3f58cbfb-4172-4e54-be49-561a579bb38b",
+    ];
+
+    let mut refs = BTreeSet::new();
+    let mut found_marker = false;
+    for marker in FORM_LIST_MARKERS {
+        let Some(marker_index) = text.find(marker) else {
+            continue;
+        };
+        found_marker = true;
+        let Some(block_start) = text[..marker_index].rfind('{') else {
+            continue;
+        };
+        let Some(block_end) = text[marker_index..]
+            .find('}')
+            .map(|offset| marker_index + offset + 1)
+        else {
+            continue;
+        };
+        let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
+            continue;
+        };
+        if fields.first().map(|field| field.trim()) != Some(*marker) {
+            continue;
+        }
+        let Some(count) = fields
+            .get(1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        for field in fields.iter().skip(2).take(count) {
+            let value = field.trim().trim_matches('"').to_ascii_lowercase();
+            if is_uuid_like_ascii(value.as_bytes()) {
+                refs.insert(value);
+            }
+        }
+    }
+    found_marker.then_some(refs)
+}
+
+#[allow(dead_code)]
 fn build_template_source_reference_index(
     rows: &[ConfigRow],
+) -> BTreeMap<String, TemplateSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_template_source_reference_index_from_texts(rows, &metadata_texts)
+}
+
+fn build_template_source_reference_index_from_texts(
+    rows: &[ConfigRow],
+    metadata_texts: &[MetadataTextRow],
 ) -> BTreeMap<String, TemplateSourceReference> {
     let rows_by_file_name = rows
         .iter()
@@ -2174,41 +3026,23 @@ fn build_template_source_reference_index(
     let mut templates = Vec::<MetadataHeader>::new();
     let mut owner_paths_by_ref = BTreeMap::<String, Vec<PathBuf>>::new();
 
-    for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
-            continue;
-        };
-        let Ok(text) = String::from_utf8(inflated) else {
-            continue;
-        };
-        let text = text.trim_start_matches('\u{feff}');
-        let Some(object_code) = parse_metadata_object_code(text) else {
-            continue;
-        };
-        if is_template_metadata_text(text, &row.file_name) {
-            if let Some(header) = parse_metadata_header_from_text(text, &row.file_name) {
-                templates.push(header);
+    for row in metadata_texts {
+        if is_template_metadata_text(&row.text, &row.file_name) {
+            if let Some(header) = row.header.as_ref() {
+                templates.push(header.clone());
             }
             continue;
         }
-        let Some((kind, folder)) = metadata_source_for_text(object_code, text, &row.file_name)
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
         else {
             continue;
         };
         if !metadata_kind_can_own_templates(kind) {
             continue;
         }
-        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
-            continue;
-        };
         let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        for reference in uuid_like_values(text) {
+        for reference in uuid_like_values(&row.text) {
             owner_paths_by_ref
                 .entry(reference)
                 .or_default()
@@ -2259,39 +3093,30 @@ fn build_template_source_reference_index(
     index
 }
 
+#[allow(dead_code)]
 fn build_subsystem_source_reference_index(
     rows: &[ConfigRow],
+) -> BTreeMap<String, SubsystemSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_subsystem_source_reference_index_from_texts(&metadata_texts)
+}
+
+fn build_subsystem_source_reference_index_from_texts(
+    rows: &[MetadataTextRow],
 ) -> BTreeMap<String, SubsystemSourceReference> {
     let mut subsystems = BTreeMap::<String, (MetadataHeader, String)>::new();
 
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
-            continue;
-        };
-        let Ok(text) = String::from_utf8(inflated) else {
-            continue;
-        };
-        let text = text.trim_start_matches('\u{feff}');
-        let Some(object_code) = parse_metadata_object_code(text) else {
-            continue;
-        };
-        let Some((kind, _folder)) = metadata_source_for_text(object_code, text, &row.file_name)
-        else {
+        let Some(kind) = row.kind.as_deref() else {
             continue;
         };
         if kind != "Subsystem" {
             continue;
         }
-        let Some(header) = parse_metadata_header_from_text(text, &row.file_name) else {
+        let Some(header) = row.header.as_ref() else {
             continue;
         };
-        subsystems.insert(header.uuid.clone(), (header, text.to_string()));
+        subsystems.insert(header.uuid.clone(), (header.clone(), row.text.clone()));
     }
 
     let subsystem_uuids = subsystems.keys().cloned().collect::<BTreeSet<_>>();
@@ -2436,6 +3261,7 @@ fn template_type_from_code(code: u32) -> Option<&'static str> {
         3 => Some("HTMLDocument"),
         4 => Some("TextDocument"),
         6 => Some("DataCompositionSchema"),
+        7 => Some("DataCompositionAppearanceTemplate"),
         9 => Some("AddIn"),
         _ => None,
     }
@@ -2480,10 +3306,15 @@ fn form_help_asset_paths(
     paths
 }
 
+#[allow(dead_code)]
 fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> {
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
+    parse_configuration_reference_text(text)
+}
+
+fn parse_configuration_reference_text(text: &str) -> Option<String> {
     if !text.trim_start().starts_with("{2,") {
         return None;
     }
@@ -2523,18 +3354,18 @@ fn extract_configuration_source_xml(text: &str, uuid: &str) -> Option<String> {
     Some(format_metadata_source_xml("Configuration", &header))
 }
 
+#[allow(dead_code)]
 fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_command_interface_reference_index_from_texts(&metadata_texts)
+}
+
+fn build_command_interface_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
     let mut index = BTreeMap::new();
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Some((kind, header, text)) =
-            parse_metadata_command_reference_blob(&bytes, &row.file_name)
-        else {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;
         };
         if kind == "CommonCommand" {
@@ -2543,7 +3374,7 @@ fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<Strin
                 format!("CommonCommand.{}", header.name),
             );
         }
-        for command in nested_command_headers_from_text(&text, &row.file_name) {
+        for command in nested_command_headers_from_text(&row.text, &row.file_name) {
             index.insert(
                 command.uuid,
                 format!("{}.{}.Command.{}", kind, header.name, command.name),
@@ -2553,6 +3384,7 @@ fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<Strin
     index
 }
 
+#[allow(dead_code)]
 fn parse_metadata_command_reference_blob(
     blob: &[u8],
     uuid: &str,
@@ -2561,7 +3393,11 @@ fn parse_metadata_command_reference_blob(
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}').to_string();
     let object_code = parse_metadata_object_code(&text)?;
-    let (kind, _) = metadata_source_for_text(object_code, &text, uuid)?;
+    let kind = if object_code == 12 {
+        "CommonModule"
+    } else {
+        metadata_source_for_text(object_code, &text, uuid)?.0
+    };
     let header = parse_metadata_header_from_text(&text, uuid)?;
     Some((kind.to_string(), header, text))
 }
@@ -2774,6 +3610,19 @@ fn parse_flowchart_item(
             events = parse_flowchart_activity_events(fields.get(5)?)?;
             "Activity"
         }
+        "7" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            "Split"
+        }
+        "8" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            "Join"
+        }
+        "9" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            events = parse_flowchart_named_events(fields.get(3)?, &["Processing"])?;
+            "Processing"
+        }
         _ => return None,
     };
 
@@ -2792,13 +3641,13 @@ fn parse_flowchart_item(
 fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
     let fields = split_1c_braced_fields(body, 0)?;
     let head = split_1c_braced_fields(fields.first()?, 0)?;
-    let uuid = if matches!(code, "2" | "3" | "4" | "5") {
+    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9") {
         head.get(2).map(|value| value.trim().to_string())
     } else {
         None
     }
     .filter(|value| is_uuid_text(value));
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9") {
         split_1c_braced_fields(head.first()?, 0)?
     } else {
         head
@@ -3058,7 +3907,10 @@ fn parse_role_rights_blob(
         if !is_uuid_text(object_uuid) {
             return None;
         }
-        let object_name = object_refs.get(object_uuid)?.clone();
+        let object_name = object_refs
+            .get(object_uuid)
+            .cloned()
+            .unwrap_or_else(|| object_uuid.to_string());
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
         objects.push(RoleObjectRights {
@@ -3130,7 +3982,7 @@ fn parse_role_right_pairs(
 
 fn parse_role_bool_field(value: &str) -> Option<bool> {
     match value.trim() {
-        "0" => Some(false),
+        "0" | "4294967295" => Some(false),
         "1" => Some(true),
         _ => None,
     }
@@ -3277,10 +4129,11 @@ fn parse_role_restriction_templates(value: &str) -> Option<Vec<RoleRestrictionTe
 }
 
 fn role_right_name(uuid: &str) -> Option<&'static str> {
-    ROLE_RIGHT_NAMES
-        .iter()
-        .find_map(|(right_uuid, name)| (*right_uuid == uuid).then_some(*name))
+    ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied()
 }
+
+static ROLE_RIGHT_NAMES_BY_UUID: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| ROLE_RIGHT_NAMES.iter().copied().collect());
 
 const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
     ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
@@ -3492,6 +4345,46 @@ fn parse_help_blob(bytes: &[u8]) -> Option<HelpContent> {
     Some(HelpContent { pages, files })
 }
 
+fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(content) else {
+        return content.to_vec();
+    };
+    let pattern = "../id";
+    let mut output = String::with_capacity(text.len());
+    let mut offset = 0usize;
+
+    while let Some(relative_start) = text[offset..].find(pattern) {
+        let start = offset + relative_start;
+        let uuid_start = start + pattern.len();
+        let uuid_end = uuid_start + 36;
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            break;
+        };
+        if parse_non_zero_uuid(uuid).is_none()
+            || text.as_bytes().get(uuid_end).copied() != Some(b'/')
+        {
+            output.push_str(&text[offset..uuid_start]);
+            offset = uuid_start;
+            continue;
+        }
+        let Some(reference) = refs.get(uuid) else {
+            output.push_str(&text[offset..uuid_end]);
+            offset = uuid_end;
+            continue;
+        };
+        let Some(relative_quote_end) = text[uuid_end..].find('"') else {
+            break;
+        };
+        let quote_end = uuid_end + relative_quote_end;
+        output.push_str(&text[offset..start]);
+        output.push_str(reference);
+        output.push_str("/Help");
+        offset = quote_end;
+    }
+    output.push_str(&text[offset..]);
+    output.into_bytes()
+}
+
 fn predefined_data_xsi_type(kind: &str) -> Option<&'static str> {
     match kind {
         "Catalog" => Some("CatalogPredefinedItems"),
@@ -3667,14 +4560,74 @@ fn parse_predefined_string_value(value: &str) -> Option<String> {
         .map(|(value, _)| value)
 }
 
-fn extract_ext_picture(bytes: &[u8]) -> Result<Vec<u8>> {
+struct ExtPictureAsset {
+    content: Vec<u8>,
+    transparent_pixel: Option<(i32, i32)>,
+}
+
+fn extract_ext_picture(bytes: &[u8]) -> Result<ExtPictureAsset> {
     let inflated = inflate_raw_deflate(bytes)?;
-    if let Ok(text) = std::str::from_utf8(&inflated)
-        && let Some(payload) = extract_base64_payload(text)
-    {
-        return decode_base64_mime(payload).context("failed to decode picture base64");
+    if let Ok(text) = std::str::from_utf8(&inflated) {
+        let transparent_pixel = extract_ext_picture_transparent_pixel(text);
+        if let Some(payload) = extract_base64_payload(text) {
+            let content = decode_base64_mime(payload).context("failed to decode picture base64")?;
+            return Ok(ExtPictureAsset {
+                content,
+                transparent_pixel,
+            });
+        }
     }
-    Ok(inflated)
+    Ok(ExtPictureAsset {
+        content: inflated,
+        transparent_pixel: None,
+    })
+}
+
+fn extract_ext_picture_transparent_pixel(text: &str) -> Option<(i32, i32)> {
+    let mut offset = skip_ascii_ws_at(text.trim_start_matches('\u{feff}'), 0);
+    let text = text.trim_start_matches('\u{feff}');
+    if text.as_bytes().get(offset) != Some(&b'{') {
+        return None;
+    }
+    offset += 1;
+    let first_comma = text[offset..].find(',')? + offset;
+    offset = skip_ascii_ws_at(text, first_comma + 1);
+    let transparent_end = scan_1c_braced_value(text, offset)?;
+    let transparent_fields = split_1c_braced_fields(&text[offset..transparent_end], 0)?;
+    if !parse_1c_bool_flag(transparent_fields.first()?.trim())? {
+        return None;
+    }
+    let x = transparent_fields.get(2)?.trim().parse().ok()?;
+    let y = transparent_fields.get(3)?.trim().parse().ok()?;
+    Some((x, y))
+}
+
+fn format_ext_picture_xml(file_name: &str, transparent_pixel: Option<(i32, i32)>) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ExtPicture xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<Picture>\r\n\
+\t\t<xr:Abs>{file_name}</xr:Abs>\r\n\
+\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+        xml_bool(transparent_pixel.is_some())
+    );
+    if let Some((x, y)) = transparent_pixel {
+        xml.push_str(&format!(
+            "\t\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>\r\n"
+        ));
+    }
+    xml.push_str(
+        "\t</Picture>\r\n\
+</ExtPicture>",
+    );
+    xml
+}
+
+fn extract_base64_payload(text: &str) -> Option<&str> {
+    let prefix = "{#base64:";
+    let start = text.find(prefix)? + prefix.len();
+    let end = text[start..].find('}')? + start;
+    Some(&text[start..end])
 }
 
 fn ext_picture_file_name(bytes: &[u8]) -> &'static str {
@@ -3714,13 +4667,6 @@ fn is_svg_content(bytes: &[u8]) -> bool {
 fn is_svg_text(text: &str) -> bool {
     let text = text.trim_start_matches('\u{feff}').trim_start();
     text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg")
-}
-
-fn extract_base64_payload(text: &str) -> Option<&str> {
-    let prefix = "{#base64:";
-    let start = text.find(prefix)? + prefix.len();
-    let end = text[start..].find('}')? + start;
-    Some(&text[start..end])
 }
 
 fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
@@ -3771,18 +4717,6 @@ fn base64_value(byte: u8) -> Option<u8> {
         b'/' => Some(63),
         _ => None,
     }
-}
-
-fn format_ext_picture_xml(file_name: &str) -> String {
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<ExtPicture xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.17\">\r\n\
-\t<Picture>\r\n\
-\t\t<xr:Abs>{file_name}</xr:Abs>\r\n\
-\t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
-\t</Picture>\r\n\
-</ExtPicture>\r\n"
-    )
 }
 
 fn format_help_xml(pages: &[HelpPage]) -> String {
@@ -4054,7 +4988,10 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
             escape_xml_text(&location.right)
         ));
     }
-    if matches!(item.tag, "Start" | "Activity" | "Condition" | "Completion") {
+    if matches!(
+        item.tag,
+        "Start" | "Activity" | "Condition" | "Completion" | "Processing" | "Split" | "Join"
+    ) {
         xml.push_str("\t\t\t\t<Border width=\"1\" gap=\"false\">\r\n");
         xml.push_str(
             "\t\t\t\t\t<v8ui:style xsi:type=\"sch:ConnectorLineType\">Solid</v8ui:style>\r\n",
@@ -4223,6 +5160,119 @@ fn extract_schedule_xml(bytes: &[u8]) -> Result<String> {
     Ok(format_job_schedule_xml(&schedule))
 }
 
+fn extract_standalone_content_xml(
+    bytes: &[u8],
+    references: &StandaloneContentReferences,
+) -> Result<Vec<u8>> {
+    let inflated = inflate_raw_deflate(bytes).context("failed to inflate standalone content")?;
+    let text = String::from_utf8(inflated).context("standalone content is not valid UTF-8")?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)
+        .ok_or_else(|| anyhow!("standalone content is not a 1C braced value"))?;
+    if fields.first().map(|field| field.trim()) != Some("2") {
+        bail!("standalone content has unsupported marker");
+    }
+    let count = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("standalone content has invalid item count"))?;
+    if fields.len() < 2 + count {
+        bail!("standalone content item count exceeds field count");
+    }
+
+    let mut xml = String::from(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<StandaloneContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+    );
+    let mut selected_uuids = fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .map(|uuid| uuid.trim())
+        .collect::<Vec<_>>();
+    selected_uuids.sort_unstable();
+    for uuid in selected_uuids {
+        let reference = references
+            .object_refs
+            .get(uuid)
+            .ok_or_else(|| anyhow!("standalone content reference not found: {uuid}"))?;
+        push_standalone_metadata_item_xml(&mut xml, "UsedItem", reference);
+    }
+    let mut index = 2 + count;
+    let mut has_extended_sections = false;
+    if let Some(child_count) = fields
+        .get(index)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    {
+        has_extended_sections = true;
+        index += 1;
+        if fields.len() < index + child_count {
+            bail!("standalone content child item count exceeds field count");
+        }
+        let mut child_uuids = fields
+            .iter()
+            .skip(index)
+            .take(child_count)
+            .map(|uuid| uuid.trim())
+            .collect::<Vec<_>>();
+        child_uuids.sort_unstable();
+        for uuid in child_uuids {
+            let reference = references
+                .object_refs
+                .get(uuid)
+                .ok_or_else(|| anyhow!("standalone content reference not found: {uuid}"))?;
+            push_standalone_metadata_item_xml(&mut xml, "UnusedItem", reference);
+        }
+        let mut trailing_uuids = fields
+            .iter()
+            .skip(index + child_count)
+            .filter_map(|uuid| parse_non_zero_uuid(uuid.trim()))
+            .collect::<Vec<_>>();
+        trailing_uuids.sort_unstable();
+        for uuid in trailing_uuids {
+            let reference = references
+                .object_refs
+                .get(&uuid)
+                .ok_or_else(|| anyhow!("standalone content reference not found: {uuid}"))?;
+            push_standalone_priority_item_xml(&mut xml, reference);
+        }
+        if child_count > 0 {
+            xml.push_str(
+                "\t<DataExchangeSettings>\r\n\
+\t\t<ExchangeOnChangeData>true</ExchangeOnChangeData>\r\n\
+\t\t<ExchangePeriod>300</ExchangePeriod>\r\n\
+\t\t<TransactionCount>1000</TransactionCount>\r\n\
+\t\t<InactiveNodesCleanupTimeout>0</InactiveNodesCleanupTimeout>\r\n\
+\t</DataExchangeSettings>\r\n",
+            );
+        }
+    }
+    if has_extended_sections {
+        xml.push_str("</StandaloneContent>");
+    } else {
+        xml.push_str("</StandaloneContent>\r\n");
+    }
+    Ok(xml.into_bytes())
+}
+
+fn push_standalone_metadata_item_xml(xml: &mut String, tag: &str, reference: &str) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
+    xml.push_str(&format!(
+        "\t\t<Metadata>{}</Metadata>\r\n",
+        escape_xml_text(reference)
+    ));
+    xml.push_str(&format!("\t</{tag}>\r\n"));
+}
+
+fn push_standalone_priority_item_xml(xml: &mut String, reference: &str) {
+    xml.push_str("\t<PriorityItem>\r\n");
+    xml.push_str(&format!(
+        "\t\t<Metadata>{}</Metadata>\r\n",
+        escape_xml_text(reference)
+    ));
+    xml.push_str("\t\t<Priority>LocalServer</Priority>\r\n");
+    xml.push_str("\t</PriorityItem>\r\n");
+}
+
 fn parse_job_schedule_text(text: &str) -> Option<JobSchedule> {
     let fields = split_1c_braced_fields(text, 0)?;
     let mut index = 0usize;
@@ -4350,21 +5400,87 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
+    extract_form_body_xml_from_body(&body, object_refs)
+}
+
+fn extract_form_body_xml_from_body(
+    body: &ParsedFormBodyBlob,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    extract_form_body_xml_from_body_timed(body, object_refs, None)
+}
+
+fn extract_form_body_xml_from_body_timed(
+    body: &ParsedFormBodyBlob,
+    object_refs: &BTreeMap<String, String>,
+    mut timings: Option<&mut MssqlDumpTimingReport>,
+) -> Option<String> {
+    let started = Instant::now();
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_split_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
     let mut properties = extract_form_body_properties(&form_fields);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_properties_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
     let events = extract_form_body_events(&form_fields);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_events_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
     let attributes = extract_form_body_attributes(&body.trailing, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_attributes_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
     properties.details_data = extract_form_report_attribute_ref(&form_fields, "6", &attributes);
-    let parameters = extract_form_body_parameters(&body.trailing, object_refs);
-    let commands = extract_form_body_commands(&body.trailing, object_refs);
-    let auto_command_bar = extract_form_auto_command_bar(&form_fields, &commands, object_refs);
-    let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
-    let command_interface = extract_form_command_interface(&body.trailing, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_properties_cpu_ms += elapsed_ms(started);
+    }
 
-    Some(format_form_body_xml(
+    let started = Instant::now();
+    let parameters = extract_form_body_parameters(&body.trailing, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_parameters_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
+    let commands = extract_form_body_commands(&body.trailing, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_commands_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
+    let auto_command_bar = extract_form_auto_command_bar(&form_fields, &commands, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_auto_command_bar_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
+    let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_child_items_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
+    let command_interface = extract_form_command_interface(&body.trailing, object_refs);
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
+    }
+
+    let started = Instant::now();
+    let xml = format_form_body_xml(
         &properties,
         auto_command_bar.as_ref(),
         &events,
@@ -4373,7 +5489,12 @@ fn extract_form_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -
         &parameters,
         &commands,
         &command_interface,
-    ))
+    );
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
+    }
+
+    Some(xml)
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -4574,6 +5695,7 @@ struct FormChildItem {
     choice_button_representation: Option<&'static str>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
+    picture_file_name: Option<&'static str>,
     title: Vec<(String, String)>,
     tooltip: Vec<(String, String)>,
     extended_tooltip: Option<(String, String)>,
@@ -5258,6 +6380,7 @@ fn is_probable_form_event_handler(value: &str) -> bool {
     })
 }
 
+#[allow(dead_code)]
 fn extract_form_item_assets(bytes: &[u8]) -> Vec<FormItemAsset> {
     let Ok(inflated) = inflate_raw_deflate(bytes) else {
         return Vec::new();
@@ -5273,6 +6396,10 @@ fn extract_form_item_assets(bytes: &[u8]) -> Vec<FormItemAsset> {
         return Vec::new();
     }
 
+    extract_form_item_assets_from_text(text)
+}
+
+fn extract_form_item_assets_from_text(text: &str) -> Vec<FormItemAsset> {
     let mut assets = Vec::new();
     let mut occurrences_by_item = BTreeMap::<String, usize>::new();
     let mut offset = 0usize;
@@ -5310,12 +6437,46 @@ fn is_form_item_picture_content(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"\x00\x00\x01\x00")
         || bytes.starts_with(b"\xff\xd8\xff")
         || bytes.starts_with(b"BM")
+        || bytes.starts_with(b"PK\x03\x04")
         || is_svg_content(bytes)
 }
 
 fn nearest_form_item_name(text: &str, marker_start: usize) -> Option<String> {
-    nearest_form_item_name_in_window(text, marker_start, 4096)
+    nearest_form_item_name_from_enclosing_item(text, marker_start)
+        .or_else(|| nearest_form_item_name_in_window(text, marker_start, 4096))
         .or_else(|| nearest_form_item_name_in_window(text, marker_start, 12_288))
+}
+
+fn nearest_form_item_name_from_enclosing_item(text: &str, marker_start: usize) -> Option<String> {
+    let mut search_end = marker_start;
+    let mut search_limit = marker_start.saturating_sub(32_768);
+    while search_limit < marker_start && !text.is_char_boundary(search_limit) {
+        search_limit += 1;
+    }
+    while search_end > search_limit {
+        let relative_start = text[search_limit..search_end].rfind('{')?;
+        let start = search_limit + relative_start;
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if end <= marker_start {
+            continue;
+        }
+        let Some(fields) = split_1c_braced_fields(&text[start..end], 0) else {
+            continue;
+        };
+        let Some(wrapper) = fields.first().map(|field| field.trim()) else {
+            continue;
+        };
+        if wrapper != "12" || form_child_item_tag(wrapper, &fields) != Some("PictureDecoration") {
+            continue;
+        }
+        if let Some(name) = parse_form_child_item_name(wrapper, &fields) {
+            return Some(name);
+        }
+    }
+    None
 }
 
 fn nearest_form_item_name_in_window(
@@ -5373,6 +6534,10 @@ fn form_item_picture_file_name(item_name: &str, content: &[u8], occurrence: usiz
     } else if item_name.contains("Авторегистрация") || item_name.ends_with("Пиктограмма")
     {
         "ValuesPicture"
+    } else if item_name.contains("Присоединять") {
+        "ValuesPicture"
+    } else if item_name == "Нормативы" {
+        "RowsPicture"
     } else if (item_name.starts_with("Дерево") || item_name.starts_with("Список"))
         && !item_name.contains("КонтекстноеМеню")
         && !item_name.contains("Добавить")
@@ -5927,6 +7092,9 @@ fn parse_form_child_item_pairs(
             }
             cursor += 2;
         }
+        if complete && items.len() == count {
+            return Some(items);
+        }
         if complete && items.len() > best.len() {
             best = items;
         }
@@ -6455,6 +7623,11 @@ fn parse_form_child_item_with_attrs(
             fields
                 .get(19)
                 .and_then(|field| parse_form_search_addition_source_item(field, table_name_by_id))
+        } else {
+            None
+        },
+        picture_file_name: if tag == "PictureDecoration" {
+            parse_form_picture_decoration_file_name(&fields)
         } else {
             None
         },
@@ -7098,6 +8271,10 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "9" => Some("AutoCommandBar"),
             _ => None,
         },
+        "12" => match fields.get(5).map(|value| value.trim())? {
+            "1" => Some("PictureDecoration"),
+            _ => None,
+        },
         "34" => Some("Button"),
         "48" => match fields
             .get(5 + form_input_field_top_level_offset(fields))
@@ -7175,6 +8352,9 @@ fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<(String, St
         if nested.first().map(|value| value.trim()) != Some("12") {
             return None;
         }
+        if nested.get(5).map(|value| value.trim()) == Some("1") {
+            return None;
+        }
         let identity = split_1c_braced_fields(nested.get(1)?.trim(), 0)?;
         let id = identity.first()?.trim();
         if id == "0" {
@@ -7182,6 +8362,14 @@ fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<(String, St
         }
         let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
         (!name.is_empty()).then(|| (name, id.to_string()))
+    })
+}
+
+fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option<&'static str> {
+    fields.iter().find_map(|field| {
+        let payload = extract_base64_payload(field)?;
+        let content = decode_base64_mime(payload)?;
+        is_form_item_picture_content(&content).then(|| ext_picture_file_name(&content))
     })
 }
 
@@ -8193,6 +9381,15 @@ fn format_form_child_item_xml(
             "{tab}\t<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
             escape_xml_text(name),
             escape_xml_text(id)
+        ));
+    }
+    if let Some(file_name) = item.picture_file_name {
+        xml.push_str(&format!(
+            "{tab}\t<Picture>\r\n\
+{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
+{tab}\t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
+{tab}\t</Picture>\r\n",
+            escape_xml_text(file_name)
         ));
     }
     if !item.events.is_empty() {
@@ -9647,15 +10844,7 @@ fn parse_moxel_formats(
 fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<MoxelFormat> {
     let fields = split_1c_braced_fields(text, 0)?;
     let flags = fields.first()?.trim().parse::<u64>().ok()?;
-    let bits = moxel_format_bits(flags)?;
-    if bits.len() + 1 != fields.len() {
-        return None;
-    }
-    let values = bits
-        .iter()
-        .copied()
-        .zip(fields.iter().skip(1).copied())
-        .collect::<Vec<_>>();
+    let values = moxel_format_values(flags, &fields)?;
     let left_border = parse_moxel_format_usize(&values, 1);
     let top_border = parse_moxel_format_usize(&values, 2);
     let right_border = parse_moxel_format_usize(&values, 3);
@@ -9707,12 +10896,13 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
     })
 }
 
-fn moxel_format_bits(flags: u64) -> Option<Vec<u8>> {
+fn moxel_format_values<'a>(flags: u64, fields: &[&'a str]) -> Option<[Option<&'a str>; 64]> {
     if flags == 0 {
         return None;
     }
-    let mut bits = Vec::new();
-    for bit in 0..64 {
+    let mut values = [None; 64];
+    let mut field_index = 1usize;
+    for (bit, value) in values.iter_mut().enumerate() {
         if flags & (1u64 << bit) == 0 {
             continue;
         }
@@ -9745,21 +10935,21 @@ fn moxel_format_bits(flags: u64) -> Option<Vec<u8>> {
         ) {
             return None;
         }
-        bits.push(bit);
+        *value = Some(*fields.get(field_index)?);
+        field_index += 1;
     }
-    Some(bits)
+    (field_index == fields.len()).then_some(values)
 }
 
-fn parse_moxel_format_usize(values: &[(u8, &str)], bit: u8) -> Option<usize> {
+fn parse_moxel_format_usize(values: &[Option<&str>; 64], bit: usize) -> Option<usize> {
     values
-        .iter()
-        .find(|(value_bit, _)| *value_bit == bit)
-        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+        .get(bit)
+        .and_then(|value| value.and_then(|value| value.trim().parse::<usize>().ok()))
 }
 
 fn parse_moxel_format_style_ref(
-    values: &[(u8, &str)],
-    bit: u8,
+    values: &[Option<&str>; 64],
+    bit: usize,
     style_refs: &[Option<String>],
 ) -> Option<String> {
     parse_moxel_format_usize(values, bit)
@@ -10640,28 +11830,31 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
     xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
 }
 
+#[allow(dead_code)]
 fn module_body_paths(rows: &[ConfigRow]) -> BTreeMap<String, PathBuf> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    module_body_paths_from_texts(rows, &metadata_texts)
+}
+
+fn module_body_paths_from_texts(
+    rows: &[ConfigRow],
+    metadata_texts: &[MetadataTextRow],
+) -> BTreeMap<String, PathBuf> {
     let file_names = rows
         .iter()
         .map(|row| row.file_name.as_str())
         .collect::<BTreeSet<_>>();
     let mut paths = configuration_module_body_paths(&file_names);
 
-    for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Some(entries) =
-            parse_module_body_source_paths_from_metadata_blob(&bytes, &row.file_name, &file_names)
+    for row in metadata_texts {
+        let Some(entries) = parse_module_body_source_paths_from_metadata_text(row, &file_names)
         else {
             continue;
         };
         paths.extend(entries);
     }
-    paths.extend(form_module_body_paths(rows, &file_names));
+    let form_refs = build_form_source_reference_index_from_texts(metadata_texts);
+    paths.extend(form_module_body_paths(&form_refs, &file_names));
 
     paths
 }
@@ -10698,16 +11891,16 @@ fn configuration_module_body_paths(file_names: &BTreeSet<&str>) -> BTreeMap<Stri
 }
 
 fn form_module_body_paths(
-    rows: &[ConfigRow],
+    form_refs: &BTreeMap<String, FormSourceReference>,
     file_names: &BTreeSet<&str>,
 ) -> BTreeMap<String, PathBuf> {
     let mut paths = BTreeMap::new();
-    for (form_uuid, form_ref) in build_form_source_reference_index(rows) {
+    for (form_uuid, form_ref) in form_refs {
         let body_id = format!("{form_uuid}.0");
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
-        let mut form_dir = form_ref.relative_path;
+        let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
         paths.insert(
             body_id,
@@ -10718,13 +11911,17 @@ fn form_module_body_paths(
 }
 
 fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
-    let module_text = parse_form_body_blob(blob).ok()?.module_text;
-    if module_text.trim().is_empty() {
+    let body = parse_form_body_blob(blob).ok()?;
+    form_body_module_text_bytes(&body)
+}
+
+fn form_body_module_text_bytes(body: &ParsedFormBodyBlob) -> Option<Vec<u8>> {
+    if body.module_text.is_empty() {
         return None;
     }
-    let mut bytes = Vec::with_capacity(3 + module_text.len());
+    let mut bytes = Vec::with_capacity(3 + body.module_text.len());
     bytes.extend_from_slice(b"\xEF\xBB\xBF");
-    bytes.extend_from_slice(module_text.as_bytes());
+    bytes.extend_from_slice(body.module_text.as_bytes());
     Some(bytes)
 }
 
@@ -10744,22 +11941,24 @@ const CONFIGURATION_MODULE_SUFFIXES: &[(&str, &str)] = &[
     ("7", "Ext/SessionModule.bsl"),
 ];
 
+#[allow(dead_code)]
 fn parse_module_body_source_paths_from_metadata_blob(
     blob: &[u8],
     uuid: &str,
     file_names: &BTreeSet<&str>,
 ) -> Option<BTreeMap<String, PathBuf>> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}');
-    let object_code = parse_metadata_object_code(text)?;
-    let header = parse_metadata_header_from_text(text, uuid)?;
+    let row = metadata_text_row_from_blob(uuid, blob)?;
+    parse_module_body_source_paths_from_metadata_text(&row, file_names)
+}
 
-    let (kind, folder) = if object_code == 12 {
-        ("CommonModule", "CommonModules")
-    } else {
-        metadata_source_for_text(object_code, text, uuid)?
-    };
+fn parse_module_body_source_paths_from_metadata_text(
+    row: &MetadataTextRow,
+    file_names: &BTreeSet<&str>,
+) -> Option<BTreeMap<String, PathBuf>> {
+    let uuid = row.file_name.as_str();
+    let kind = row.kind.as_deref()?;
+    let folder = row.folder?;
+    let header = row.header.as_ref()?;
     let mut paths = BTreeMap::new();
     for suffix in MODULE_BODY_SUFFIXES {
         let body_id = format!("{uuid}.{suffix}");
@@ -10775,7 +11974,7 @@ fn parse_module_body_source_paths_from_metadata_blob(
         folder,
         &header.name,
         uuid,
-        text,
+        &row.text,
         file_names,
     ));
 
@@ -10910,6 +12109,17 @@ fn nested_headers_from_text(
     owner_uuid: &str,
     accepts_marker: impl Fn(usize) -> bool,
 ) -> Vec<MetadataHeader> {
+    nested_headers_with_offsets_from_text(text, owner_uuid, accepts_marker)
+        .into_iter()
+        .map(|(header, _)| header)
+        .collect()
+}
+
+fn nested_headers_with_offsets_from_text(
+    text: &str,
+    owner_uuid: &str,
+    accepts_marker: impl Fn(usize) -> bool,
+) -> Vec<(MetadataHeader, usize)> {
     let mut headers = Vec::new();
     let mut seen = BTreeSet::new();
     let mut offset = 0usize;
@@ -10934,7 +12144,7 @@ fn nested_headers_from_text(
             continue;
         }
         if let Some(header) = parse_metadata_header_from_text(text, uuid) {
-            headers.push(header);
+            headers.push((header, marker_start));
         }
     }
 
@@ -10955,11 +12165,85 @@ fn is_offset_inside_metadata_object_code(text: &str, offset: usize, code: u32) -
         .unwrap_or(false)
 }
 
+fn enclosing_metadata_header_for_code(
+    text: &str,
+    offset: usize,
+    code: u32,
+) -> Option<MetadataHeader> {
+    let code_marker = format!("{{{code},");
+    let mut search_end = offset;
+    while let Some(relative_start) = text[..search_end].rfind(&code_marker) {
+        let start = relative_start;
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if offset >= end {
+            continue;
+        }
+        let Some(marker_relative) = text[start..end].find("{1,0,") else {
+            continue;
+        };
+        let uuid_start = start + marker_relative + "{1,0,".len();
+        let uuid_end = uuid_start + 36;
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
+            continue;
+        }
+        if let Some(header) = parse_metadata_header_from_text(text, uuid) {
+            return Some(header);
+        }
+    }
+    None
+}
+
+fn preceding_metadata_header_for_code(
+    text: &str,
+    offset: usize,
+    code: u32,
+) -> Option<MetadataHeader> {
+    let code_marker = format!("{{{code},");
+    let mut search_end = offset;
+    while let Some(start) = text[..search_end].rfind(&code_marker) {
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        let Some(marker_relative) = text[start..end].find("{1,0,") else {
+            continue;
+        };
+        let uuid_start = start + marker_relative + "{1,0,".len();
+        let uuid_end = uuid_start + 36;
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
+            continue;
+        }
+        if let Some(header) = parse_metadata_header_from_text(text, uuid) {
+            return Some(header);
+        }
+    }
+    None
+}
+
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
-    let module_file = match (kind, suffix) {
+    module_owner_module_file(kind, suffix).map(|module_file| {
+        PathBuf::from(folder)
+            .join(sanitize_source_path_segment(name))
+            .join("Ext")
+            .join(module_file)
+    })
+}
+
+fn module_owner_module_file(kind: &str, suffix: &str) -> Option<&'static str> {
+    match (kind, suffix) {
         ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
         ("Bot", "1") | ("IntegrationService", "0") => Some("Module.bsl"),
         ("CommonCommand", "2") => Some("CommandModule.bsl"),
+        ("FilterCriterion", "0") => Some("ManagerModule.bsl"),
         ("Constant", "0") => Some("ValueManagerModule.bsl"),
         ("Constant", "1") => Some("ManagerModule.bsl"),
         ("SettingsStorage", "8") => Some("ManagerModule.bsl"),
@@ -10991,13 +12275,7 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
         ("ChartOfCharacteristicTypes", "15") => Some("ObjectModule.bsl"),
         ("ChartOfCharacteristicTypes", "16") => Some("ManagerModule.bsl"),
         _ => None,
-    };
-    module_file.map(|module_file| {
-        PathBuf::from(folder)
-            .join(sanitize_source_path_segment(name))
-            .join("Ext")
-            .join(module_file)
-    })
+    }
 }
 
 struct ExtractedMetadataSourceXml {
@@ -11020,12 +12298,18 @@ struct SubsystemSourceReference {
     relative_path: PathBuf,
 }
 
+#[derive(Clone)]
 struct MetadataHeader {
     uuid: String,
     name: String,
     synonyms: Vec<(String, String)>,
     comment: String,
     template_type_code: Option<u32>,
+}
+
+struct CommonPictureProperties {
+    availability_for_choice: bool,
+    availability_for_appearance: bool,
 }
 
 struct CommonModuleFlags {
@@ -11151,16 +12435,16 @@ enum ConstantValueType {
     },
 }
 
+#[allow(dead_code)]
 fn build_metadata_type_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_type_index_from_texts(&metadata_texts)
+}
+
+fn build_metadata_type_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<String, String> {
     let mut index = BTreeMap::new();
     for row in rows {
-        if row.file_name.contains('.') {
-            continue;
-        }
-        let Ok(bytes) = decode_hex(&row.binary_hex) else {
-            continue;
-        };
-        let Some(entries) = parse_generated_type_entries_from_blob(&bytes, &row.file_name) else {
+        let Some(entries) = parse_generated_type_entries_from_text(row) else {
             continue;
         };
         for (type_id, reference) in entries {
@@ -11170,6 +12454,7 @@ fn build_metadata_type_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
     index
 }
 
+#[allow(dead_code)]
 fn parse_generated_type_entries_from_blob(
     blob: &[u8],
     uuid: &str,
@@ -11177,8 +12462,21 @@ fn parse_generated_type_entries_from_blob(
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
-    let object_code = parse_metadata_object_code(text)?;
-    let header = parse_metadata_header_from_text(text, uuid)?;
+    let row = MetadataTextRow {
+        file_name: uuid.to_string(),
+        text: text.to_string(),
+        object_code: parse_metadata_object_code(text),
+        header: parse_metadata_header_from_text(text, uuid),
+        kind: None,
+        folder: None,
+    };
+    parse_generated_type_entries_from_text(&row)
+}
+
+fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(String, String)>> {
+    let text = row.text.as_str();
+    let object_code = row.object_code?;
+    let header = row.header.as_ref()?;
     let root_fields = split_1c_braced_fields(text, 0)?;
     let object_text = *root_fields.get(1)?;
     let fields = split_1c_braced_fields(object_text, 0)?;
@@ -11222,12 +12520,21 @@ fn parse_generated_type_entries_from_blob(
         push_indexed_generated_type(&mut entries, &fields, 7, "CatalogList", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 34, "CatalogManager", &header.name);
     }
-    let header_index = metadata_header_field_index(&fields, uuid);
+    let header_index = metadata_header_field_index(&fields, &row.file_name);
 
     if object_code == 20 && header_index == Some(5) {
         if let Some(type_id) = fields.get(1).copied().and_then(parse_uuid_field) {
             entries.push((type_id, format!("cfg:EnumRef.{}", header.name)));
         }
+    }
+    if object_code == 28 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            9,
+            "AccumulationRegisterRecordSet",
+            &header.name,
+        );
     }
     if object_code == 33 && fields.get(1).copied().and_then(parse_uuid_field).is_some() {
         push_indexed_generated_type(
@@ -11422,18 +12729,39 @@ fn extract_metadata_source_xml_with_refs(
     if uuid.contains('.') {
         return None;
     }
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}');
+    let row = metadata_text_row_from_blob(uuid, blob)?;
+    extract_metadata_source_xml_from_text_row(
+        &row,
+        type_index,
+        object_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+    )
+}
+
+fn extract_metadata_source_xml_from_text_row(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> Option<ExtractedMetadataSourceXml> {
+    let uuid = row.file_name.as_str();
+    if uuid.contains('.') {
+        return None;
+    }
+    let text = row.text.as_str();
     if let Some(xml) = extract_configuration_source_xml(text, uuid) {
         return Some(ExtractedMetadataSourceXml {
             relative_path: PathBuf::from("Configuration.xml"),
             xml: xml.into_bytes(),
         });
     }
-    let object_code = parse_metadata_object_code(text)?;
+    let object_code = row.object_code?;
     if object_code == 12 {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let flags = parse_common_module_flags_from_text(text, uuid)?;
         let relative_path = PathBuf::from("CommonModules")
             .join(sanitize_source_path_segment(&header.name))
@@ -11442,7 +12770,7 @@ fn extract_metadata_source_xml_with_refs(
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 16 {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let constant = parse_constant_properties_from_text(text, uuid, type_index)?;
         let relative_path = PathBuf::from("Constants")
             .join(sanitize_source_path_segment(&header.name))
@@ -11451,10 +12779,12 @@ fn extract_metadata_source_xml_with_refs(
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 3
-        && metadata_source_for_text(object_code, text, uuid)
-            .is_some_and(|(kind, _)| kind == "CommandGroup")
+        && row
+            .kind
+            .as_deref()
+            .is_some_and(|kind| kind == "CommandGroup")
     {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let command_group = parse_command_group_properties_from_text(text, uuid, object_refs)?;
         let relative_path = PathBuf::from("CommandGroups")
             .join(sanitize_source_path_segment(&header.name))
@@ -11462,10 +12792,12 @@ fn extract_metadata_source_xml_with_refs(
         let xml = format_command_group_source_xml(&header, &command_group).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    if metadata_source_for_text(object_code, text, uuid)
-        .is_some_and(|(kind, _)| kind == "CommonCommand")
+    if row
+        .kind
+        .as_deref()
+        .is_some_and(|kind| kind == "CommonCommand")
     {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let common_command =
             parse_common_command_properties_from_text(text, uuid, type_index, object_refs)?;
         let relative_path = PathBuf::from("CommonCommands")
@@ -11474,11 +12806,8 @@ fn extract_metadata_source_xml_with_refs(
         let xml = format_common_command_source_xml(&header, &common_command).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    if object_code == 3
-        && metadata_source_for_text(object_code, text, uuid)
-            .is_some_and(|(kind, _)| kind == "StyleItem")
-    {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+    if object_code == 3 && row.kind.as_deref().is_some_and(|kind| kind == "StyleItem") {
+        let header = row.header.as_ref()?;
         let style_item = parse_style_item_properties_from_text(text, uuid)?;
         let relative_path = PathBuf::from("StyleItems")
             .join(sanitize_source_path_segment(&header.name))
@@ -11487,7 +12816,7 @@ fn extract_metadata_source_xml_with_refs(
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 0 && is_defined_type_metadata_text(text, uuid) {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let defined_type = parse_defined_type_properties_from_text(text, uuid, type_index)?;
         let relative_path = PathBuf::from("DefinedTypes")
             .join(sanitize_source_path_segment(&header.name))
@@ -11496,7 +12825,7 @@ fn extract_metadata_source_xml_with_refs(
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if is_form_metadata_text(text, uuid) {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let form_ref = form_refs.get(uuid);
         let relative_path = form_ref
             .map(|form_ref| form_ref.relative_path.clone())
@@ -11512,7 +12841,7 @@ fn extract_metadata_source_xml_with_refs(
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if is_template_metadata_text(text, uuid) {
-        let header = parse_metadata_header_from_text(text, uuid)?;
+        let header = row.header.as_ref()?;
         let template_ref = template_refs.get(uuid);
         let relative_path = template_ref
             .map(|template_ref| template_ref.relative_path.clone())
@@ -11530,8 +12859,9 @@ fn extract_metadata_source_xml_with_refs(
         let xml = format_template_source_xml(kind, &header, template_type).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    let (kind, folder) = metadata_source_for_text(object_code, text, uuid)?;
-    let header = parse_metadata_header_from_text(text, uuid)?;
+    let kind = row.kind.as_deref()?;
+    let folder = row.folder?;
+    let header = row.header.as_ref()?;
     let relative_path = if kind == "Subsystem" {
         subsystem_refs
             .get(uuid)
@@ -11551,7 +12881,10 @@ fn extract_metadata_source_xml_with_refs(
     } else {
         Vec::new()
     };
-    let mut xml = if kind == "Catalog" {
+    let mut xml = if kind == "CommonPicture" {
+        let picture = parse_common_picture_properties_from_text(text, uuid)?;
+        format_common_picture_source_xml(&header, &picture).into_bytes()
+    } else if kind == "Catalog" {
         let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if is_typed_metadata_source(kind) {
@@ -11686,7 +13019,7 @@ fn contains_wrapped_metadata_object_code(text: &str, code: u32, uuid: &str) -> b
 }
 
 fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
-    matches!(parse_metadata_object_code(text), Some(0 | 4))
+    matches!(parse_metadata_object_code(text), Some(0 | 1 | 4 | 13))
         && (contains_wrapped_metadata_object_code(text, 13, uuid)
             || contains_wrapped_metadata_object_code(text, 14, uuid))
 }
@@ -11779,6 +13112,22 @@ fn parse_common_module_flags_from_text(text: &str, uuid: &str) -> Option<CommonM
         client_managed_application: parse_1c_bool_flag(flags[5])?,
         return_values_reuse: parse_return_values_reuse_flag(flags[6])?,
         server_call: parse_1c_bool_flag(flags[7])?,
+    })
+}
+
+fn parse_common_picture_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<CommonPictureProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("4")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+    Some(CommonPictureProperties {
+        availability_for_choice: parse_1c_bool_flag(fields.get(2)?.trim())?,
+        availability_for_appearance: parse_1c_bool_flag(fields.get(3)?.trim())?,
     })
 }
 
@@ -12379,6 +13728,10 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
             item_type: "Font",
             value_xml: parse_style_font_value_xml(value),
         }),
+        2 => Some(StyleItemProperties {
+            item_type: "Border",
+            value_xml: parse_style_border_value_xml(value)?,
+        }),
         _ => None,
     }
 }
@@ -12655,21 +14008,51 @@ fn parse_style_color_value(value: &str) -> Option<String> {
     }
 }
 
+fn parse_style_border_value_xml(value: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r##""#""## {
+        return None;
+    }
+    let border_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
+    if border_fields.first()?.trim() != "3" {
+        return None;
+    }
+    let style = match border_fields.get(3)?.trim() {
+        "0" => "WithoutBorder",
+        "1" => "Single",
+        _ => return None,
+    };
+    Some(format!(
+        "<Value xsi:type=\"v8ui:Border\" width=\"1\">\r\n\
+\t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
+\t\t\t</Value>"
+    ))
+}
+
 fn style_web_color_name(code: i32) -> Option<&'static str> {
     match code {
         8 => Some("web:Black"),
         10 => Some("web:Blue"),
         20 => Some("web:Cream"),
+        21 => Some("web:Crimson"),
+        26 => Some("web:DarkGray"),
+        27 => Some("web:DarkGray"),
+        31 => Some("web:DarkGreen"),
         23 => Some("web:DarkBlue"),
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
         44 => Some("web:FireBrick"),
         45 => Some("web:FloralWhite"),
         46 => Some("web:ForestGreen"),
+        50 => Some("web:Gold"),
+        51 => Some("web:Goldenrod"),
         48 => Some("web:Gainsboro"),
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
+        64 => Some("web:LightCoral"),
+        65 => Some("web:LightBlue"),
+        66 => Some("web:LightCoral"),
         67 => Some("web:LightCyan"),
         68 => Some("web:LightGoldenRod"),
         69 => Some("web:LightGoldenRodYellow"),
@@ -12677,10 +14060,17 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         72 => Some("web:LightPink"),
         79 => Some("web:LightYellow"),
         84 => Some("web:Maroon"),
+        86 => Some("web:MediumBlue"),
+        87 => Some("web:MediumGray"),
+        94 => Some("web:Orange"),
+        105 => Some("web:Orange"),
         97 => Some("web:MintCream"),
         98 => Some("web:MistyRose"),
+        96 => Some("web:Moccasin"),
+        99 => Some("web:Moccasin"),
         119 => Some("web:Red"),
         120 => Some("web:RosyBrown"),
+        121 => Some("web:RoyalBlue"),
         128 => Some("web:Silver"),
         130 => Some("web:SlateBlue"),
         134 => Some("web:SteelBlue"),
@@ -13019,6 +14409,57 @@ fn expect_comma_at(text: &str, offset: usize) -> Option<usize> {
     } else {
         None
     }
+}
+
+fn format_common_picture_source_xml(
+    header: &MetadataHeader,
+    picture: &CommonPictureProperties,
+) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<CommonPicture uuid=\"{}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&header.uuid),
+        escape_xml_text(&header.name)
+    );
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_element_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_text(&header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<AvailabilityForChoice>{}</AvailabilityForChoice>\r\n\
+\t\t\t<AvailabilityForAppearance>{}</AvailabilityForAppearance>\r\n\
+\t\t</Properties>\r\n\
+\t</CommonPicture>\r\n\
+</MetaDataObject>",
+        xml_bool(picture.availability_for_choice),
+        xml_bool(picture.availability_for_appearance)
+    ));
+    xml
 }
 
 fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
@@ -14107,6 +15548,81 @@ fn fetch_rows(
         .with_context(|| format!("failed to assemble {table} row chunks for {database}"))
 }
 
+fn fetch_binary_rows_bcp(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    use_range_filter: bool,
+) -> Result<Vec<BinaryConfigRow>> {
+    let query =
+        build_fetch_binary_rows_query(database, table, selected_file_names, use_range_filter);
+    let output_path = std::env::temp_dir().join(format!(
+        "ibcmd-rs-bcp-{}-{}.bcp",
+        std::process::id(),
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    let bcp = bcp_executable_for_sqlcmd(sqlcmd);
+    let mut command = Command::new(&bcp);
+    command
+        .arg(&query)
+        .arg("queryout")
+        .arg(&output_path)
+        .arg("-S")
+        .arg(server)
+        .arg("-n")
+        .arg("-u")
+        .arg("-a")
+        .arg("65535");
+    match user {
+        Some(user) => {
+            command.arg("-U").arg(user);
+            if let Some(password) = password {
+                command.arg("-P").arg(password);
+            }
+        }
+        None => {
+            command.arg("-T");
+        }
+    }
+
+    let output = command
+        .output()
+        .with_context(|| format!("failed to run {}", bcp.display()))?;
+    if !output.status.success() {
+        let _ = fs::remove_file(&output_path);
+        bail!(
+            "bcp failed with status {}: {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let bytes = fs::read(&output_path)
+        .with_context(|| format!("failed to read {}", output_path.display()))?;
+    let _ = fs::remove_file(&output_path);
+    let parts = parse_bcp_native_config_rows(&bytes)
+        .with_context(|| format!("failed to parse native bcp rows for {database}.{table}"))?;
+    assemble_binary_config_rows(parts)
+        .with_context(|| format!("failed to assemble native bcp rows for {database}.{table}"))
+}
+
+fn bcp_executable_for_sqlcmd(sqlcmd: &Path) -> PathBuf {
+    if let Some(parent) = sqlcmd.parent() {
+        for name in ["bcp.exe", "bcp"] {
+            let candidate = parent.join(name);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from("bcp")
+}
+
 fn fetch_metadata_rows(
     sqlcmd: &Path,
     server: &str,
@@ -14121,6 +15637,45 @@ fn fetch_metadata_rows(
         .with_context(|| format!("failed to parse {table} metadata row chunks for {database}"))?;
     assemble_config_rows(chunks)
         .with_context(|| format!("failed to assemble {table} metadata rows for {database}"))
+}
+
+fn build_fetch_binary_rows_query(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    use_range_filter: bool,
+) -> String {
+    let filter = if selected_file_names.is_empty() {
+        String::new()
+    } else if use_range_filter {
+        let first = selected_file_names
+            .first()
+            .expect("non-empty selected_file_names has first value");
+        let last = selected_file_names
+            .last()
+            .expect("non-empty selected_file_names has last value");
+        format!(
+            "WHERE FileName >= N'{}' AND FileName <= N'{}'\n",
+            quote_string(first),
+            quote_string(last)
+        )
+    } else {
+        let values = selected_file_names
+            .iter()
+            .map(|value| format!("N'{}'", quote_string(value)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("WHERE FileName IN ({values})\n")
+    };
+
+    format!(
+        "SELECT FileName, PartNo, DataSize, BinaryData\n\
+         FROM {qualified_table}\n\
+         {filter}\
+         ORDER BY FileName, PartNo",
+        qualified_table = qualified_storage_table(database, table),
+        filter = filter,
+    )
 }
 
 fn build_fetch_metadata_rows_sql(database: &str, table: &str) -> String {
@@ -14407,8 +15962,115 @@ fn assemble_config_rows(chunks: Vec<ConfigChunkRow>) -> Result<Vec<ConfigRow>> {
     Ok(rows.into_values().collect())
 }
 
+fn parse_bcp_native_config_rows(bytes: &[u8]) -> Result<Vec<BinaryConfigRow>> {
+    let mut rows = Vec::new();
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let name_len = read_u16_le(bytes, &mut offset)? as usize;
+        let name_bytes = read_bytes(bytes, &mut offset, name_len)?;
+        if name_bytes.len() % 2 != 0 {
+            bail!(
+                "invalid native bcp nvarchar byte length: {}",
+                name_bytes.len()
+            );
+        }
+        let units = name_bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        let file_name = String::from_utf16(&units).context("invalid UTF-16 FileName in bcp row")?;
+        let part_no = read_i32_le(bytes, &mut offset)?;
+        let data_size = read_i64_le(bytes, &mut offset)?;
+        let binary_len = read_i64_le(bytes, &mut offset)?;
+        if binary_len < 0 {
+            bail!("unexpected NULL BinaryData in bcp row {file_name}");
+        }
+        let binary = read_bytes(bytes, &mut offset, binary_len as usize)?.to_vec();
+        rows.push(BinaryConfigRow {
+            file_name,
+            part_no,
+            data_size,
+            binary,
+        });
+    }
+    Ok(rows)
+}
+
+fn assemble_binary_config_rows(parts: Vec<BinaryConfigRow>) -> Result<Vec<BinaryConfigRow>> {
+    let mut rows = BTreeMap::<String, BinaryConfigRow>::new();
+    let mut expected_part = BTreeMap::<String, i32>::new();
+    for part in parts {
+        let expected = expected_part.entry(part.file_name.clone()).or_insert(0);
+        if part.part_no != *expected {
+            bail!(
+                "Config row {} part order gap: expected {}, got {}",
+                part.file_name,
+                expected,
+                part.part_no
+            );
+        }
+        *expected += 1;
+
+        rows.entry(part.file_name.clone())
+            .and_modify(|row| {
+                if row.data_size != part.data_size {
+                    row.data_size = part.data_size;
+                }
+                row.binary.extend_from_slice(&part.binary);
+            })
+            .or_insert_with(|| BinaryConfigRow {
+                file_name: part.file_name,
+                part_no: 0,
+                data_size: part.data_size,
+                binary: part.binary,
+            });
+    }
+
+    for row in rows.values() {
+        if row.binary.len() != row.data_size as usize {
+            bail!(
+                "Config row {} DataSize {} does not match assembled BinaryData length {}",
+                row.file_name,
+                row.data_size,
+                row.binary.len()
+            );
+        }
+    }
+
+    Ok(rows.into_values().collect())
+}
+
+fn read_bytes<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| anyhow!("native bcp offset overflow"))?;
+    let slice = bytes
+        .get(*offset..end)
+        .ok_or_else(|| anyhow!("unexpected end of native bcp data"))?;
+    *offset = end;
+    Ok(slice)
+}
+
+fn read_u16_le(bytes: &[u8], offset: &mut usize) -> Result<u16> {
+    let slice = read_bytes(bytes, offset, 2)?;
+    Ok(u16::from_le_bytes([slice[0], slice[1]]))
+}
+
+fn read_i32_le(bytes: &[u8], offset: &mut usize) -> Result<i32> {
+    let slice = read_bytes(bytes, offset, 4)?;
+    Ok(i32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+fn read_i64_le(bytes: &[u8], offset: &mut usize) -> Result<i64> {
+    let slice = read_bytes(bytes, offset, 8)?;
+    Ok(i64::from_le_bytes([
+        slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
+    ]))
+}
+
 const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
-const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 25;
+const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 4096;
+const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 1024 * 1024 * 1024;
 
 fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
     let mut selected = BTreeSet::new();
@@ -14643,6 +16305,79 @@ mod tests {
         assert!(sql.contains("WHERE FileName IN (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa')"));
         assert!(sql.contains("ORDER BY rows.FileName, rows.PartNo, chunks.chunk_index"));
         assert!(!sql.contains("FOR JSON"));
+    }
+
+    #[test]
+    fn fetch_binary_rows_query_can_use_range_filter() {
+        let selected = BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+        ]);
+
+        let sql = build_fetch_binary_rows_query("TestDb", "Config", &selected, true);
+
+        assert!(sql.contains("FROM [TestDb].dbo.[Config]"));
+        assert!(sql.contains(
+            "WHERE FileName >= N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa' AND FileName <= N'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb'"
+        ));
+        assert!(!sql.contains(" IN "));
+        assert!(sql.contains("ORDER BY FileName, PartNo"));
+    }
+
+    #[test]
+    fn parses_native_bcp_rows_and_assembles_parts() {
+        let mut bytes = Vec::new();
+        push_native_bcp_row(&mut bytes, "first", 0, 5, b"abc");
+        push_native_bcp_row(&mut bytes, "first", 1, 5, b"de");
+        push_native_bcp_row(&mut bytes, "second", 0, 1, b"z");
+
+        let parts = parse_bcp_native_config_rows(&bytes).unwrap();
+        let rows = assemble_binary_config_rows(parts).unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].file_name, "first");
+        assert_eq!(rows[0].part_no, 0);
+        assert_eq!(rows[0].data_size, 5);
+        assert_eq!(rows[0].binary, b"abcde");
+        assert_eq!(rows[1].file_name, "second");
+        assert_eq!(rows[1].binary, b"z");
+    }
+
+    #[test]
+    fn dump_file_name_batches_limit_large_blob_memory() {
+        let big = SQLCMD_DUMP_BATCH_MAX_DATA_BYTES;
+        let headers = vec![
+            ConfigRowHeader {
+                file_name: "small-1".to_string(),
+                part_no: 0,
+                data_size: 1024,
+            },
+            ConfigRowHeader {
+                file_name: "large".to_string(),
+                part_no: 0,
+                data_size: big as i64,
+            },
+            ConfigRowHeader {
+                file_name: "small-2".to_string(),
+                part_no: 0,
+                data_size: 1024,
+            },
+        ];
+        let file_names = BTreeSet::from([
+            "large".to_string(),
+            "small-1".to_string(),
+            "small-2".to_string(),
+        ]);
+
+        let batches = build_dump_file_name_batches(&headers, &file_names);
+
+        assert_eq!(
+            batches,
+            vec![
+                vec!["large".to_string()],
+                vec!["small-1".to_string(), "small-2".to_string()]
+            ]
+        );
     }
 
     #[test]
@@ -15085,14 +16820,14 @@ mod tests {
                 "first".to_string(),
                 SourceAsset {
                     primary_path: PathBuf::from("Shared/Ext/Template.xml"),
-                    kind: SourceAssetKind::Binary,
+                    kind: SourceAssetKind::InflatedBinary,
                 },
             ),
             (
                 "second".to_string(),
                 SourceAsset {
                     primary_path: PathBuf::from("Shared/Ext/Template.xml"),
-                    kind: SourceAssetKind::Binary,
+                    kind: SourceAssetKind::InflatedBinary,
                 },
             ),
         ]);
@@ -15156,6 +16891,110 @@ mod tests {
     }
 
     #[test]
+    fn writes_binary_common_module_body_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "\u{feff}{{1,\r\n{{12,\r\n{{3,\r\n{{1,0,{uuid}}},\"BinaryModule\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let body = binary_module_blob_for_test(1);
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 0);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("CommonModules/BinaryModule/Ext/Module.bin")).unwrap(),
+            inflate_raw_deflate(&body).unwrap()
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("CommonModules/BinaryModule/Ext/Module.bin")
+        );
+        assert!(body_row.module_text_path.is_none());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_binary_data_processor_object_module_body_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,835478cc-434a-480c-ad61-99801cd685ed,92b15a50-2234-40c9-af13-3d746d4b870f,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"BinaryProcessor\",{{1,\"en\",\"Binary processor\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,86df3c66-2c45-49c1-9e7d-5d1892acb646,6ae2f4ed-a57a-49ed-a854-8795bf1e1519,00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},{{0}},{{0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let body = binary_module_blob_for_test(2);
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+        assert_eq!(dumped.module_text_rows, 0);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("DataProcessors/BinaryProcessor/Ext/ObjectModule.bin")).unwrap(),
+            inflate_raw_deflate(&body).unwrap()
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("DataProcessors/BinaryProcessor/Ext/ObjectModule.bin")
+        );
+        assert!(body_row.module_text_path.is_none());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn writes_configuration_module_text_to_source_layout_without_metadata_row() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -15181,7 +17020,8 @@ mod tests {
             .blob;
         let png = b"\x89PNG\r\n\x1a\n";
         let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
-        let parent_blob = b"parent-cf".to_vec();
+        let parent_configurations = b"\xEF\xBB\xBF{6,1,1,\"parent-cf\"}".to_vec();
+        let parent_blob = deflate_for_test(&parent_configurations);
         let home_page_work_area = b"\xEF\xBB\xBF<HomePageWorkArea/>".to_vec();
         let home_page_work_area_blob = deflate_for_test(&home_page_work_area);
         let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
@@ -15195,9 +17035,8 @@ mod tests {
         let client_application_interface = b"\xEF\xBB\xBF<ClientApplicationInterface/>".to_vec();
         let client_application_interface_blob = deflate_for_test(&client_application_interface);
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
-        let standalone_configuration_content = b"\xEF\xBB\xBF<StandaloneContent/>".to_vec();
-        let standalone_configuration_content_blob =
-            deflate_for_test(&standalone_configuration_content);
+        let standalone_configuration_content = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<StandaloneContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n</StandaloneContent>\r\n".to_vec();
+        let standalone_configuration_content_blob = deflate_for_test(b"\xEF\xBB\xBF{2,0}");
         let rows = vec![
             ConfigRow {
                 file_name: format!("{uuid}.0"),
@@ -15306,7 +17145,7 @@ mod tests {
         );
         assert_eq!(
             fs::read(root.join("Ext/ParentConfigurations.bin")).unwrap(),
-            parent_blob
+            parent_configurations
         );
         assert_eq!(
             fs::read(root.join("Ext/HomePageWorkArea.xml")).unwrap(),
@@ -15430,6 +17269,58 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_standalone_content_used_items() {
+        let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let body = deflate_for_test(format!("{{2,2,{first_uuid},{second_uuid},0}}").as_bytes());
+        let references = StandaloneContentReferences {
+            object_refs: BTreeMap::from([
+                (first_uuid.to_string(), "Role.ReadOnlyUsers".to_string()),
+                (
+                    second_uuid.to_string(),
+                    "CommonCommand.OpenAllReports".to_string(),
+                ),
+            ]),
+        };
+
+        let xml =
+            String::from_utf8(extract_standalone_content_xml(&body, &references).unwrap()).unwrap();
+
+        assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(xml.contains("<StandaloneContent"));
+        assert!(xml.contains("<Metadata>Role.ReadOnlyUsers</Metadata>"));
+        assert!(xml.contains("<Metadata>CommonCommand.OpenAllReports</Metadata>"));
+        assert!(
+            xml.find("Role.ReadOnlyUsers").unwrap()
+                < xml.find("CommonCommand.OpenAllReports").unwrap()
+        );
+    }
+
+    #[test]
+    fn indexes_common_module_object_reference() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
+            format!(
+                "\u{feff}{{1,{{12,{{3,{{1,0,{uuid}}},\"StringFunctions\",{{1,\"en\",\"String functions\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},1,1,1,0,0,1,0,0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![ConfigRow {
+            file_name: uuid.to_string(),
+            part_no: 0,
+            data_size: metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&metadata),
+        }];
+
+        let refs = build_metadata_object_reference_index(&rows);
+
+        assert_eq!(
+            refs.get(uuid).map(String::as_str),
+            Some("CommonModule.StringFunctions")
+        );
     }
 
     #[test]
@@ -15827,7 +17718,7 @@ mod tests {
         let common_form_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{common_form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{owned_form_uuid},{common_form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{owned_form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -15921,6 +17812,57 @@ mod tests {
     }
 
     #[test]
+    fn extracts_owned_form_refs_from_form_list_marker() {
+        let refs = owned_form_uuid_values(
+            "{1,{0},1183ecbe-255b-4a2e-a148-17c5249498c1,\
+             {fdf816d2-1ead-11d5-b975-0050bae0a95d,2,\
+             1183ecbe-255b-4a2e-a148-17c5249498c1,\
+             039772b1-a494-4618-b613-8ff21bad9890},\
+             {13134204-f60b-11d5-a3c7-0050bae0a776,1,\
+             0074aea8-6dd8-4e09-b6f0-017f96173e87}}",
+        )
+        .unwrap();
+
+        assert_eq!(refs.len(), 3);
+        assert!(refs.contains("1183ecbe-255b-4a2e-a148-17c5249498c1"));
+        assert!(refs.contains("039772b1-a494-4618-b613-8ff21bad9890"));
+        assert!(refs.contains("0074aea8-6dd8-4e09-b6f0-017f96173e87"));
+    }
+
+    #[test]
+    fn recognizes_wrapped_code1_owned_form_metadata() {
+        let form_uuid = "72abba2e-e78a-44a5-9879-4944113429eb";
+        let text = format!(
+            "{{1,\r\n{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"Form\",{{1,\"ru\",\"Form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}\r\n}},0}}"
+        );
+
+        assert!(is_form_metadata_text(&text, form_uuid));
+        assert_eq!(parse_metadata_object_code(&text), Some(1));
+    }
+
+    #[test]
+    fn recognizes_direct_code13_form_metadata() {
+        let form_uuid = "f0620d5a-e1fe-419f-af37-e0f462f97e8d";
+        let text = format!(
+            "{{1,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"Form\",{{1,\"ru\",\"Form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}},0}}"
+        );
+
+        assert!(is_form_metadata_text(&text, form_uuid));
+        assert_eq!(parse_metadata_object_code(&text), Some(13));
+    }
+
+    #[test]
+    fn does_not_treat_direct_code14_filter_criterion_as_form() {
+        let criterion_uuid = "4c9dd3d1-067f-4e9e-8771-dbe1fb357a0b";
+        let text = format!(
+            "{{1,\r\n{{14,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,\r\n{{2,\r\n{{3,\r\n{{1,0,{criterion_uuid}}},\"RelatedDocuments\",{{1,\"en\",\"Related documents\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\"}}\r\n}}\r\n}},0}}"
+        );
+
+        assert!(!is_form_metadata_text(&text, criterion_uuid));
+        assert_eq!(parse_metadata_object_code(&text), Some(14));
+    }
+
+    #[test]
     fn writes_code4_common_form_to_common_forms_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -15996,7 +17938,7 @@ mod tests {
         let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -16061,6 +18003,22 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn skips_zero_length_form_module_text() {
+        let form_body = deflate_for_test(b"{4,{0},\"\",{0}}");
+
+        assert!(unpack_form_body_module_text(&form_body).is_none());
+    }
+
+    #[test]
+    fn writes_whitespace_only_form_module_text() {
+        let form_body = deflate_for_test(b"{4,{0},\"\r\n\",{0}}");
+
+        let module_text = unpack_form_body_module_text(&form_body).unwrap();
+
+        assert_eq!(module_text, b"\xEF\xBB\xBF\r\n");
     }
 
     #[test]
@@ -18390,6 +20348,7 @@ mod tests {
             choice_button_representation: None,
             item_type: None,
             addition_source_item: None,
+            picture_file_name: None,
             title: Vec::new(),
             tooltip: Vec::new(),
             extended_tooltip: None,
@@ -18449,6 +20408,7 @@ mod tests {
                     choice_button_representation: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
+                    picture_file_name: None,
                     title: Vec::new(),
                     tooltip: Vec::new(),
                     extended_tooltip: None,
@@ -18509,6 +20469,7 @@ mod tests {
                     choice_button_representation: None,
                     item_type: None,
                     addition_source_item: None,
+                    picture_file_name: None,
                     title: Vec::new(),
                     tooltip: Vec::new(),
                     extended_tooltip: None,
@@ -18609,7 +20570,7 @@ mod tests {
         let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -18671,12 +20632,56 @@ mod tests {
     }
 
     #[test]
+    fn extracts_picture_decoration_from_wrapper_12() {
+        let field = r#"{12,{165,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СостояниеКартинка",{1,0},{1,0},{#base64:R0lGODlh}}"#;
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "PictureDecoration");
+        assert_eq!(item.name, "СостояниеКартинка");
+        assert_eq!(item.picture_file_name, Some("Picture.gif"));
+        assert_eq!(item.extended_tooltip, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+
+        assert!(xml.contains(r#"<PictureDecoration name="СостояниеКартинка" id="165">"#));
+        assert!(xml.contains("<xr:Abs>Picture.gif</xr:Abs>"));
+        assert!(xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
+        assert!(!xml.contains("<ExtendedTooltip"));
+
+        let first_field = r#"{12,{164,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"КартинкаОжидание",{1,0},{1,0},{#base64:R0lGODlh}}"#;
+        let form_body =
+            deflate_for_test(format!(r#"{{4,{{0}},"",{{2,{first_field},{field}}}}}"#).as_bytes());
+        let assets = extract_form_item_assets(&form_body);
+        assert_eq!(
+            assets
+                .iter()
+                .map(|asset| (asset.item_name.as_str(), asset.file_name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("КартинкаОжидание", "Picture.gif"),
+                ("СостояниеКартинка", "Picture.gif")
+            ]
+        );
+        assert!(assets.iter().all(|asset| asset.content == b"GIF89a"));
+    }
+
+    #[test]
     fn recognizes_form_item_picture_asset_formats() {
         assert!(is_form_item_picture_content(b"\x89PNG\r\n\x1a\npayload"));
         assert!(is_form_item_picture_content(b"GIF87apayload"));
         assert!(is_form_item_picture_content(b"\x00\x00\x01\x00payload"));
         assert!(is_form_item_picture_content(b"\xff\xd8\xff\xe0payload"));
         assert!(is_form_item_picture_content(b"BMpayload"));
+        assert!(is_form_item_picture_content(b"PK\x03\x04payload"));
         assert!(is_form_item_picture_content(b"<svg/>"));
         assert!(is_form_item_picture_content(
             b"<?xml version=\"1.0\"?><svg/>"
@@ -18895,6 +20900,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let text_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let transparent_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{uuid}}},\"Address\",{{1,\"en\",\"Address\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0}},0}}"
@@ -18903,13 +20909,20 @@ mod tests {
         );
         let text_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{text_uuid}}},\"DocumentKinds\",{{1,\"en\",\"Document kinds\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0}},0}}"
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{text_uuid}}},\"DocumentKinds\",{{1,\"en\",\"Document kinds\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},1,1}},0}}"
+            )
+            .as_bytes(),
+        );
+        let transparent_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{transparent_uuid}}},\"Importance\",{{1,\"en\",\"Importance\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0}},0}}"
             )
             .as_bytes(),
         );
         let zip = b"PK\x03\x04";
         let picture = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
         let text_picture = deflate_for_test(b"1;Passport;Pass\r\n");
+        let transparent_picture = deflate_for_test(b"{1,{1,0,10,7},{{#base64:iVBORw0KGgo=}}}");
         let rows = vec![
             ConfigRow {
                 file_name: uuid.to_string(),
@@ -18935,30 +20948,69 @@ mod tests {
                 data_size: text_picture.len() as i64,
                 binary_hex: encode_hex_for_test(&text_picture),
             },
+            ConfigRow {
+                file_name: transparent_uuid.to_string(),
+                part_no: 0,
+                data_size: transparent_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&transparent_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{transparent_uuid}.0"),
+                part_no: 0,
+                data_size: transparent_picture.len() as i64,
+                binary_hex: encode_hex_for_test(&transparent_picture),
+            },
         ];
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
-        assert_eq!(dumped.metadata_xml_rows, 2);
-        assert_eq!(dumped.source_asset_rows, 2);
+        assert_eq!(dumped.metadata_xml_rows, 3);
+        assert_eq!(dumped.source_asset_rows, 3);
         assert!(root.join("CommonPictures/Address.xml").exists());
+        let address_xml = fs::read_to_string(root.join("CommonPictures/Address.xml")).unwrap();
+        assert!(address_xml.starts_with('\u{feff}'));
+        assert!(address_xml.contains(r#"version="2.20""#));
+        assert!(address_xml.contains("<Comment/>"));
+        assert!(address_xml.contains("<AvailabilityForChoice>false</AvailabilityForChoice>"));
+        assert!(
+            address_xml.contains("<AvailabilityForAppearance>false</AvailabilityForAppearance>")
+        );
+        assert!(!address_xml.ends_with("\r\n"));
         assert_eq!(
             fs::read(root.join("CommonPictures/Address/Ext/Picture/Picture.zip")).unwrap(),
             zip
         );
-        assert!(
-            fs::read_to_string(root.join("CommonPictures/Address/Ext/Picture.xml"))
-                .unwrap()
-                .contains("<xr:Abs>Picture.zip</xr:Abs>")
-        );
+        let address_picture_xml =
+            fs::read_to_string(root.join("CommonPictures/Address/Ext/Picture.xml")).unwrap();
+        assert!(address_picture_xml.starts_with('\u{feff}'));
+        assert!(address_picture_xml.contains(r#"version="2.20""#));
+        assert!(address_picture_xml.contains("<xr:Abs>Picture.zip</xr:Abs>"));
+        assert!(address_picture_xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
+        assert!(!address_picture_xml.contains("<xr:TransparentPixel"));
+        assert!(!address_picture_xml.ends_with("\r\n"));
         assert_eq!(
             fs::read(root.join("CommonPictures/DocumentKinds/Ext/Picture/Picture.txt")).unwrap(),
             b"1;Passport;Pass\r\n"
+        );
+        let document_kinds_xml =
+            fs::read_to_string(root.join("CommonPictures/DocumentKinds.xml")).unwrap();
+        assert!(document_kinds_xml.contains("<AvailabilityForChoice>true</AvailabilityForChoice>"));
+        assert!(
+            document_kinds_xml
+                .contains("<AvailabilityForAppearance>true</AvailabilityForAppearance>")
         );
         assert!(
             fs::read_to_string(root.join("CommonPictures/DocumentKinds/Ext/Picture.xml"))
                 .unwrap()
                 .contains("<xr:Abs>Picture.txt</xr:Abs>")
         );
+        assert_eq!(
+            fs::read(root.join("CommonPictures/Importance/Ext/Picture/Picture.png")).unwrap(),
+            b"\x89PNG\r\n\x1a\n"
+        );
+        let transparent_picture_xml =
+            fs::read_to_string(root.join("CommonPictures/Importance/Ext/Picture.xml")).unwrap();
+        assert!(transparent_picture_xml.contains("<xr:LoadTransparent>true</xr:LoadTransparent>"));
+        assert!(transparent_picture_xml.contains(r#"<xr:TransparentPixel x="10" y="7"/>"#));
         let metadata_row = dumped
             .rows
             .iter()
@@ -18979,6 +21031,15 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_ext_picture_transparent_pixel_from_multiline_wrapper() {
+        let wrapper = "{1,\r\n{1,0,10,7},\r\n{\r\n{#base64:iVBORw0KGgo=\r\n}\r\n}\r\n}";
+        let picture = extract_ext_picture(&deflate_for_test(wrapper.as_bytes())).unwrap();
+
+        assert_eq!(picture.content, b"\x89PNG\r\n\x1a\n");
+        assert_eq!(picture.transparent_pixel, Some((10, 7)));
     }
 
     #[test]
@@ -19324,7 +21385,7 @@ mod tests {
         let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -19537,6 +21598,22 @@ mod tests {
         let (path, kind) = template_body_source_asset("GraphicalSchema").unwrap();
         assert_eq!(path, "Template.xml");
         assert!(matches!(kind, SourceAssetKind::InflatedBinary));
+    }
+
+    #[test]
+    fn rewrites_internal_help_links_to_metadata_references() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let unknown_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let refs = BTreeMap::from([(uuid.to_string(), "Catalog.Products".to_string())]);
+        let html = format!(
+            r#"<a href="../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Products</a><a href="../id{unknown_uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Unknown</a><a href="https://example.com">External</a>"#
+        );
+
+        let rewritten = String::from_utf8(rewrite_help_links(html.as_bytes(), &refs)).unwrap();
+
+        assert!(rewritten.contains(r#"href="Catalog.Products/Help""#));
+        assert!(rewritten.contains(&format!(r#"href="../id{unknown_uuid}/"#)));
+        assert!(rewritten.contains(r#"href="https://example.com""#));
     }
 
     #[test]
@@ -21013,6 +23090,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_business_process_flowchart_processing_split_and_join_items() {
+        let style = "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+        let processing_uuid = "11111111-1111-4111-8111-111111111111";
+        let split_uuid = "22222222-2222-4222-8222-222222222222";
+        let join_uuid = "33333333-3333-4333-8333-333333333333";
+        let processing_head =
+            format!("{{{{4,10,{{1,0}},\"Processing\",1}},4,{processing_uuid},0}}");
+        let split_head = format!("{{{{4,20,{{1,0}},\"Split\",2}},4,{split_uuid},0}}");
+        let join_head = format!("{{{{4,30,{{1,0}},\"Join\",3}},4,{join_uuid},0}}");
+        let shape = format!("{{{{{{{style},5,10,20,50,60}},1}}}}");
+        let processing_item = format!("{{{processing_head},0,{shape},{{1,{{0,\"OnProcess\"}}}}}}");
+        let split_item = format!("{{{split_head},1,{shape}}}");
+        let join_item = format!("{{{join_head},1,{shape}}}");
+        let text = format!(
+            "{{5,{{{{1,{style},1,20,20}}}},3,9,{processing_item},7,{split_item},8,{join_item}}}"
+        );
+
+        let flowchart = parse_business_process_flowchart_text(&text).unwrap();
+
+        assert_eq!(flowchart.items[0].tag, "Processing");
+        assert_eq!(
+            flowchart.items[0].events[0].handler.as_deref(),
+            Some("OnProcess")
+        );
+        assert_eq!(flowchart.items[1].tag, "Split");
+        assert_eq!(flowchart.items[2].tag, "Join");
+    }
+
+    #[test]
     fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -22457,5 +24563,94 @@ mod tests {
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(bytes).unwrap();
         encoder.finish().unwrap()
+    }
+
+    fn binary_module_blob_for_test(storage_version: u32) -> Vec<u8> {
+        deflate_for_test(&v8_container_for_test(
+            storage_version,
+            &[("image", b"compiled-image".as_slice()), ("info", b"info")],
+        ))
+    }
+
+    fn v8_container_for_test(storage_version: u32, elements: &[(&str, &[u8])]) -> Vec<u8> {
+        const V8_MAGIC_NUMBER: u32 = 0x7fff_ffff;
+        const V8_PAGE_SIZE: usize = 512;
+        const FILE_HEADER_SIZE: usize = 16;
+        const BLOCK_HEADER_SIZE: usize = 31;
+        const ELEM_ADDR_SIZE: usize = 12;
+
+        let toc_len = elements.len() * ELEM_ADDR_SIZE;
+        let mut offset = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE + toc_len;
+        let mut addresses = Vec::new();
+        let mut prepared = Vec::new();
+        for (name, data) in elements {
+            let header = v8_element_header_for_test(name);
+            let header_addr = offset;
+            offset += BLOCK_HEADER_SIZE + V8_PAGE_SIZE;
+            let data_addr = offset;
+            offset += BLOCK_HEADER_SIZE + data.len().max(V8_PAGE_SIZE);
+            addresses.push((header_addr, data_addr));
+            prepared.push((header, *data));
+        }
+
+        let mut bytes = Vec::with_capacity(offset);
+        bytes.extend_from_slice(&V8_MAGIC_NUMBER.to_le_bytes());
+        bytes.extend_from_slice(&(V8_PAGE_SIZE as u32).to_le_bytes());
+        bytes.extend_from_slice(&storage_version.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        let mut toc = Vec::new();
+        for (header_addr, data_addr) in addresses {
+            toc.extend_from_slice(&(header_addr as u32).to_le_bytes());
+            toc.extend_from_slice(&(data_addr as u32).to_le_bytes());
+            toc.extend_from_slice(&V8_MAGIC_NUMBER.to_le_bytes());
+        }
+        write_v8_block_for_test(&mut bytes, &toc, toc.len());
+
+        for (header, data) in prepared {
+            write_v8_block_for_test(&mut bytes, &header, V8_PAGE_SIZE);
+            write_v8_block_for_test(&mut bytes, data, data.len().max(V8_PAGE_SIZE));
+        }
+        bytes
+    }
+
+    fn v8_element_header_for_test(name: &str) -> Vec<u8> {
+        let mut header = vec![0; 20];
+        for unit in name.encode_utf16() {
+            header.extend_from_slice(&unit.to_le_bytes());
+        }
+        header.extend_from_slice(&[0, 0, 0, 0]);
+        header
+    }
+
+    fn write_v8_block_for_test(target: &mut Vec<u8>, data: &[u8], page_size: usize) {
+        let header = format!(
+            "\r\n{:08x} {:08x} {:08x} \r\n",
+            data.len(),
+            page_size,
+            0x7fff_ffffu32
+        );
+        target.extend_from_slice(header.as_bytes());
+        target.extend_from_slice(data);
+        target.resize(target.len() + page_size - data.len(), 0);
+    }
+
+    fn push_native_bcp_row(
+        target: &mut Vec<u8>,
+        file_name: &str,
+        part_no: i32,
+        data_size: i64,
+        binary: &[u8],
+    ) {
+        let mut name_bytes = Vec::new();
+        for unit in file_name.encode_utf16() {
+            name_bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        target.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        target.extend_from_slice(&name_bytes);
+        target.extend_from_slice(&part_no.to_le_bytes());
+        target.extend_from_slice(&data_size.to_le_bytes());
+        target.extend_from_slice(&(binary.len() as i64).to_le_bytes());
+        target.extend_from_slice(binary);
     }
 }
