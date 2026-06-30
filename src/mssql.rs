@@ -56,6 +56,7 @@ use crate::module_blob::{
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
     predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
     raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
+    versions_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -887,7 +888,7 @@ fn source_bootstrap_readiness_report(
         "versions",
         BootstrapGeneration::RequiresBaseBlob,
         true,
-        "current source staging patches an existing versions blob; a standalone bootstrap versions compiler is not implemented",
+        &versions_base_free_blocker_reason(rows.len()),
     ));
 
     rows.sort_by(|left, right| {
@@ -1393,6 +1394,13 @@ fn business_process_flowchart_base_free_blocker_reason(body_path: &Path) -> Resu
         "BusinessProcess Flowchart.xml requires active base blob: {}",
         blockers.join("; ")
     ))
+}
+
+fn versions_base_free_blocker_reason(selected_config_rows: usize) -> String {
+    format!(
+        "versions row requires active base blob: {}",
+        versions_base_free_blockers(selected_config_rows).join("; ")
+    )
 }
 
 fn configuration_asset_bootstrap_rows(
@@ -7637,6 +7645,19 @@ mod tests {
             .unwrap();
         assert_eq!(row.config_file_name, "versions");
         assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert!(
+            row.reason
+                .contains("versions row requires active base blob")
+        );
+        assert!(row.reason.contains("6 selected Config row(s)"));
+        assert!(
+            row.reason
+                .contains("standard root/version/versions entries")
+        );
+        assert!(row.reason.contains("FileName-to-generation-UUID map"));
+        assert!(row.reason.contains("unchanged row set"));
+        assert!(row.reason.contains("database-specific GUIDs"));
 
         let _ = fs::remove_dir_all(root);
     }
