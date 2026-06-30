@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
@@ -589,6 +589,13 @@ struct RoleRightsXml {
 struct RoleObjectRightsXml {
     name: String,
     rights: Vec<RoleRightXml>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct RoleObjectRefKey {
+    uuid: String,
+    kind_code: Option<String>,
+    slot_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14979,6 +14986,14 @@ pub fn pack_role_rights_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
 ) -> Result<PackedRawDeflatedBlob> {
+    pack_role_rights_blob_from_xml_with_source(base_blob, xml, None)
+}
+
+pub fn pack_role_rights_blob_from_xml_with_source(
+    base_blob: &[u8],
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
     let rights = parse_role_rights_xml(xml)?;
     let inflated = inflate_raw(base_blob).context("failed to inflate base Role rights blob")?;
     let mut plain =
@@ -15004,7 +15019,8 @@ pub fn pack_role_rights_blob_from_xml(
         .get(3)
         .ok_or_else(|| anyhow!("base Role rights body has no setForNewObjects field"))?
         .clone();
-    let mut replacements = role_right_value_replacements(&plain, objects_range, &rights.objects)?;
+    let mut replacements =
+        role_right_value_replacements(&plain, objects_range, &rights.objects, source)?;
     replacements.extend(role_restriction_template_value_replacements(
         &plain,
         templates_range,
@@ -15477,6 +15493,7 @@ fn role_right_value_replacements(
     plain: &str,
     objects_range: Range<usize>,
     objects: &[RoleObjectRightsXml],
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<(Range<usize>, String)>> {
     let object_fields = scan_braced_fields(plain, objects_range.start)?;
     let base_count_range = object_fields
@@ -15514,19 +15531,42 @@ fn role_right_value_replacements(
         let rights_range = entry_fields.get(1).ok_or_else(|| {
             anyhow!("base Role object rights entry {object_index} has no rights payload")
         })?;
-        base_entries.push(rights_range.clone());
+        let key = source
+            .map(|_| role_object_ref_key(plain, object_ref_range.clone()))
+            .transpose()?;
+        base_entries.push((key, rights_range.clone()));
     }
 
     let mut replacements = Vec::new();
-    for (object_index, rights_range) in base_entries.into_iter().enumerate() {
-        let object = objects.get(object_index).ok_or_else(|| {
-            anyhow!("Role Rights.xml has no object for base entry {object_index}")
-        })?;
-        replacements.extend(role_object_right_value_replacements(
-            plain,
-            rights_range,
-            object,
-        )?);
+    if let Some(source) = source {
+        let mut objects_by_key = role_objects_by_ref_key(objects, source)?;
+        for (object_index, (key, rights_range)) in base_entries.into_iter().enumerate() {
+            let key = key.ok_or_else(|| {
+                anyhow!("base Role object rights entry {object_index} has no key")
+            })?;
+            let object = objects_by_key
+                .get_mut(&key)
+                .and_then(VecDeque::pop_front)
+                .ok_or_else(|| {
+                    anyhow!("Role Rights.xml has no object matching base entry {object_index}")
+                })?;
+            replacements.extend(role_object_right_value_replacements(
+                plain,
+                rights_range,
+                object,
+            )?);
+        }
+    } else {
+        for (object_index, (_, rights_range)) in base_entries.into_iter().enumerate() {
+            let object = objects.get(object_index).ok_or_else(|| {
+                anyhow!("Role Rights.xml has no object for base entry {object_index}")
+            })?;
+            replacements.extend(role_object_right_value_replacements(
+                plain,
+                rights_range,
+                object,
+            )?);
+        }
     }
     Ok(replacements)
 }
@@ -15541,6 +15581,268 @@ fn validate_role_object_ref(plain: &str, object_ref_range: Range<usize>) -> Resu
         return Err(anyhow!("object reference has invalid UUID {uuid}"));
     }
     Ok(())
+}
+
+fn role_object_ref_key(plain: &str, object_ref_range: Range<usize>) -> Result<RoleObjectRefKey> {
+    let fields = scan_braced_fields(plain, object_ref_range.start)?;
+    let uuid_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("object reference has no UUID field"))?;
+    let uuid = plain[uuid_range.clone()].trim();
+    if !is_uuid_text(uuid) {
+        return Err(anyhow!("object reference has invalid UUID {uuid}"));
+    }
+    Ok(RoleObjectRefKey {
+        uuid: uuid.to_string(),
+        kind_code: fields
+            .get(2)
+            .map(|range| plain[range.clone()].trim().to_string()),
+        slot_code: fields
+            .get(3)
+            .map(|range| plain[range.clone()].trim().to_string()),
+    })
+}
+
+fn role_objects_by_ref_key<'a>(
+    objects: &'a [RoleObjectRightsXml],
+    source: &MetadataSourceContext,
+) -> Result<BTreeMap<RoleObjectRefKey, VecDeque<&'a RoleObjectRightsXml>>> {
+    let mut objects_by_key = BTreeMap::<RoleObjectRefKey, VecDeque<&RoleObjectRightsXml>>::new();
+    for object in objects {
+        let key = resolve_role_object_ref_key(&object.name, source)
+            .with_context(|| format!("failed to resolve Role Rights.xml object {}", object.name))?;
+        objects_by_key.entry(key).or_default().push_back(object);
+    }
+    Ok(objects_by_key)
+}
+
+fn resolve_role_object_ref_key(
+    reference: &str,
+    source: &MetadataSourceContext,
+) -> Result<RoleObjectRefKey> {
+    if let Some((owner_reference, attribute)) = reference.split_once(".StandardAttribute.") {
+        let uuid = source.resolve_metadata_reference_uuid(owner_reference)?;
+        let slot = role_standard_attribute_slot(owner_reference, attribute)
+            .ok_or_else(|| anyhow!("unsupported Role standard attribute reference: {reference}"))?;
+        return Ok(RoleObjectRefKey {
+            uuid,
+            kind_code: Some("1".to_string()),
+            slot_code: Some(slot.to_string()),
+        });
+    }
+    if reference.contains(".Command.") {
+        return Ok(RoleObjectRefKey::direct(
+            source.resolve_command_reference_uuid(reference)?,
+        ));
+    }
+    if let Some((owner_reference, child_kind, child_name)) = role_child_object_reference(reference)
+    {
+        return Ok(RoleObjectRefKey::direct(
+            source.resolve_metadata_child_uuid(owner_reference, child_kind, child_name)?,
+        ));
+    }
+    if reference.starts_with("Configuration.") {
+        return Ok(RoleObjectRefKey::direct(
+            source.resolve_configuration_uuid(reference)?,
+        ));
+    }
+    Ok(RoleObjectRefKey::direct(
+        source.resolve_metadata_reference_uuid(reference)?,
+    ))
+}
+
+impl RoleObjectRefKey {
+    fn direct(uuid: String) -> Self {
+        Self {
+            uuid,
+            kind_code: Some("0".to_string()),
+            slot_code: Some("0".to_string()),
+        }
+    }
+}
+
+fn role_standard_attribute_slot(owner_reference: &str, attribute: &str) -> Option<usize> {
+    let kind = owner_reference.split_once('.')?.0;
+    let attributes: &[&str] = match kind {
+        "Catalog" => &[
+            "PredefinedDataName",
+            "Predefined",
+            "Ref",
+            "DeletionMark",
+            "IsFolder",
+            "Owner",
+            "Parent",
+            "Description",
+            "Code",
+        ],
+        "Document" => &["Posted", "Ref", "DeletionMark", "Date", "Number"],
+        "ExchangePlan" => &[
+            "ReceivedNo",
+            "SentNo",
+            "Ref",
+            "DeletionMark",
+            "Description",
+            "Code",
+        ],
+        "AccumulationRegister"
+        | "AccountingRegister"
+        | "CalculationRegister"
+        | "InformationRegister" => &["Active", "Period", "Recorder", "LineNumber"],
+        _ => return None,
+    };
+    attributes.iter().position(|name| *name == attribute)
+}
+
+fn role_child_object_reference(reference: &str) -> Option<(&str, &str, &str)> {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    if parts.len() == 4 && role_child_object_tag(parts[2]).is_some() {
+        return Some((
+            &reference[..parts[0].len() + 1 + parts[1].len()],
+            parts[2],
+            parts[3],
+        ));
+    }
+    if parts.len() == 6
+        && parts[2] == "TabularSection"
+        && parts[4] == "Attribute"
+        && role_child_object_tag(parts[4]).is_some()
+    {
+        return Some((
+            &reference[..parts[0].len() + 1 + parts[1].len()],
+            parts[4],
+            parts[5],
+        ));
+    }
+    None
+}
+
+fn role_child_object_tag(tag: &str) -> Option<&'static str> {
+    match tag {
+        "Attribute" => Some("Attribute"),
+        "Dimension" => Some("Dimension"),
+        "Resource" => Some("Resource"),
+        _ => None,
+    }
+}
+
+impl MetadataSourceContext {
+    fn resolve_configuration_uuid(&self, reference: &str) -> Result<String> {
+        let expected_name = reference
+            .trim()
+            .strip_prefix("Configuration.")
+            .ok_or_else(|| anyhow!("unsupported Configuration reference: {reference}"))?;
+        let path = self.source_root.join("Configuration.xml");
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read Configuration XML {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)?;
+        if properties.kind != "Configuration" || properties.name != expected_name {
+            return Err(anyhow!(
+                "expected Configuration.{expected_name} at {}, got {}.{}",
+                path.display(),
+                properties.kind,
+                properties.name
+            ));
+        }
+        Ok(properties.uuid)
+    }
+
+    fn resolve_metadata_child_uuid(
+        &self,
+        owner_reference: &str,
+        child_kind: &str,
+        child_name: &str,
+    ) -> Result<String> {
+        let (prefix, folder) =
+            metadata_reference_source_folder(owner_reference).ok_or_else(|| {
+                anyhow!(
+                    "unsupported child owner reference for source resolution: {owner_reference}"
+                )
+            })?;
+        let owner_name = owner_reference
+            .strip_prefix(&format!("{prefix}."))
+            .ok_or_else(|| anyhow!("invalid child owner reference: {owner_reference}"))?;
+        let path = self
+            .source_root
+            .join(folder)
+            .join(format!("{owner_name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read child owner XML {}", path.display()))?;
+        parse_nested_metadata_child_uuid_from_xml(&xml, child_kind, child_name).with_context(|| {
+            format!("failed to resolve child {owner_reference}.{child_kind}.{child_name}")
+        })
+    }
+}
+
+fn parse_nested_metadata_child_uuid_from_xml(
+    xml: &[u8],
+    child_kind: &str,
+    child_name: &str,
+) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_uuid = None::<String>;
+    let mut current_name = None::<String>;
+    let mut text_value = String::new();
+    let mut collecting_name = false;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == child_kind {
+                    current_uuid = xml_attr_value(&event, "uuid")
+                        .map(|value| normalize_uuid_text(&value))
+                        .transpose()?;
+                    current_name = None;
+                } else if current_uuid.is_some()
+                    && local == "Name"
+                    && path_ends_with(&path, &[child_kind, "Properties"])
+                {
+                    text_value.clear();
+                    collecting_name = true;
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == child_kind {
+                    current_uuid = None;
+                    current_name = None;
+                }
+            }
+            Ok(Event::Text(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if collecting_name && local == "Name" {
+                    current_name = Some(text_value.trim().to_string());
+                    collecting_name = false;
+                    text_value.clear();
+                }
+                if local == child_kind {
+                    if current_name.as_deref() == Some(child_name)
+                        && let Some(uuid) = current_uuid.take()
+                    {
+                        return Ok(uuid);
+                    }
+                    current_uuid = None;
+                    current_name = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Err(anyhow!("{child_kind} {child_name} not found in owner XML"))
 }
 
 fn role_restriction_template_value_replacements(
@@ -29839,6 +30141,82 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             "{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,1}"
         ));
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_xml_matches_source_objects_by_ref_key() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-role-rights-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::create_dir_all(root.join("InformationRegisters"))?;
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd"><Properties><Name>Run</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        std::fs::write(
+            root.join("InformationRegisters/Prices.xml"),
+            br#"<MetaDataObject><InformationRegister uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"><Properties><Name>Prices</Name></Properties><ChildObjects><Dimension uuid="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"><Properties><Name>Contract</Name></Properties></Dimension></ChildObjects></InformationRegister></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            b"{10,{5,{{1,dddddddd-dddd-4ddd-8ddd-dddddddddddd,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,0,0},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,287b74b8-3a66-4a76-ba27-4f1f6a93770e,-1}}},{0},0,1,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>false</setForNewObjects>
+	<setForAttributesByDefault>true</setForAttributesByDefault>
+	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
+	<object>
+		<name>Catalog.Products</name>
+		<right><name>Update</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices.StandardAttribute.Period</name>
+		<right><name>Edit</name><value>true</value></right>
+	</object>
+	<object>
+		<name>DataProcessor.Loader.Command.Run</name>
+		<right><name>View</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices.Dimension.Contract</name>
+		<right><name>Edit</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices</name>
+		<right><name>Read</name><value>true</value></right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml_with_source(&base, xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            "{1,dddddddd-dddd-4ddd-8ddd-dddddddddddd,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}"
+        ));
+        assert!(text.contains(
+            "{1,eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,0,0},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,1}"
+        ));
+        assert!(text.contains(
+            "{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,1}"
+        ));
+        assert!(text.contains(
+            "{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}"
+        ));
+        assert!(text.contains(
+            "{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1}"
+        ));
+
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 
