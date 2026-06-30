@@ -251,6 +251,7 @@ struct FormXmlChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
+    row_picture_data_path: Option<String>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
     user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
@@ -4368,6 +4369,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefresh"
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
+                        | "DefaultItem"
+                        | "RowPictureDataPath"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
                         | "AllowGettingCurrentRowURL"
@@ -4926,6 +4929,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_row_picture_data_path(&path, &current_child_items)
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
                     || path_ends_with_for_child_user_settings_group(&path, &current_child_items)
                     || path_ends_with_for_child_allow_getting_current_row_url(
@@ -5486,6 +5490,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::GeneralRef(reference)) => {
                 if form_localized_text_path_allows_entity_ref(&path, &current_child_items)
+                    || path_ends_with_for_child_row_picture_data_path(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
@@ -6724,6 +6729,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "RowPictureDataPath"
+                        if path_ends_with_for_child_row_picture_data_path(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.row_picture_data_path = Some(text_value.trim().to_string());
+                        }
+                    }
                     "UpdateOnDataChange"
                         if path_ends_with_for_child_update_on_data_change(
                             &path,
@@ -7245,6 +7260,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "DefaultItem"
+                        | "RowPictureDataPath"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
                         | "AllowGettingCurrentRowURL"
@@ -7428,6 +7444,7 @@ fn parse_form_child_item_xml(
         auto_refresh_period: None,
         use_alternation_row_color: None,
         default_item: None,
+        row_picture_data_path: None,
         update_on_data_change: None,
         user_settings_group: None,
         allow_getting_current_row_url: None,
@@ -8161,6 +8178,16 @@ fn path_ends_with_for_child_default_item(path: &[String], items: &[FormXmlChildI
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
+}
+
+fn path_ends_with_for_child_row_picture_data_path(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RowPictureDataPath"])
 }
 
 fn path_ends_with_for_child_update_on_data_change(
@@ -11151,6 +11178,16 @@ fn patch_form_layout_child_item_entry(
                 .to_string(),
             ));
         }
+        if let Some(row_picture_data_path) = &item.row_picture_data_path
+            && let Some(row_picture_range) =
+                form_layout_table_property_bag_value_range(text, fields, "19")
+            && is_form_property_bag_string_value(&text[row_picture_range.clone()])
+        {
+            replacements.push((
+                row_picture_range.clone(),
+                format!(r#"{{"S",{}}}"#, format_1c_string(row_picture_data_path)),
+            ));
+        }
         if let Some(update_on_data_change) = item.update_on_data_change
             && let Some(update_range) =
                 form_layout_table_property_bag_value_range(text, fields, "14")
@@ -12645,6 +12682,18 @@ fn is_form_property_bag_number_value(value: &str) -> bool {
     }) && fields
         .get(1)
         .is_some_and(|range| value[range.clone()].trim().parse::<u32>().is_ok())
+}
+
+fn is_form_property_bag_string_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "S")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| parse_1c_quoted_string(&value[range.clone()]).is_ok())
 }
 
 fn format_form_button_command_reference(
@@ -28863,6 +28912,39 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains(r#"11,{"B",1}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"11,{"B",0}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_row_picture_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,19,{"S",""}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let properties = super::parse_form_xml_body_properties(xml)?;
+        assert_eq!(
+            properties.child_items[0].row_picture_data_path.as_deref(),
+            Some("Rows.DefaultPicture")
+        );
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#"19,{"S","Rows.DefaultPicture"}"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains(r#"19,{"S",""}"#));
         Ok(())
     }
 
