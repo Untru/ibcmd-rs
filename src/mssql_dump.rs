@@ -4927,6 +4927,7 @@ fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'s
         (12, "CommonModule"),
         (5, "CommonAttribute"),
         (16, "Constant"),
+        (57, "Catalog"),
     ];
 
     for (code, tag) in ROOT_CHILD_OBJECT_CODES {
@@ -31819,6 +31820,41 @@ mod tests {
         assert!(xml.contains(&format!(r#"<Constant uuid="{constant_uuid}">"#)));
         assert!(xml.contains("<Name>UseFeature</Name>"));
         assert!(xml.contains("<Comment>Constant comment</Comment>"));
+        assert!(!xml.contains(header_uuid));
+        assert!(!xml.contains("ConfigDumpInfo"));
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_root_catalog_child_object() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_uuid = "11111111-2222-4222-8222-111111111111";
+        let blob = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{57,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"Catalog comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains(&format!(r#"<Catalog uuid="{catalog_uuid}">"#)));
+        assert!(xml.contains("<Name>Products</Name>"));
+        assert!(xml.contains("<Comment>Catalog comment</Comment>"));
         assert!(!xml.contains(header_uuid));
         assert!(!xml.contains("ConfigDumpInfo"));
     }
