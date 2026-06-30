@@ -52,7 +52,7 @@ use crate::module_blob::{
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
     raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
-    raw_deflated_looks_like_help_blob, raw_deflated_plain_sha256,
+    raw_deflated_plain_sha256,
 };
 use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
@@ -3928,6 +3928,7 @@ fn infer_help_body_id_for_kind(kind: &str, uuid: &str) -> String {
     format!("{uuid}.{suffix}")
 }
 
+#[cfg(test)]
 fn resolve_help_body_id_from_config_rows(
     kind: &str,
     uuid: &str,
@@ -3937,7 +3938,7 @@ fn resolve_help_body_id_from_config_rows(
     if rows.iter().any(|row| {
         row.file_name == preferred
             && decode_hex(&row.binary_hex)
-                .is_ok_and(|blob| raw_deflated_looks_like_help_blob(&blob))
+                .is_ok_and(|blob| crate::module_blob::raw_deflated_looks_like_help_blob(&blob))
     }) {
         return Some(preferred);
     }
@@ -3954,7 +3955,7 @@ fn resolve_help_body_id_from_config_rows(
         }
         decode_hex(&row.binary_hex)
             .ok()
-            .filter(|blob| raw_deflated_looks_like_help_blob(blob))
+            .filter(|blob| crate::module_blob::raw_deflated_looks_like_help_blob(blob))
             .map(|_| row.file_name.clone())
     })
 }
