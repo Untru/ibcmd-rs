@@ -16223,6 +16223,7 @@ struct SubsystemProperties {
 }
 
 struct ExchangePlanProperties {
+    this_node: Option<String>,
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
     child_objects: Vec<MetadataChildObject>,
@@ -17796,6 +17797,7 @@ fn parse_exchange_plan_properties_from_text(
     if fields.first().map(|value| value.trim()) != Some("37") {
         return None;
     }
+    let header_index = metadata_header_field_index(&fields, uuid)?;
 
     let mut generated_types = Vec::new();
     push_generated_type_entry(
@@ -17839,13 +17841,26 @@ fn parse_exchange_plan_properties_from_text(
         "Manager",
     );
 
-    let use_standard_commands = parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true);
+    let this_node = parse_exchange_plan_this_node(&fields, header_index);
+    let use_standard_commands =
+        parse_1c_bool_field(fields.get(header_index + 1).copied()).unwrap_or(true);
 
     Some(ExchangePlanProperties {
+        this_node,
         generated_types,
         use_standard_commands,
         child_objects: parse_exchange_plan_child_objects(text, uuid, type_index),
     })
+}
+
+fn parse_exchange_plan_this_node(fields: &[&str], header_index: usize) -> Option<String> {
+    if header_index <= 11 {
+        return None;
+    }
+    header_index
+        .checked_sub(1)
+        .and_then(|index| fields.get(index).copied())
+        .and_then(parse_non_zero_uuid)
 }
 
 fn parse_exchange_plan_child_objects(
@@ -22421,7 +22436,7 @@ fn format_exchange_plan_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("ExchangePlan", header, source_version);
-    let internal_info = format_generated_types_internal_info_xml(&exchange_plan.generated_types);
+    let internal_info = format_exchange_plan_internal_info_xml(exchange_plan);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
@@ -22441,6 +22456,33 @@ fn format_exchange_plan_source_xml(
         }
         insert_metadata_child_objects_xml(&mut xml, "ExchangePlan", &child_objects);
     }
+    xml
+}
+
+fn format_exchange_plan_internal_info_xml(exchange_plan: &ExchangePlanProperties) -> String {
+    if exchange_plan.this_node.is_none() && exchange_plan.generated_types.is_empty() {
+        return String::new();
+    }
+    let mut xml = "\t\t<InternalInfo>\r\n".to_string();
+    if let Some(this_node) = &exchange_plan.this_node {
+        xml.push_str(&format!(
+            "\t\t\t<xr:ThisNode>{}</xr:ThisNode>\r\n",
+            escape_xml_text(this_node)
+        ));
+    }
+    for generated_type in &exchange_plan.generated_types {
+        xml.push_str(&format!(
+            "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+            escape_xml_text(&generated_type.name),
+            escape_xml_text(generated_type.category),
+            escape_xml_text(&generated_type.type_id),
+            escape_xml_text(&generated_type.value_id)
+        ));
+    }
+    xml.push_str("\t\t</InternalInfo>\r\n");
     xml
 }
 
@@ -36019,6 +36061,61 @@ mod tests {
         assert!(
             xml.find("ExchangePlanList.Sync").unwrap()
                 < xml.find("ExchangePlanManager.Sync").unwrap()
+        );
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(
+            xml.find("<Comment>exchange comment</Comment>").unwrap()
+                < xml
+                    .find("<UseStandardCommands>false</UseStandardCommands>")
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn extracts_exchange_plan_this_node_to_internal_info() {
+        let exchange_plan_uuid = "11111111-1111-4111-8111-111111111111";
+        let this_node_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let object_type_id = "22222222-2222-4222-8222-222222222221";
+        let object_value_id = "22222222-2222-4222-8222-222222222222";
+        let ref_type_id = "33333333-3333-4333-8333-333333333331";
+        let ref_value_id = "33333333-3333-4333-8333-333333333332";
+        let selection_type_id = "55555555-5555-4555-8555-555555555551";
+        let selection_value_id = "55555555-5555-4555-8555-555555555552";
+        let list_type_id = "66666666-6666-4666-8666-666666666661";
+        let list_value_id = "66666666-6666-4666-8666-666666666662";
+        let manager_type_id = "44444444-4444-4444-8444-444444444441";
+        let manager_value_id = "44444444-4444-4444-8444-444444444442";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{37,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\
+{selection_type_id},{selection_value_id},\
+{list_type_id},{list_value_id},\
+{manager_type_id},{manager_value_id},{this_node_uuid},\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{exchange_plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"exchange comment\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            exchange_plan_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains(&format!("<xr:ThisNode>{this_node_uuid}</xr:ThisNode>")));
+        assert!(
+            xml.find("<xr:ThisNode>").unwrap()
+                < xml
+                    .find(r#"<xr:GeneratedType name="ExchangePlanObject.Sync""#)
+                    .unwrap()
         );
         assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
         assert!(
