@@ -61,6 +61,13 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 35 | Diff mining | sampled XML-path mining report added to drive agents by repeated signatures instead of object families |
+| 35 | Form.xml | default `ShowCommandBar=true` is suppressed while explicit `false` and explicit packer values remain supported |
+| 35 | Object metadata XML | Catalog child attributes now reuse generic property-tail parsing with resolved `ChoiceParameters` refs |
+| 35 | Flowchart.xml | BusinessProcess/GraphicalSchema item `ZOrder` exports from serialized item order instead of hardcoded zero |
+| 35 | MXL templates | unknown MOXCEL format bits no longer drop the whole format table; known neighboring format properties and indexes are preserved |
+| 35 | Source staging readiness | root configuration application modules under `Ext/*.bsl` have explicit base-free readiness and row-generation coverage |
+| 35 | Role Rights.xml | form refs resolve and pack in role rights, including owned refs such as `Catalog.<name>.Form.<form>` |
 | 34 | Source staging readiness | `Ext/ParentConfigurations.bin` now stages base-free by re-deflating inflated raw-deflated source bytes into the `ConfigSave` row |
 | 34 | Object metadata XML | Catalog owner refs are emitted as ordered `xr:MDObjectRef` items in `<Owners>` |
 | 34 | DCS templates | calculated-field `TypeId` normalization uses the native `d4p1` current-config namespace context |

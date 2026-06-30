@@ -48,6 +48,13 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 35 diff-mining slice | sampled XML-path diff mining | added `docs/diff-mining-2026-07-01-round35.md` to prioritize repeated signatures such as MXL format indexes, Catalog child tails and Form default over-emission |
+| Round 35 Form.xml slice | unit-level extractor/packer verification | default `ShowCommandBar=true` is omitted from source XML while explicit `false` and explicit packer `true` remain supported |
+| Round 35 Catalog metadata slice | unit-level metadata XML verification | Catalog child attributes now pass `object_refs` into the shared property-tail parser, resolving `ChoiceParameters` design-time refs |
+| Round 35 Flowchart.xml slice | unit-level source asset verification | BusinessProcess/GraphicalSchema item `ZOrder` is derived from serialized item order instead of hardcoded zero |
+| Round 35 MXL template slice | unit-level template body verification | unknown MOXCEL format bits are consumed without dropping known neighboring format properties or format indexes |
+| Round 35 source staging readiness slice | unit-level readiness/row-generation verification | root configuration application modules under `Ext/*.bsl` are explicitly covered as base-free staging rows |
+| Round 35 Role Rights.xml slice | unit-level extractor/packer verification | Role rights object refs now include common and owned form refs, and source packing resolves `Form` child refs |
 | Round 34 source staging readiness slice | unit-level row-generation verification | `Ext/ParentConfigurations.bin` source bytes are treated as inflated raw-deflated payload and re-deflated for the `ConfigSave` row without fetching an active base blob |
 | Round 34 Catalog metadata slice | unit-level metadata XML verification | `Catalog` owner refs are parsed from native metadata and emitted as ordered `xr:MDObjectRef` items in `<Owners>` |
 | Round 34 DCS template slice | unit-level template body verification | DCS `calculatedField` `TypeId` values normalize to `d4p1` current-config refs instead of falling back to `d5p1` |
@@ -205,6 +212,13 @@ Verification history:
 | Round 34 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `RowFilter xsi:nil="true"` maps to property-bag key `10` / `{"U"}` |
 | Round 34 ExchangePlan Content.xml slice | unit-level source asset verification | `ExchangePlan/Ext/Content.xml` ordering follows configuration metadata child order when that index is available |
 | Round 34 CommonAttribute metadata slice | unit-level metadata XML verification | CommonAttribute property-tail `FillValue` supports string, nil, decimal and boolean encodings |
+| Round 35 diff-mining slice | sampled XML-path diff mining | planning now targets repeated signatures instead of broad object families; full all-file pass still needs a faster reusable diagnostic |
+| Round 35 Form.xml slice | unit-level extractor/packer verification | default `ShowCommandBar=true` is suppressed in export, and explicit XML still packs into the form layout |
+| Round 35 Catalog metadata slice | unit-level metadata XML verification | Catalog child attributes reuse generic native-order property tails and resolve choice-parameter refs through `object_refs` |
+| Round 35 Flowchart.xml slice | unit-level source asset verification | Flowchart item `ZOrder` is emitted from serialized item position rather than fixed zero |
+| Round 35 MXL template slice | unit-level template body verification | unknown MOXCEL format bits no longer invalidate the entire format table |
+| Round 35 source staging readiness slice | unit-level readiness/row-generation verification | configuration application modules have explicit base-free readiness and row-generation coverage |
+| Round 35 Role Rights.xml slice | unit-level extractor/packer verification | role rights extraction and packing support form refs including owned forms |
 
 Performance note for selected extraction:
 
@@ -443,5 +457,12 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | ExchangePlan `Content.xml` metadata-tree ordering | merged to `master` in round 34 |
 | #21 | base-free `Ext/ParentConfigurations.bin` raw-deflated staging | merged to `master` in round 34 |
 | #22 | CommonAttribute property-tail `FillValue` metadata XML | merged to `master` in round 34 |
+| #13 | Role Rights.xml common/owned form refs and source packing | merged to `master` in round 35 |
+| #15 | Catalog child attribute property tails and choice-parameter refs | merged to `master` in round 35 |
+| #16 | Form.xml `ShowCommandBar=true` default suppression | merged to `master` in round 35 |
+| #17 | MOXCEL unknown format-bit tolerance for MXL templates | merged to `master` in round 35 |
+| #18 | BusinessProcess Flowchart `ZOrder` export | merged to `master` in round 35 |
+| #19 | sampled XML-path diff-mining report for round35 planning | merged to `master` in round 35 |
+| #21 | configuration application module base-free staging audit | merged to `master` in round 35 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
