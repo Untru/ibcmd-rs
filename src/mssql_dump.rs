@@ -3517,6 +3517,8 @@ struct PredefinedItem {
 
 struct RoleRights {
     set_for_new_objects: bool,
+    set_for_attributes_by_default: bool,
+    independent_rights_of_child_objects: bool,
     objects: Vec<RoleObjectRights>,
     restriction_templates: Vec<RoleRestrictionTemplate>,
 }
@@ -5635,8 +5637,12 @@ fn parse_role_rights_blob(
     objects.reverse();
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
+    let set_for_attributes_by_default = parse_role_bool_field_or_default(&fields, 4, true)?;
+    let independent_rights_of_child_objects = parse_role_bool_field_or_default(&fields, 5, false)?;
     Some(RoleRights {
         set_for_new_objects,
+        set_for_attributes_by_default,
+        independent_rights_of_child_objects,
         objects,
         restriction_templates,
     })
@@ -5699,6 +5705,12 @@ fn parse_role_bool_field(value: &str) -> Option<bool> {
         "1" => Some(true),
         _ => None,
     }
+}
+
+fn parse_role_bool_field_or_default(fields: &[&str], index: usize, default: bool) -> Option<bool> {
+    fields
+        .get(index)
+        .map_or(Some(default), |value| parse_role_bool_field(value))
 }
 
 fn parse_role_right_value(value: &str) -> Option<bool> {
@@ -6964,9 +6976,11 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Rights xmlns=\"http://v8.1c.ru/8.2/roles\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Rights\" version=\"2.20\">\r\n\
 \t<setForNewObjects>{}</setForNewObjects>\r\n\
-\t<setForAttributesByDefault>true</setForAttributesByDefault>\r\n\
-\t<independentRightsOfChildObjects>false</independentRightsOfChildObjects>\r\n",
-        xml_bool(rights.set_for_new_objects)
+\t<setForAttributesByDefault>{}</setForAttributesByDefault>\r\n\
+\t<independentRightsOfChildObjects>{}</independentRightsOfChildObjects>\r\n",
+        xml_bool(rights.set_for_new_objects),
+        xml_bool(rights.set_for_attributes_by_default),
+        xml_bool(rights.independent_rights_of_child_objects)
     );
     for object in &rights.objects {
         xml.push_str("\t<object>\r\n\t\t<name>");
@@ -28418,6 +28432,8 @@ mod tests {
     fn format_role_rights_omits_false_rights_without_restrictions() {
         let xml = format_role_rights_xml(&RoleRights {
             set_for_new_objects: false,
+            set_for_attributes_by_default: true,
+            independent_rights_of_child_objects: false,
             objects: vec![RoleObjectRights {
                 name: "Document.Invoice".to_string(),
                 rights: vec![
@@ -28450,6 +28466,25 @@ mod tests {
         assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
         assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
         assert!(!xml.contains("<name>Edit</name>"));
+    }
+
+    #[test]
+    fn role_rights_header_flags_follow_blob_values() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}}}},{{0}},1,0,1,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs =
+            BTreeMap::from([(object_uuid.to_string(), "Catalog.Products".to_string())]);
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let xml = format_role_rights_xml(&rights);
+
+        assert!(xml.contains("<setForNewObjects>true</setForNewObjects>"));
+        assert!(xml.contains("<setForAttributesByDefault>false</setForAttributesByDefault>"));
+        assert!(
+            xml.contains("<independentRightsOfChildObjects>true</independentRightsOfChildObjects>")
+        );
     }
 
     #[test]

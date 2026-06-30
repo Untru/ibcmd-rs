@@ -559,6 +559,8 @@ pub struct PackedHelpBlob {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct RoleRightsXml {
     set_for_new_objects: bool,
+    set_for_attributes_by_default: Option<bool>,
+    independent_rights_of_child_objects: Option<bool>,
     objects: Vec<RoleObjectRightsXml>,
 }
 
@@ -13298,7 +13300,7 @@ pub fn pack_role_rights_blob_from_xml(
         .ok_or_else(|| anyhow!("base Role rights body has no object rights field"))?
         .clone();
     let set_for_new_objects_range = fields
-        .get(4)
+        .get(3)
         .ok_or_else(|| anyhow!("base Role rights body has no setForNewObjects field"))?
         .clone();
     let mut replacements = role_right_value_replacements(&plain, objects_range, &rights.objects)?;
@@ -13306,6 +13308,16 @@ pub fn pack_role_rights_blob_from_xml(
         set_for_new_objects_range,
         if rights.set_for_new_objects { "1" } else { "0" }.to_string(),
     ));
+    if let Some(value) = rights.set_for_attributes_by_default
+        && let Some(range) = fields.get(4)
+    {
+        replacements.push((range.clone(), if value { "1" } else { "0" }.to_string()));
+    }
+    if let Some(value) = rights.independent_rights_of_child_objects
+        && let Some(range) = fields.get(5)
+    {
+        replacements.push((range.clone(), if value { "1" } else { "0" }.to_string()));
+    }
     replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
     for (range, replacement) in replacements {
         plain.replace_range(range, &replacement);
@@ -13956,6 +13968,8 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut set_for_new_objects = None::<bool>;
+    let mut set_for_attributes_by_default = None::<bool>;
+    let mut independent_rights_of_child_objects = None::<bool>;
     let mut objects = Vec::<RoleObjectRightsXml>::new();
     let mut current_object = None::<RoleObjectRightsXml>;
     let mut current_right = None::<RoleRightXml>;
@@ -13979,7 +13993,12 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                 }
                 if matches!(
                     local.as_str(),
-                    "setForNewObjects" | "name" | "value" | "condition"
+                    "setForNewObjects"
+                        | "setForAttributesByDefault"
+                        | "independentRightsOfChildObjects"
+                        | "name"
+                        | "value"
+                        | "condition"
                 ) {
                     text_value.clear();
                 }
@@ -13989,6 +14008,10 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                 let local = xml_local_name(event.local_name().as_ref());
                 if local == "setForNewObjects" {
                     set_for_new_objects = Some(false);
+                } else if local == "setForAttributesByDefault" {
+                    set_for_attributes_by_default = Some(false);
+                } else if local == "independentRightsOfChildObjects" {
+                    independent_rights_of_child_objects = Some(false);
                 } else if local == "condition"
                     && path_ends_with(
                         &path,
@@ -14001,6 +14024,8 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
             }
             Ok(Event::Text(text)) => {
                 if path_ends_with(&path, &["Rights", "setForNewObjects"])
+                    || path_ends_with(&path, &["Rights", "setForAttributesByDefault"])
+                    || path_ends_with(&path, &["Rights", "independentRightsOfChildObjects"])
                     || path_ends_with(&path, &["Rights", "object", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "value"])
@@ -14020,6 +14045,8 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
             }
             Ok(Event::CData(text)) => {
                 if path_ends_with(&path, &["Rights", "setForNewObjects"])
+                    || path_ends_with(&path, &["Rights", "setForAttributesByDefault"])
+                    || path_ends_with(&path, &["Rights", "independentRightsOfChildObjects"])
                     || path_ends_with(&path, &["Rights", "object", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "value"])
@@ -14045,6 +14072,25 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                     {
                         set_for_new_objects = Some(parse_xml_bool_text(
                             "Role/setForNewObjects",
+                            text_value.trim(),
+                        )?);
+                    }
+                    "setForAttributesByDefault"
+                        if path_ends_with(&path, &["Rights", "setForAttributesByDefault"]) =>
+                    {
+                        set_for_attributes_by_default = Some(parse_xml_bool_text(
+                            "Role/setForAttributesByDefault",
+                            text_value.trim(),
+                        )?);
+                    }
+                    "independentRightsOfChildObjects"
+                        if path_ends_with(
+                            &path,
+                            &["Rights", "independentRightsOfChildObjects"],
+                        ) =>
+                    {
+                        independent_rights_of_child_objects = Some(parse_xml_bool_text(
+                            "Role/independentRightsOfChildObjects",
                             text_value.trim(),
                         )?);
                     }
@@ -14105,7 +14151,12 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                 let _ = path.pop();
                 if matches!(
                     local.as_str(),
-                    "setForNewObjects" | "name" | "value" | "condition"
+                    "setForNewObjects"
+                        | "setForAttributesByDefault"
+                        | "independentRightsOfChildObjects"
+                        | "name"
+                        | "value"
+                        | "condition"
                 ) {
                     text_value.clear();
                 }
@@ -14120,6 +14171,8 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
     Ok(RoleRightsXml {
         set_for_new_objects: set_for_new_objects
             .ok_or_else(|| anyhow!("Rights.xml has no setForNewObjects"))?,
+        set_for_attributes_by_default,
+        independent_rights_of_child_objects,
         objects,
     })
 }
@@ -26356,6 +26409,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
 	<setForNewObjects>true</setForNewObjects>
+	<setForAttributesByDefault>false</setForAttributesByDefault>
+	<independentRightsOfChildObjects>true</independentRightsOfChildObjects>
 	<object>
 		<name>InformationRegister.Prices</name>
 		<right>
@@ -26382,7 +26437,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("499e8968-ca89-43f0-9955-8756058b1b53,1"));
         assert!(text.contains(r#""WHERE TRUE""#));
         assert!(!text.contains("WHERE OLD"));
-        assert!(text.ends_with(",4294967295,1,0,4294967295}"));
+        assert!(text.ends_with(",1,0,1,4294967295}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
