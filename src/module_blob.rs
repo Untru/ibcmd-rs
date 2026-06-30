@@ -3509,6 +3509,7 @@ fn spreadsheet_system_style_code(value: &str) -> Option<i32> {
     match value {
         "style:FieldBackColor" => Some(-10),
         "style:ButtonBackColor" => Some(-7),
+        "style:ButtonTextColor" => Some(-15),
         "style:ReportLineColor" => Some(-28),
         _ => None,
     }
@@ -21560,13 +21561,19 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<textColor>#009646</textColor>
 		<backColor>style:ButtonBackColor</backColor>
 	</format>
+	<format>
+		<textColor>style:ButtonTextColor</textColor>
+	</format>
 </document>
 "##;
 
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{3,0,{4625920}},{3,3,{-7}},{1,{3200,72,0,1}}"));
+        assert!(text.contains("{3,0,{4625920}}"));
+        assert!(text.contains("{3,3,{-7}}"));
+        assert!(text.contains("{3,3,{-15}}"));
+        assert!(text.contains("{2,{1024,0},{3200,72,1,2}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
