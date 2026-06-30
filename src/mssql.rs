@@ -967,8 +967,8 @@ fn metadata_body_bootstrap_rows(
             "0",
             "raw_deflated_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "raw deflated body packer builds the Config blob directly from source bytes",
+            false,
+            "raw deflated body packer builds the Config blob directly from source bytes without reading the active Config row",
         )),
         "WSReference" => rows.extend(optional_body_bootstrap_row(
             source_root,
@@ -978,8 +978,8 @@ fn metadata_body_bootstrap_rows(
             "0",
             "raw_deflated_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "raw deflated body packer builds the Config blob directly from source bytes",
+            false,
+            "raw deflated body packer builds the Config blob directly from source bytes without reading the active Config row",
         )),
         "CommonTemplate" | "Template" => rows.extend(template_bootstrap_rows(
             source_root,
@@ -1183,8 +1183,8 @@ fn template_bootstrap_rows(
                     "0",
                     "template_raw_body",
                     BootstrapGeneration::CanGenerateWithoutBaseBlob,
-                    true,
-                    "raw template body packer builds the Config blob directly from source bytes",
+                    false,
+                    "raw template body packer builds the Config blob directly from source bytes without reading the active Config row",
                 ));
             }
         }
@@ -3196,9 +3196,9 @@ fn prepare_scheduled_job_body_row(
 }
 
 fn prepare_raw_deflated_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     body_path: PathBuf,
     properties: &SimpleMetadataXmlProperties,
     label: &str,
@@ -3207,7 +3207,6 @@ fn prepare_raw_deflated_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let bytes = fs::read(&body_path)
         .with_context(|| format!("failed to read {label} {}", body_path.display()))?;
     let packed = pack_raw_deflated_blob_from_bytes(&bytes)
@@ -6245,7 +6244,7 @@ mod tests {
     use crate::cli::InfobaseConfigSourceVersion;
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties, hex_sha256,
-        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
+        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes, raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::fs;
@@ -7413,6 +7412,148 @@ mod tests {
             .unwrap();
         assert_eq!(row.config_file_name, "versions");
         assert_eq!(row.generation, "requires_base_blob");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_raw_deflated_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-raw-bootstrap-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let package_xml = root.join("XDTOPackages").join("Exchange.xml");
+        let package_ext = root.join("XDTOPackages").join("Exchange").join("Ext");
+        fs::create_dir_all(&package_ext).unwrap();
+        fs::write(
+            &package_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <XDTOPackage uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties><Name>Exchange</Name></Properties>
+  </XDTOPackage>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(package_ext.join("Package.bin"), b"raw-package-body").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&package_xml),
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(report.config_rows, 3);
+        assert_eq!(report.rows_requiring_base_blob, 2);
+        assert_eq!(report.rows_generatable_without_base_blob, 1);
+        assert_eq!(report.current_staging_rows_fetching_base_blob, 2);
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "raw_deflated_body")
+            .unwrap();
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "cccccccc-cccc-4ccc-cccc-cccccccccccc.0"
+        );
+        assert_eq!(row.source_path, "XDTOPackages/Exchange/Ext/Package.bin");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_raw_template_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-raw-template-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("SharedText.xml");
+        let template_ext = root.join("CommonTemplates").join("SharedText").join("Ext");
+        fs::create_dir_all(&template_ext).unwrap();
+        fs::write(
+            &template_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>SharedText</Name>
+      <TemplateType>TextDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(template_ext.join("Template.txt"), b"template-body").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&template_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "template_raw_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd.0"
+        );
+        assert_eq!(
+            row.source_path,
+            "CommonTemplates/SharedText/Ext/Template.txt"
+        );
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_raw_deflated_body_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-raw-body-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let body_path = root
+            .join("XDTOPackages")
+            .join("Exchange")
+            .join("Ext")
+            .join("Package.bin");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let body = b"raw-package-body";
+        fs::write(&body_path, body).unwrap();
+        let properties = test_simple_metadata_properties(
+            "XDTOPackage",
+            "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+            "Exchange",
+        );
+
+        let rows = super::prepare_raw_deflated_body_row(
+            PathBuf::from("missing-sqlcmd-for-raw-body-test").as_path(),
+            "missing-server",
+            "missing-database",
+            body_path.clone(),
+            &properties,
+            "XDTOPackage body",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "cccccccc-cccc-4ccc-cccc-cccccccccccc.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(body)
+        );
 
         let _ = fs::remove_dir_all(root);
     }
