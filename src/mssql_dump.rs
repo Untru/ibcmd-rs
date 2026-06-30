@@ -12697,12 +12697,16 @@ fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings> {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if count != 18 || fields.len() != count * 2 + 2 {
+    if count == 0 || count > 18 || fields.len() != count * 2 + 2 {
         return None;
     }
     let mut settings = MoxelPrintSettings::default();
+    let mut seen_keys = BTreeSet::new();
     for pair in fields[2..].chunks_exact(2) {
         let key = pair.first()?.trim().parse::<usize>().ok()?;
+        if key > 17 || !seen_keys.insert(key) {
+            return None;
+        }
         let value = parse_moxel_print_settings_value(pair.get(1)?)?;
         match key {
             0 => settings.paper = value.as_usize(),
@@ -12723,7 +12727,7 @@ fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings> {
             15 => settings.paper_source = value.as_usize(),
             16 => settings.page_width = value.as_usize(),
             17 => settings.page_height = value.as_usize(),
-            _ => {}
+            _ => return None,
         }
     }
     Some(settings)
@@ -28107,6 +28111,23 @@ mod tests {
         assert!(xml.contains("<printerName>HP LaserJet 5100 PCL 6</printerName>"));
         assert!(xml.contains("<paper>9</paper>"));
         assert!(xml.contains("<paperSource>7</paperSource>"));
+    }
+
+    #[test]
+    fn formats_moxel_sparse_print_settings_from_raw_pairs() {
+        let settings = parse_moxel_print_settings_field(
+            r#"{{0,4,1,{"N",1},2,{"N",85},12,{"N",1},14,{"S","Office PDF"}}}"#,
+        )
+        .unwrap();
+        let mut xml = String::new();
+        push_moxel_print_settings_xml(&mut xml, &settings);
+
+        assert!(xml.contains("<pageOrientation>Portrait</pageOrientation>"));
+        assert!(xml.contains("<scale>85</scale>"));
+        assert!(xml.contains("<fitToPage>true</fitToPage>"));
+        assert!(xml.contains("<printerName>Office PDF</printerName>"));
+        assert!(!xml.contains("<paper>"));
+        assert!(!xml.contains("<paperSource>"));
     }
 
     #[test]
