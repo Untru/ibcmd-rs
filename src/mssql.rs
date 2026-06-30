@@ -40,7 +40,8 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, hex_sha256, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
+    VersionReplacement, command_interface_xml_can_pack_without_base, hex_sha256,
+    module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
@@ -1125,16 +1126,13 @@ fn metadata_body_bootstrap_rows(
     }
 
     if let Some(suffix) = command_interface_body_suffix(&properties.kind) {
-        rows.extend(optional_body_bootstrap_row(
+        rows.extend(command_interface_bootstrap_row(
             source_root,
             properties,
             object_path,
             infer_command_interface_body_path(xml_path),
             suffix,
             "command_interface_body",
-            BootstrapGeneration::RequiresBaseBlob,
-            true,
-            "CommandInterface.xml packer preserves command references and validates command count against the base blob",
         ));
     }
 
@@ -1224,6 +1222,47 @@ fn template_bootstrap_rows(
     Ok(rows)
 }
 
+fn command_interface_bootstrap_row(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    body_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+) -> Vec<MssqlSourceBootstrapRowReport> {
+    if !body_path.exists() {
+        return Vec::new();
+    }
+    let (generation, current_staging_fetches_base_blob, reason) = fs::read(&body_path)
+        .ok()
+        .and_then(|xml| command_interface_xml_can_pack_without_base(&xml).ok())
+        .filter(|can_pack| *can_pack)
+        .map(|_| {
+            (
+                BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                false,
+                "CommandInterface.xml contains raw command references and can be packed without reading the active Config row",
+            )
+        })
+        .unwrap_or((
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "CommandInterface.xml with readable command references preserves command references and validates command count against the base blob",
+        ));
+
+    vec![bootstrap_row_report(
+        "metadata_object",
+        &properties.kind,
+        object_path,
+        source_relative_path(source_root, &body_path),
+        format!("{}.{}", properties.uuid, suffix),
+        row_kind,
+        generation,
+        current_staging_fetches_base_blob,
+        reason,
+    )]
+}
+
 fn configuration_asset_bootstrap_rows(
     source_root: &Path,
     xml_path: &Path,
@@ -1275,27 +1314,21 @@ fn configuration_asset_bootstrap_rows(
         false,
         "configuration raw asset is stored as a raw deflated body generated from source bytes without reading the active Config row",
     ));
-    rows.extend(optional_body_bootstrap_row(
+    rows.extend(command_interface_bootstrap_row(
         source_root,
         properties,
         object_path,
         infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
         "a",
         "configuration_command_interface_body",
-        BootstrapGeneration::RequiresBaseBlob,
-        true,
-        "Configuration CommandInterface.xml packer preserves command references and validates command count against the base blob",
     ));
-    rows.extend(optional_body_bootstrap_row(
+    rows.extend(command_interface_bootstrap_row(
         source_root,
         properties,
         object_path,
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
         "9",
         "configuration_command_interface_body",
-        BootstrapGeneration::RequiresBaseBlob,
-        true,
-        "Configuration MainSectionCommandInterface.xml packer preserves command references and validates command count against the base blob",
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -3511,13 +3544,27 @@ fn prepare_configuration_command_interface_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read Configuration CommandInterface {}",
             body_path.display()
         )
     })?;
+    if command_interface_xml_can_pack_without_base(&xml)? {
+        let packed = pack_command_interface_blob_from_xml(&[], &xml).with_context(|| {
+            format!(
+                "failed to pack base-free Configuration CommandInterface {}",
+                body_path.display()
+            )
+        })?;
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        }]);
+    }
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let packed = pack_command_interface_blob_from_xml(&base_body, &xml).with_context(|| {
         format!(
             "failed to pack Configuration CommandInterface {}",
@@ -3784,13 +3831,27 @@ fn prepare_command_interface_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read CommandInterface XML {}",
             body_path.display()
         )
     })?;
+    if command_interface_xml_can_pack_without_base(&xml)? {
+        let packed = pack_command_interface_blob_from_xml(&[], &xml).with_context(|| {
+            format!(
+                "failed to pack base-free CommandInterface {}",
+                body_path.display()
+            )
+        })?;
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        }]);
+    }
+    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let packed = pack_command_interface_blob_from_xml(&base_body, &xml)
         .with_context(|| format!("failed to pack CommandInterface {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
@@ -6247,6 +6308,18 @@ mod tests {
 "#
     }
 
+    fn sample_raw_command_interface_xml() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="100:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+			<Visibility><xr:Common>true</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#
+    }
+
     #[test]
     fn quotes_sql_identifier_and_string() {
         assert_eq!(quote_ident("a]b"), "[a]]b]");
@@ -8604,6 +8677,98 @@ mod tests {
         assert_eq!(rows[0].path, body_path);
         assert_eq!(rows[0].blob, body);
         assert_eq!(rows[0].blob_sha256, hex_sha256(body));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_raw_command_interface_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-command-interface-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let subsystem_xml = root.join("Subsystems").join("Admin.xml");
+        let subsystem_ext = root.join("Subsystems").join("Admin").join("Ext");
+        fs::create_dir_all(&subsystem_ext).unwrap();
+        fs::write(
+            &subsystem_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Subsystem uuid="eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee">
+    <Properties><Name>Admin</Name></Properties>
+  </Subsystem>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            subsystem_ext.join("CommandInterface.xml"),
+            sample_raw_command_interface_xml(),
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&subsystem_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "command_interface_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.1"
+        );
+        assert_eq!(row.source_path, "Subsystems/Admin/Ext/CommandInterface.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("raw command references"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_raw_command_interface_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-command-interface-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let subsystem_xml = root.join("Subsystems").join("Admin.xml");
+        let body_path = root
+            .join("Subsystems")
+            .join("Admin")
+            .join("Ext")
+            .join("CommandInterface.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&subsystem_xml, b"<Subsystem/>").unwrap();
+        fs::write(&body_path, sample_raw_command_interface_xml()).unwrap();
+        let properties = test_simple_metadata_properties(
+            "Subsystem",
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+            "Admin",
+        );
+
+        let rows = super::prepare_command_interface_body_row(
+            PathBuf::from("missing-sqlcmd-for-command-interface-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &subsystem_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.1");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(
+                b"{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+            )
+        );
 
         let _ = fs::remove_dir_all(root);
     }

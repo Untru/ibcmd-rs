@@ -14100,6 +14100,9 @@ pub fn pack_command_interface_blob_from_xml(
     xml: &[u8],
 ) -> Result<PackedRawDeflatedBlob> {
     let entries = parse_command_interface_xml(xml)?;
+    if base_blob.is_empty() {
+        return pack_command_interface_entries_without_base(&entries);
+    }
     let inflated =
         inflate_raw(base_blob).context("failed to inflate base CommandInterface blob")?;
     let mut plain =
@@ -14153,6 +14156,53 @@ pub fn pack_command_interface_blob_from_xml(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+pub fn command_interface_xml_can_pack_without_base(xml: &[u8]) -> Result<bool> {
+    let entries = parse_command_interface_xml(xml)?;
+    Ok(entries
+        .iter()
+        .all(|entry| format_raw_command_interface_ref(&entry.name).is_ok()))
+}
+
+fn pack_command_interface_entries_without_base(
+    entries: &[CommandInterfaceXmlEntry],
+) -> Result<PackedRawDeflatedBlob> {
+    let mut fields = Vec::with_capacity(3 + entries.len() * 2 + 5);
+    fields.push("7".to_string());
+    fields.push("1".to_string());
+    fields.push(entries.len().to_string());
+    for entry in entries {
+        fields.push(format_raw_command_interface_ref(&entry.name)?);
+        let common = if entry.common { "1" } else { "0" };
+        fields.push(format!("{{0,{{0,{{\"B\",{common}}},0}}}}"));
+    }
+    fields.extend(["0", "0", "0", "0", "0"].into_iter().map(String::from));
+    let plain = format!("{{{}}}", fields.join(","));
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+fn format_raw_command_interface_ref(name: &str) -> Result<String> {
+    let (kind, uuid) = name
+        .split_once(':')
+        .ok_or_else(|| anyhow!("base-free CommandInterface command must be kind:uuid: {name}"))?;
+    let kind = kind.trim();
+    let uuid = uuid.trim();
+    if kind.is_empty()
+        || !kind.chars().all(|ch| ch.is_ascii_digit())
+        || uuid::Uuid::parse_str(uuid).is_err()
+    {
+        return Err(anyhow!(
+            "base-free CommandInterface command must be numeric kind and UUID: {name}"
+        ));
+    }
+    Ok(format!("{{{kind},{uuid}}}"))
 }
 
 pub fn pack_exchange_plan_content_blob_from_xml(
@@ -28041,6 +28091,56 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("{0,\n{0,\n{\"B\",0},0}\n}"), "{text:?}");
 
         Ok(())
+    }
+
+    #[test]
+    fn packs_command_interface_xml_without_base_for_raw_command_refs() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="100:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+			<Visibility><xr:Common>true</xr:Common></Visibility>
+		</Command>
+		<Command name="0:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+			<Visibility><xr:Common>false</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#;
+
+        assert!(super::command_interface_xml_can_pack_without_base(xml)?);
+        let packed = super::pack_command_interface_blob_from_xml(&[], xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(
+            text,
+            "{7,1,2,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}},0,0,0,0,0}"
+        );
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn command_interface_xml_without_base_rejects_readable_command_refs() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="Catalog.Products.StandardCommand.OpenList">
+			<Visibility><xr:Common>true</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#;
+
+        assert!(!super::command_interface_xml_can_pack_without_base(xml).unwrap());
+        let error = super::pack_command_interface_blob_from_xml(&[], xml).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("base-free CommandInterface command"),
+            "{error}"
+        );
     }
 
     #[test]
