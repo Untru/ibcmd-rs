@@ -624,6 +624,7 @@ struct DumpRowContext<'a> {
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
     object_refs: &'a BTreeMap<String, String>,
+    role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
     functional_option_refs: &'a BTreeMap<String, String>,
@@ -786,6 +787,8 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
+    let role_rights_object_refs =
+        build_role_rights_object_reference_index(&object_refs, &form_refs);
     let metadata_order = if extract_metadata_xml || needs_source_layout_refs {
         build_metadata_order_index_from_texts(&metadata_texts)
     } else {
@@ -873,6 +876,7 @@ fn dump_table_rows_with_options(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,
         functional_option_refs: &functional_option_refs,
@@ -1230,12 +1234,14 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_type_index_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let form_refs =
-        if (extract_metadata_xml && source_reference_needs.form_refs) || needs_standalone_refs {
-            build_form_source_reference_index_from_texts(&index_metadata_texts)
-        } else {
-            BTreeMap::new()
-        };
+    let form_refs = if (extract_metadata_xml
+        && (source_reference_needs.form_refs || source_reference_needs.object_refs))
+        || needs_standalone_refs
+    {
+        build_form_source_reference_index_from_texts(&index_metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
     timings.prepare_form_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let template_refs = if (extract_metadata_xml && source_reference_needs.template_refs)
@@ -1271,6 +1277,8 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
+    let role_rights_object_refs =
+        build_role_rights_object_reference_index(&object_refs, &form_refs);
     timings.prepare_object_refs_ms += elapsed_ms(index_part_started);
     let metadata_order = if (extract_metadata_xml || needs_source_layout_refs)
         && source_reference_needs.metadata_order
@@ -1382,6 +1390,7 @@ fn dump_table_rows_streamed(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,
         functional_option_refs: &functional_option_refs,
@@ -2201,7 +2210,8 @@ fn dynamic_source_asset(
     let owner = context.body_owners.get(owner_uuid)?;
     if owner.kind == "Role"
         && suffix == "0"
-        && parse_role_rights_blob(bytes, context.object_refs, context.field_refs).is_some()
+        && parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
+            .is_some()
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join("Ext").join("Rights.xml"),
@@ -2662,6 +2672,7 @@ fn source_asset_paths_with_indexes(
             .or_default()
             .insert(suffix);
     }
+    let role_rights_object_refs = build_role_rights_object_reference_index(object_refs, form_refs);
 
     let mut paths = BTreeMap::new();
     for (metadata_id, suffixes) in suffixes_by_id {
@@ -2734,7 +2745,7 @@ fn source_asset_paths_with_indexes(
             &rows_by_file_name,
             &command_refs,
             &metadata_refs,
-            &object_refs,
+            &role_rights_object_refs,
             &field_refs,
             &type_index,
             &subsystem_refs,
@@ -4010,13 +4021,14 @@ fn write_source_asset(
             )?;
         }
         SourceAssetKind::RoleRights => {
-            let rights = parse_role_rights_blob(bytes, context.object_refs, context.field_refs)
-                .with_context(|| {
-                    format!(
-                        "failed to extract role rights from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+            let rights =
+                parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
+                    .with_context(|| {
+                        format!(
+                            "failed to extract role rights from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -4601,6 +4613,19 @@ fn build_metadata_object_reference_index_from_texts(
         }
     }
     index
+}
+
+fn build_role_rights_object_reference_index(
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut refs = object_refs.clone();
+    for (uuid, form_ref) in form_refs {
+        if let Some(reference) = form_source_reference_name(form_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    refs
 }
 
 fn build_metadata_order_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<String, usize> {
@@ -35425,6 +35450,62 @@ mod tests {
             rights.objects[0].name,
             "HTTPService.Api.URLTemplate.Any.Method.POST"
         );
+    }
+
+    #[test]
+    fn role_rights_blob_resolves_common_form_refs_from_index() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let role_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let role_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{6,\r\n{{3,\r\n{{1,0,{role_uuid}}},\"FormReader\",{{1,\"en\",\"Form reader\"}},\"\"}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"SharedRightsForm\",{{1,\"en\",\"Shared rights form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+            )
+            .as_bytes(),
+        );
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{form_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights = deflate_for_test(rights_text.as_bytes());
+        let rows = vec![
+            ConfigRow {
+                file_name: role_uuid.to_string(),
+                part_no: 0,
+                data_size: role_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&role_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{role_uuid}.0"),
+                part_no: 0,
+                data_size: rights.len() as i64,
+                binary_hex: encode_hex_for_test(&rights),
+            },
+            ConfigRow {
+                file_name: form_uuid.to_string(),
+                part_no: 0,
+                data_size: form_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&form_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("Roles/FormReader/Ext/Rights.xml")).unwrap();
+        assert!(xml.contains("<name>CommonForm.SharedRightsForm</name>"));
+        assert!(xml.contains("<name>View</name>"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
