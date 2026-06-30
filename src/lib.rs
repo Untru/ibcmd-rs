@@ -14,3 +14,4 @@ pub mod source_audit;
 pub mod storage_map;
 pub mod templates;
 pub mod trace;
+pub(crate) mod v8_container;
