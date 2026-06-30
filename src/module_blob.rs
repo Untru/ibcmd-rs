@@ -9461,7 +9461,7 @@ fn format_form_layout_new_button_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    if item.location_in_command_bar.is_some() {
+    if item.location_in_command_bar.is_some() || item.show_title.is_some() {
         return format_form_layout_new_extended_button_item(
             item,
             item_uuid,
@@ -9544,6 +9544,11 @@ fn format_form_layout_new_extended_button_item(
         .button_representation
         .map(form_button_representation_code)
         .unwrap_or("3");
+    let show_title = if item.show_title.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
     let default_button = if item.default_button.unwrap_or(false) {
         "1"
     } else {
@@ -9566,7 +9571,7 @@ fn format_form_layout_new_extended_button_item(
         item_type.to_string(),
         format_1c_string(&item.name),
         format_1c_synonyms(&item.title),
-        "1".to_string(),
+        show_title.to_string(),
         command_ref,
         data_path_ref,
         representation.to_string(),
@@ -10142,6 +10147,16 @@ fn patch_form_layout_child_item_entry(
         replacements.push((
             location_range.clone(),
             form_button_location_in_command_bar_code(location).to_string(),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(show_title) = item.show_title
+        && form_layout_button_is_extended(fields)
+        && let Some(show_title_range) = fields.get(7)
+    {
+        replacements.push((
+            show_title_range.clone(),
+            if show_title { "1" } else { "0" }.to_string(),
         ));
     }
     if item.tag == "InputField"
@@ -24425,6 +24440,100 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_existing_extended_button_show_title() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let button = [
+                "34",
+                "{44,22222222-2222-4222-8222-222222222222}",
+                "0",
+                "0",
+                "0",
+                "\"Save\"",
+                "{1,0}",
+                "1",
+                "{0}",
+                "{0}",
+                "3",
+                "0",
+                "0",
+                "0",
+                "2",
+                "2",
+                "0",
+                "0",
+                "0",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{8,3,0,1,100}",
+                "{0,0,0}",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "1",
+                "{\"Pattern\"}",
+                "\"\"",
+                "0",
+                "0",
+                "1",
+                "{0}",
+                "{\"U\"}",
+                "1",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "0",
+                "3",
+                "3",
+                "3",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "0",
+                "0",
+                "0",
+                "1",
+                "\"\"",
+            ]
+            .join(",");
+            let layout = format!(
+                "{{4,{{59,1,11111111-1111-4111-8111-111111111111,{{{button}}}}},\"Old module\",{{0}}}}"
+            );
+            let base = super::deflate_raw(layout.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<ShowTitle>{value}</ShowTitle>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+            assert_eq!(&parsed.layout[button_fields[7].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_new_top_level_groups() -> anyhow::Result<()> {
         let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -24670,6 +24779,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_button_show_title() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="RunButton" id="44">
+			<ShowTitle>false</ShowTitle>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[4].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""RunButton""#);
+        assert_eq!(&parsed.layout[button_fields[7].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
