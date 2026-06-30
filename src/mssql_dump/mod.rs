@@ -3693,14 +3693,18 @@ fn write_source_asset(
             )?;
         }
         SourceAssetKind::RoleRights => {
-            let rights =
-                parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
-                    .with_context(|| {
-                        format!(
-                            "failed to extract role rights from source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?;
+            let rights = parse_role_rights_blob_with_metadata_order(
+                bytes,
+                context.role_rights_object_refs,
+                context.field_refs,
+                context.metadata_order,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract role rights from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -7008,11 +7012,18 @@ fn role_rights_object_owner_reference(object_name: &str) -> Option<&str> {
     if let Some((owner, _)) = object_name.split_once(".Command.") {
         return Some(owner);
     }
-    if let Some((owner, _, _)) = role_http_service_method_reference(object_name) {
-        return Some(owner);
-    }
-    if let Some((owner, _, _)) = role_child_object_reference(object_name) {
-        return Some(owner);
+    for marker in [
+        ".AddressingAttribute.",
+        ".Attribute.",
+        ".Dimension.",
+        ".Form.",
+        ".Resource.",
+        ".TabularSection.",
+        ".URLTemplate.",
+    ] {
+        if let Some((owner, _)) = object_name.split_once(marker) {
+            return Some(owner);
+        }
     }
     Some(object_name)
 }
@@ -35924,6 +35935,55 @@ mod tests {
         assert_eq!(
             names,
             vec!["Catalog.Gamma", "Catalog.Alpha", "Catalog.Beta"]
+        );
+    }
+
+    #[test]
+    fn role_rights_objects_follow_metadata_order_when_available() {
+        let catalog_uuid = "11111111-1111-4111-8111-111111111111";
+        let command_uuid = "22222222-2222-4222-8222-222222222222";
+        let document_uuid = "33333333-3333-4333-8333-333333333333";
+        let rights_text = format!(
+            "{{10,{{3,\
+{{{{1,{command_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{document_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{catalog_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([
+            (catalog_uuid.to_string(), "Catalog.Products".to_string()),
+            (
+                command_uuid.to_string(),
+                "Catalog.Products.Command.Import".to_string(),
+            ),
+            (document_uuid.to_string(), "Document.Invoice".to_string()),
+        ]);
+        let metadata_order = BTreeMap::from([
+            (catalog_uuid.to_string(), 10usize),
+            (document_uuid.to_string(), 5usize),
+        ]);
+
+        let rights = parse_role_rights_blob_with_metadata_order(
+            &rights_blob,
+            &object_refs,
+            &BTreeMap::new(),
+            &metadata_order,
+        )
+        .unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "Document.Invoice",
+                "Catalog.Products.Command.Import",
+                "Catalog.Products"
+            ]
         );
     }
 
