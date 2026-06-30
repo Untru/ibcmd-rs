@@ -15,12 +15,50 @@ The first milestone started read-only for the target infobase:
 Guarded direct database writers are now available for researched storage rows.
 They are still intended only for throwaway test databases.
 
+## Export Compatibility Status
+
+Current parity tracking is summarized in
+[docs/export-parity-status.md](docs/export-parity-status.md). The table below is
+the compact top-level view for the `ut_ibcmd` export comparison against native
+`ibcmd`.
+
+| Object / group | Status | Ready | Remaining |
+|---|---|---:|---:|
+| CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, EventSubscriptions, FunctionalOptions, ScheduledJobs, StyleItems, CommandGroups, FunctionalOptionsParameters, Languages, SessionParameters, DocumentNumerators, WSReferences, IntegrationServices, Ext | done / byte-identical | 100.0% | 0 |
+| Enums | partial | 93.9% | 73 |
+| CommonTemplates | partial | 82.0% | 89 |
+| Roles | partial | 78.6% | 476 |
+| AccumulationRegisters | partial | 59.5% | 182 |
+| Reports | partial | 55.0% | 1063 |
+| XDTOPackages | partial | 50.0% | 407 |
+| WebServices | partial | 50.0% | 18 |
+| HTTPServices | partial | 50.0% | 5 |
+| ExchangePlans | partial | 49.7% | 184 |
+| DocumentJournals | partial | 49.6% | 61 |
+| Tasks | partial | 46.9% | 26 |
+| DataProcessors | partial | 45.5% | 3844 |
+| Catalogs | partial | 45.2% | 3672 |
+| InformationRegisters | partial | 44.0% | 2227 |
+| Documents | partial | 43.8% | 3498 |
+| ChartsOfCharacteristicTypes | partial | 41.9% | 97 |
+| BusinessProcesses | partial | 41.4% | 89 |
+| SettingsStorages | partial | 39.0% | 50 |
+| CommonForms | partial | 36.8% | 705 |
+| FilterCriteria | partial | 14.3% | 6 |
+| Subsystems | partial | 9.9% | 690 |
+| CommonAttributes | not started | 0.0% | 7 |
+| Configuration.xml | not started | 0.0% | 1 |
+
+Scope exclusion: `ConfigDumpInfo.xml` is intentionally not generated and is not
+counted as parity debt.
+
 ## Commands
 
 ```powershell
 cargo run -- probe --deep
 cargo run -- scan C:\path\to\xml-sources -o current-manifest.json
 cargo run -- plan current-manifest.json -b baseline-manifest.json -o load-plan.json
+cargo run -- source-diff C:\ibcmd-export C:\ibcmd-rs-dump --path-prefix Catalogs\Валюты -o source-diff.json
 cargo run -- profile-run --capture-output -- ibcmd infobase config load ...
 cargo run -- dump-sources --settings C:\repo\autumn-properties.json --extension EmergingTravelGroup -o C:\repo\src\cfe\EmergingTravelGroup --overwrite
 cargo run -- mssql-dump-config --database MyInfobase -o C:\repo\db-dump --include-config-save --inflate --extract-module-text

@@ -22,6 +22,8 @@ pub struct DumpSourcesReport {
     pub db_name: String,
     pub db_user: String,
     pub password_source: String,
+    pub infobase_user: Option<String>,
+    pub infobase_password_source: Option<String>,
     pub extension: Option<String>,
     pub output_dir: PathBuf,
     pub data_dir: PathBuf,
@@ -41,6 +43,9 @@ struct DumpConfig {
     db_user: String,
     db_pwd: String,
     password_source: String,
+    infobase_user: Option<String>,
+    infobase_password: Option<String>,
+    infobase_password_source: Option<String>,
     output_dir: PathBuf,
     extension: Option<String>,
     data_dir: PathBuf,
@@ -65,6 +70,13 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
         .arg(format!("--db-pwd={}", config.db_pwd))
         .arg(format!("--data={}", config.data_dir.display()));
 
+    if let Some(user) = &config.infobase_user {
+        command.arg(format!("--user={user}"));
+    }
+    if let Some(password) = &config.infobase_password {
+        command.arg(format!("--password={password}"));
+    }
+
     if let Some(extension) = &config.extension {
         command.arg(format!("--extension={extension}"));
     }
@@ -77,15 +89,25 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
 
     if output.timed_out {
         bail!(
-            "ibcmd export timed out after {} seconds",
-            config.timeout.as_secs()
+            "ibcmd export timed out after {} seconds\nibcmd: {}\ndatabase: {}\ninfobase_user: {}\ndata_dir: {}\ntemp_export_dir: {}",
+            config.timeout.as_secs(),
+            config.ibcmd.display(),
+            config.db_name,
+            config.infobase_user.as_deref().unwrap_or("<none>"),
+            config.data_dir.display(),
+            temp_export_dir.display()
         );
     }
 
     if !output.success {
         bail!(
-            "ibcmd export failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
+            "ibcmd export failed with exit code {:?}\nibcmd: {}\ndatabase: {}\ninfobase_user: {}\ndata_dir: {}\ntemp_export_dir: {}\nstdout:\n{}\nstderr:\n{}",
             output.exit_code,
+            config.ibcmd.display(),
+            config.db_name,
+            config.infobase_user.as_deref().unwrap_or("<none>"),
+            config.data_dir.display(),
+            temp_export_dir.display(),
             output.stdout,
             output.stderr
         );
@@ -105,6 +127,8 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
         db_name: config.db_name,
         db_user: config.db_user,
         password_source: config.password_source,
+        infobase_user: config.infobase_user,
+        infobase_password_source: config.infobase_password_source,
         extension: config.extension,
         output_dir: config.output_dir,
         data_dir: config.data_dir,
@@ -157,6 +181,17 @@ fn resolve_config(args: &DumpSourcesArgs) -> Result<DumpConfig> {
             }
         }
     };
+    let infobase_user = first_value(
+        args.user.as_deref(),
+        settings_value_any(&settings, &["ib-user", "user", "usr"]),
+    )
+    .or_else(|| env::var("IBCMD_USR").ok());
+    let (infobase_password, infobase_password_source) = resolve_optional_infobase_password(
+        infobase_user.as_ref(),
+        args.password.as_deref(),
+        &settings,
+        &args.password_env,
+    )?;
 
     let ibcmd = resolve_ibcmd(args.ibcmd.as_deref())?;
     let output_dir = absolute_path(&args.output_dir)?;
@@ -173,6 +208,9 @@ fn resolve_config(args: &DumpSourcesArgs) -> Result<DumpConfig> {
         db_user,
         db_pwd,
         password_source,
+        infobase_user,
+        infobase_password,
+        infobase_password_source,
         output_dir,
         extension: args.extension.clone(),
         data_dir,
@@ -196,6 +234,46 @@ fn settings_value(settings: &Option<Value>, name: &str) -> Option<String> {
         .as_str()
         .filter(|value| !value.trim().is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn settings_value_any(settings: &Option<Value>, names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        settings_value(settings, name).or_else(|| settings_string_at(settings, &["ibcmd-rs", name]))
+    })
+}
+
+fn settings_string_at(settings: &Option<Value>, path: &[&str]) -> Option<String> {
+    let mut current = settings.as_ref()?;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn resolve_optional_infobase_password(
+    user: Option<&String>,
+    cli_password: Option<&str>,
+    settings: &Option<Value>,
+    password_env: &str,
+) -> Result<(Option<String>, Option<String>)> {
+    if user.is_none() {
+        return Ok((None, None));
+    }
+    if let Some(value) = cli_password.filter(|value| !value.is_empty()) {
+        return Ok((Some(value.to_string()), Some("--password".to_string())));
+    }
+    if let Ok(value) = env::var(password_env) {
+        return Ok((Some(value), Some(format!("env:{password_env}"))));
+    }
+    if let Some(value) = settings_value_any(settings, &["ib-pwd", "password", "pwd"]) {
+        return Ok((Some(value), Some("settings".to_string())));
+    }
+    bail!(
+        "infobase password is required when --user is set: pass --password, set {password_env}, or use --settings"
+    )
 }
 
 fn first_value(cli: Option<&str>, settings: Option<String>) -> Option<String> {
@@ -460,7 +538,7 @@ mod tests {
         ));
         fs::write(
             &path,
-            r#"{"vrunner":{"dbms-type":"MSSQLServer","dbms-server":"localhost","dbms-base":"OstrovokEmpty","dbms-user":"sa","dbms-pwd":"secret"}}"#,
+            r#"{"vrunner":{"dbms-type":"MSSQLServer","dbms-server":"localhost","dbms-base":"OstrovokEmpty","dbms-user":"test-sql-user","dbms-pwd":"dummy-value-for-settings-test"}}"#,
         )
         .unwrap();
 
@@ -471,7 +549,7 @@ mod tests {
         );
         assert_eq!(
             settings_value(&settings, "dbms-pwd"),
-            Some("secret".to_string())
+            Some("dummy-value-for-settings-test".to_string())
         );
 
         let _ = fs::remove_file(path);

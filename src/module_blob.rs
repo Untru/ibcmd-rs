@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
@@ -24,10 +24,13 @@ const BLOCK_HEADER_SIZE: usize = 31;
 const ELEM_ADDR_SIZE: usize = 12;
 const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
+// Platform-level 1C standard pictures and form type IDs, not database metadata UUIDs.
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
 const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
+const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
+const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -72,7 +75,396 @@ pub struct PatchedVersionsBlob {
 pub struct ParsedFormBodyBlob {
     pub layout: String,
     pub module_text: String,
+    pub trailing: Vec<String>,
     pub trailing_fields: usize,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlBodyProperties {
+    title: Vec<LocalizedString>,
+    width: Option<String>,
+    height: Option<String>,
+    window_opening_mode: Option<FormXmlWindowOpeningMode>,
+    enter_key_behavior: Option<FormXmlEnterKeyBehavior>,
+    save_window_settings: Option<bool>,
+    auto_title: Option<bool>,
+    auto_url: Option<bool>,
+    save_data_in_settings: Option<FormXmlSaveDataInSettings>,
+    auto_save_data_in_settings: Option<FormXmlAutoSaveDataInSettings>,
+    group: Option<FormXmlGroup>,
+    scaling_mode: Option<FormXmlScalingMode>,
+    auto_time: Option<FormXmlAutoTime>,
+    use_posting_mode: Option<FormXmlUsePostingMode>,
+    repost_on_write: Option<bool>,
+    auto_fill_check: Option<bool>,
+    command_set_excluded_commands: Vec<FormXmlExcludedCommand>,
+    use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
+    customizable: Option<bool>,
+    command_bar_location: Option<FormXmlCommandBarLocation>,
+    vertical_scroll: Option<FormXmlVerticalScroll>,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    conversations_representation: Option<FormXmlConversationsRepresentation>,
+    show_title: Option<bool>,
+    show_command_bar: Option<bool>,
+    show_close_button: Option<bool>,
+    report_result: Option<String>,
+    details_data: Option<String>,
+    report_form_type: Option<FormXmlReportFormType>,
+    auto_show_state: Option<FormXmlAutoShowState>,
+    report_result_view_mode: Option<FormXmlReportResultViewMode>,
+    view_mode_application_on_set_report_result: Option<FormXmlViewModeApplicationOnSetReportResult>,
+    events_present: bool,
+    events: Vec<FormXmlEvent>,
+    auto_command_bar: Option<FormXmlAutoCommandBar>,
+    attributes_present: bool,
+    attributes: Vec<FormXmlAttribute>,
+    parameters_present: bool,
+    parameters: Vec<FormXmlParameter>,
+    commands_present: bool,
+    commands: Vec<FormXmlCommand>,
+    command_interface_present: bool,
+    command_interface_items: Vec<FormXmlCommandInterfaceItem>,
+    child_items_present: bool,
+    child_items: Vec<FormXmlChildItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlAutoCommandBar {
+    id: String,
+    name: String,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
+    child_items_present: bool,
+    child_items: Vec<FormXmlChildItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlEvent {
+    name: String,
+    handler: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlCommand {
+    id: String,
+    name: String,
+    title: Vec<LocalizedString>,
+    tooltip: Vec<LocalizedString>,
+    action: Option<String>,
+    functional_options: Vec<String>,
+    current_row_use: Option<FormXmlCommandCurrentRowUse>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlAttribute {
+    id: String,
+    name: String,
+    types: Vec<String>,
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
+    main_attribute: Option<bool>,
+    settings: Option<FormXmlDynamicListSettings>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlParameter {
+    name: String,
+    types: Vec<String>,
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
+    key_parameter: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlDynamicListSettings {
+    manual_query: Option<bool>,
+    dynamic_data_read: Option<bool>,
+    query_text: Option<String>,
+    main_table: Option<String>,
+    list_settings: FormXmlListSettings,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettings {
+    filter: Option<FormXmlListSettingsStandardSection>,
+    order: Option<FormXmlListSettingsOrder>,
+    conditional_appearance: Option<FormXmlListSettingsStandardSection>,
+    items_view_mode: Option<String>,
+    items_user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsStandardSection {
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsOrder {
+    items: Vec<FormXmlListSettingsOrderItem>,
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsOrderItem {
+    field: Option<String>,
+    order_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlCommandInterfaceItem {
+    command: Option<String>,
+    command_group: Option<String>,
+    index: Option<usize>,
+    default_visible: Option<bool>,
+    visible_common: Option<bool>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlChildItem {
+    tag: String,
+    depth: usize,
+    id: String,
+    name: String,
+    group: Option<FormXmlGroup>,
+    behavior: Option<FormXmlGroupBehavior>,
+    representation: Option<FormXmlGroupRepresentation>,
+    table_representation: Option<String>,
+    height_in_table_rows: Option<String>,
+    row_selection_mode: Option<String>,
+    enable_start_drag: Option<bool>,
+    enable_drag: Option<bool>,
+    file_drag_mode: Option<String>,
+    button_representation: Option<FormXmlButtonRepresentation>,
+    location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
+    default_button: Option<bool>,
+    scroll_on_compress: Option<bool>,
+    show_title: Option<bool>,
+    show_in_header: Option<bool>,
+    read_only: Option<bool>,
+    skip_on_input: Option<bool>,
+    title_location: Option<FormXmlTitleLocation>,
+    edit_mode: Option<FormXmlEditMode>,
+    mark_required_complete: Option<bool>,
+    auto_edit_mode: Option<bool>,
+    width: Option<String>,
+    height: Option<String>,
+    auto_max_width: Option<bool>,
+    max_width: Option<String>,
+    auto_max_height: Option<bool>,
+    max_height: Option<String>,
+    horizontal_stretch: Option<bool>,
+    vertical_stretch: Option<bool>,
+    password_mode: Option<bool>,
+    multi_line: Option<bool>,
+    wrap: Option<bool>,
+    text_edit: Option<bool>,
+    auto_cell_height: Option<bool>,
+    drop_list_button: Option<bool>,
+    clear_button: Option<bool>,
+    open_button: Option<bool>,
+    create_button: Option<bool>,
+    choice_button: Option<bool>,
+    choice_list_button: Option<bool>,
+    spin_button: Option<bool>,
+    list_choice_mode: Option<bool>,
+    quick_choice: Option<bool>,
+    choose_type: Option<bool>,
+    auto_mark_incomplete: Option<bool>,
+    choice_button_representation: Option<FormXmlChoiceButtonRepresentation>,
+    item_type: Option<String>,
+    addition_source_item: Option<String>,
+    title: Vec<LocalizedString>,
+    tooltip: Vec<LocalizedString>,
+    extended_tooltip: Option<FormXmlExtendedTooltip>,
+    events: Vec<FormXmlEvent>,
+    command_name: Option<String>,
+    data_path: Option<String>,
+    child_items_present: bool,
+    child_items: Vec<FormXmlChildItem>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlExtendedTooltip {
+    id: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlCommandCurrentRowUse {
+    DontUse,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlWindowOpeningMode {
+    DontBlock,
+    LockOwner,
+    LockWholeInterface,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlEnterKeyBehavior {
+    DefaultButton,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlAutoSaveDataInSettings {
+    Use,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlSaveDataInSettings {
+    UseList,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlGroup {
+    Vertical,
+    Horizontal,
+    AlwaysHorizontal,
+    HorizontalIfPossible,
+    InCell,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlScalingMode {
+    Normal,
+    Compact,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlAutoTime {
+    DontUse,
+    CurrentOrLast,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlUsePostingMode {
+    Regular,
+    Auto,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlExcludedCommand {
+    Change,
+    Copy,
+    Create,
+    CustomizeForm,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlUseForFoldersAndItems {
+    Items,
+    Folders,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlVerticalScroll {
+    UseIfNecessary,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlConversationsRepresentation {
+    DontShow,
+    Show,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlReportFormType {
+    Main,
+    Settings,
+    Variant,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlAutoShowState {
+    Auto,
+    DontShow,
+    ShowOnComposition,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlReportResultViewMode {
+    Auto,
+    Default,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlViewModeApplicationOnSetReportResult {
+    Auto,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlGroupBehavior {
+    Usual,
+    Collapsible,
+    PopUp,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlGroupRepresentation {
+    None,
+    StrongSeparation,
+    WeakSeparation,
+    NormalSeparation,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlButtonRepresentation {
+    Text,
+    Picture,
+    PictureAndText,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlButtonLocationInCommandBar {
+    InAdditionalSubmenu,
+    InCommandBar,
+    InCommandBarAndInAdditionalSubmenu,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlTitleLocation {
+    None,
+    Left,
+    Top,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlEditMode {
+    Directly,
+    EnterOnInput,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlChoiceButtonRepresentation {
+    ShowInDropList,
+    ShowInDropListAndInInputField,
+    ShowInInputField,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlCommandBarLocation {
+    None,
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlHorizontalAlign {
+    Left,
+    Center,
+    Right,
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,7 +483,7 @@ pub struct CommonModuleXmlProperties {
     pub return_values_reuse: ReturnValuesReuse,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct LocalizedString {
     pub lang: String,
     pub content: String,
@@ -222,6 +614,42 @@ pub struct MetadataSourceContext {
 impl MetadataSourceContext {
     pub fn new(source_root: PathBuf) -> Self {
         Self { source_root }
+    }
+
+    pub fn moxel_object_refs(&self) -> Result<BTreeMap<String, String>> {
+        let mut refs = BTreeMap::new();
+        self.collect_simple_metadata_refs("CommonPictures", "CommonPicture", &mut refs)?;
+        self.collect_simple_metadata_refs("StyleItems", "StyleItem", &mut refs)?;
+        Ok(refs)
+    }
+
+    fn collect_simple_metadata_refs(
+        &self,
+        folder: &str,
+        kind: &str,
+        refs: &mut BTreeMap<String, String>,
+    ) -> Result<()> {
+        let dir = self.source_root.join(folder);
+        if !dir.is_dir() {
+            return Ok(());
+        }
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+                continue;
+            }
+            let xml = fs::read(&path)
+                .with_context(|| format!("failed to read metadata XML {}", path.display()))?;
+            let properties = parse_simple_metadata_xml_properties(&xml)
+                .with_context(|| format!("failed to parse metadata XML {}", path.display()))?;
+            if properties.kind == kind {
+                refs.insert(properties.uuid, format!("{}.{}", kind, properties.name));
+            }
+        }
+        Ok(())
     }
 
     fn resolve_common_picture_uuid(&self, reference: &str) -> Result<String> {
@@ -356,6 +784,28 @@ impl MetadataSourceContext {
         })?;
         self.resolve_simple_metadata_uuid(reference, prefix, folder, &format!("{prefix}."))
     }
+
+    fn resolve_command_reference_uuid(&self, reference: &str) -> Result<String> {
+        let reference = reference.trim();
+        let Some((owner_reference, command_name)) = reference.split_once(".Command.") else {
+            return self.resolve_metadata_reference_uuid(reference);
+        };
+        let (prefix, folder) =
+            metadata_reference_source_folder(owner_reference).ok_or_else(|| {
+                anyhow!("unsupported command owner reference for source resolution: {reference}")
+            })?;
+        let owner_name = owner_reference
+            .strip_prefix(&format!("{prefix}."))
+            .ok_or_else(|| anyhow!("invalid command owner reference: {reference}"))?;
+        let path = self
+            .source_root
+            .join(folder)
+            .join(format!("{owner_name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read command owner XML {}", path.display()))?;
+        parse_nested_command_uuid_from_xml(&xml, command_name)
+            .with_context(|| format!("failed to resolve command {reference}"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -475,11 +925,14 @@ pub fn pack_module_blob_bytes(
 }
 
 pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
-    let elements = read_base_elements_from_blob(blob)?;
-    let text = elements
-        .get("text")
-        .ok_or_else(|| anyhow!("module blob does not contain text element"))?;
-    Ok(text.data.clone())
+    read_element_from_blob(blob, "text")
+        .context("failed to read module blob text element")?
+        .ok_or_else(|| anyhow!("module blob does not contain text element"))
+}
+
+pub fn module_blob_text_sha256(blob: &[u8]) -> Result<String> {
+    let text = unpack_module_blob_text(blob)?;
+    Ok(hex_sha256(&text))
 }
 
 pub fn pack_common_module_metadata_blob_from_xml(
@@ -534,6 +987,7 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
             let command_group = parse_command_group_xml_properties(xml, source)?;
             patch_command_group_metadata_text(text, &command_group)?
         }
+        "Configuration" => patch_configuration_metadata_text(text, &properties)?,
         _ => patch_simple_metadata_header_text(text, &properties)?,
     };
     let plain = patched.into_bytes();
@@ -552,7 +1006,66 @@ pub fn pack_style_body_blob_from_xml(
     xml: &[u8],
     source: Option<&MetadataSourceContext>,
 ) -> Result<PackedStyleBodyBlob> {
+    pack_style_body_blob_from_xml_with_base(&[], xml, source)
+}
+
+pub fn pack_style_body_blob_from_xml_with_base(
+    base_blob: &[u8],
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedStyleBodyBlob> {
     let items = parse_style_body_xml_items(xml)?;
+    if !base_blob.is_empty() {
+        let formatted_by_key = items
+            .iter()
+            .map(|item| {
+                let formatted = format_style_body_item(item, source)?;
+                let key = style_body_item_key(&formatted)?;
+                Ok((key, formatted))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let inflated = inflate_raw(base_blob).context("failed to inflate base Style body blob")?;
+        let mut plain =
+            String::from_utf8(inflated).context("base Style body blob is not valid UTF-8")?;
+        let body_start = plain
+            .find('{')
+            .ok_or_else(|| anyhow!("base Style body has no braced payload"))?;
+        let fields = scan_braced_fields(&plain, body_start)?;
+        if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+            return Err(anyhow!("base Style body does not start with type marker 2"));
+        }
+        let count = fields
+            .get(1)
+            .and_then(|range| plain[range.clone()].trim().parse::<usize>().ok())
+            .ok_or_else(|| anyhow!("base Style body item count is missing"))?;
+        if fields.len() < 2 + count {
+            return Err(anyhow!(
+                "base Style body has {} fields, expected at least {}",
+                fields.len(),
+                2 + count
+            ));
+        }
+        let mut replacements = Vec::<(Range<usize>, String)>::new();
+        for item_range in fields.iter().skip(2).take(count) {
+            let key = style_body_item_key(&plain[item_range.clone()])?;
+            if let Some(formatted) = formatted_by_key.get(&key) {
+                replacements.push((item_range.clone(), formatted.clone()));
+            }
+        }
+        replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+        for (range, replacement) in replacements {
+            replace_1c_value_if_different(&mut plain, range, &replacement);
+        }
+        let blob = deflate_raw(plain.as_bytes())?;
+        let output_sha256 = hex_sha256(&blob);
+
+        return Ok(PackedStyleBodyBlob {
+            blob,
+            plain_bytes: plain.len(),
+            output_sha256,
+        });
+    }
+
     let mut fields = Vec::with_capacity(items.len() + 3);
     fields.push("2".to_string());
     fields.push(items.len().to_string());
@@ -569,6 +1082,14 @@ pub fn pack_style_body_blob_from_xml(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn style_body_item_key(value: &str) -> Result<String> {
+    let fields = scan_braced_fields(value.trim(), 0)?;
+    let key = fields
+        .first()
+        .ok_or_else(|| anyhow!("Style body item has no key"))?;
+    Ok(compact_1c_value(&value.trim()[key.clone()]))
 }
 
 #[derive(Debug, Clone)]
@@ -851,6 +1372,9 @@ fn style_body_standard_code_for_name(name: &str) -> Option<i32> {
         "TableHeaderTextColor" => Some(-36),
         "TableFooterBackColor" => Some(-37),
         "TableFooterTextColor" => Some(-38),
+        "NavigationColor" => Some(-42),
+        "AuxiliaryNavigationColor" => Some(-43),
+        "ActivityColor" => Some(-44),
         _ => None,
     }
 }
@@ -911,8 +1435,10 @@ pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
     fields.extend(schedule.months);
     fields.push(schedule.weeks_period);
     fields.push(schedule.days_repeat_period);
+    fields.push("0".to_string());
 
-    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let mut plain = b"\xEF\xBB\xBF".to_vec();
+    plain.extend_from_slice(format!("{{{}}}", fields.join(",")).as_bytes());
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
 
@@ -931,6 +1457,128 @@ pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflat
         plain_bytes: bytes.len(),
         output_sha256,
     })
+}
+
+pub fn raw_deflated_plain_sha256(blob: &[u8]) -> Result<String> {
+    let plain = inflate_raw(blob).context("failed to inflate raw deflated blob")?;
+    Ok(hex_sha256(&plain))
+}
+
+pub fn raw_deflated_first_base64_payload_sha256(blob: &[u8]) -> Result<String> {
+    let plain =
+        String::from_utf8(inflate_raw(blob).context("failed to inflate raw deflated base64 blob")?)
+            .context("raw deflated base64 blob is not valid UTF-8")?;
+    let prefix = "{#base64:";
+    let payload_start = plain
+        .find(prefix)
+        .map(|index| index + prefix.len())
+        .ok_or_else(|| anyhow!("raw deflated blob has no base64 payload"))?;
+    let payload_end = plain[payload_start..]
+        .find('}')
+        .map(|relative| payload_start + relative)
+        .ok_or_else(|| anyhow!("raw deflated blob base64 payload is not closed"))?;
+    let payload = decode_base64_mime(&plain[payload_start..payload_end])
+        .ok_or_else(|| anyhow!("raw deflated blob base64 payload is invalid"))?;
+    Ok(hex_sha256(&payload))
+}
+
+pub fn raw_deflated_looks_like_help_blob(blob: &[u8]) -> bool {
+    raw_deflated_help_content_sha256(blob).is_ok()
+}
+
+pub fn raw_deflated_help_content_sha256(blob: &[u8]) -> Result<String> {
+    let plain = String::from_utf8(inflate_raw(blob).context("failed to inflate Help blob")?)
+        .context("Help blob is not valid UTF-8")?;
+    let text = plain.trim_start_matches('\u{feff}');
+    let fields = scan_braced_fields(text, 0).context("Help blob is not a 1C braced value")?;
+    if fields
+        .first()
+        .is_none_or(|range| text[range.clone()].trim() != "5")
+    {
+        return Err(anyhow!("Help blob marker is not 5"));
+    }
+    let page_count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Help blob page count is missing"))?;
+    if page_count == 0 {
+        return Err(anyhow!("Help blob has no pages"));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"ibcmd-rs-help-v1");
+    let mut index = 2usize;
+    hash_usize(&mut hasher, page_count);
+    for _ in 0..page_count {
+        let page_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob page name is missing"))?;
+        let page = parse_1c_quoted_string(text[page_range.clone()].trim())
+            .context("Help blob page name is not a 1C string")?;
+        index += 1;
+        let payload_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob page payload is missing"))?;
+        let payload = decode_base64_payload_field(text[payload_range.clone()].trim())
+            .context("Help blob page payload is not valid base64")?;
+        index += 1;
+        hash_bytes(&mut hasher, page.as_bytes());
+        hash_bytes(&mut hasher, &payload);
+    }
+
+    let file_count = fields
+        .get(index)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if fields.get(index).is_some() {
+        index += 1;
+    }
+    hash_usize(&mut hasher, file_count);
+    for _ in 0..file_count {
+        let file_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob file name is missing"))?;
+        let file_name = parse_1c_quoted_string(text[file_range.clone()].trim())
+            .context("Help blob file name is not a 1C string")?;
+        index += 1;
+        if fields.get(index).is_some_and(|range| {
+            text[range.clone()]
+                .trim()
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+        }) {
+            index += 1;
+        }
+        let payload_range = fields
+            .get(index)
+            .ok_or_else(|| anyhow!("Help blob file payload is missing"))?;
+        let payload = decode_base64_payload_field(text[payload_range.clone()].trim())
+            .context("Help blob file payload is not valid base64")?;
+        index += 1;
+        hash_bytes(&mut hasher, file_name.as_bytes());
+        hash_bytes(&mut hasher, &payload);
+    }
+
+    Ok(format!("{:X}", hasher.finalize()))
+}
+
+fn decode_base64_payload_field(field: &str) -> Result<Vec<u8>> {
+    let Some(payload) = field
+        .strip_prefix("{#base64:")
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return Err(anyhow!("base64 payload wrapper is missing"));
+    };
+    decode_base64_mime(payload).ok_or_else(|| anyhow!("base64 payload is invalid"))
+}
+
+fn hash_usize(hasher: &mut Sha256, value: usize) {
+    hasher.update((value as u64).to_le_bytes());
+}
+
+fn hash_bytes(hasher: &mut Sha256, bytes: &[u8]) {
+    hash_usize(hasher, bytes.len());
+    hasher.update(bytes);
 }
 
 pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
@@ -3074,14 +3722,169 @@ pub fn pack_form_body_blob_from_module_text(
     base_blob: &[u8],
     module_text: &[u8],
 ) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml(base_blob, &[], Some(module_text))
+}
+
+pub fn pack_form_body_blob_from_form_xml(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml_with_source(base_blob, form_xml, module_text, None)
+}
+
+pub fn pack_form_body_blob_from_form_xml_with_source(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
+    pack_form_body_blob_from_form_xml_with_source_and_assets(
+        base_blob,
+        form_xml,
+        module_text,
+        source,
+        None,
+    )
+}
+
+pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
+    base_blob: &[u8],
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+    form_item_assets_root: Option<&Path>,
+) -> Result<PackedRawDeflatedBlob> {
     let inflated = inflate_raw(base_blob).context("failed to inflate base Form body blob")?;
     let mut plain =
         String::from_utf8(inflated).context("base Form body blob is not valid UTF-8")?;
-    let container = FormBodyContainer::parse(&plain)?;
-    let module_text = std::str::from_utf8(module_text)
-        .context("Form module text is not valid UTF-8")?
-        .trim_start_matches('\u{feff}');
-    plain.replace_range(container.module_range, &format_1c_string(module_text));
+    if !form_xml.is_empty() {
+        let properties = parse_form_xml_body_properties(form_xml)?;
+        let form_command_uuids = form_command_uuids_for_pack(&plain, &properties.commands)?;
+        if properties.window_opening_mode.is_some()
+            || properties.enter_key_behavior.is_some()
+            || properties.save_window_settings.is_some()
+            || !properties.title.is_empty()
+            || properties.width.is_some()
+            || properties.height.is_some()
+            || properties.auto_title.is_some()
+            || properties.auto_url.is_some()
+            || properties.save_data_in_settings.is_some()
+            || properties.auto_save_data_in_settings.is_some()
+            || properties.group.is_some()
+            || properties.scaling_mode.is_some()
+            || properties.auto_time.is_some()
+            || properties.use_posting_mode.is_some()
+            || properties.repost_on_write.is_some()
+            || properties.auto_fill_check.is_some()
+            || !properties.command_set_excluded_commands.is_empty()
+            || properties.use_for_folders_and_items.is_some()
+            || properties.customizable.is_some()
+            || properties.command_bar_location.is_some()
+            || properties.vertical_scroll.is_some()
+            || properties.horizontal_align.is_some()
+            || properties.conversations_representation.is_some()
+            || properties.show_title.is_some()
+            || properties.show_command_bar.is_some()
+            || properties.show_close_button.is_some()
+            || properties.report_result.is_some()
+            || properties.details_data.is_some()
+            || properties.report_form_type.is_some()
+            || properties.auto_show_state.is_some()
+            || properties.report_result_view_mode.is_some()
+            || properties
+                .view_mode_application_on_set_report_result
+                .is_some()
+            || properties.events_present
+            || properties.auto_command_bar.is_some()
+            || properties.child_items_present
+            || !properties.child_items.is_empty()
+        {
+            let container = FormBodyContainer::parse(&plain)?;
+            let mut layout = plain[container.layout_range.clone()].trim().to_string();
+            patch_form_layout_properties(&mut layout, &properties)
+                .context("failed to patch Form layout properties")?;
+            if let Some(auto_command_bar) = &properties.auto_command_bar {
+                let _ = patch_form_layout_auto_command_bar(
+                    &mut layout,
+                    auto_command_bar,
+                    &properties.commands,
+                    &form_command_uuids,
+                    source,
+                )
+                .context("failed to patch Form layout AutoCommandBar")?;
+            }
+            patch_form_layout_events(&mut layout, &properties.events, properties.events_present)
+                .context("failed to patch Form layout events")?;
+            patch_form_layout_child_items(
+                &mut layout,
+                &properties.child_items,
+                &properties.attributes,
+                &properties.commands,
+                &form_command_uuids,
+                source,
+                properties.child_items_present,
+            )
+            .context("failed to patch Form layout child items")?;
+            plain.replace_range(container.layout_range, &layout);
+        }
+        if properties.commands_present {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(commands_range) = container.trailing_ranges.get(2).cloned() {
+                let mut commands = plain[commands_range.clone()].trim().to_string();
+                patch_form_body_commands(
+                    &mut commands,
+                    &properties.commands,
+                    &form_command_uuids,
+                    source,
+                )
+                .context("failed to patch Form body commands")?;
+                plain.replace_range(commands_range, &commands);
+            }
+        }
+        if properties.parameters_present {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(parameters_range) = container.trailing_ranges.get(1).cloned() {
+                let mut parameters = plain[parameters_range.clone()].trim().to_string();
+                patch_form_body_parameters(&mut parameters, &properties.parameters, source)
+                    .context("failed to patch Form body parameters")?;
+                plain.replace_range(parameters_range, &parameters);
+            }
+        }
+        if properties.attributes_present {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(attributes_range) = container.trailing_ranges.first().cloned() {
+                let mut attributes = plain[attributes_range.clone()].trim().to_string();
+                patch_form_body_attributes(&mut attributes, &properties.attributes, source)
+                    .context("failed to patch Form body attributes")?;
+                plain.replace_range(attributes_range, &attributes);
+            }
+        }
+        if properties.command_interface_present {
+            let container = FormBodyContainer::parse(&plain)?;
+            if let Some(command_interface_range) = container.trailing_ranges.get(3).cloned() {
+                let mut command_interface =
+                    plain[command_interface_range.clone()].trim().to_string();
+                patch_form_command_interface(
+                    &mut command_interface,
+                    &properties.command_interface_items,
+                    source,
+                )
+                .context("failed to patch Form command interface")?;
+                plain.replace_range(command_interface_range, &command_interface);
+            }
+        }
+    }
+    if let Some(module_text) = module_text {
+        let container = FormBodyContainer::parse(&plain)?;
+        let module_text = std::str::from_utf8(module_text)
+            .context("Form module text is not valid UTF-8")?
+            .trim_start_matches('\u{feff}');
+        plain.replace_range(container.module_range, &format_1c_string(module_text));
+    }
+    if let Some(form_item_assets_root) = form_item_assets_root {
+        patch_form_item_picture_assets(&mut plain, form_item_assets_root)?;
+    }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -3089,6 +3892,9308 @@ pub fn pack_form_body_blob_from_module_text(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Result<()> {
+    if !assets_root.is_dir() {
+        return Ok(());
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    let mut occurrences_by_item = BTreeMap::<String, usize>::new();
+    let mut offset = 0usize;
+    let prefix = "{#base64:";
+    while let Some(relative_start) = plain[offset..].find(prefix) {
+        let marker_start = offset + relative_start;
+        let payload_start = marker_start + prefix.len();
+        let Some(relative_end) = plain[payload_start..].find('}') else {
+            break;
+        };
+        let payload_end = payload_start + relative_end;
+        if let Some(current_content) = decode_base64_mime(&plain[payload_start..payload_end])
+            && is_form_item_picture_asset_content(&current_content)
+            && let Some(item_name) = nearest_form_item_asset_name(plain, marker_start)
+        {
+            let occurrence = occurrences_by_item.entry(item_name.clone()).or_insert(0);
+            let file_name = form_item_asset_file_name(&item_name, &current_content, *occurrence);
+            *occurrence += 1;
+            if let Some(path) = resolve_form_item_asset_path(assets_root, &item_name, &file_name) {
+                let content = fs::read(&path).with_context(|| {
+                    format!("failed to read Form item asset {}", path.display())
+                })?;
+                if is_form_item_picture_asset_content(&content) && content != current_content {
+                    replacements.push((payload_start..payload_end, encode_base64(&content)));
+                }
+            }
+        }
+        offset = payload_end + 1;
+    }
+
+    for (range, payload) in replacements.into_iter().rev() {
+        plain.replace_range(range, &payload);
+    }
+    Ok(())
+}
+
+fn resolve_form_item_asset_path(
+    assets_root: &Path,
+    item_name: &str,
+    file_name: &str,
+) -> Option<PathBuf> {
+    let item_dir = assets_root.join(sanitize_source_path_segment(item_name));
+    let exact = item_dir.join(file_name);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let stem = file_name
+        .split_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let entries = fs::read_dir(&item_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(candidate_stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if candidate_stem == stem {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn is_form_item_picture_asset_content(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"GIF87a")
+        || bytes.starts_with(b"GIF89a")
+        || bytes.starts_with(b"\x00\x00\x01\x00")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || bytes.starts_with(b"BM")
+        || is_svg_content(bytes)
+}
+
+fn is_svg_content(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg")
+}
+
+fn nearest_form_item_asset_name(text: &str, marker_start: usize) -> Option<String> {
+    nearest_form_item_asset_name_in_window(text, marker_start, 4096)
+        .or_else(|| nearest_form_item_asset_name_in_window(text, marker_start, 12_288))
+}
+
+fn nearest_form_item_asset_name_in_window(
+    text: &str,
+    marker_start: usize,
+    window_size: usize,
+) -> Option<String> {
+    let mut window_start = marker_start.saturating_sub(window_size);
+    while window_start > 0 && !text.is_char_boundary(window_start) {
+        window_start -= 1;
+    }
+    let window = &text[window_start..marker_start];
+    let mut candidates = Vec::<String>::new();
+    let mut offset = 0usize;
+    while let Some(relative_quote) = window[offset..].find('"') {
+        let quote_start = offset + relative_quote;
+        let content_start = quote_start + 1;
+        let Some(relative_end) = window[content_start..].find('"') else {
+            break;
+        };
+        let quote_end = content_start + relative_end;
+        let value = &window[content_start..quote_end];
+        if is_probable_form_item_asset_name(value) {
+            candidates.push(value.to_string());
+        }
+        offset = quote_end + 1;
+    }
+    candidates.into_iter().rev().find(|value| {
+        value != "Picture"
+            && value != "RowsPicture"
+            && value != "ValuesPicture"
+            && value != "HeaderPicture"
+    })
+}
+
+fn is_probable_form_item_asset_name(value: &str) -> bool {
+    if value.is_empty() || value.len() > 160 || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    value.chars().all(|ch| {
+        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
+    })
+}
+
+fn form_item_asset_file_name(item_name: &str, content: &[u8], occurrence: usize) -> String {
+    let property_name = if item_name.contains("ИндексКартинки") {
+        if occurrence == 0 {
+            "HeaderPicture"
+        } else {
+            "ValuesPicture"
+        }
+    } else if item_name.contains("Авторегистрация") || item_name.ends_with("Пиктограмма")
+    {
+        "ValuesPicture"
+    } else if (item_name.starts_with("Дерево") || item_name.starts_with("Список"))
+        && !item_name.contains("КонтекстноеМеню")
+        && !item_name.contains("Добавить")
+        && !item_name.contains("Удалить")
+        && !item_name.contains("Показать")
+    {
+        "RowsPicture"
+    } else {
+        "Picture"
+    };
+    format!("{property_name}.{}", form_item_asset_extension(content))
+}
+
+fn form_item_asset_extension(content: &[u8]) -> &'static str {
+    if content.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "png"
+    } else if content.starts_with(b"GIF87a") || content.starts_with(b"GIF89a") {
+        "gif"
+    } else if content.starts_with(b"\xff\xd8\xff") {
+        "jpg"
+    } else if content.starts_with(b"BM") {
+        "bmp"
+    } else if content.starts_with(b"\x00\x00\x01\x00") {
+        "ico"
+    } else if is_svg_content(content) {
+        "svg"
+    } else {
+        "bin"
+    }
+}
+
+fn sanitize_source_path_segment(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+            output.push('_');
+        } else {
+            output.push(ch);
+        }
+    }
+    if output.trim().is_empty() {
+        "Unnamed".to_string()
+    } else {
+        output
+    }
+}
+
+fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text_value = String::new();
+    let mut properties = FormXmlBodyProperties::default();
+    let mut current_event_name = None::<String>;
+    let mut current_command = None::<FormXmlCommand>;
+    let mut current_localized_section = None::<String>;
+    let mut current_localized_lang = None::<String>;
+    let mut current_localized_content = None::<String>;
+    let mut current_attribute = None::<FormXmlAttribute>;
+    let mut current_parameter = None::<FormXmlParameter>;
+    let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
+    let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
+    let mut current_child_items = Vec::<FormXmlChildItem>::new();
+    let mut current_child_localized_section = None::<String>;
+    let mut current_child_title_lang = None::<String>;
+    let mut current_child_title_content = None::<String>;
+    let mut current_child_event_name = None::<String>;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if matches!(
+                    local.as_str(),
+                    "WindowOpeningMode"
+                        | "EnterKeyBehavior"
+                        | "SaveWindowSettings"
+                        | "Width"
+                        | "Height"
+                        | "AutoTitle"
+                        | "AutoURL"
+                        | "SaveDataInSettings"
+                        | "AutoSaveDataInSettings"
+                        | "Group"
+                        | "ScalingMode"
+                        | "AutoTime"
+                        | "UsePostingMode"
+                        | "RepostOnWrite"
+                        | "AutoFillCheck"
+                        | "ExcludedCommand"
+                        | "UseForFoldersAndItems"
+                        | "Customizable"
+                        | "CommandBarLocation"
+                        | "VerticalScroll"
+                        | "ConversationsRepresentation"
+                        | "ShowCommandBar"
+                        | "ShowCloseButton"
+                        | "ReportResult"
+                        | "DetailsData"
+                        | "ReportFormType"
+                        | "AutoShowState"
+                        | "ReportResultViewMode"
+                        | "ViewModeApplicationOnSetReportResult"
+                        | "HorizontalAlign"
+                        | "Autofill"
+                        | "Event"
+                        | "Action"
+                        | "CurrentRowUse"
+                        | "Item"
+                        | "MainAttribute"
+                        | "ManualQuery"
+                        | "DynamicDataRead"
+                        | "QueryText"
+                        | "MainTable"
+                        | "field"
+                        | "orderType"
+                        | "viewMode"
+                        | "userSettingID"
+                        | "itemsViewMode"
+                        | "itemsUserSettingID"
+                        | "Command"
+                        | "CommandGroup"
+                        | "Index"
+                        | "DefaultVisible"
+                        | "Common"
+                        | "CommandName"
+                        | "DataPath"
+                        | "HeightInTableRows"
+                        | "RowSelectionMode"
+                        | "EnableStartDrag"
+                        | "EnableDrag"
+                        | "FileDragMode"
+                        | "ScrollOnCompress"
+                        | "ShowTitle"
+                        | "ShowInHeader"
+                        | "DefaultButton"
+                        | "ReadOnly"
+                        | "SkipOnInput"
+                        | "LocationInCommandBar"
+                        | "TitleLocation"
+                        | "EditMode"
+                        | "MarkRequiredComplete"
+                        | "AutoEditMode"
+                        | "AutoMaxWidth"
+                        | "MaxWidth"
+                        | "AutoMaxHeight"
+                        | "MaxHeight"
+                        | "HorizontalStretch"
+                        | "VerticalStretch"
+                        | "PasswordMode"
+                        | "MultiLine"
+                        | "Wrap"
+                        | "TextEdit"
+                        | "AutoCellHeight"
+                        | "DropListButton"
+                        | "ClearButton"
+                        | "OpenButton"
+                        | "CreateButton"
+                        | "ChoiceButton"
+                        | "ChoiceListButton"
+                        | "SpinButton"
+                        | "ListChoiceMode"
+                        | "QuickChoice"
+                        | "ChooseType"
+                        | "AutoMarkIncomplete"
+                        | "ChoiceButtonRepresentation"
+                        | "Behavior"
+                        | "Representation"
+                        | "KeyParameter"
+                        | "Type"
+                        | "Length"
+                        | "AllowedLength"
+                        | "Digits"
+                        | "FractionDigits"
+                        | "AllowedSign"
+                        | "lang"
+                        | "content"
+                ) {
+                    text_value.clear();
+                }
+                if local == "Event"
+                    && path_ends_with(&path, &["Form", "Events"])
+                    && let Some(name) = xml_attribute_value(&event, "name")?
+                {
+                    current_event_name = Some(name);
+                }
+                if local == "Events" && path_ends_with(&path, &["Form"]) {
+                    properties.events_present = true;
+                }
+                if local == "Attributes" && path_ends_with(&path, &["Form"]) {
+                    properties.attributes_present = true;
+                }
+                if local == "Parameters" && path_ends_with(&path, &["Form"]) {
+                    properties.parameters_present = true;
+                }
+                if local == "Commands" && path_ends_with(&path, &["Form"]) {
+                    properties.commands_present = true;
+                }
+                if local == "CommandInterface" && path_ends_with(&path, &["Form"]) {
+                    properties.command_interface_present = true;
+                }
+                if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
+                    properties.child_items_present = true;
+                }
+                if local == "ChildItems"
+                    && path_ends_with(&path, &["Form", "AutoCommandBar"])
+                    && let Some(command_bar) = properties.auto_command_bar.as_mut()
+                {
+                    command_bar.child_items_present = true;
+                }
+                if local == "ChildItems"
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.child_items_present = true;
+                }
+                if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
+                    properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
+                if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
+                    current_command = parse_form_command_xml(&event)?;
+                } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
+                    current_attribute = parse_form_attribute_xml(&event)?;
+                } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
+                    current_parameter = parse_form_parameter_xml(&event)?;
+                } else if local == "Settings"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && current_attribute
+                        .as_ref()
+                        .and_then(|attribute| attribute.settings.as_ref())
+                        .is_none()
+                {
+                    if let Some(attribute) = current_attribute.as_mut() {
+                        attribute.settings = Some(FormXmlDynamicListSettings::default());
+                    }
+                } else if local == "item"
+                    && path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                        ],
+                    )
+                {
+                    current_list_settings_order_item =
+                        Some(FormXmlListSettingsOrderItem::default());
+                } else if local == "Item"
+                    && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
+                {
+                    current_command_interface_item = Some(FormXmlCommandInterfaceItem::default());
+                } else if is_form_child_item_xml_tag(&local)
+                    && (path.last().map(String::as_str) == Some("ChildItems")
+                        || current_child_items.last().is_some_and(|item| {
+                            path.last().map(String::as_str) == Some(item.tag.as_str())
+                        }))
+                {
+                    if path.last().map(String::as_str) != Some("ChildItems")
+                        && let Some(parent) = current_child_items.last_mut()
+                    {
+                        parent.child_items_present = true;
+                    }
+                    if let Some(mut item) = parse_form_child_item_xml(&local, &event)? {
+                        item.depth = current_child_items.len();
+                        current_child_items.push(item);
+                    }
+                } else if local == "item"
+                    && (path_ends_with_for_child_title(&path, &current_child_items)
+                        || path_ends_with_for_child_tooltip(&path, &current_child_items))
+                {
+                    current_child_localized_section = path
+                        .last()
+                        .map(|value| value.to_string())
+                        .filter(|value| matches!(value.as_str(), "Title" | "ToolTip"));
+                    current_child_title_lang = None;
+                    current_child_title_content = None;
+                } else if local == "Event"
+                    && path_ends_with_for_child_events(&path, &current_child_items)
+                {
+                    current_child_event_name = xml_attribute_value(&event, "name")?;
+                } else if local == "ExtendedTooltip"
+                    && path_ends_with_for_current_child_item(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if matches!(local.as_str(), "Title" | "ToolTip")
+                    && path_ends_with(&path, &["Form", "Commands", "Command"])
+                {
+                    current_localized_section = Some(local.clone());
+                } else if local == "Title" && path_ends_with(&path, &["Form"]) {
+                    current_localized_section = Some("FormTitle".to_string());
+                } else if local == "item" && path_ends_with(&path, &["Form", "Title"]) {
+                    current_localized_lang = None;
+                    current_localized_content = None;
+                } else if local == "item"
+                    && (path_ends_with(&path, &["Form", "Commands", "Command", "Title"])
+                        || path_ends_with(&path, &["Form", "Commands", "Command", "ToolTip"]))
+                {
+                    current_localized_lang = None;
+                    current_localized_content = None;
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Events" && path_ends_with(&path, &["Form"]) {
+                    properties.events_present = true;
+                }
+                if local == "Attributes" && path_ends_with(&path, &["Form"]) {
+                    properties.attributes_present = true;
+                }
+                if local == "Parameters" && path_ends_with(&path, &["Form"]) {
+                    properties.parameters_present = true;
+                }
+                if local == "Commands" && path_ends_with(&path, &["Form"]) {
+                    properties.commands_present = true;
+                }
+                if local == "CommandInterface" && path_ends_with(&path, &["Form"]) {
+                    properties.command_interface_present = true;
+                }
+                if local == "ChildItems" && path_ends_with(&path, &["Form"]) {
+                    properties.child_items_present = true;
+                }
+                if local == "ChildItems"
+                    && path_ends_with(&path, &["Form", "AutoCommandBar"])
+                    && let Some(command_bar) = properties.auto_command_bar.as_mut()
+                {
+                    command_bar.child_items_present = true;
+                }
+                if local == "ChildItems"
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.child_items_present = true;
+                }
+                if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
+                    properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                } else if local == "ExtendedTooltip"
+                    && path_ends_with_for_current_child_item(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if is_form_child_item_xml_tag(&local)
+                    && (path.last().map(String::as_str) == Some("ChildItems")
+                        || current_child_items.last().is_some_and(|item| {
+                            path.last().map(String::as_str) == Some(item.tag.as_str())
+                        }))
+                    && let Some(mut item) = parse_form_child_item_xml(&local, &event)?
+                {
+                    item.depth = current_child_items.len();
+                    if path_ends_with_root_auto_command_bar_child_items(&path)
+                        && current_child_items.is_empty()
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.child_items.push(item);
+                        }
+                    } else if let Some(parent) = current_child_items.last_mut() {
+                        if path.last().map(String::as_str) != Some("ChildItems") {
+                            parent.child_items_present = true;
+                        }
+                        parent.child_items.push(item.clone());
+                        properties.child_items.push(item);
+                    } else {
+                        properties.child_items.push(item);
+                    }
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
+                    || path_ends_with(&path, &["Form", "SaveWindowSettings"])
+                    || path_ends_with(&path, &["Form", "Width"])
+                    || path_ends_with(&path, &["Form", "Height"])
+                    || path_ends_with(&path, &["Form", "AutoTitle"])
+                    || path_ends_with(&path, &["Form", "AutoURL"])
+                    || path_ends_with(&path, &["Form", "SaveDataInSettings"])
+                    || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
+                    || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "ScalingMode"])
+                    || path_ends_with(&path, &["Form", "AutoTime"])
+                    || path_ends_with(&path, &["Form", "UsePostingMode"])
+                    || path_ends_with(&path, &["Form", "RepostOnWrite"])
+                    || path_ends_with(&path, &["Form", "AutoFillCheck"])
+                    || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
+                    || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
+                    || path_ends_with(&path, &["Form", "Customizable"])
+                    || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "VerticalScroll"])
+                    || path_ends_with(&path, &["Form", "HorizontalAlign"])
+                    || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
+                    || path_ends_with(&path, &["Form", "ShowTitle"])
+                    || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ShowCloseButton"])
+                    || path_ends_with(&path, &["Form", "ReportResult"])
+                    || path_ends_with(&path, &["Form", "DetailsData"])
+                    || path_ends_with(&path, &["Form", "ReportFormType"])
+                    || path_ends_with(&path, &["Form", "AutoShowState"])
+                    || path_ends_with(&path, &["Form", "ReportResultViewMode"])
+                    || path_ends_with(&path, &["Form", "ViewModeApplicationOnSetReportResult"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "lang"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "content"])
+                    || path_ends_with(&path, &["Form", "Events", "Event"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    )
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "DynamicDataRead",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "field",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "orderType",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsViewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsUserSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Command",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "CommandGroup",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Index",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "DefaultVisible",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Visible",
+                            "Common",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "content"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                    )
+                    || path_ends_with_for_child_title_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_group(&path, &current_child_items)
+                    || path_ends_with_for_child_behavior(&path, &current_child_items)
+                    || path_ends_with_for_child_group_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_table_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_height_in_table_rows(&path, &current_child_items)
+                    || path_ends_with_for_child_row_selection_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_button_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_default_button(&path, &current_child_items)
+                    || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
+                    || path_ends_with_for_child_read_only(&path, &current_child_items)
+                    || path_ends_with_for_child_skip_on_input(&path, &current_child_items)
+                    || path_ends_with_for_child_location_in_command_bar(&path, &current_child_items)
+                    || path_ends_with_for_child_title_location(&path, &current_child_items)
+                    || path_ends_with_for_child_edit_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_mark_required_complete(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_edit_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_width(&path, &current_child_items)
+                    || path_ends_with_for_child_height(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_max_width(&path, &current_child_items)
+                    || path_ends_with_for_child_max_width(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_max_height(&path, &current_child_items)
+                    || path_ends_with_for_child_max_height(&path, &current_child_items)
+                    || path_ends_with_for_child_horizontal_stretch(&path, &current_child_items)
+                    || path_ends_with_for_child_vertical_stretch(&path, &current_child_items)
+                    || path_ends_with_for_child_password_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_multi_line(&path, &current_child_items)
+                    || path_ends_with_for_child_wrap(&path, &current_child_items)
+                    || path_ends_with_for_child_text_edit(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_cell_height(&path, &current_child_items)
+                    || path_ends_with_for_child_drop_list_button(&path, &current_child_items)
+                    || path_ends_with_for_child_clear_button(&path, &current_child_items)
+                    || path_ends_with_for_child_open_button(&path, &current_child_items)
+                    || path_ends_with_for_child_create_button(&path, &current_child_items)
+                    || path_ends_with_for_child_choice_button(&path, &current_child_items)
+                    || path_ends_with_for_child_choice_list_button(&path, &current_child_items)
+                    || path_ends_with_for_child_spin_button(&path, &current_child_items)
+                    || path_ends_with_for_child_list_choice_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_quick_choice(&path, &current_child_items)
+                    || path_ends_with_for_child_choose_type(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_mark_incomplete(&path, &current_child_items)
+                    || path_ends_with_for_child_choice_button_representation(
+                        &path,
+                        &current_child_items,
+                    )
+                    || path_ends_with_for_child_show_title(&path, &current_child_items)
+                    || path_ends_with_for_child_show_in_header(&path, &current_child_items)
+                    || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
+                    || path_ends_with_for_child_command_name(&path, &current_child_items)
+                    || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Type",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Type",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Type",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Type",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Type",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "Type",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "Type",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "Type",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "Type",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "Type",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if path_ends_with(&path, &["Form", "WindowOpeningMode"])
+                    || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
+                    || path_ends_with(&path, &["Form", "SaveWindowSettings"])
+                    || path_ends_with(&path, &["Form", "Width"])
+                    || path_ends_with(&path, &["Form", "Height"])
+                    || path_ends_with(&path, &["Form", "AutoTitle"])
+                    || path_ends_with(&path, &["Form", "AutoURL"])
+                    || path_ends_with(&path, &["Form", "SaveDataInSettings"])
+                    || path_ends_with(&path, &["Form", "AutoSaveDataInSettings"])
+                    || path_ends_with(&path, &["Form", "Group"])
+                    || path_ends_with(&path, &["Form", "ScalingMode"])
+                    || path_ends_with(&path, &["Form", "AutoTime"])
+                    || path_ends_with(&path, &["Form", "UsePostingMode"])
+                    || path_ends_with(&path, &["Form", "RepostOnWrite"])
+                    || path_ends_with(&path, &["Form", "AutoFillCheck"])
+                    || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
+                    || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
+                    || path_ends_with(&path, &["Form", "Customizable"])
+                    || path_ends_with(&path, &["Form", "CommandBarLocation"])
+                    || path_ends_with(&path, &["Form", "VerticalScroll"])
+                    || path_ends_with(&path, &["Form", "HorizontalAlign"])
+                    || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
+                    || path_ends_with(&path, &["Form", "ShowTitle"])
+                    || path_ends_with(&path, &["Form", "ShowCommandBar"])
+                    || path_ends_with(&path, &["Form", "ShowCloseButton"])
+                    || path_ends_with(&path, &["Form", "ReportResult"])
+                    || path_ends_with(&path, &["Form", "DetailsData"])
+                    || path_ends_with(&path, &["Form", "ReportFormType"])
+                    || path_ends_with(&path, &["Form", "AutoShowState"])
+                    || path_ends_with(&path, &["Form", "ReportResultViewMode"])
+                    || path_ends_with(&path, &["Form", "ViewModeApplicationOnSetReportResult"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "HorizontalAlign"])
+                    || path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "lang"])
+                    || path_ends_with(&path, &["Form", "Title", "item", "content"])
+                    || path_ends_with(&path, &["Form", "Events", "Event"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    )
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "DynamicDataRead",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "field",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "item",
+                            "orderType",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "order",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "viewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                            "userSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsViewMode",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "itemsUserSettingID",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Command",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "CommandGroup",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Index",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "DefaultVisible",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "CommandInterface",
+                            "NavigationPanel",
+                            "Item",
+                            "Visible",
+                            "Common",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Title", "item", "content"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                    )
+                    || path_ends_with_for_child_title_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_title_content(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_type(&path, &current_child_items)
+                    || path_ends_with_for_child_group(&path, &current_child_items)
+                    || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
+                    || path_ends_with_for_child_table_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_height_in_table_rows(&path, &current_child_items)
+                    || path_ends_with_for_child_row_selection_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_enable_drag(&path, &current_child_items)
+                    || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_show_title(&path, &current_child_items)
+                    || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
+                    || path_ends_with_for_child_command_name(&path, &current_child_items)
+                    || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "Type", "Type"])
+                    || path_ends_with(&path, &["Form", "Parameters", "Parameter", "KeyParameter"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "Length",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "StringQualifiers",
+                            "AllowedLength",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "Digits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "FractionDigits",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Parameters",
+                            "Parameter",
+                            "NumberQualifiers",
+                            "AllowedSign",
+                        ],
+                    )
+                {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if form_localized_text_path_allows_entity_ref(&path, &current_child_items)
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                    )
+                {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text_value.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                match local.as_str() {
+                    "WindowOpeningMode"
+                        if path_ends_with(&path, &["Form", "WindowOpeningMode"]) =>
+                    {
+                        properties.window_opening_mode =
+                            Some(parse_form_window_opening_mode_xml(text_value.trim())?);
+                    }
+                    "EnterKeyBehavior" if path_ends_with(&path, &["Form", "EnterKeyBehavior"]) => {
+                        properties.enter_key_behavior =
+                            Some(parse_form_enter_key_behavior_xml(text_value.trim())?);
+                    }
+                    "SaveWindowSettings"
+                        if path_ends_with(&path, &["Form", "SaveWindowSettings"]) =>
+                    {
+                        properties.save_window_settings = Some(parse_form_xml_bool(
+                            "SaveWindowSettings",
+                            text_value.trim(),
+                        )?);
+                    }
+                    "Width" if path_ends_with(&path, &["Form", "Width"]) => {
+                        properties.width =
+                            Some(parse_form_dimension_xml("Width", text_value.trim())?);
+                    }
+                    "Height" if path_ends_with(&path, &["Form", "Height"]) => {
+                        properties.height =
+                            Some(parse_form_dimension_xml("Height", text_value.trim())?);
+                    }
+                    "AutoTitle" if path_ends_with(&path, &["Form", "AutoTitle"]) => {
+                        properties.auto_title =
+                            Some(parse_form_xml_bool("AutoTitle", text_value.trim())?);
+                    }
+                    "AutoURL" if path_ends_with(&path, &["Form", "AutoURL"]) => {
+                        properties.auto_url =
+                            Some(parse_form_xml_bool("AutoURL", text_value.trim())?);
+                    }
+                    "SaveDataInSettings"
+                        if path_ends_with(&path, &["Form", "SaveDataInSettings"]) =>
+                    {
+                        properties.save_data_in_settings =
+                            Some(parse_form_save_data_in_settings_xml(text_value.trim())?);
+                    }
+                    "AutoSaveDataInSettings"
+                        if path_ends_with(&path, &["Form", "AutoSaveDataInSettings"]) =>
+                    {
+                        properties.auto_save_data_in_settings = Some(
+                            parse_form_auto_save_data_in_settings_xml(text_value.trim())?,
+                        );
+                    }
+                    "Group" if path_ends_with(&path, &["Form", "Group"]) => {
+                        properties.group = Some(parse_form_group_xml(text_value.trim())?);
+                    }
+                    "ScalingMode" if path_ends_with(&path, &["Form", "ScalingMode"]) => {
+                        properties.scaling_mode =
+                            Some(parse_form_scaling_mode_xml(text_value.trim())?);
+                    }
+                    "AutoTime" if path_ends_with(&path, &["Form", "AutoTime"]) => {
+                        properties.auto_time = Some(parse_form_auto_time_xml(text_value.trim())?);
+                    }
+                    "UsePostingMode" if path_ends_with(&path, &["Form", "UsePostingMode"]) => {
+                        properties.use_posting_mode =
+                            Some(parse_form_use_posting_mode_xml(text_value.trim())?);
+                    }
+                    "RepostOnWrite" if path_ends_with(&path, &["Form", "RepostOnWrite"]) => {
+                        properties.repost_on_write =
+                            Some(parse_form_xml_bool("RepostOnWrite", text_value.trim())?);
+                    }
+                    "AutoFillCheck" if path_ends_with(&path, &["Form", "AutoFillCheck"]) => {
+                        properties.auto_fill_check =
+                            Some(parse_form_xml_bool("AutoFillCheck", text_value.trim())?);
+                    }
+                    "ExcludedCommand"
+                        if path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"]) =>
+                    {
+                        properties
+                            .command_set_excluded_commands
+                            .push(parse_form_excluded_command_xml(text_value.trim())?);
+                    }
+                    "UseForFoldersAndItems"
+                        if path_ends_with(&path, &["Form", "UseForFoldersAndItems"]) =>
+                    {
+                        properties.use_for_folders_and_items =
+                            Some(parse_form_use_for_folders_and_items_xml(text_value.trim())?);
+                    }
+                    "Customizable" if path_ends_with(&path, &["Form", "Customizable"]) => {
+                        properties.customizable =
+                            Some(parse_form_xml_bool("Customizable", text_value.trim())?);
+                    }
+                    "CommandBarLocation"
+                        if path_ends_with(&path, &["Form", "CommandBarLocation"]) =>
+                    {
+                        properties.command_bar_location =
+                            Some(parse_form_command_bar_location_xml(text_value.trim())?);
+                    }
+                    "VerticalScroll" if path_ends_with(&path, &["Form", "VerticalScroll"]) => {
+                        properties.vertical_scroll =
+                            Some(parse_form_vertical_scroll_xml(text_value.trim())?);
+                    }
+                    "HorizontalAlign" if path_ends_with(&path, &["Form", "HorizontalAlign"]) => {
+                        properties.horizontal_align =
+                            Some(parse_form_horizontal_align_xml(text_value.trim())?);
+                    }
+                    "ConversationsRepresentation"
+                        if path_ends_with(&path, &["Form", "ConversationsRepresentation"]) =>
+                    {
+                        properties.conversations_representation = Some(
+                            parse_form_conversations_representation_xml(text_value.trim())?,
+                        );
+                    }
+                    "ShowTitle" if path_ends_with(&path, &["Form", "ShowTitle"]) => {
+                        properties.show_title =
+                            Some(parse_form_xml_bool("ShowTitle", text_value.trim())?);
+                    }
+                    "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
+                        properties.show_command_bar =
+                            Some(parse_form_xml_bool("ShowCommandBar", text_value.trim())?);
+                    }
+                    "ShowCloseButton" if path_ends_with(&path, &["Form", "ShowCloseButton"]) => {
+                        properties.show_close_button =
+                            Some(parse_form_xml_bool("ShowCloseButton", text_value.trim())?);
+                    }
+                    "ReportResult" if path_ends_with(&path, &["Form", "ReportResult"]) => {
+                        let value = text_value.trim();
+                        if !value.is_empty() {
+                            properties.report_result = Some(value.to_string());
+                        }
+                    }
+                    "DetailsData" if path_ends_with(&path, &["Form", "DetailsData"]) => {
+                        let value = text_value.trim();
+                        if !value.is_empty() {
+                            properties.details_data = Some(value.to_string());
+                        }
+                    }
+                    "ReportFormType" if path_ends_with(&path, &["Form", "ReportFormType"]) => {
+                        properties.report_form_type =
+                            Some(parse_form_report_form_type_xml(text_value.trim())?);
+                    }
+                    "AutoShowState" if path_ends_with(&path, &["Form", "AutoShowState"]) => {
+                        properties.auto_show_state =
+                            Some(parse_form_auto_show_state_xml(text_value.trim())?);
+                    }
+                    "ReportResultViewMode"
+                        if path_ends_with(&path, &["Form", "ReportResultViewMode"]) =>
+                    {
+                        properties.report_result_view_mode =
+                            Some(parse_form_report_result_view_mode_xml(text_value.trim())?);
+                    }
+                    "ViewModeApplicationOnSetReportResult"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "ViewModeApplicationOnSetReportResult"],
+                        ) =>
+                    {
+                        properties.view_mode_application_on_set_report_result =
+                            Some(parse_form_view_mode_application_on_set_report_result_xml(
+                                text_value.trim(),
+                            )?);
+                    }
+                    "Autofill"
+                        if path_ends_with(&path, &["Form", "AutoCommandBar", "Autofill"]) =>
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.autofill = Some(parse_form_xml_bool(
+                                "AutoCommandBar/Autofill",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "HorizontalAlign"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "AutoCommandBar", "HorizontalAlign"],
+                        ) =>
+                    {
+                        if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                            command_bar.horizontal_align =
+                                Some(parse_form_horizontal_align_xml(text_value.trim())?);
+                        }
+                    }
+                    "Event" if path_ends_with(&path, &["Form", "Events", "Event"]) => {
+                        if let Some(name) = current_event_name.take() {
+                            let handler = text_value.trim();
+                            if !handler.is_empty() {
+                                properties.events.push(FormXmlEvent {
+                                    name,
+                                    handler: handler.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "lang"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item", "lang"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+                        ) || path_ends_with(&path, &["Form", "Title", "item", "lang"]) =>
+                    {
+                        current_localized_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item", "content"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+                        ) || path_ends_with(&path, &["Form", "Title", "item", "content"]) =>
+                    {
+                        current_localized_content = Some(text_value.to_string());
+                    }
+                    "item" if path_ends_with(&path, &["Form", "Title", "item"]) => {
+                        if let (Some(lang), Some(content)) = (
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            properties.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Title", "item"],
+                        ) || path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ToolTip", "item"],
+                        ) =>
+                    {
+                        if let (Some(command), Some(section), Some(lang), Some(content)) = (
+                            current_command.as_mut(),
+                            current_localized_section.as_deref(),
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            let value = LocalizedString { lang, content };
+                            match section {
+                                "Title" => command.title.push(value),
+                                "ToolTip" => command.tooltip.push(value),
+                                _ => {}
+                            }
+                        }
+                    }
+                    "Title" | "ToolTip"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", local.as_str()],
+                        ) =>
+                    {
+                        current_localized_section = None;
+                    }
+                    "Title" if path_ends_with(&path, &["Form", "Title"]) => {
+                        current_localized_section = None;
+                    }
+                    "Action"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", "Action"]) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.action = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CurrentRowUse"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "CurrentRowUse"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.current_row_use =
+                                Some(parse_form_command_current_row_use_xml(text_value.trim())?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                command.functional_options.push(value.to_string());
+                            }
+                        }
+                    }
+                    "Command" if path_ends_with(&path, &["Form", "Commands", "Command"]) => {
+                        if let Some(command) = current_command.take() {
+                            properties.commands.push(command);
+                        }
+                    }
+                    "Type"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Parameters", "Parameter", "Type", "Type"],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                parameter.types.push(value.to_string());
+                            }
+                        }
+                    }
+                    "KeyParameter"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Parameters", "Parameter", "KeyParameter"],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.key_parameter = Some(parse_form_xml_bool(
+                                "Parameter/KeyParameter",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Length"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "Type",
+                                "StringQualifiers",
+                                "Length",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.string_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedLength"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "Type",
+                                "StringQualifiers",
+                                "AllowedLength",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.string_allowed_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Digits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "Type",
+                                "NumberQualifiers",
+                                "Digits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "FractionDigits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "Type",
+                                "NumberQualifiers",
+                                "FractionDigits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_fraction_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedSign"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Parameters",
+                                "Parameter",
+                                "Type",
+                                "NumberQualifiers",
+                                "AllowedSign",
+                            ],
+                        ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            parameter.number_allowed_sign = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Parameter" if path_ends_with(&path, &["Form", "Parameters", "Parameter"]) => {
+                        if let Some(parameter) = current_parameter.take() {
+                            properties.parameters.push(parameter);
+                        }
+                    }
+                    "Type"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Type", "Type"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                attribute.types.push(value.to_string());
+                            }
+                        }
+                    }
+                    "Length"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Type",
+                                "StringQualifiers",
+                                "Length",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.string_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedLength"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Type",
+                                "StringQualifiers",
+                                "AllowedLength",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.string_allowed_length = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Digits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Type",
+                                "NumberQualifiers",
+                                "Digits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.number_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "FractionDigits"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Type",
+                                "NumberQualifiers",
+                                "FractionDigits",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.number_fraction_digits = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AllowedSign"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Type",
+                                "NumberQualifiers",
+                                "AllowedSign",
+                            ],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.number_allowed_sign = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "MainAttribute"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "MainAttribute"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.main_attribute = Some(parse_form_xml_bool(
+                                "Attribute/MainAttribute",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ManualQuery"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.manual_query = Some(parse_form_xml_bool(
+                                "Settings/ManualQuery",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "DynamicDataRead"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "DynamicDataRead",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.dynamic_data_read = Some(parse_form_xml_bool(
+                                "Settings/DynamicDataRead",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "QueryText"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.query_text = Some(text_value.to_string());
+                        }
+                    }
+                    "MainTable"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.main_table = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "field"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                                "field",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.as_mut() {
+                            item.field = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "orderType"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                                "orderType",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.as_mut() {
+                            item.order_type = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "item",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_order_item.take()
+                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .items
+                                .push(item);
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "order",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .order
+                                .get_or_insert_with(FormXmlListSettingsOrder::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "viewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "viewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .view_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "userSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "userSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .user_setting_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "itemsViewMode"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "itemsViewMode",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.list_settings.items_view_mode =
+                                Some(text_value.trim().to_string());
+                        }
+                    }
+                    "itemsUserSettingID"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "itemsUserSettingID",
+                            ],
+                        ) =>
+                    {
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.list_settings.items_user_setting_id =
+                                Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Attribute" if path_ends_with(&path, &["Form", "Attributes", "Attribute"]) => {
+                        if let Some(attribute) = current_attribute.take() {
+                            properties.attributes.push(attribute);
+                        }
+                    }
+                    "Command"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Command",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.command = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CommandGroup"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "CommandGroup",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.command_group = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Index"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Index",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.index = Some(text_value.trim().parse().with_context(|| {
+                                format!(
+                                    "invalid Form CommandInterface Index: {}",
+                                    text_value.trim()
+                                )
+                            })?);
+                        }
+                    }
+                    "DefaultVisible"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "DefaultVisible",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.default_visible = Some(parse_form_xml_bool(
+                                "CommandInterface/DefaultVisible",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Common"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "CommandInterface",
+                                "NavigationPanel",
+                                "Item",
+                                "Visible",
+                                "Common",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.visible_common = Some(parse_form_xml_bool(
+                                "CommandInterface/Visible/Common",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "CommandInterface", "NavigationPanel", "Item"],
+                        ) =>
+                    {
+                        if let Some(item) = current_command_interface_item.take() {
+                            properties.command_interface_items.push(item);
+                        }
+                    }
+                    "lang"
+                        if path_ends_with_for_child_title_lang(&path, &current_child_items)
+                            || path_ends_with_for_child_tooltip_lang(
+                                &path,
+                                &current_child_items,
+                            ) =>
+                    {
+                        current_child_title_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with_for_child_title_content(&path, &current_child_items)
+                            || path_ends_with_for_child_tooltip_content(
+                                &path,
+                                &current_child_items,
+                            ) =>
+                    {
+                        current_child_title_content = Some(text_value.to_string());
+                    }
+                    "item"
+                        if path_ends_with_for_child_title_item(&path, &current_child_items)
+                            || path_ends_with_for_child_tooltip_item(
+                                &path,
+                                &current_child_items,
+                            ) =>
+                    {
+                        if let (Some(item), Some(lang), Some(content)) = (
+                            current_child_items.last_mut(),
+                            current_child_title_lang.take(),
+                            current_child_title_content.take(),
+                        ) {
+                            let value = LocalizedString { lang, content };
+                            if current_child_localized_section.as_deref() == Some("ToolTip") {
+                                item.tooltip.push(value);
+                            } else {
+                                item.title.push(value);
+                            }
+                        }
+                        current_child_localized_section = None;
+                    }
+                    "Event" if path_ends_with_for_child_event(&path, &current_child_items) => {
+                        if let (Some(item), Some(name)) = (
+                            current_child_items.last_mut(),
+                            current_child_event_name.take(),
+                        ) {
+                            let handler = text_value.trim();
+                            if !handler.is_empty() {
+                                item.events.push(FormXmlEvent {
+                                    name,
+                                    handler: handler.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    "Type" if path_ends_with_for_child_type(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.item_type = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Group" if path_ends_with_for_child_group(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.group = Some(parse_form_group_xml(text_value.trim())?);
+                        }
+                    }
+                    "Behavior"
+                        if path_ends_with_for_child_behavior(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.behavior = Some(parse_form_group_behavior_xml(text_value.trim())?);
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with_for_child_group_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.representation =
+                                Some(parse_form_group_representation_xml(text_value.trim())?);
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with_for_child_table_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_representation = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with_for_child_button_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.button_representation =
+                                Some(parse_form_button_representation_xml(text_value.trim())?);
+                        }
+                    }
+                    "HeightInTableRows"
+                        if path_ends_with_for_child_height_in_table_rows(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.height_in_table_rows = Some(parse_form_dimension_xml(
+                                "ChildItem/HeightInTableRows",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "RowSelectionMode"
+                        if path_ends_with_for_child_row_selection_mode(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.row_selection_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "EnableStartDrag"
+                        if path_ends_with_for_child_enable_start_drag(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.enable_start_drag = Some(parse_form_xml_bool(
+                                "ChildItem/EnableStartDrag",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "EnableDrag"
+                        if path_ends_with_for_child_enable_drag(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.enable_drag = Some(parse_form_xml_bool(
+                                "ChildItem/EnableDrag",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "FileDragMode"
+                        if path_ends_with_for_child_file_drag_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.file_drag_mode = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "DefaultButton"
+                        if path_ends_with_for_child_default_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.default_button = Some(parse_form_xml_bool(
+                                "ChildItem/DefaultButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ScrollOnCompress"
+                        if path_ends_with_for_child_scroll_on_compress(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.scroll_on_compress = Some(parse_form_xml_bool(
+                                "ChildItem/ScrollOnCompress",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ReadOnly"
+                        if path_ends_with_for_child_read_only(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.read_only = Some(parse_form_xml_bool(
+                                "ChildItem/ReadOnly",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "SkipOnInput"
+                        if path_ends_with_for_child_skip_on_input(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.skip_on_input = Some(parse_form_xml_bool(
+                                "ChildItem/SkipOnInput",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "LocationInCommandBar"
+                        if path_ends_with_for_child_location_in_command_bar(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.location_in_command_bar = Some(
+                                parse_form_button_location_in_command_bar_xml(text_value.trim())?,
+                            );
+                        }
+                    }
+                    "TitleLocation"
+                        if path_ends_with_for_child_title_location(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.title_location =
+                                Some(parse_form_title_location_xml(text_value.trim())?);
+                        }
+                    }
+                    "EditMode"
+                        if path_ends_with_for_child_edit_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.edit_mode = Some(parse_form_edit_mode_xml(text_value.trim())?);
+                        }
+                    }
+                    "MarkRequiredComplete"
+                        if path_ends_with_for_child_mark_required_complete(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.mark_required_complete = Some(parse_form_xml_bool(
+                                "ChildItem/MarkRequiredComplete",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "AutoEditMode"
+                        if path_ends_with_for_child_auto_edit_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_edit_mode = Some(parse_form_xml_bool(
+                                "ChildItem/AutoEditMode",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Width" if path_ends_with_for_child_width(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.width = Some(parse_form_dimension_xml(
+                                "ChildItem/Width",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Height" if path_ends_with_for_child_height(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.height = Some(parse_form_dimension_xml(
+                                "ChildItem/Height",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "AutoMaxWidth"
+                        if path_ends_with_for_child_auto_max_width(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_max_width = Some(parse_form_xml_bool(
+                                "ChildItem/AutoMaxWidth",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "MaxWidth"
+                        if path_ends_with_for_child_max_width(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.max_width = Some(parse_form_dimension_xml(
+                                "ChildItem/MaxWidth",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "AutoMaxHeight"
+                        if path_ends_with_for_child_auto_max_height(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_max_height = Some(parse_form_xml_bool(
+                                "ChildItem/AutoMaxHeight",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "MaxHeight"
+                        if path_ends_with_for_child_max_height(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.max_height = Some(parse_form_dimension_xml(
+                                "ChildItem/MaxHeight",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "HorizontalStretch"
+                        if path_ends_with_for_child_horizontal_stretch(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.horizontal_stretch = Some(parse_form_xml_bool(
+                                "ChildItem/HorizontalStretch",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "VerticalStretch"
+                        if path_ends_with_for_child_vertical_stretch(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.vertical_stretch = Some(parse_form_xml_bool(
+                                "ChildItem/VerticalStretch",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "PasswordMode"
+                        if path_ends_with_for_child_password_mode(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.password_mode = Some(parse_form_xml_bool(
+                                "ChildItem/PasswordMode",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "MultiLine"
+                        if path_ends_with_for_child_multi_line(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.multi_line = Some(parse_form_xml_bool(
+                                "ChildItem/MultiLine",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Wrap" if path_ends_with_for_child_wrap(&path, &current_child_items) => {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.wrap =
+                                Some(parse_form_xml_bool("ChildItem/Wrap", text_value.trim())?);
+                        }
+                    }
+                    "TextEdit"
+                        if path_ends_with_for_child_text_edit(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.text_edit = Some(parse_form_xml_bool(
+                                "ChildItem/TextEdit",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "AutoCellHeight"
+                        if path_ends_with_for_child_auto_cell_height(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_cell_height = Some(parse_form_xml_bool(
+                                "ChildItem/AutoCellHeight",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "DropListButton"
+                        if path_ends_with_for_child_drop_list_button(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.drop_list_button = Some(parse_form_xml_bool(
+                                "ChildItem/DropListButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ClearButton"
+                        if path_ends_with_for_child_clear_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.clear_button = Some(parse_form_xml_bool(
+                                "ChildItem/ClearButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "OpenButton"
+                        if path_ends_with_for_child_open_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.open_button = Some(parse_form_xml_bool(
+                                "ChildItem/OpenButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "CreateButton"
+                        if path_ends_with_for_child_create_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.create_button = Some(parse_form_xml_bool(
+                                "ChildItem/CreateButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ChoiceButton"
+                        if path_ends_with_for_child_choice_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.choice_button = Some(parse_form_xml_bool(
+                                "ChildItem/ChoiceButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ChoiceListButton"
+                        if path_ends_with_for_child_choice_list_button(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.choice_list_button = Some(parse_form_xml_bool(
+                                "ChildItem/ChoiceListButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "SpinButton"
+                        if path_ends_with_for_child_spin_button(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.spin_button = Some(parse_form_xml_bool(
+                                "ChildItem/SpinButton",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ListChoiceMode"
+                        if path_ends_with_for_child_list_choice_mode(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.list_choice_mode = Some(parse_form_xml_bool(
+                                "ChildItem/ListChoiceMode",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "QuickChoice"
+                        if path_ends_with_for_child_quick_choice(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.quick_choice = Some(parse_form_xml_bool(
+                                "ChildItem/QuickChoice",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ChooseType"
+                        if path_ends_with_for_child_choose_type(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.choose_type = Some(parse_form_xml_bool(
+                                "ChildItem/ChooseType",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "AutoMarkIncomplete"
+                        if path_ends_with_for_child_auto_mark_incomplete(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_mark_incomplete = Some(parse_form_xml_bool(
+                                "ChildItem/AutoMarkIncomplete",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ChoiceButtonRepresentation"
+                        if path_ends_with_for_child_choice_button_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.choice_button_representation = Some(
+                                parse_form_choice_button_representation_xml(text_value.trim())?,
+                            );
+                        }
+                    }
+                    "ShowTitle"
+                        if path_ends_with_for_child_show_title(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.show_title = Some(parse_form_xml_bool(
+                                "ChildItem/ShowTitle",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ShowInHeader"
+                        if path_ends_with_for_child_show_in_header(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.show_in_header = Some(parse_form_xml_bool(
+                                "ChildItem/ShowInHeader",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Item"
+                        if path_ends_with_for_child_addition_source_item(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            let value = text_value.trim();
+                            if !value.is_empty() {
+                                item.addition_source_item = Some(value.to_string());
+                            }
+                        }
+                    }
+                    "CommandName"
+                        if path_ends_with_for_child_command_name(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.command_name = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "DataPath"
+                        if path_ends_with_for_child_data_path(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.data_path = Some(text_value.trim().to_string());
+                        }
+                    }
+                    _ if current_child_items
+                        .last()
+                        .is_some_and(|item| local == item.tag)
+                        && path
+                            .last()
+                            .is_some_and(|current| current.as_str() == local.as_str()) =>
+                    {
+                        if let Some(item) = current_child_items.pop() {
+                            if let Some(parent) = current_child_items.last_mut() {
+                                parent.child_items.push(item.clone());
+                            } else if path_ends_with_root_auto_command_bar_child_item(&path, &item)
+                            {
+                                if let Some(command_bar) = properties.auto_command_bar.as_mut() {
+                                    command_bar.child_items.push(item.clone());
+                                }
+                            }
+                            if !path_ends_with_root_auto_command_bar_child_item(&path, &item) {
+                                properties.child_items.push(item);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                let _ = path.pop();
+                if matches!(
+                    local.as_str(),
+                    "WindowOpeningMode"
+                        | "AutoFillCheck"
+                        | "Group"
+                        | "Event"
+                        | "Action"
+                        | "CurrentRowUse"
+                        | "Item"
+                        | "MainAttribute"
+                        | "ManualQuery"
+                        | "DynamicDataRead"
+                        | "QueryText"
+                        | "MainTable"
+                        | "field"
+                        | "orderType"
+                        | "viewMode"
+                        | "userSettingID"
+                        | "itemsViewMode"
+                        | "itemsUserSettingID"
+                        | "Command"
+                        | "CommandGroup"
+                        | "Index"
+                        | "DefaultVisible"
+                        | "Common"
+                        | "Type"
+                        | "CommandName"
+                        | "DataPath"
+                        | "ScrollOnCompress"
+                        | "ShowTitle"
+                        | "ShowInHeader"
+                        | "DefaultButton"
+                        | "ReadOnly"
+                        | "SkipOnInput"
+                        | "LocationInCommandBar"
+                        | "TitleLocation"
+                        | "EditMode"
+                        | "MarkRequiredComplete"
+                        | "AutoEditMode"
+                        | "AutoMaxWidth"
+                        | "MaxWidth"
+                        | "AutoMaxHeight"
+                        | "MaxHeight"
+                        | "HorizontalStretch"
+                        | "VerticalStretch"
+                        | "PasswordMode"
+                        | "MultiLine"
+                        | "Wrap"
+                        | "TextEdit"
+                        | "AutoCellHeight"
+                        | "DropListButton"
+                        | "ClearButton"
+                        | "OpenButton"
+                        | "CreateButton"
+                        | "ChoiceButton"
+                        | "ChoiceListButton"
+                        | "SpinButton"
+                        | "ListChoiceMode"
+                        | "QuickChoice"
+                        | "ChooseType"
+                        | "AutoMarkIncomplete"
+                        | "ChoiceButtonRepresentation"
+                        | "Behavior"
+                        | "Representation"
+                        | "lang"
+                        | "content"
+                ) {
+                    text_value.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(properties)
+}
+
+fn parse_form_auto_command_bar_xml(
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlAutoCommandBar>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAutoCommandBar {
+        id,
+        name,
+        horizontal_align: None,
+        autofill: None,
+        child_items_present: false,
+        child_items: Vec::new(),
+    }))
+}
+
+fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlCommand>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlCommand {
+        id,
+        name,
+        title: Vec::new(),
+        tooltip: Vec::new(),
+        action: None,
+        functional_options: Vec::new(),
+        current_row_use: None,
+    }))
+}
+
+fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttribute>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAttribute {
+        id,
+        name,
+        types: Vec::new(),
+        string_length: None,
+        string_allowed_length: None,
+        number_digits: None,
+        number_fraction_digits: None,
+        number_allowed_sign: None,
+        main_attribute: None,
+        settings: None,
+    }))
+}
+
+fn parse_form_parameter_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlParameter>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    if name.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(FormXmlParameter {
+        name,
+        ..FormXmlParameter::default()
+    }))
+}
+
+fn parse_form_child_item_xml(
+    tag: &str,
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlChildItem>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlChildItem {
+        tag: tag.to_string(),
+        depth: 0,
+        id,
+        name,
+        group: None,
+        behavior: None,
+        representation: None,
+        table_representation: None,
+        height_in_table_rows: None,
+        row_selection_mode: None,
+        enable_start_drag: None,
+        enable_drag: None,
+        file_drag_mode: None,
+        button_representation: None,
+        location_in_command_bar: None,
+        default_button: None,
+        scroll_on_compress: None,
+        show_title: None,
+        show_in_header: None,
+        read_only: None,
+        skip_on_input: None,
+        title_location: None,
+        edit_mode: None,
+        mark_required_complete: None,
+        auto_edit_mode: None,
+        width: None,
+        height: None,
+        auto_max_width: None,
+        max_width: None,
+        auto_max_height: None,
+        max_height: None,
+        horizontal_stretch: None,
+        vertical_stretch: None,
+        password_mode: None,
+        multi_line: None,
+        wrap: None,
+        text_edit: None,
+        auto_cell_height: None,
+        drop_list_button: None,
+        clear_button: None,
+        open_button: None,
+        create_button: None,
+        choice_button: None,
+        choice_list_button: None,
+        spin_button: None,
+        list_choice_mode: None,
+        quick_choice: None,
+        choose_type: None,
+        auto_mark_incomplete: None,
+        choice_button_representation: None,
+        item_type: None,
+        addition_source_item: None,
+        title: Vec::new(),
+        tooltip: Vec::new(),
+        extended_tooltip: None,
+        events: Vec::new(),
+        command_name: None,
+        data_path: None,
+        child_items_present: false,
+        child_items: Vec::new(),
+    }))
+}
+
+fn parse_form_extended_tooltip_xml(
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlExtendedTooltip>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlExtendedTooltip { id, name }))
+}
+
+fn parse_nested_command_uuid_from_xml(xml: &[u8], command_name: &str) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_uuid = None::<String>;
+    let mut current_name = None::<String>;
+    let mut text_value = String::new();
+    let mut collecting_name = false;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command" {
+                    current_uuid = xml_attr_value(&event, "uuid")
+                        .map(|value| normalize_uuid_text(&value))
+                        .transpose()?;
+                    current_name = None;
+                } else if current_uuid.is_some()
+                    && local == "Name"
+                    && path_ends_with(&path, &["Command", "Properties"])
+                {
+                    text_value.clear();
+                    collecting_name = true;
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "Command" {
+                    current_uuid = None;
+                    current_name = None;
+                }
+            }
+            Ok(Event::Text(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) if collecting_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if collecting_name && local == "Name" {
+                    current_name = Some(text_value.trim().to_string());
+                    collecting_name = false;
+                    text_value.clear();
+                }
+                if local == "Command" {
+                    if current_name.as_deref() == Some(command_name)
+                        && let Some(uuid) = current_uuid.take()
+                    {
+                        return Ok(uuid);
+                    }
+                    current_uuid = None;
+                    current_name = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Err(anyhow!("command {command_name} not found in owner XML"))
+}
+
+fn is_form_child_item_xml_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "UsualGroup"
+            | "CommandBar"
+            | "AutoCommandBar"
+            | "ColumnGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
+            | "Button"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "CheckBoxField"
+            | "TextDocumentField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
+}
+
+fn path_ends_with_for_child_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title"])
+}
+
+fn path_ends_with_for_child_tooltip(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip"])
+}
+
+fn path_ends_with_for_current_child_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path.last().map(String::as_str) == Some(item.tag.as_str())
+}
+
+fn path_ends_with_root_auto_command_bar_child_items(path: &[String]) -> bool {
+    path_ends_with(path, &["Form", "AutoCommandBar", "ChildItems"])
+}
+
+fn path_ends_with_root_auto_command_bar_child_item(
+    path: &[String],
+    item: &FormXmlChildItem,
+) -> bool {
+    path_ends_with(
+        path,
+        &["Form", "AutoCommandBar", "ChildItems", item.tag.as_str()],
+    )
+}
+
+fn path_ends_with_for_child_events(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Events"])
+}
+
+fn path_ends_with_for_child_event(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Events", "Event"])
+}
+
+fn path_ends_with_for_child_title_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item"])
+}
+
+fn path_ends_with_for_child_tooltip_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item"])
+}
+
+fn path_ends_with_for_child_title_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item", "lang"])
+}
+
+fn path_ends_with_for_child_title_content(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Title", "item", "content"])
+}
+
+fn path_ends_with_for_child_tooltip_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item", "lang"])
+}
+
+fn path_ends_with_for_child_tooltip_content(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item", "content"])
+}
+
+fn form_localized_text_path_allows_entity_ref(
+    path: &[String],
+    child_items: &[FormXmlChildItem],
+) -> bool {
+    path_ends_with(path, &["Form", "Title", "item", "lang"])
+        || path_ends_with(path, &["Form", "Title", "item", "content"])
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "Title", "item", "lang"],
+        )
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "Title", "item", "content"],
+        )
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "ToolTip", "item", "lang"],
+        )
+        || path_ends_with(
+            path,
+            &["Form", "Commands", "Command", "ToolTip", "item", "content"],
+        )
+        || path_ends_with_for_child_title_lang(path, child_items)
+        || path_ends_with_for_child_title_content(path, child_items)
+        || path_ends_with_for_child_tooltip_lang(path, child_items)
+        || path_ends_with_for_child_tooltip_content(path, child_items)
+}
+
+fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Type"])
+        || path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Type"])
+}
+
+fn path_ends_with_for_child_group(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Group"])
+}
+
+fn path_ends_with_for_child_behavior(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Behavior"])
+}
+
+fn path_ends_with_for_child_group_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "UsualGroup" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_button_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_default_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "DefaultButton"])
+}
+
+fn path_ends_with_for_child_scroll_on_compress(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Page" && path_ends_with(path, &[item.tag.as_str(), "ScrollOnCompress"])
+}
+
+fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
+}
+
+fn path_ends_with_for_child_skip_on_input(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(item.tag.as_str(), "Button" | "InputField")
+        && path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
+}
+
+fn path_ends_with_for_child_location_in_command_bar(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "LocationInCommandBar"])
+}
+
+fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
+        && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
+}
+
+fn path_ends_with_for_child_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "EditMode"])
+}
+
+fn path_ends_with_for_child_mark_required_complete(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MarkRequiredComplete"])
+}
+
+fn path_ends_with_for_child_auto_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoEditMode"])
+}
+
+fn path_ends_with_for_child_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "Width"])
+}
+
+fn path_ends_with_for_child_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(
+        item.tag.as_str(),
+        "InputField" | "TextDocumentField" | "Pages"
+    ) && path_ends_with(path, &[item.tag.as_str(), "Height"])
+}
+
+fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMaxWidth"])
+}
+
+fn path_ends_with_for_child_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MaxWidth"])
+}
+
+fn path_ends_with_for_child_auto_max_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMaxHeight"])
+}
+
+fn path_ends_with_for_child_max_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MaxHeight"])
+}
+
+fn path_ends_with_for_child_horizontal_stretch(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "HorizontalStretch"])
+}
+
+fn path_ends_with_for_child_vertical_stretch(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "VerticalStretch"])
+}
+
+fn path_ends_with_for_child_password_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "PasswordMode"])
+}
+
+fn path_ends_with_for_child_multi_line(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MultiLine"])
+}
+
+fn path_ends_with_for_child_wrap(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "Wrap"])
+}
+
+fn path_ends_with_for_child_text_edit(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "TextEdit"])
+}
+
+fn path_ends_with_for_child_auto_cell_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoCellHeight"])
+}
+
+fn path_ends_with_for_child_drop_list_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "DropListButton"])
+}
+
+fn path_ends_with_for_child_clear_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ClearButton"])
+}
+
+fn path_ends_with_for_child_open_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "OpenButton"])
+}
+
+fn path_ends_with_for_child_create_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "CreateButton"])
+}
+
+fn path_ends_with_for_child_choice_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChoiceButton"])
+}
+
+fn path_ends_with_for_child_choice_list_button(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChoiceListButton"])
+}
+
+fn path_ends_with_for_child_spin_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "SpinButton"])
+}
+
+fn path_ends_with_for_child_list_choice_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ListChoiceMode"])
+}
+
+fn path_ends_with_for_child_quick_choice(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "QuickChoice"])
+}
+
+fn path_ends_with_for_child_choose_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChooseType"])
+}
+
+fn path_ends_with_for_child_auto_mark_incomplete(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMarkIncomplete"])
+}
+
+fn path_ends_with_for_child_choice_button_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "InputField"
+        && path_ends_with(path, &[item.tag.as_str(), "ChoiceButtonRepresentation"])
+}
+
+fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ShowTitle"])
+}
+
+fn path_ends_with_for_child_show_in_header(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(
+        item.tag.as_str(),
+        "InputField" | "LabelField" | "CheckBoxField" | "ColumnGroup"
+    ) && path_ends_with(path, &[item.tag.as_str(), "ShowInHeader"])
+}
+
+fn path_ends_with_for_child_addition_source_item(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "AdditionSource", "Item"])
+}
+
+fn path_ends_with_for_child_command_name(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "CommandName"])
+}
+
+fn path_ends_with_for_child_data_path(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "DataPath"])
+}
+
+fn path_ends_with_for_child_table_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_height_in_table_rows(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HeightInTableRows"])
+}
+
+fn path_ends_with_for_child_row_selection_mode(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RowSelectionMode"])
+}
+
+fn path_ends_with_for_child_enable_start_drag(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "EnableStartDrag"])
+}
+
+fn path_ends_with_for_child_enable_drag(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "EnableDrag"])
+}
+
+fn path_ends_with_for_child_file_drag_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "FileDragMode"])
+}
+
+fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(anyhow!("unsupported Form {name} boolean value: {other}")),
+    }
+}
+
+fn parse_form_dimension_xml(name: &str, value: &str) -> Result<String> {
+    let parsed = value
+        .parse::<u32>()
+        .with_context(|| format!("unsupported Form {name} dimension value: {value}"))?;
+    Ok(parsed.to_string())
+}
+
+fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandCurrentRowUse> {
+    match value {
+        "DontUse" => Ok(FormXmlCommandCurrentRowUse::DontUse),
+        other => Err(anyhow!("unsupported Form Command CurrentRowUse: {other}")),
+    }
+}
+
+fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpeningMode> {
+    match value {
+        "DontBlock" => Ok(FormXmlWindowOpeningMode::DontBlock),
+        "LockOwner" => Ok(FormXmlWindowOpeningMode::LockOwner),
+        "LockWholeInterface" => Ok(FormXmlWindowOpeningMode::LockWholeInterface),
+        other => Err(anyhow!("unsupported Form WindowOpeningMode: {other}")),
+    }
+}
+
+fn parse_form_enter_key_behavior_xml(value: &str) -> Result<FormXmlEnterKeyBehavior> {
+    match value {
+        "DefaultButton" => Ok(FormXmlEnterKeyBehavior::DefaultButton),
+        other => Err(anyhow!("unsupported Form EnterKeyBehavior: {other}")),
+    }
+}
+
+fn parse_form_group_xml(value: &str) -> Result<FormXmlGroup> {
+    match value {
+        "Vertical" => Ok(FormXmlGroup::Vertical),
+        "Horizontal" => Ok(FormXmlGroup::Horizontal),
+        "AlwaysHorizontal" => Ok(FormXmlGroup::AlwaysHorizontal),
+        "HorizontalIfPossible" => Ok(FormXmlGroup::HorizontalIfPossible),
+        "InCell" => Ok(FormXmlGroup::InCell),
+        other => Err(anyhow!("unsupported Form Group: {other}")),
+    }
+}
+
+fn parse_form_scaling_mode_xml(value: &str) -> Result<FormXmlScalingMode> {
+    match value {
+        "Normal" => Ok(FormXmlScalingMode::Normal),
+        "Compact" => Ok(FormXmlScalingMode::Compact),
+        other => Err(anyhow!("unsupported Form ScalingMode: {other}")),
+    }
+}
+
+fn parse_form_auto_time_xml(value: &str) -> Result<FormXmlAutoTime> {
+    match value {
+        "DontUse" => Ok(FormXmlAutoTime::DontUse),
+        "CurrentOrLast" => Ok(FormXmlAutoTime::CurrentOrLast),
+        other => Err(anyhow!("unsupported Form AutoTime: {other}")),
+    }
+}
+
+fn parse_form_use_posting_mode_xml(value: &str) -> Result<FormXmlUsePostingMode> {
+    match value {
+        "Regular" => Ok(FormXmlUsePostingMode::Regular),
+        "Auto" => Ok(FormXmlUsePostingMode::Auto),
+        other => Err(anyhow!("unsupported Form UsePostingMode: {other}")),
+    }
+}
+
+fn parse_form_excluded_command_xml(value: &str) -> Result<FormXmlExcludedCommand> {
+    match value {
+        "Change" => Ok(FormXmlExcludedCommand::Change),
+        "Copy" => Ok(FormXmlExcludedCommand::Copy),
+        "Create" => Ok(FormXmlExcludedCommand::Create),
+        "CustomizeForm" => Ok(FormXmlExcludedCommand::CustomizeForm),
+        other => Err(anyhow!("unsupported Form ExcludedCommand: {other}")),
+    }
+}
+
+fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseForFoldersAndItems> {
+    match value {
+        "Items" => Ok(FormXmlUseForFoldersAndItems::Items),
+        "Folders" => Ok(FormXmlUseForFoldersAndItems::Folders),
+        other => Err(anyhow!("unsupported Form UseForFoldersAndItems: {other}")),
+    }
+}
+
+fn parse_form_vertical_scroll_xml(value: &str) -> Result<FormXmlVerticalScroll> {
+    match value {
+        "useIfNecessary" => Ok(FormXmlVerticalScroll::UseIfNecessary),
+        other => Err(anyhow!("unsupported Form VerticalScroll: {other}")),
+    }
+}
+
+fn parse_form_conversations_representation_xml(
+    value: &str,
+) -> Result<FormXmlConversationsRepresentation> {
+    match value {
+        "DontShow" => Ok(FormXmlConversationsRepresentation::DontShow),
+        "Show" => Ok(FormXmlConversationsRepresentation::Show),
+        other => Err(anyhow!(
+            "unsupported Form ConversationsRepresentation: {other}"
+        )),
+    }
+}
+
+fn parse_form_auto_save_data_in_settings_xml(value: &str) -> Result<FormXmlAutoSaveDataInSettings> {
+    match value {
+        "Use" => Ok(FormXmlAutoSaveDataInSettings::Use),
+        other => Err(anyhow!("unsupported Form AutoSaveDataInSettings: {other}")),
+    }
+}
+
+fn parse_form_save_data_in_settings_xml(value: &str) -> Result<FormXmlSaveDataInSettings> {
+    match value {
+        "UseList" => Ok(FormXmlSaveDataInSettings::UseList),
+        other => Err(anyhow!("unsupported Form SaveDataInSettings: {other}")),
+    }
+}
+
+fn parse_form_group_behavior_xml(value: &str) -> Result<FormXmlGroupBehavior> {
+    match value {
+        "Usual" => Ok(FormXmlGroupBehavior::Usual),
+        "Collapsible" => Ok(FormXmlGroupBehavior::Collapsible),
+        "PopUp" => Ok(FormXmlGroupBehavior::PopUp),
+        other => Err(anyhow!("unsupported Form UsualGroup Behavior: {other}")),
+    }
+}
+
+fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepresentation> {
+    match value {
+        "None" => Ok(FormXmlGroupRepresentation::None),
+        "StrongSeparation" => Ok(FormXmlGroupRepresentation::StrongSeparation),
+        "WeakSeparation" => Ok(FormXmlGroupRepresentation::WeakSeparation),
+        "NormalSeparation" => Ok(FormXmlGroupRepresentation::NormalSeparation),
+        other => Err(anyhow!(
+            "unsupported Form UsualGroup Representation: {other}"
+        )),
+    }
+}
+
+fn parse_form_button_representation_xml(value: &str) -> Result<FormXmlButtonRepresentation> {
+    match value {
+        "Text" => Ok(FormXmlButtonRepresentation::Text),
+        "Picture" => Ok(FormXmlButtonRepresentation::Picture),
+        "PictureAndText" => Ok(FormXmlButtonRepresentation::PictureAndText),
+        "None" => Ok(FormXmlButtonRepresentation::None),
+        other => Err(anyhow!("unsupported Form Button Representation: {other}")),
+    }
+}
+
+fn parse_form_button_location_in_command_bar_xml(
+    value: &str,
+) -> Result<FormXmlButtonLocationInCommandBar> {
+    match value {
+        "InAdditionalSubmenu" => Ok(FormXmlButtonLocationInCommandBar::InAdditionalSubmenu),
+        "InCommandBar" => Ok(FormXmlButtonLocationInCommandBar::InCommandBar),
+        "InCommandBarAndInAdditionalSubmenu" => {
+            Ok(FormXmlButtonLocationInCommandBar::InCommandBarAndInAdditionalSubmenu)
+        }
+        other => Err(anyhow!(
+            "unsupported Form Button LocationInCommandBar: {other}"
+        )),
+    }
+}
+
+fn parse_form_title_location_xml(value: &str) -> Result<FormXmlTitleLocation> {
+    match value {
+        "None" => Ok(FormXmlTitleLocation::None),
+        "Left" => Ok(FormXmlTitleLocation::Left),
+        "Top" => Ok(FormXmlTitleLocation::Top),
+        "Right" => Ok(FormXmlTitleLocation::Right),
+        other => Err(anyhow!(
+            "unsupported Form InputField TitleLocation: {other}"
+        )),
+    }
+}
+
+fn parse_form_edit_mode_xml(value: &str) -> Result<FormXmlEditMode> {
+    match value {
+        "Directly" => Ok(FormXmlEditMode::Directly),
+        "EnterOnInput" => Ok(FormXmlEditMode::EnterOnInput),
+        other => Err(anyhow!("unsupported Form InputField EditMode: {other}")),
+    }
+}
+
+fn parse_form_choice_button_representation_xml(
+    value: &str,
+) -> Result<FormXmlChoiceButtonRepresentation> {
+    match value {
+        "ShowInDropList" => Ok(FormXmlChoiceButtonRepresentation::ShowInDropList),
+        "ShowInDropListAndInInputField" => {
+            Ok(FormXmlChoiceButtonRepresentation::ShowInDropListAndInInputField)
+        }
+        "ShowInInputField" => Ok(FormXmlChoiceButtonRepresentation::ShowInInputField),
+        other => Err(anyhow!(
+            "unsupported Form InputField ChoiceButtonRepresentation: {other}"
+        )),
+    }
+}
+
+fn parse_form_command_bar_location_xml(value: &str) -> Result<FormXmlCommandBarLocation> {
+    match value {
+        "None" => Ok(FormXmlCommandBarLocation::None),
+        "Top" => Ok(FormXmlCommandBarLocation::Top),
+        "Bottom" => Ok(FormXmlCommandBarLocation::Bottom),
+        other => Err(anyhow!("unsupported Form CommandBarLocation: {other}")),
+    }
+}
+
+fn parse_form_report_form_type_xml(value: &str) -> Result<FormXmlReportFormType> {
+    match value {
+        "Main" => Ok(FormXmlReportFormType::Main),
+        "Settings" => Ok(FormXmlReportFormType::Settings),
+        "Variant" => Ok(FormXmlReportFormType::Variant),
+        other => Err(anyhow!("unsupported Form ReportFormType: {other}")),
+    }
+}
+
+fn parse_form_auto_show_state_xml(value: &str) -> Result<FormXmlAutoShowState> {
+    match value {
+        "Auto" => Ok(FormXmlAutoShowState::Auto),
+        "DontShow" => Ok(FormXmlAutoShowState::DontShow),
+        "ShowOnComposition" => Ok(FormXmlAutoShowState::ShowOnComposition),
+        other => Err(anyhow!("unsupported Form AutoShowState: {other}")),
+    }
+}
+
+fn parse_form_report_result_view_mode_xml(value: &str) -> Result<FormXmlReportResultViewMode> {
+    match value {
+        "Auto" => Ok(FormXmlReportResultViewMode::Auto),
+        "Default" => Ok(FormXmlReportResultViewMode::Default),
+        other => Err(anyhow!("unsupported Form ReportResultViewMode: {other}")),
+    }
+}
+
+fn parse_form_view_mode_application_on_set_report_result_xml(
+    value: &str,
+) -> Result<FormXmlViewModeApplicationOnSetReportResult> {
+    match value {
+        "Auto" => Ok(FormXmlViewModeApplicationOnSetReportResult::Auto),
+        other => Err(anyhow!(
+            "unsupported Form ViewModeApplicationOnSetReportResult: {other}"
+        )),
+    }
+}
+
+fn parse_form_horizontal_align_xml(value: &str) -> Result<FormXmlHorizontalAlign> {
+    match value {
+        "Left" => Ok(FormXmlHorizontalAlign::Left),
+        "Center" => Ok(FormXmlHorizontalAlign::Center),
+        "Right" => Ok(FormXmlHorizontalAlign::Right),
+        "Auto" => Ok(FormXmlHorizontalAlign::Auto),
+        other => Err(anyhow!("unsupported Form HorizontalAlign: {other}")),
+    }
+}
+
+fn patch_form_layout_properties(
+    layout: &mut String,
+    properties: &FormXmlBodyProperties,
+) -> Result<()> {
+    if !properties.title.is_empty() {
+        let fields = scan_braced_fields(layout, 0)?;
+        if let Some(title_range) = fields.get(10)
+            && parse_1c_localized_strings(&layout[title_range.clone()])
+                .ok()
+                .as_deref()
+                != Some(properties.title.as_slice())
+        {
+            layout.replace_range(
+                title_range.clone(),
+                &format_form_title_value(&properties.title),
+            );
+        }
+    }
+    if let Some(width) = &properties.width {
+        replace_braced_field(layout, 3, width)?;
+    }
+    if let Some(height) = &properties.height {
+        replace_braced_field(layout, 4, height)?;
+    }
+    if let Some(window_opening_mode) = properties.window_opening_mode {
+        replace_braced_field(
+            layout,
+            2,
+            form_window_opening_mode_code(window_opening_mode),
+        )?;
+    }
+    if let Some(value) = properties.enter_key_behavior {
+        replace_braced_field(layout, 5, form_enter_key_behavior_code(value))?;
+    }
+    if let Some(value) = properties.save_window_settings {
+        replace_form_save_window_settings(layout, value)?;
+    }
+    if let Some(auto_title) = properties.auto_title {
+        replace_braced_field(layout, 9, if auto_title { "1" } else { "0" })?;
+    }
+    if let Some(auto_url) = properties.auto_url {
+        replace_form_auto_url(layout, auto_url)?;
+    }
+    if let Some(value) = properties.save_data_in_settings {
+        replace_form_save_data_in_settings(layout, value)?;
+    }
+    if let Some(value) = properties.auto_save_data_in_settings {
+        replace_braced_field(layout, 7, form_auto_save_data_in_settings_code(value))?;
+    }
+    if let Some(group) = properties.group {
+        match group {
+            FormXmlGroup::Vertical => {
+                replace_braced_field(layout, 11, "0")?;
+            }
+            FormXmlGroup::Horizontal => {
+                replace_braced_field(layout, 11, "1")?;
+                replace_braced_field(layout, 13, "0")?;
+                replace_braced_field(layout, 14, "0")?;
+            }
+            FormXmlGroup::AlwaysHorizontal | FormXmlGroup::HorizontalIfPossible => {
+                replace_braced_field(layout, 11, "1")?;
+                replace_braced_field(layout, 13, "1")?;
+                replace_braced_field(layout, 14, "1")?;
+            }
+            FormXmlGroup::InCell => return Err(anyhow!("unsupported root Form Group: InCell")),
+        }
+    }
+    if let Some(value) = properties.scaling_mode {
+        replace_form_scaling_mode(layout, value)?;
+    }
+    if let Some(value) = properties.auto_time {
+        replace_form_auto_time(layout, value)?;
+    }
+    if let Some(value) = properties.use_posting_mode {
+        replace_form_use_posting_mode(layout, value)?;
+    }
+    if let Some(value) = properties.repost_on_write {
+        replace_form_repost_on_write(layout, value)?;
+    }
+    if let Some(auto_fill_check) = properties.auto_fill_check {
+        replace_form_auto_fill_check(layout, auto_fill_check)?;
+    }
+    if !properties.command_set_excluded_commands.is_empty() {
+        replace_form_command_set(layout, &properties.command_set_excluded_commands)?;
+    }
+    if let Some(value) = properties.use_for_folders_and_items {
+        replace_form_use_for_folders_and_items(layout, value)?;
+    }
+    if let Some(customizable) = properties.customizable {
+        replace_form_customizable(layout, customizable)?;
+    }
+    if let Some(command_bar_location) = properties.command_bar_location {
+        replace_braced_field(
+            layout,
+            17,
+            form_command_bar_location_code(command_bar_location),
+        )?;
+    }
+    if let Some(vertical_scroll) = properties.vertical_scroll {
+        replace_form_vertical_scroll(layout, vertical_scroll)?;
+    }
+    if let Some(horizontal_align) = properties.horizontal_align {
+        replace_form_horizontal_align(layout, horizontal_align)?;
+    }
+    if let Some(conversations_representation) = properties.conversations_representation {
+        replace_form_conversations_representation(layout, conversations_representation)?;
+    }
+    if let Some(show_title) = properties.show_title {
+        replace_form_show_title(layout, show_title)?;
+    }
+    if let Some(show_command_bar) = properties.show_command_bar {
+        replace_form_show_command_bar(layout, show_command_bar)?;
+    }
+    if let Some(show_close_button) = properties.show_close_button {
+        replace_form_show_close_button(layout, show_close_button)?;
+    }
+    if let Some(report_result) = &properties.report_result {
+        replace_form_report_attribute_ref(
+            layout,
+            "5",
+            "ReportResult",
+            report_result,
+            &properties.attributes,
+        )?;
+    }
+    if let Some(details_data) = &properties.details_data {
+        replace_form_report_attribute_ref(
+            layout,
+            "6",
+            "DetailsData",
+            details_data,
+            &properties.attributes,
+        )?;
+    }
+    if let Some(report_form_type) = properties.report_form_type {
+        replace_form_report_form_type(layout, report_form_type)?;
+    }
+    if let Some(auto_show_state) = properties.auto_show_state {
+        replace_form_auto_show_state(layout, auto_show_state)?;
+    }
+    if let Some(report_result_view_mode) = properties.report_result_view_mode {
+        replace_form_report_result_view_mode(layout, report_result_view_mode)?;
+    }
+    if let Some(value) = properties.view_mode_application_on_set_report_result {
+        replace_form_view_mode_application_on_set_report_result(layout, value)?;
+    }
+    Ok(())
+}
+
+// Platform-level 1C form property and standard command IDs, not DB object IDs.
+const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
+const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
+const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
+const FORM_REPORT_FORM_TYPE_UUID: &str = "acbc2eeb-2efb-48e4-b78a-661fd09fcf80";
+const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048fd2df";
+const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
+    "874260df-7e23-4f02-9e10-5794914b5adf";
+const FORM_REPORT_ATTRIBUTE_REF_UUID: &str = "11cfd3e0-86f8-4480-aaa5-dc6a6ccac689";
+const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
+const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
+const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
+const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a23-f999f4c67ee6";
+
+fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    if fields
+        .get(11)
+        .is_some_and(|range| layout[range.clone()].trim() == "0")
+        && let Some(range) = fields.get(13)
+    {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
+fn replace_form_save_window_settings(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 23) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1") {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
+fn replace_form_auto_time(layout: &mut String, value: FormXmlAutoTime) -> Result<()> {
+    replace_form_property_bag_enum(layout, "2", FORM_AUTO_TIME_UUID, form_auto_time_code(value))
+}
+
+fn replace_form_use_posting_mode(layout: &mut String, value: FormXmlUsePostingMode) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "3",
+        FORM_USE_POSTING_MODE_UUID,
+        form_use_posting_mode_code(value),
+    )
+}
+
+fn replace_form_repost_on_write(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "4") else {
+        return Ok(());
+    };
+    if !is_form_property_bag_bool_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(range, if value { r#"{"B",1}"# } else { r#"{"B",0}"# });
+    Ok(())
+}
+
+fn replace_form_auto_fill_check(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "24") else {
+        return Ok(());
+    };
+    if !is_form_property_bag_bool_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(range, if value { r#"{"B",1}"# } else { r#"{"B",0}"# });
+    Ok(())
+}
+
+fn replace_form_report_form_type(layout: &mut String, value: FormXmlReportFormType) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "7",
+        FORM_REPORT_FORM_TYPE_UUID,
+        form_report_form_type_code(value),
+    )
+}
+
+fn replace_form_auto_show_state(layout: &mut String, value: FormXmlAutoShowState) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "21",
+        FORM_CONVERSATIONS_REPRESENTATION_UUID,
+        form_auto_show_state_code(value),
+    )
+}
+
+fn replace_form_report_result_view_mode(
+    layout: &mut String,
+    value: FormXmlReportResultViewMode,
+) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "27",
+        FORM_REPORT_RESULT_VIEW_MODE_UUID,
+        form_report_result_view_mode_code(value),
+    )
+}
+
+fn replace_form_view_mode_application_on_set_report_result(
+    layout: &mut String,
+    value: FormXmlViewModeApplicationOnSetReportResult,
+) -> Result<()> {
+    replace_form_property_bag_enum(
+        layout,
+        "29",
+        FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID,
+        form_view_mode_application_on_set_report_result_code(value),
+    )
+}
+
+fn replace_form_report_attribute_ref(
+    layout: &mut String,
+    property_key: &str,
+    xml_tag: &str,
+    attribute_name: &str,
+    attributes: &[FormXmlAttribute],
+) -> Result<()> {
+    let Some(attribute) = attributes
+        .iter()
+        .find(|attribute| attribute.name == attribute_name)
+    else {
+        return Err(anyhow!(
+            "Form {xml_tag} references unknown attribute: {attribute_name}"
+        ));
+    };
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, property_key) else {
+        return Ok(());
+    };
+    if !is_form_property_bag_enum_value(&layout[range.clone()], FORM_REPORT_ATTRIBUTE_REF_UUID) {
+        return Ok(());
+    }
+    layout.replace_range(
+        range,
+        &format!(
+            r##"{{"#",{FORM_REPORT_ATTRIBUTE_REF_UUID},{{1,{{{}}},""}}}}"##,
+            attribute.id
+        ),
+    );
+    Ok(())
+}
+
+fn replace_form_property_bag_enum(
+    layout: &mut String,
+    property_key: &str,
+    uuid: &str,
+    code: &str,
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, property_key) else {
+        return Ok(());
+    };
+    if !is_form_property_bag_enum_value(&layout[range.clone()], uuid) {
+        return Ok(());
+    }
+    layout.replace_range(range, &format!(r##"{{"#",{uuid},{code}}}"##));
+    Ok(())
+}
+
+fn replace_form_use_for_folders_and_items(
+    layout: &mut String,
+    value: FormXmlUseForFoldersAndItems,
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "0") else {
+        return Ok(());
+    };
+    if !is_form_use_for_folders_and_items_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(
+        range,
+        &format!(
+            r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},{}}}"##,
+            form_use_for_folders_and_items_code(value)
+        ),
+    );
+    Ok(())
+}
+
+fn replace_form_command_set(
+    layout: &mut String,
+    commands: &[FormXmlExcludedCommand],
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(range) = form_root_command_set_range(layout, &fields) else {
+        return Ok(());
+    };
+    layout.replace_range(range, &format_form_command_set(commands));
+    Ok(())
+}
+
+fn replace_form_customizable(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if fields
+        .get(11)
+        .is_some_and(|range| layout[range.clone()].trim() == "0")
+    {
+        if let Some(range) = fields.get(14) {
+            layout.replace_range(range.clone(), if value { "1" } else { "0" });
+        }
+    }
+    Ok(())
+}
+
+fn replace_form_save_data_in_settings(
+    layout: &mut String,
+    value: FormXmlSaveDataInSettings,
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    if let Some(range) = fields.get(6) {
+        layout.replace_range(range.clone(), form_save_data_in_settings_code(value));
+    }
+    Ok(())
+}
+
+fn replace_form_show_command_bar(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(range) = fields.get(18) else {
+        return Ok(());
+    };
+    match layout[range.clone()].trim() {
+        "0" | "1" => {
+            layout.replace_range(range.clone(), if value { "0" } else { "1" });
+            Ok(())
+        }
+        _ if form_layout_uses_property_bag(layout, &fields) => {
+            if let Some(range) = fields.get(6)
+                && matches!(layout[range.clone()].trim(), "0" | "1")
+            {
+                layout.replace_range(range.clone(), if value { "0" } else { "1" });
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScroll) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let code = form_vertical_scroll_code(value);
+    let mut replacements = Vec::<Range<usize>>::new();
+    for index in [tail_start + 5, tail_start + 15] {
+        if let Some(range) = fields.get(index)
+            && matches!(layout[range.clone()].trim(), "0" | "2")
+        {
+            replacements.push(range.clone());
+        }
+    }
+    for range in replacements.into_iter().rev() {
+        layout.replace_range(range, code);
+    }
+    Ok(())
+}
+
+fn replace_form_scaling_mode(layout: &mut String, value: FormXmlScalingMode) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_item_pairs_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 6) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1" | "2") {
+        layout.replace_range(range.clone(), form_scaling_mode_code(value));
+    }
+    Ok(())
+}
+
+fn replace_form_show_close_button(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 18) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1") {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
+fn replace_form_horizontal_align(layout: &mut String, value: FormXmlHorizontalAlign) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 11) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1" | "2" | "3") {
+        layout.replace_range(range.clone(), form_horizontal_align_code(value));
+    }
+    Ok(())
+}
+
+fn replace_form_show_title(layout: &mut String, value: bool) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + 17) else {
+        return Ok(());
+    };
+    if matches!(layout[range.clone()].trim(), "0" | "1") {
+        layout.replace_range(range.clone(), if value { "1" } else { "0" });
+    }
+    Ok(())
+}
+
+fn replace_form_conversations_representation(
+    layout: &mut String,
+    value: FormXmlConversationsRepresentation,
+) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    if !form_layout_uses_property_bag(layout, &fields) {
+        return Ok(());
+    }
+    let Some(range) = form_root_property_bag_value_range(layout, &fields, "21") else {
+        return Ok(());
+    };
+    if !is_form_conversations_representation_value(&layout[range.clone()]) {
+        return Ok(());
+    }
+    layout.replace_range(
+        range,
+        &format!(
+            r##"{{"#",{FORM_CONVERSATIONS_REPRESENTATION_UUID},{}}}"##,
+            form_conversations_representation_code(value)
+        ),
+    );
+    Ok(())
+}
+
+fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool {
+    fields
+        .get(18)
+        .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        .is_some_and(|count| count > 1)
+        && fields
+            .get(19)
+            .is_some_and(|range| layout[range.clone()].trim().parse::<usize>().is_ok())
+}
+
+fn form_layout_child_items_tail_start(layout: &str, fields: &[Range<usize>]) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if !(1..=200).contains(&count) {
+            continue;
+        }
+        let tail_start = index + 1 + count * 2;
+        if tail_start >= fields.len() {
+            continue;
+        }
+        let mut complete = true;
+        for item_index in 0..count {
+            let uuid_index = index + 1 + item_index * 2;
+            let value_index = uuid_index + 1;
+            if fields
+                .get(uuid_index)
+                .and_then(|range| parse_non_zero_uuid(layout[range.clone()].trim()))
+                .is_none()
+                || fields
+                    .get(value_index)
+                    .and_then(|range| scan_braced_fields(layout, range.start).ok())
+                    .and_then(|item_fields| {
+                        let wrapper = item_fields.first()?;
+                        form_layout_child_item_tag(&layout[wrapper.clone()], layout, &item_fields)
+                    })
+                    .is_none()
+            {
+                complete = false;
+                break;
+            }
+        }
+        if complete {
+            return Some(tail_start);
+        }
+    }
+    None
+}
+
+fn form_layout_child_item_pairs_tail_start(layout: &str, fields: &[Range<usize>]) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if !(1..=200).contains(&count) {
+            continue;
+        }
+        let tail_start = index + 1 + count * 2;
+        if tail_start >= fields.len() {
+            continue;
+        }
+        let mut complete = true;
+        for item_index in 0..count {
+            let uuid_index = index + 1 + item_index * 2;
+            let value_index = uuid_index + 1;
+            if fields
+                .get(uuid_index)
+                .and_then(|range| parse_non_zero_uuid(layout[range.clone()].trim()))
+                .is_none()
+                || !fields
+                    .get(value_index)
+                    .is_some_and(|range| layout[range.clone()].trim().starts_with('{'))
+            {
+                complete = false;
+                break;
+            }
+        }
+        if complete {
+            return Some(tail_start);
+        }
+    }
+    None
+}
+
+fn form_root_property_bag_value_range(
+    layout: &str,
+    fields: &[Range<usize>],
+    property_key: &str,
+) -> Option<Range<usize>> {
+    if !form_layout_uses_property_bag(layout, fields) {
+        return None;
+    }
+    let count = fields.get(18)?.clone();
+    let count = layout[count].trim().parse::<usize>().ok()?;
+    let mut index = 19usize;
+    for _ in 0..count {
+        let key_range = fields.get(index)?;
+        let value_range = fields.get(index + 1)?;
+        if layout[key_range.clone()].trim() == property_key {
+            return Some(value_range.clone());
+        }
+        index += 2;
+    }
+    None
+}
+
+fn form_root_command_set_range(layout: &str, fields: &[Range<usize>]) -> Option<Range<usize>> {
+    for range in fields {
+        let value = layout[range.clone()].trim();
+        if !value.starts_with('{') {
+            continue;
+        }
+        let Ok(nested) = scan_braced_fields(layout, range.start) else {
+            continue;
+        };
+        let Some(count) = nested
+            .first()
+            .and_then(|range| layout[range.clone()].trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count == 0 || count != nested.len().saturating_sub(1) {
+            continue;
+        }
+        if nested
+            .iter()
+            .skip(1)
+            .all(|range| form_excluded_command_from_uuid(layout[range.clone()].trim()).is_some())
+        {
+            return Some(range.clone());
+        }
+    }
+    None
+}
+
+fn is_form_use_for_folders_and_items_value(value: &str) -> bool {
+    is_form_property_bag_enum_value(value, FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
+}
+
+fn is_form_conversations_representation_value(value: &str) -> bool {
+    is_form_property_bag_enum_value(value, FORM_CONVERSATIONS_REPRESENTATION_UUID)
+}
+
+fn is_form_property_bag_enum_value(value: &str, uuid: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "#")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| value[range.clone()].trim() == uuid)
+}
+
+fn is_form_property_bag_bool_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "B")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| matches!(value[range.clone()].trim(), "0" | "1"))
+}
+
+fn format_form_title_value(title: &[LocalizedString]) -> String {
+    let mut output = format!("{{1,{}", title.len());
+    for value in title {
+        output.push_str(",{");
+        output.push_str(&format_1c_string(&value.lang));
+        output.push(',');
+        output.push_str(&format_1c_string(&value.content));
+        output.push('}');
+    }
+    output.push('}');
+    output
+}
+
+fn form_command_bar_location_code(value: FormXmlCommandBarLocation) -> &'static str {
+    match value {
+        FormXmlCommandBarLocation::None => "0",
+        FormXmlCommandBarLocation::Top => "2",
+        FormXmlCommandBarLocation::Bottom => "3",
+    }
+}
+
+fn form_auto_save_data_in_settings_code(value: FormXmlAutoSaveDataInSettings) -> &'static str {
+    match value {
+        FormXmlAutoSaveDataInSettings::Use => "1",
+    }
+}
+
+fn form_save_data_in_settings_code(value: FormXmlSaveDataInSettings) -> &'static str {
+    match value {
+        FormXmlSaveDataInSettings::UseList => "1",
+    }
+}
+
+fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &'static str {
+    match value {
+        FormXmlUseForFoldersAndItems::Items => "0",
+        FormXmlUseForFoldersAndItems::Folders => "1",
+    }
+}
+
+fn form_auto_time_code(value: FormXmlAutoTime) -> &'static str {
+    match value {
+        FormXmlAutoTime::DontUse => "0",
+        FormXmlAutoTime::CurrentOrLast => "3",
+    }
+}
+
+fn form_use_posting_mode_code(value: FormXmlUsePostingMode) -> &'static str {
+    match value {
+        FormXmlUsePostingMode::Regular => "0",
+        FormXmlUsePostingMode::Auto => "3",
+    }
+}
+
+fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
+    match value {
+        FormXmlVerticalScroll::UseIfNecessary => "2",
+    }
+}
+
+fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
+    match value {
+        FormXmlScalingMode::Normal => "1",
+        FormXmlScalingMode::Compact => "2",
+    }
+}
+
+fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
+    let mut output = format!("{{{}", commands.len());
+    for command in commands {
+        output.push(',');
+        output.push_str(form_excluded_command_uuid(*command));
+    }
+    output.push('}');
+    output
+}
+
+fn form_excluded_command_uuid(command: FormXmlExcludedCommand) -> &'static str {
+    match command {
+        FormXmlExcludedCommand::Change => FORM_COMMAND_CHANGE_UUID,
+        FormXmlExcludedCommand::Copy => FORM_COMMAND_COPY_UUID,
+        FormXmlExcludedCommand::Create => FORM_COMMAND_CREATE_UUID,
+        FormXmlExcludedCommand::CustomizeForm => FORM_COMMAND_CUSTOMIZE_FORM_UUID,
+    }
+}
+
+fn form_excluded_command_from_uuid(uuid: &str) -> Option<FormXmlExcludedCommand> {
+    match uuid {
+        FORM_COMMAND_CHANGE_UUID => Some(FormXmlExcludedCommand::Change),
+        FORM_COMMAND_COPY_UUID => Some(FormXmlExcludedCommand::Copy),
+        FORM_COMMAND_CREATE_UUID => Some(FormXmlExcludedCommand::Create),
+        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some(FormXmlExcludedCommand::CustomizeForm),
+        _ => None,
+    }
+}
+
+fn form_conversations_representation_code(
+    value: FormXmlConversationsRepresentation,
+) -> &'static str {
+    match value {
+        FormXmlConversationsRepresentation::DontShow => "0",
+        FormXmlConversationsRepresentation::Show => "1",
+    }
+}
+
+fn form_report_form_type_code(value: FormXmlReportFormType) -> &'static str {
+    match value {
+        FormXmlReportFormType::Main => "0",
+        FormXmlReportFormType::Settings => "1",
+        FormXmlReportFormType::Variant => "2",
+    }
+}
+
+fn form_auto_show_state_code(value: FormXmlAutoShowState) -> &'static str {
+    match value {
+        FormXmlAutoShowState::Auto => "0",
+        FormXmlAutoShowState::DontShow => "1",
+        FormXmlAutoShowState::ShowOnComposition => "3",
+    }
+}
+
+fn form_report_result_view_mode_code(value: FormXmlReportResultViewMode) -> &'static str {
+    match value {
+        FormXmlReportResultViewMode::Auto => "0",
+        FormXmlReportResultViewMode::Default => "1",
+    }
+}
+
+fn form_view_mode_application_on_set_report_result_code(
+    value: FormXmlViewModeApplicationOnSetReportResult,
+) -> &'static str {
+    match value {
+        FormXmlViewModeApplicationOnSetReportResult::Auto => "0",
+    }
+}
+
+fn patch_form_layout_auto_command_bar(
+    text: &mut String,
+    command_bar: &FormXmlAutoCommandBar,
+    commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("22")
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && identity
+            .first()
+            .is_some_and(|range| text[range.clone()].trim() == command_bar.id)
+        && let Some(name_range) = fields.get(6)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        let mut replacements = Vec::<(Range<usize>, String)>::new();
+        replacements.push((name_range.clone(), format_1c_string(&command_bar.name)));
+        if (command_bar.horizontal_align.is_some() || command_bar.autofill.is_some())
+            && let Some(settings_range) = fields.get(20)
+            && let Some(settings) = format_form_auto_command_bar_settings(
+                &text[settings_range.clone()],
+                command_bar.horizontal_align,
+                command_bar.autofill,
+            )?
+        {
+            replacements.push((settings_range.clone(), settings));
+        }
+        replacements.sort_by_key(|(range, _)| range.start);
+        for (range, replacement) in replacements.into_iter().rev() {
+            text.replace_range(range, &replacement);
+        }
+        if command_bar.child_items_present {
+            retain_form_layout_direct_child_items(text, &command_bar.child_items)?;
+        }
+        for child in &command_bar.child_items {
+            if !is_form_layout_creatable_nested_item(child) {
+                continue;
+            }
+            let _ = patch_or_append_form_layout_direct_child_item(
+                text,
+                child,
+                commands,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                command_uuids,
+                source,
+            )?;
+        }
+        return Ok(true);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_auto_command_bar(
+            &mut nested,
+            command_bar,
+            commands,
+            command_uuids,
+            source,
+        )? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn format_form_auto_command_bar_settings(
+    existing: &str,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.len() <= 1 || (autofill.is_some() && fields.len() <= 2) {
+        return Ok(None);
+    }
+    if let Some(horizontal_align) = horizontal_align {
+        replace_braced_field(&mut text, 1, form_horizontal_align_code(horizontal_align))?;
+    }
+    if let Some(autofill) = autofill {
+        replace_braced_field(&mut text, 2, if autofill { "1" } else { "0" })?;
+    }
+    Ok(Some(text))
+}
+
+fn form_horizontal_align_code(value: FormXmlHorizontalAlign) -> &'static str {
+    match value {
+        FormXmlHorizontalAlign::Left => "0",
+        FormXmlHorizontalAlign::Center => "1",
+        FormXmlHorizontalAlign::Right => "2",
+        FormXmlHorizontalAlign::Auto => "3",
+    }
+}
+
+fn form_command_uuids_for_pack(
+    plain: &str,
+    commands: &[FormXmlCommand],
+) -> Result<BTreeMap<String, String>> {
+    let mut uuids = BTreeMap::new();
+    let container = FormBodyContainer::parse(plain)?;
+    if let Some(commands_range) = container.trailing_ranges.get(2) {
+        collect_form_command_uuids(&plain[commands_range.clone()], &mut uuids)?;
+    }
+    for command in commands {
+        uuids
+            .entry(command.name.clone())
+            .or_insert_with(|| Uuid::new_v4().hyphenated().to_string());
+    }
+    Ok(uuids)
+}
+
+fn collect_form_command_uuids(text: &str, uuids: &mut BTreeMap<String, String>) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("11")
+        && let Some(name) = fields
+            .get(2)
+            .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+        && let Some(uuid) = fields
+            .get(1)
+            .and_then(|range| scan_braced_fields(text, range.start).ok())
+            .and_then(|identity| {
+                identity
+                    .get(1)
+                    .map(|range| text[range.clone()].trim().to_string())
+            })
+            .filter(|uuid| is_uuid_text(uuid))
+    {
+        uuids.insert(name, uuid);
+        return Ok(());
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_command_uuids(&text[range], uuids)?;
+    }
+    Ok(())
+}
+
+fn patch_form_layout_events(
+    layout: &mut String,
+    events: &[FormXmlEvent],
+    retain_missing: bool,
+) -> Result<()> {
+    if retain_missing {
+        retain_form_layout_events(layout, events)?;
+    }
+    for event in events {
+        let identifiers = form_event_layout_identifiers(&event.name);
+        let _ = patch_form_layout_event(layout, &identifiers, &event.handler)?;
+    }
+    Ok(())
+}
+
+fn retain_form_layout_events(text: &mut String, events: &[FormXmlEvent]) -> Result<()> {
+    let keep_identifiers = events
+        .iter()
+        .map(|event| form_event_layout_identifiers(&event.name))
+        .collect::<Vec<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.is_empty() {
+        return Ok(());
+    }
+
+    let mut retained = Vec::with_capacity(fields.len());
+    let mut changed = false;
+    for (index, range) in fields.iter().enumerate() {
+        let field = text[range.clone()].to_string();
+        if index == 0 {
+            retained.push(field);
+            continue;
+        }
+        if !field.trim_start().starts_with('{') {
+            retained.push(field);
+            continue;
+        }
+        match form_layout_event_entry_name(&field)? {
+            Some(name) if !form_layout_event_name_is_kept(&name, &keep_identifiers) => {
+                changed = true;
+            }
+            _ => retained.push(field),
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+
+    *text = format!("{{{}}}", retained.join(","));
+    Ok(())
+}
+
+fn form_layout_event_entry_name(text: &str) -> Result<Option<String>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.len() < 3 {
+        return Ok(None);
+    }
+    if parse_1c_quoted_string(&text[fields[2].clone()]).is_err() {
+        return Ok(None);
+    }
+    Ok(fields.get(1).map(|range| {
+        parse_1c_quoted_string(&text[range.clone()])
+            .unwrap_or_else(|_| text[range.clone()].trim().to_string())
+    }))
+}
+
+fn form_layout_event_name_is_kept(name: &str, keep_identifiers: &[Vec<&str>]) -> bool {
+    keep_identifiers.iter().any(|identifiers| {
+        identifiers
+            .iter()
+            .any(|identifier| name.eq_ignore_ascii_case(identifier))
+    })
+}
+
+fn patch_form_layout_child_items(
+    layout: &mut String,
+    items: &[FormXmlChildItem],
+    attributes: &[FormXmlAttribute],
+    commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+    retain_missing: bool,
+) -> Result<()> {
+    if retain_missing {
+        retain_form_layout_top_level_child_items(layout, items)?;
+    }
+    let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
+    let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
+    let attribute_ids_by_name = form_attribute_ids_by_name(attributes);
+    for item in items {
+        if item.depth != 0 {
+            continue;
+        }
+        let patched = patch_form_layout_child_item(
+            layout,
+            item,
+            commands,
+            &attribute_ids_by_name,
+            &table_ids_by_name,
+            &table_column_ids_by_name,
+            command_uuids,
+            source,
+        )
+        .with_context(|| format!("failed to patch Form layout child item {}", item.name))?;
+        if !patched {
+            let _ = append_form_layout_top_level_child_item(
+                layout,
+                item,
+                commands,
+                &attribute_ids_by_name,
+                &table_ids_by_name,
+                &table_column_ids_by_name,
+                command_uuids,
+                source,
+            )
+            .with_context(|| format!("failed to append Form layout child item {}", item.name))?;
+        }
+    }
+    Ok(())
+}
+
+fn form_attribute_ids_by_name(attributes: &[FormXmlAttribute]) -> BTreeMap<String, String> {
+    attributes
+        .iter()
+        .map(|attribute| (attribute.name.clone(), attribute.id.clone()))
+        .collect()
+}
+
+fn retain_form_layout_top_level_child_items(
+    text: &mut String,
+    items: &[FormXmlChildItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("59") {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count * 2 {
+        return Ok(());
+    }
+
+    let top_level_items = items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .collect::<Vec<_>>();
+    let mut retained = Vec::<(String, String)>::new();
+    let mut changed = false;
+
+    for index in 0..count {
+        let uuid_range = fields[2 + index * 2].clone();
+        let item_range = fields[3 + index * 2].clone();
+        let uuid = text[uuid_range].trim().to_string();
+        if !is_uuid_text(&uuid) {
+            return Ok(());
+        }
+        let item_text = text[item_range].to_string();
+        let item_fields = scan_braced_fields(&item_text, 0)?;
+        let is_known_item = item_fields
+            .first()
+            .and_then(|range| {
+                form_layout_child_item_tag(
+                    item_text[range.clone()].trim(),
+                    &item_text,
+                    &item_fields,
+                )
+            })
+            .is_some();
+        let keep = !is_known_item
+            || top_level_items
+                .iter()
+                .any(|item| form_layout_child_item_matches(&item_text, &item_fields, item));
+        if keep {
+            retained.push((uuid, item_text));
+        } else {
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    let mut replacement = format!("{{59,{}", retained.len());
+    for (uuid, item_text) in retained {
+        replacement.push(',');
+        replacement.push_str(&uuid);
+        replacement.push(',');
+        replacement.push_str(&item_text);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn patch_form_layout_child_item(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if form_layout_child_item_matches(text, &fields, item) {
+        patch_form_layout_child_item_entry(
+            text,
+            &fields,
+            item,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )
+        .with_context(|| format!("failed to patch Form layout child item entry {}", item.name))?;
+        return Ok(true);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_child_item(
+            &mut nested,
+            item,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn append_form_layout_top_level_child_item(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    if item.depth != 0 || !is_form_layout_creatable_top_level_item(item) {
+        return Ok(false);
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("59") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() != 2 + count * 2 {
+        return Ok(false);
+    }
+    for range in fields.iter().skip(2).step_by(2) {
+        if !is_uuid_text(text[range.clone()].trim()) {
+            return Ok(false);
+        }
+    }
+
+    let item_uuid = Uuid::new_v4().hyphenated().to_string();
+    let item_text = format_form_layout_new_top_level_item(
+        item,
+        &item_uuid,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form layout root is not closed"))?;
+    text.insert_str(insert_at, &format!(",{item_uuid},{item_text}"));
+    Ok(true)
+}
+
+fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
+    matches!(
+        item.tag.as_str(),
+        "Button"
+            | "CommandBar"
+            | "AutoCommandBar"
+            | "UsualGroup"
+            | "ColumnGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "TextDocumentField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
+}
+
+fn format_form_layout_new_top_level_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    match item.tag.as_str() {
+        "Button" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "CommandBar" | "AutoCommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages"
+        | "Page" | "ButtonGroup" | "ContextMenu" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "Table" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "InputField"
+        | "LabelField"
+        | "TextDocumentField"
+        | "SearchStringAddition"
+        | "ViewStatusAddition"
+        | "SearchControlAddition" => format_form_layout_new_child_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        _ => Ok(String::new()),
+    }
+}
+
+fn format_form_layout_new_child_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    match item.tag.as_str() {
+        "Button" => format_form_layout_new_button_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "CommandBar" | "AutoCommandBar" | "UsualGroup" | "ColumnGroup" | "Popup" | "Pages"
+        | "Page" | "ButtonGroup" | "ContextMenu" => format_form_layout_new_group_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "Table" => format_form_layout_new_table_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        ),
+        "InputField" => Ok(format_form_layout_new_input_field_item(item, item_uuid)),
+        "LabelField" => Ok(format_form_layout_new_label_field_item(item, item_uuid)),
+        "TextDocumentField" => Ok(format_form_layout_new_text_document_field_item(
+            item,
+            item_uuid,
+            attribute_ids_by_name,
+        )),
+        "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition" => Ok(
+            format_form_layout_new_search_addition_item(item, item_uuid, table_ids_by_name),
+        ),
+        _ => Ok(String::new()),
+    }
+}
+
+fn format_form_layout_new_button_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let item_type = item
+        .item_type
+        .as_deref()
+        .and_then(form_button_type_code)
+        .unwrap_or("0");
+    let command_ref = item
+        .command_name
+        .as_deref()
+        .map(|command_name| {
+            format_form_new_button_command_reference(command_name, commands, command_uuids, source)
+        })
+        .transpose()?
+        .flatten()
+        .unwrap_or_else(|| "{0}".to_string());
+    let data_path_ref = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| {
+            format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
+        })
+        .unwrap_or_else(|| "{0}".to_string());
+
+    let mut text = format!(
+        "{{34,{{{},{}}},0,0,0,{},{},{},{},{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        item_type,
+        command_ref,
+        data_path_ref
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    let title_location = item
+        .title_location
+        .map(form_input_field_title_location_code)
+        .unwrap_or("1");
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,2,{},{},0,{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        title_location,
+        format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_label_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,1,2,{},1,0,{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_text_document_field_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> String {
+    let title_location = item
+        .title_location
+        .map(form_input_field_title_location_code)
+        .unwrap_or("1");
+    let data_path = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| format_form_attribute_data_path(data_path, attribute_ids_by_name))
+        .unwrap_or_else(|| "{0}".to_string());
+    let height = item.height.as_deref().unwrap_or("0");
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,{},0",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        title_location,
+        format_1c_synonyms(&item.title),
+        data_path,
+        height
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_search_addition_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    table_ids_by_name: &BTreeMap<String, String>,
+) -> String {
+    let type_code = item
+        .item_type
+        .as_deref()
+        .and_then(form_search_addition_type_code)
+        .unwrap_or_else(|| form_search_addition_default_type_code(&item.tag));
+    let source_ref = item
+        .addition_source_item
+        .as_deref()
+        .and_then(|source_item| table_ids_by_name.get(source_item))
+        .map(|source_id| format!("{{{source_id},{type_code}}}"))
+        .unwrap_or_else(|| "{0}".to_string());
+    let mut text = format!(
+        "{{6,{{{},{}}},0,0,0,{},{},{},{{1,0}},1,1,0,1,{{1,0}},0,0,0,0,0,{}",
+        item.id,
+        item_uuid,
+        type_code,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        source_ref
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_table_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut nested_table_ids_by_name = table_ids_by_name.clone();
+    nested_table_ids_by_name.insert(item.name.clone(), item.id.clone());
+    let creatable_children = item
+        .child_items
+        .iter()
+        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .collect::<Vec<_>>();
+    let mut text = format!(
+        "{{73,{{{},{}}},0,1,0,{},0,0,0,{},{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        creatable_children.len()
+    );
+    for child in creatable_children {
+        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_text = format_form_layout_new_child_item(
+            child,
+            &child_uuid,
+            commands,
+            attribute_ids_by_name,
+            &nested_table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+        text.push(',');
+        text.push_str(&child_uuid);
+        text.push(',');
+        text.push_str(&child_text);
+    }
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn format_form_layout_new_group_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
+    let group = item.group.and_then(form_child_group_code).unwrap_or("0");
+    let show_title = if item.show_title.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let creatable_children = item
+        .child_items
+        .iter()
+        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .collect::<Vec<_>>();
+    let mut text = format!(
+        "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{}",
+        item.id,
+        item_uuid,
+        group_type,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        group,
+        show_title,
+        creatable_children.len()
+    );
+    for child in creatable_children {
+        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_text = format_form_layout_new_child_item(
+            child,
+            &child_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+        text.push(',');
+        text.push_str(&child_uuid);
+        text.push(',');
+        text.push_str(&child_text);
+    }
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
+    matches!(
+        item.tag.as_str(),
+        "Button"
+            | "CommandBar"
+            | "AutoCommandBar"
+            | "UsualGroup"
+            | "ColumnGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "TextDocumentField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
+}
+
+fn format_form_layout_events_tail(events: &[FormXmlEvent]) -> String {
+    let mut text = String::new();
+    for event in events {
+        text.push(',');
+        text.push_str(&format_1c_string(&event.name));
+        text.push(',');
+        text.push_str(&format_1c_string(&event.handler));
+    }
+    text
+}
+
+fn form_group_child_item_type_code(tag: &str) -> Option<&'static str> {
+    match tag {
+        "CommandBar" => Some("0"),
+        "AutoCommandBar" => Some("9"),
+        "Popup" => Some("1"),
+        "ColumnGroup" => Some("2"),
+        "Pages" => Some("3"),
+        "Page" => Some("4"),
+        "UsualGroup" => Some("5"),
+        "ButtonGroup" => Some("6"),
+        "ContextMenu" => Some("8"),
+        _ => None,
+    }
+}
+
+fn form_child_group_code(value: FormXmlGroup) -> Option<&'static str> {
+    match value {
+        FormXmlGroup::Vertical => Some("0"),
+        FormXmlGroup::Horizontal => Some("1"),
+        FormXmlGroup::AlwaysHorizontal => Some("2"),
+        FormXmlGroup::HorizontalIfPossible => Some("3"),
+        FormXmlGroup::InCell => Some("4"),
+    }
+}
+
+fn form_column_group_group_code(value: FormXmlGroup) -> Option<&'static str> {
+    match value {
+        FormXmlGroup::Horizontal => Some("0"),
+        FormXmlGroup::InCell => Some("2"),
+        FormXmlGroup::Vertical
+        | FormXmlGroup::AlwaysHorizontal
+        | FormXmlGroup::HorizontalIfPossible => None,
+    }
+}
+
+fn form_extended_group_representation_code(
+    value: FormXmlGroupRepresentation,
+) -> Option<&'static str> {
+    match value {
+        FormXmlGroupRepresentation::None => Some("0"),
+        FormXmlGroupRepresentation::StrongSeparation => Some("1"),
+        FormXmlGroupRepresentation::WeakSeparation => Some("2"),
+        FormXmlGroupRepresentation::NormalSeparation => Some("3"),
+    }
+}
+
+fn form_extended_group_group_codes(
+    value: FormXmlGroup,
+) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    match value {
+        FormXmlGroup::Vertical => Some(("0", "0", "0", "0")),
+        FormXmlGroup::Horizontal => Some(("1", "1", "1", "1")),
+        FormXmlGroup::AlwaysHorizontal => Some(("1", "1", "3", "3")),
+        FormXmlGroup::HorizontalIfPossible => Some(("1", "2", "2", "2")),
+        FormXmlGroup::InCell => None,
+    }
+}
+
+fn form_extended_group_behavior_codes(
+    value: FormXmlGroupBehavior,
+) -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
+    match value {
+        FormXmlGroupBehavior::Usual => ("0", "0", "0", "0", "0"),
+        FormXmlGroupBehavior::Collapsible => ("1", "1", "1", "1", "1"),
+        FormXmlGroupBehavior::PopUp => ("1", "1", "0", "2", "2"),
+    }
+}
+
+fn format_form_new_button_command_reference(
+    command_name: &str,
+    commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    if let Some(uuid) = form_standard_command_uuid(command_name) {
+        return Ok(Some(format!("{{0,{uuid}}}")));
+    }
+    if let Some(name) = command_name.strip_prefix("Form.Command.") {
+        let Some(command) = commands.iter().find(|command| command.name == name) else {
+            return Ok(None);
+        };
+        return Ok(command_uuids
+            .get(name)
+            .map(|uuid| format!("{{{},{uuid}}}", command.id)));
+    }
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let uuid = source.resolve_command_reference_uuid(command_name)?;
+    Ok(Some(format!("{{0,{uuid}}}")))
+}
+
+fn form_layout_child_item_matches(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> bool {
+    let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return false;
+    };
+    if form_layout_child_item_tag(wrapper, text, fields) != Some(item.tag.as_str()) {
+        return false;
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = form_layout_child_item_name(text, wrapper, fields);
+    existing_id.as_deref() == Some(item.id.as_str())
+        || existing_name.as_deref() == Some(item.name.as_str())
+}
+
+fn patch_form_layout_child_item_entry(
+    text: &mut String,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let Some(wrapper) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return Ok(());
+    };
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = form_layout_child_item_name_range(text, wrapper, fields)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range, format_1c_string(&item.name)));
+    }
+    if !item.title.is_empty()
+        && let Some(title_range) = form_layout_child_item_title_range(text, wrapper, fields)
+        && let Some(replacement) =
+            form_localized_replacement(&text[title_range.clone()], &item.title)
+    {
+        replacements.push((title_range, replacement));
+    }
+    if !item.tooltip.is_empty()
+        && let Some(tooltip_range) = form_layout_child_item_tooltip_range(text, wrapper, fields)
+        && let Some(replacement) =
+            form_localized_replacement(&text[tooltip_range.clone()], &item.tooltip)
+    {
+        replacements.push((tooltip_range, replacement));
+    }
+    if let Some(extended_tooltip) = &item.extended_tooltip
+        && let Some(tooltip_range) = form_layout_child_item_extended_tooltip_range(text, fields)?
+        && let Some(tooltip) = patch_form_layout_child_item_extended_tooltip(
+            &text[tooltip_range.clone()],
+            extended_tooltip,
+        )?
+    {
+        replacements.push((tooltip_range, tooltip));
+    }
+    if item.tag == "Table" {
+        if let Some(representation) = &item.table_representation
+            && let Some(code) = form_table_representation_code(representation)
+            && let Some(representation_range) = fields.get(8)
+        {
+            replacements.push((representation_range.clone(), code.to_string()));
+        }
+        if let Some(data_path) = &item.data_path
+            && let Some(data_path_range) = fields.get(11)
+            && text[data_path_range.clone()].trim_start().starts_with('{')
+            && let Some(data_path_ref) = form_attribute_data_path_replacement(
+                &text[data_path_range.clone()],
+                data_path,
+                attribute_ids_by_name,
+            )
+            && !one_c_values_equal_ignoring_ws(&text[data_path_range.clone()], &data_path_ref)
+        {
+            replacements.push((data_path_range.clone(), data_path_ref));
+        }
+        if let Some(height) = &item.height_in_table_rows
+            && let Some(height_range) = fields.get(21)
+        {
+            replacements.push((height_range.clone(), height.to_string()));
+        }
+        if let Some(row_selection_mode) = &item.row_selection_mode
+            && let Some(code) = form_table_row_selection_mode_code(row_selection_mode)
+            && let Some(row_selection_range) = fields.get(24)
+        {
+            replacements.push((row_selection_range.clone(), code.to_string()));
+        }
+        if let Some(enable_start_drag) = item.enable_start_drag
+            && let Some(enable_start_drag_range) = fields.get(26)
+        {
+            replacements.push((
+                enable_start_drag_range.clone(),
+                if enable_start_drag { "1" } else { "0" }.to_string(),
+            ));
+        }
+        if let Some(enable_drag) = item.enable_drag
+            && let Some(enable_drag_range) = fields.get(29)
+        {
+            replacements.push((
+                enable_drag_range.clone(),
+                if enable_drag { "1" } else { "0" }.to_string(),
+            ));
+        }
+        if let Some(file_drag_mode) = &item.file_drag_mode
+            && let Some(code) = form_table_file_drag_mode_code(file_drag_mode)
+            && let Some(file_drag_range) = fields.get(30)
+        {
+            replacements.push((file_drag_range.clone(), code.to_string()));
+        }
+    }
+    if item.tag == "Button"
+        && let Some(item_type) = &item.item_type
+    {
+        if form_layout_button_is_extended(fields) {
+            if let Some(type_code) = form_extended_button_type_code(item_type)
+                && let Some(type_range) = fields.get(4)
+            {
+                replacements.push((type_range.clone(), type_code.to_string()));
+            }
+        } else if let Some(type_code) = form_button_type_code(item_type)
+            && let Some(type_range) = fields.get(7)
+        {
+            replacements.push((type_range.clone(), type_code.to_string()));
+        }
+    }
+    if item.tag == "Button"
+        && let Some(representation) = item.button_representation
+        && let Some(representation_range) = fields.get(10)
+    {
+        replacements.push((
+            representation_range.clone(),
+            form_button_representation_code(representation).to_string(),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(default_button) = item.default_button
+        && let Some(default_range) = fields.get(11)
+    {
+        replacements.push((
+            default_range.clone(),
+            if default_button { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "InputField"
+        && let Some(read_only) = item.read_only
+        && form_layout_input_field_is_extended(fields)
+        && let Some(read_only_range) = fields.get(14)
+    {
+        replacements.push((
+            read_only_range.clone(),
+            if read_only { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "InputField"
+        && let Some(skip_on_input) = item.skip_on_input
+        && form_layout_input_field_is_extended(fields)
+        && let Some(skip_on_input_range) = fields.get(15)
+    {
+        replacements.push((
+            skip_on_input_range.clone(),
+            if skip_on_input { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(skip_on_input) = item.skip_on_input
+        && form_layout_button_is_extended(fields)
+        && let Some(skip_on_input_range) = fields.get(29)
+    {
+        replacements.push((
+            skip_on_input_range.clone(),
+            if skip_on_input { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(location) = item.location_in_command_bar
+        && form_layout_button_is_extended(fields)
+        && let Some(location_range) = fields.get(49)
+    {
+        replacements.push((
+            location_range.clone(),
+            form_button_location_in_command_bar_code(location).to_string(),
+        ));
+    }
+    if item.tag == "InputField"
+        && let Some(title_location) = item.title_location
+        && let Some(title_location_range) = fields.get(7)
+    {
+        replacements.push((
+            title_location_range.clone(),
+            form_input_field_title_location_code(title_location).to_string(),
+        ));
+    }
+    if item.tag == "TextDocumentField"
+        && let Some(title_location) = item.title_location
+        && let Some(title_location_range) = fields.get(7)
+    {
+        replacements.push((
+            title_location_range.clone(),
+            form_input_field_title_location_code(title_location).to_string(),
+        ));
+    }
+    if item.tag == "InputField"
+        && form_layout_input_field_is_extended(fields)
+        && let Some(edit_mode) = form_input_field_edit_mode_code(item)
+        && let Some(edit_mode_range) = fields.get(26)
+    {
+        replacements.push((edit_mode_range.clone(), edit_mode.to_string()));
+    }
+    if item.tag == "InputField"
+        && form_layout_input_field_is_extended(fields)
+        && let Some(auto_cell_height) = item.auto_cell_height
+    {
+        let index = 28 + form_layout_input_field_top_level_offset(text, fields);
+        if let Some(auto_cell_height_range) = fields.get(index) {
+            replacements.push((
+                auto_cell_height_range.clone(),
+                if auto_cell_height { "1" } else { "0" }.to_string(),
+            ));
+        }
+    }
+    if matches!(
+        item.tag.as_str(),
+        "InputField" | "LabelField" | "CheckBoxField"
+    ) && form_layout_input_field_is_extended(fields)
+        && let Some(show_in_header) = item.show_in_header
+    {
+        let index = 20 + form_layout_input_field_top_level_offset(text, fields);
+        if let Some(show_in_header_range) = fields.get(index) {
+            replacements.push((
+                show_in_header_range.clone(),
+                if show_in_header { "1" } else { "0" }.to_string(),
+            ));
+        }
+    }
+    if item.tag == "InputField"
+        && form_layout_input_field_is_extended(fields)
+        && let Some(options_range) = form_layout_input_field_extended_options_range(text, fields)?
+        && let Some(options) =
+            patch_form_layout_input_field_extended_options(&text[options_range.clone()], item)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form layout input options for {}",
+                        item.name
+                    )
+                })?
+    {
+        replacements.push((options_range.clone(), options));
+    }
+    if item.tag == "Pages"
+        && let Some(height) = &item.height
+        && let Some(height_range) = fields.get(13)
+    {
+        replacements.push((height_range.clone(), height.to_string()));
+    }
+    if item.tag == "TextDocumentField"
+        && let Some(height) = &item.height
+        && let Some(height_range) = fields.get(23)
+    {
+        replacements.push((height_range.clone(), height.to_string()));
+    }
+    if item.tag == "Page"
+        && let Some(scroll_on_compress) = item.scroll_on_compress
+        && let Some(scroll_range) = form_layout_page_scroll_on_compress_range(text, fields, item)
+    {
+        replacements.push((
+            scroll_range.clone(),
+            if scroll_on_compress { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag.ends_with("Addition")
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_search_addition_type_code(item_type)
+        && let Some(type_range) = fields.get(5)
+    {
+        replacements.push((type_range.clone(), type_code.to_string()));
+    }
+    if item.tag.ends_with("Addition")
+        && let Some(source_item) = &item.addition_source_item
+        && let Some(source_item_id) = table_ids_by_name.get(source_item)
+        && let Some(item_type) = &item.item_type
+        && let Some(type_code) = form_search_addition_type_code(item_type)
+        && let Some(source_range) = fields.get(19)
+    {
+        replacements.push((
+            source_range.clone(),
+            format!("{{{source_item_id},{type_code}}}"),
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(command_name) = &item.command_name
+        && let Some(command_range) = fields.get(8)
+        && let Some(command_ref) = format_form_button_command_reference(
+            &text[command_range.clone()],
+            command_name,
+            commands,
+            source,
+        )?
+    {
+        replacements.push((command_range.clone(), command_ref));
+    }
+    if item.tag == "Button"
+        && let Some(data_path) = &item.data_path
+        && let Some(data_path_range) = fields.get(9)
+        && let Some(data_path_ref) =
+            format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
+    {
+        replacements.push((data_path_range.clone(), data_path_ref));
+    }
+    if item.tag == "TextDocumentField"
+        && let Some(data_path) = &item.data_path
+        && let Some(data_path_range) = fields.get(11)
+        && let Some(data_path_ref) = form_attribute_data_path_replacement(
+            &text[data_path_range.clone()],
+            data_path,
+            attribute_ids_by_name,
+        )
+    {
+        replacements.push((data_path_range.clone(), data_path_ref));
+    }
+    if matches!(
+        item.tag.as_str(),
+        "CommandBar"
+            | "AutoCommandBar"
+            | "UsualGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
+    ) && let Some(group) = item.group
+        && form_layout_usual_group_extended_options_range(text, fields).is_none()
+        && let Some(group_code) = form_child_group_code(group)
+        && let Some(group_range) = form_layout_child_item_group_range(text, fields, item)
+    {
+        replacements.push((group_range.clone(), group_code.to_string()));
+    }
+    if item.tag == "UsualGroup"
+        && (item.group.is_some() || item.behavior.is_some() || item.representation.is_some())
+        && let Some(options_range) = form_layout_usual_group_extended_options_range(text, fields)
+        && let Some(options) =
+            patch_form_layout_usual_group_extended_options(&text[options_range.clone()], item)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form layout group options for {}",
+                        item.name
+                    )
+                })?
+    {
+        replacements.push((options_range, options));
+    }
+    if item.tag == "UsualGroup"
+        && let Some(behavior) = item.behavior
+    {
+        if let Some(style_range) = fields.get(16) {
+            let replacement = match behavior {
+                FormXmlGroupBehavior::PopUp => "{4,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f},3}",
+                FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{4,4,{0},4}",
+            };
+            if !one_c_values_equal_ignoring_ws(&text[style_range.clone()], replacement) {
+                replacements.push((style_range.clone(), replacement.to_string()));
+            }
+        }
+        if let Some(size_range) = fields.get(17) {
+            let replacement = match behavior {
+                FormXmlGroupBehavior::PopUp => "{8,2,0,{-31},1,100}",
+                FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{8,3,0,1,100}",
+            };
+            if !one_c_values_equal_ignoring_ws(&text[size_range.clone()], replacement) {
+                replacements.push((size_range.clone(), replacement.to_string()));
+            }
+        }
+    }
+    if matches!(
+        item.tag.as_str(),
+        "CommandBar"
+            | "AutoCommandBar"
+            | "UsualGroup"
+            | "Popup"
+            | "Pages"
+            | "Page"
+            | "ButtonGroup"
+            | "ContextMenu"
+    ) && let Some(show_title) = item.show_title
+        && let Some(show_title_range) = fields.get(9)
+    {
+        replacements.push((
+            show_title_range.clone(),
+            if show_title { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if item.tag == "ColumnGroup"
+        && (item.group.is_some() || item.show_in_header.is_some())
+        && let Some(options_range) = form_layout_column_group_options_range(text, fields)
+        && let Some(options) =
+            patch_form_layout_column_group_options(&text[options_range.clone()], item)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form layout column group options for {}",
+                        item.name
+                    )
+                })?
+    {
+        replacements.push((options_range, options));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    patch_form_layout_events(text, &item.events, false)
+        .with_context(|| format!("failed to patch Form layout events for {}", item.name))?;
+    patch_form_layout_direct_child_items(
+        text,
+        item,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )
+    .with_context(|| {
+        format!(
+            "failed to patch Form layout direct child items for {}",
+            item.name
+        )
+    })?;
+    patch_form_layout_single_child_items(
+        text,
+        item,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )
+    .with_context(|| {
+        format!(
+            "failed to patch Form layout single child items for {}",
+            item.name
+        )
+    })?;
+    Ok(())
+}
+
+fn form_layout_child_item_group_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> Option<Range<usize>> {
+    if item.tag == "Page" {
+        for index in [8, 9] {
+            let range = fields.get(index)?.clone();
+            if form_child_group_code(item.group?) == Some(text[range.clone()].trim()) {
+                return Some(range);
+            }
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return Some(range);
+            }
+        }
+        None
+    } else {
+        fields.get(8).cloned()
+    }
+}
+
+fn form_layout_page_scroll_on_compress_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> Option<Range<usize>> {
+    if item.tag != "Page" {
+        return None;
+    }
+    fields
+        .get(8)
+        .filter(|range| text[(*range).clone()].trim_start().starts_with('{'))?;
+    fields.get(11).cloned()
+}
+
+fn form_layout_button_is_extended(fields: &[Range<usize>]) -> bool {
+    fields.len() > 20
+}
+
+fn form_layout_input_field_is_extended(fields: &[Range<usize>]) -> bool {
+    fields.len() > 20
+}
+
+fn form_layout_input_field_top_level_offset(text: &str, fields: &[Range<usize>]) -> usize {
+    fields
+        .get(6)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+        .filter(|value| !value.is_empty())
+        .map(|_| 0)
+        .unwrap_or(1)
+}
+
+fn form_layout_input_field_extended_options_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Result<Option<Range<usize>>> {
+    for range in fields.iter().skip(39) {
+        let value = text[range.clone()].trim();
+        if !value.starts_with('{') {
+            continue;
+        }
+        let nested = scan_braced_fields(value, 0)?;
+        if nested.first().map(|field| value[field.clone()].trim()) == Some("38") {
+            return Ok(Some(range.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn form_layout_usual_group_extended_options_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    if wrapper != "22" || fields.get(5).map(|range| text[range.clone()].trim()) != Some("5") {
+        return None;
+    }
+    let range = fields.get(20)?.clone();
+    text[range.clone()]
+        .trim_start()
+        .starts_with("{38")
+        .then_some(range)
+}
+
+fn form_layout_column_group_options_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    if wrapper != "22" || fields.get(5).map(|range| text[range.clone()].trim()) != Some("2") {
+        return None;
+    }
+    let range = fields.get(20)?.clone();
+    text[range.clone()]
+        .trim_start()
+        .starts_with("{5")
+        .then_some(range)
+}
+
+fn patch_form_layout_column_group_options(
+    existing: &str,
+    item: &FormXmlChildItem,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("5") {
+        return Ok(None);
+    }
+    let mut replacements = Vec::<(usize, &'static str)>::new();
+    if let Some(group) = item.group
+        && let Some(code) = form_column_group_group_code(group)
+    {
+        replacements.push((1, code));
+    }
+    if let Some(show_in_header) = item.show_in_header {
+        replacements.push((3, if show_in_header { "1" } else { "0" }));
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    replacements.sort_by_key(|(index, _)| *index);
+    replacements.dedup_by_key(|(index, _)| *index);
+    for (index, value) in replacements.into_iter().rev() {
+        replace_braced_field(&mut text, index, value)?;
+    }
+    Ok(Some(text))
+}
+
+fn patch_form_layout_usual_group_extended_options(
+    existing: &str,
+    item: &FormXmlChildItem,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("38") {
+        return Ok(None);
+    }
+    let mut replacements = Vec::<(usize, &'static str)>::new();
+    if let Some(representation) = item.representation
+        && let Some(code) = form_extended_group_representation_code(representation)
+    {
+        replacements.push((3, code));
+        replacements.push((35, code));
+    }
+    if let Some(group) = item.group
+        && let Some((orientation_code, group_code, layout_code, mirror_code)) =
+            form_extended_group_group_codes(group)
+    {
+        replacements.push((1, orientation_code));
+        replacements.push((22, group_code));
+        replacements.push((27, layout_code));
+        replacements.push((36, mirror_code));
+    }
+    if let Some(behavior) = item.behavior {
+        let (marker_code, flag10, flag11, flag24, flag28) =
+            form_extended_group_behavior_codes(behavior);
+        let marker_code = if behavior == FormXmlGroupBehavior::Usual
+            && item.group == Some(FormXmlGroup::AlwaysHorizontal)
+        {
+            "1"
+        } else {
+            marker_code
+        };
+        replacements.push((4, marker_code));
+        replacements.push((10, flag10));
+        replacements.push((11, flag11));
+        replacements.push((24, flag24));
+        replacements.push((28, flag28));
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    replacements.sort_by_key(|(index, _)| *index);
+    replacements.dedup_by_key(|(index, _)| *index);
+    for (index, value) in replacements.into_iter().rev() {
+        replace_braced_field(&mut text, index, value)?;
+    }
+    Ok(Some(text))
+}
+
+fn patch_form_layout_input_field_extended_options(
+    existing: &str,
+    item: &FormXmlChildItem,
+) -> Result<Option<String>> {
+    if item.auto_max_width != Some(false)
+        && item.width.is_none()
+        && item.height.is_none()
+        && item.max_width.is_none()
+        && item.auto_max_height != Some(false)
+        && item.max_height.is_none()
+        && item.horizontal_stretch.is_none()
+        && item.vertical_stretch.is_none()
+        && item.password_mode.is_none()
+        && item.multi_line.is_none()
+        && item.wrap.is_none()
+        && item.text_edit.is_none()
+        && item.drop_list_button.is_none()
+        && item.clear_button.is_none()
+        && item.open_button.is_none()
+        && item.create_button.is_none()
+        && item.choice_button.is_none()
+        && item.choice_list_button.is_none()
+        && item.spin_button.is_none()
+        && item.list_choice_mode.is_none()
+        && item.quick_choice.is_none()
+        && item.choose_type.is_none()
+        && item.mark_required_complete.is_none()
+        && item.auto_mark_incomplete.is_none()
+        && item.choice_button_representation.is_none()
+    {
+        return Ok(None);
+    }
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("38") {
+        return Ok(None);
+    }
+    if let Some(horizontal_stretch) = item.horizontal_stretch
+        && fields.get(4).is_some()
+    {
+        replace_braced_field(&mut text, 4, if horizontal_stretch { "1" } else { "0" })?;
+    }
+    if let Some(vertical_stretch) = item.vertical_stretch {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(5).is_some() {
+            replace_braced_field(&mut text, 5, if vertical_stretch { "1" } else { "0" })?;
+        }
+    }
+    if let Some(password_mode) = item.password_mode {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(7).is_some() {
+            replace_braced_field(&mut text, 7, if password_mode { "1" } else { "0" })?;
+        }
+    }
+    if let Some(multi_line) = item.multi_line {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(8).is_some() {
+            replace_braced_field(&mut text, 8, if multi_line { "1" } else { "0" })?;
+        }
+    }
+    if let Some(wrap) = item.wrap {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(6).is_some() {
+            replace_braced_field(&mut text, 6, if wrap { "1" } else { "0" })?;
+        }
+    }
+    if let Some(text_edit) = item.text_edit {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(41).is_some() {
+            replace_braced_field(&mut text, 41, if text_edit { "1" } else { "0" })?;
+        }
+    }
+    if let Some(mark_required_complete) = item.mark_required_complete {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(31).is_some() {
+            replace_braced_field(
+                &mut text,
+                31,
+                if mark_required_complete { "1" } else { "0" },
+            )?;
+        }
+    }
+    if let Some(list_choice_mode) = item.list_choice_mode {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(19).is_some() {
+            replace_braced_field(&mut text, 19, if list_choice_mode { "1" } else { "0" })?;
+        }
+    }
+    if let Some(width) = &item.width {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(2).is_some() {
+            replace_braced_field(&mut text, 2, width)?;
+        }
+    }
+    if let Some(height) = &item.height {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(3).is_some() {
+            replace_braced_field(&mut text, 3, height)?;
+        }
+    }
+    if item.auto_max_width == Some(false) {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(49).is_some() {
+            replace_braced_field(&mut text, 49, "0")?;
+            if item.max_width.is_none() && scan_braced_fields(&text, 0)?.get(50).is_some() {
+                replace_braced_field(&mut text, 50, "0")?;
+            }
+        }
+    }
+    if let Some(max_width) = &item.max_width {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(50).is_some() {
+            replace_braced_field(&mut text, 50, max_width)?;
+        }
+    }
+    if item.auto_max_height == Some(false) {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(52).is_some() {
+            replace_braced_field(&mut text, 52, "0")?;
+        }
+    }
+    if let Some(max_height) = &item.max_height {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(53).is_some() {
+            replace_braced_field(&mut text, 53, max_height)?;
+        }
+    }
+    if let Some(drop_list_button) = item.drop_list_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(47).is_some() {
+            replace_braced_field(&mut text, 47, if drop_list_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(clear_button) = item.clear_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(13).is_some() {
+            replace_braced_field(&mut text, 13, if clear_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(open_button) = item.open_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(15).is_some() {
+            replace_braced_field(&mut text, 15, if open_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(create_button) = item.create_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(45).is_some() {
+            replace_braced_field(&mut text, 45, if create_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(choice_button) = item.choice_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(12).is_some() {
+            replace_braced_field(&mut text, 12, if choice_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(choice_list_button) = item.choice_list_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(11).is_some() {
+            replace_braced_field(&mut text, 11, if choice_list_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(spin_button) = item.spin_button {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(14).is_some() {
+            replace_braced_field(&mut text, 14, if spin_button { "1" } else { "0" })?;
+        }
+    }
+    if let Some(quick_choice) = item.quick_choice {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(23).is_some() {
+            replace_braced_field(&mut text, 23, if quick_choice { "1" } else { "0" })?;
+        }
+    }
+    if let Some(choose_type) = item.choose_type {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(32).is_some() {
+            replace_braced_field(&mut text, 32, if choose_type { "1" } else { "0" })?;
+        }
+    }
+    if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(31).is_some() {
+            replace_braced_field(&mut text, 31, if auto_mark_incomplete { "1" } else { "0" })?;
+        }
+    }
+    if let Some(choice_button_representation) = item.choice_button_representation {
+        let fields = scan_braced_fields(&text, 0)?;
+        if fields.get(46).is_some() {
+            replace_braced_field(
+                &mut text,
+                46,
+                form_choice_button_representation_code(choice_button_representation),
+            )?;
+        }
+    }
+    Ok(Some(text))
+}
+
+struct FormLayoutDirectChildItemsSpan {
+    count_range: Range<usize>,
+    count: usize,
+    first_uuid_index: usize,
+}
+
+fn form_layout_direct_child_items_span(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<FormLayoutDirectChildItemsSpan> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let item_type = fields.get(5).map(|range| text[range.clone()].trim());
+    let (count_index, first_uuid_index) = if wrapper == "22"
+        && form_layout_usual_group_extended_options_range(text, fields).is_some()
+    {
+        (21, 22)
+    } else if wrapper == "22"
+        && item_type == Some("9")
+        && form_layout_direct_child_items_span_at(text, fields, 21, 22).is_some()
+    {
+        (21, 22)
+    } else if wrapper == "22"
+        && matches!(item_type, Some("3" | "4"))
+        && form_layout_direct_child_items_span_at(text, fields, 21, 22).is_some()
+    {
+        (21, 22)
+    } else if matches!(wrapper, "22" | "73") {
+        (10, 11)
+    } else {
+        return None;
+    };
+    form_layout_direct_child_items_span_at(text, fields, count_index, first_uuid_index)
+}
+
+fn form_layout_direct_child_items_span_at(
+    text: &str,
+    fields: &[Range<usize>],
+    count_index: usize,
+    first_uuid_index: usize,
+) -> Option<FormLayoutDirectChildItemsSpan> {
+    let count_range = fields.get(count_index)?.clone();
+    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
+    if fields.len() < first_uuid_index + count * 2 {
+        return None;
+    }
+    for index in 0..count {
+        let uuid_range = fields.get(first_uuid_index + index * 2)?.clone();
+        if !is_uuid_text(text[uuid_range].trim()) {
+            return None;
+        }
+        let item_range = fields.get(first_uuid_index + 1 + index * 2)?.clone();
+        if !text[item_range].trim_start().starts_with('{') {
+            return None;
+        }
+    }
+    Some(FormLayoutDirectChildItemsSpan {
+        count_range,
+        count,
+        first_uuid_index,
+    })
+}
+
+fn patch_form_layout_direct_child_items(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    if item.child_items_present {
+        retain_form_layout_direct_child_items(text, &item.child_items)?;
+    }
+    for child in &item.child_items {
+        if !is_form_layout_creatable_nested_item(child) {
+            continue;
+        }
+        let _ = patch_or_append_form_layout_direct_child_item(
+            text,
+            child,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch or append Form layout direct child item {}",
+                child.name
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn patch_form_layout_single_child_items(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    if item.child_items_present {
+        retain_form_layout_single_child_items(text, &item.child_items)?;
+    }
+    for child in &item.child_items {
+        if child.tag != "ContextMenu" {
+            continue;
+        }
+        let _ = patch_or_append_form_layout_single_child_item(
+            text,
+            child,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch or append Form layout single child item {}",
+                child.name
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn form_layout_single_child_item_slot(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<(Range<usize>, Option<Range<usize>>)> {
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("48") {
+        return None;
+    }
+    let count_range = fields.get(41)?.clone();
+    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
+    match count {
+        0 => Some((count_range, None)),
+        1 => fields.get(42).cloned().and_then(|item_range| {
+            text[item_range.clone()]
+                .trim_start()
+                .starts_with('{')
+                .then_some((count_range, Some(item_range)))
+        }),
+        _ => None,
+    }
+}
+
+fn retain_form_layout_single_child_items(
+    text: &mut String,
+    children: &[FormXmlChildItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let Some((count_range, Some(item_range))) = form_layout_single_child_item_slot(text, &fields)
+    else {
+        return Ok(());
+    };
+    let item_text = text[item_range.clone()].to_string();
+    let item_fields = scan_braced_fields(&item_text, 0)?;
+    let is_known_item = item_fields
+        .first()
+        .and_then(|range| {
+            form_layout_child_item_tag(item_text[range.clone()].trim(), &item_text, &item_fields)
+        })
+        .is_some();
+    let keep = !is_known_item
+        || children
+            .iter()
+            .any(|child| form_layout_child_item_matches(&item_text, &item_fields, child));
+    if keep {
+        return Ok(());
+    }
+    text.replace_range(count_range.start..item_range.end, "0");
+    Ok(())
+}
+
+fn patch_or_append_form_layout_single_child_item(
+    text: &mut String,
+    child: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    let Some((count_range, item_range)) = form_layout_single_child_item_slot(text, &fields) else {
+        return Ok(false);
+    };
+    if let Some(item_range) = item_range {
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        if !form_layout_child_item_matches(text, &child_fields, child) {
+            return Ok(false);
+        }
+        let mut nested = text[item_range.clone()].to_string();
+        let nested_fields = scan_braced_fields(&nested, 0)?;
+        patch_form_layout_child_item_entry(
+            &mut nested,
+            &nested_fields,
+            child,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch Form layout single child item entry {}",
+                child.name
+            )
+        })?;
+        text.replace_range(item_range, &nested);
+        return Ok(true);
+    }
+
+    let child_uuid = Uuid::new_v4().hyphenated().to_string();
+    let child_text = format_form_layout_new_child_item(
+        child,
+        &child_uuid,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
+    text.insert_str(count_range.end, &format!(",{child_text}"));
+    text.replace_range(count_range, "1");
+    Ok(true)
+}
+
+fn retain_form_layout_direct_child_items(
+    text: &mut String,
+    children: &[FormXmlChildItem],
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if !matches!(
+        fields.first().map(|range| text[range.clone()].trim()),
+        Some("22" | "73")
+    ) {
+        return Ok(());
+    }
+    let Some(span) = form_layout_direct_child_items_span(text, &fields) else {
+        return Ok(());
+    };
+
+    let mut retained = Vec::<(String, String)>::new();
+    let mut changed = false;
+
+    for index in 0..span.count {
+        let uuid_index = span.first_uuid_index + index * 2;
+        let item_index = span.first_uuid_index + 1 + index * 2;
+        let Some(uuid_range) = fields.get(uuid_index).cloned() else {
+            return Ok(());
+        };
+        let Some(item_range) = fields.get(item_index).cloned() else {
+            return Ok(());
+        };
+        let uuid = text[uuid_range].trim().to_string();
+        if !is_uuid_text(&uuid) {
+            return Ok(());
+        }
+        let item_text = text[item_range].to_string();
+        let item_fields = scan_braced_fields(&item_text, 0)?;
+        let is_known_item = item_fields
+            .first()
+            .and_then(|range| {
+                form_layout_child_item_tag(
+                    item_text[range.clone()].trim(),
+                    &item_text,
+                    &item_fields,
+                )
+            })
+            .is_some();
+        let keep = !is_known_item
+            || children
+                .iter()
+                .any(|child| form_layout_child_item_matches(&item_text, &item_fields, child));
+        if keep {
+            retained.push((uuid, item_text));
+        } else {
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    let replace_end = if span.count == 0 {
+        span.count_range.end
+    } else {
+        fields[span.first_uuid_index - 1 + span.count * 2].end
+    };
+    let mut replacement = retained.len().to_string();
+    for (uuid, item_text) in retained {
+        replacement.push(',');
+        replacement.push_str(&uuid);
+        replacement.push(',');
+        replacement.push_str(&item_text);
+    }
+    text.replace_range(span.count_range.start..replace_end, &replacement);
+    Ok(())
+}
+
+fn patch_or_append_form_layout_direct_child_item(
+    text: &mut String,
+    child: &FormXmlChildItem,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if !matches!(
+        fields.first().map(|range| text[range.clone()].trim()),
+        Some("22" | "73")
+    ) {
+        return Ok(false);
+    }
+    let Some(span) = form_layout_direct_child_items_span(text, &fields) else {
+        return Ok(false);
+    };
+
+    for index in 0..span.count {
+        let item_field_index = span.first_uuid_index + 1 + index * 2;
+        let Some(item_range) = fields.get(item_field_index).cloned() else {
+            return Ok(false);
+        };
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        if !form_layout_child_item_matches(text, &child_fields, child) {
+            continue;
+        }
+        let mut nested = text[item_range.clone()].to_string();
+        let nested_fields = scan_braced_fields(&nested, 0)?;
+        patch_form_layout_child_item_entry(
+            &mut nested,
+            &nested_fields,
+            child,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )
+        .with_context(|| {
+            format!(
+                "failed to patch Form layout direct child item entry {}",
+                child.name
+            )
+        })?;
+        text.replace_range(item_range, &nested);
+        return Ok(true);
+    }
+
+    let child_uuid = Uuid::new_v4().hyphenated().to_string();
+    let child_text = format_form_layout_new_child_item(
+        child,
+        &child_uuid,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+    )?;
+    let insert_at = if span.count == 0 {
+        span.count_range.end
+    } else {
+        fields
+            .get(span.first_uuid_index - 1 + span.count * 2)
+            .map(|range| range.end)
+            .unwrap_or(span.count_range.end)
+    };
+    text.insert_str(insert_at, &format!(",{child_uuid},{child_text}"));
+    text.replace_range(span.count_range, &(span.count + 1).to_string());
+    Ok(true)
+}
+
+fn form_button_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "UsualButton" => Some("0"),
+        "CommandBarButton" => Some("1"),
+        "Hyperlink" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_extended_button_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "CommandBarButton" => Some("0"),
+        "UsualButton" => Some("1"),
+        "Hyperlink" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_button_representation_code(value: FormXmlButtonRepresentation) -> &'static str {
+    match value {
+        FormXmlButtonRepresentation::Text => "0",
+        FormXmlButtonRepresentation::Picture => "1",
+        FormXmlButtonRepresentation::PictureAndText => "2",
+        FormXmlButtonRepresentation::None => "3",
+    }
+}
+
+fn form_table_representation_code(value: &str) -> Option<&'static str> {
+    match value {
+        "List" => Some("1"),
+        _ => None,
+    }
+}
+
+fn form_table_row_selection_mode_code(value: &str) -> Option<&'static str> {
+    match value {
+        "Cell" => Some("1"),
+        _ => None,
+    }
+}
+
+fn form_table_file_drag_mode_code(value: &str) -> Option<&'static str> {
+    match value {
+        "AsFile" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_button_location_in_command_bar_code(
+    value: FormXmlButtonLocationInCommandBar,
+) -> &'static str {
+    match value {
+        FormXmlButtonLocationInCommandBar::InAdditionalSubmenu => "1",
+        FormXmlButtonLocationInCommandBar::InCommandBar => "2",
+        FormXmlButtonLocationInCommandBar::InCommandBarAndInAdditionalSubmenu => "3",
+    }
+}
+
+fn form_input_field_title_location_code(value: FormXmlTitleLocation) -> &'static str {
+    match value {
+        FormXmlTitleLocation::None => "0",
+        FormXmlTitleLocation::Left => "2",
+        FormXmlTitleLocation::Top => "3",
+        FormXmlTitleLocation::Right => "4",
+    }
+}
+
+fn form_choice_button_representation_code(
+    value: FormXmlChoiceButtonRepresentation,
+) -> &'static str {
+    match value {
+        FormXmlChoiceButtonRepresentation::ShowInDropList => "1",
+        FormXmlChoiceButtonRepresentation::ShowInDropListAndInInputField => "2",
+        FormXmlChoiceButtonRepresentation::ShowInInputField => "3",
+    }
+}
+
+fn form_input_field_edit_mode_code(item: &FormXmlChildItem) -> Option<&'static str> {
+    match (item.edit_mode, item.auto_edit_mode) {
+        (Some(FormXmlEditMode::Directly), None) => Some("0"),
+        (Some(FormXmlEditMode::EnterOnInput), Some(true)) => Some("2"),
+        (Some(FormXmlEditMode::EnterOnInput), None) => Some("2"),
+        (None, Some(true)) => Some("2"),
+        (None, None) | (Some(FormXmlEditMode::Directly), Some(true)) | (_, Some(false)) => None,
+    }
+}
+
+fn form_search_addition_type_code(value: &str) -> Option<&'static str> {
+    match value {
+        "SearchStringRepresentation" => Some("0"),
+        "ViewStatusRepresentation" => Some("1"),
+        "SearchControl" => Some("2"),
+        _ => None,
+    }
+}
+
+fn form_search_addition_default_type_code(tag: &str) -> &'static str {
+    match tag {
+        "ViewStatusAddition" => "1",
+        "SearchControlAddition" => "2",
+        _ => "0",
+    }
+}
+
+fn form_layout_table_ids_by_name(layout: &str) -> Result<BTreeMap<String, String>> {
+    let mut tables = BTreeMap::new();
+    collect_form_layout_table_ids_by_name(layout, &mut tables)?;
+    Ok(tables)
+}
+
+fn form_layout_table_column_ids_by_name(
+    layout: &str,
+) -> Result<BTreeMap<(String, String), String>> {
+    let mut columns = BTreeMap::new();
+    collect_form_layout_table_column_ids_by_name(layout, &mut columns)?;
+    Ok(columns)
+}
+
+fn collect_form_layout_table_ids_by_name(
+    text: &str,
+    tables: &mut BTreeMap<String, String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && let Some(id) = identity
+            .first()
+            .map(|range| text[range.clone()].trim().to_string())
+        && let Some(name) = form_layout_child_item_name(text, "73", &fields)
+    {
+        tables.insert(name, id);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_ids_by_name(&text[range], tables)?;
+    }
+    Ok(())
+}
+
+fn collect_form_layout_table_column_ids_by_name(
+    text: &str,
+    columns: &mut BTreeMap<(String, String), String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
+        && let Some(table_name) = form_layout_child_item_name(text, "73", &fields)
+    {
+        collect_form_layout_table_column_ids_for_table(text, &table_name, columns)?;
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_column_ids_by_name(&text[range], columns)?;
+    }
+    Ok(())
+}
+
+fn collect_form_layout_table_column_ids_for_table(
+    text: &str,
+    table_name: &str,
+    columns: &mut BTreeMap<(String, String), String>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let wrapper = fields.first().map(|range| text[range.clone()].trim());
+    if matches!(
+        wrapper.and_then(|wrapper| form_layout_child_item_tag(wrapper, text, &fields)),
+        Some("InputField" | "LabelField")
+    ) && let Some(wrapper) = wrapper
+        && let Some(identity_range) = fields.get(1)
+        && let Ok(identity) = scan_braced_fields(text, identity_range.start)
+        && let Some(id) = identity
+            .first()
+            .map(|range| text[range.clone()].trim().to_string())
+        && let Some(name) = form_layout_child_item_name(text, wrapper, &fields)
+    {
+        columns.insert((table_name.to_string(), name), id);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        collect_form_layout_table_column_ids_for_table(&text[range], table_name, columns)?;
+    }
+    Ok(())
+}
+
+fn format_form_button_data_path(
+    data_path: &str,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+) -> Option<String> {
+    let data_path = data_path.trim();
+    let rest = data_path.strip_prefix("Items.")?;
+    let (table_name, field_name) = rest.split_once(".CurrentData.")?;
+    let column_id = match field_name {
+        "Ссылка" => "8".to_string(),
+        _ => table_column_ids_by_name
+            .get(&(table_name.to_string(), field_name.to_string()))
+            .cloned()?,
+    };
+    let table_id = table_ids_by_name.get(table_name)?;
+    Some(format!("{{2,{{{table_id}}},{{{column_id}}}}}"))
+}
+
+fn format_form_attribute_data_path(
+    data_path: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> Option<String> {
+    let attribute_id = attribute_ids_by_name.get(data_path.trim())?;
+    Some(format!("{{1,{{{attribute_id}}}}}"))
+}
+
+fn form_attribute_data_path_replacement(
+    existing: &str,
+    data_path: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> Option<String> {
+    if data_path.trim() == "Объект" && compact_1c_value(existing) == "{0}" {
+        return None;
+    }
+    let attribute_id = attribute_ids_by_name.get(data_path.trim())?;
+    if form_data_path_ref_points_to_attribute(existing, attribute_id) {
+        return None;
+    }
+    Some(format!("{{1,{{{attribute_id}}}}}"))
+}
+
+fn form_data_path_ref_points_to_attribute(existing: &str, attribute_id: &str) -> bool {
+    let text = existing.trim();
+    let Ok(fields) = scan_braced_fields(text, 0) else {
+        return false;
+    };
+    let Some(marker) = fields.first().map(|range| text[range.clone()].trim()) else {
+        return false;
+    };
+    if !matches!(marker, "1" | "2") {
+        return false;
+    }
+    let Some(path_range) = fields.get(1).cloned() else {
+        return false;
+    };
+    let path_text = text[path_range].trim();
+    let Ok(path_fields) = scan_braced_fields(path_text, 0) else {
+        return false;
+    };
+    path_fields
+        .first()
+        .is_some_and(|range| path_text[range.clone()].trim() == attribute_id)
+}
+
+fn format_form_button_command_reference(
+    existing: &str,
+    command_name: &str,
+    commands: &[FormXmlCommand],
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    if let Some(uuid) = form_standard_command_uuid(command_name) {
+        return Ok(Some(format!("{{0,{uuid}}}")));
+    }
+    if let Some(name) = command_name.strip_prefix("Form.Command.") {
+        let Some(command) = commands.iter().find(|command| command.name == name) else {
+            return Ok(None);
+        };
+        let fields = scan_braced_fields(existing.trim(), 0)?;
+        let Some(uuid) = fields.get(1).map(|range| existing[range.clone()].trim()) else {
+            return Ok(None);
+        };
+        return Ok(Some(format!("{{{},{uuid}}}", command.id)));
+    }
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let uuid = source.resolve_command_reference_uuid(command_name)?;
+    Ok(Some(format!("{{0,{uuid}}}")))
+}
+
+fn form_standard_command_uuid(command_name: &str) -> Option<&'static str> {
+    match command_name {
+        "Form.StandardCommand.Create" => Some("4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
+        "Form.StandardCommand.Help" => Some("39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+        _ => None,
+    }
+}
+
+fn form_layout_child_item_tag<'a>(
+    wrapper: &str,
+    text: &'a str,
+    fields: &[Range<usize>],
+) -> Option<&'static str> {
+    match wrapper {
+        "22" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" => Some("CommandBar"),
+            "9" => Some("AutoCommandBar"),
+            "1" => Some("Popup"),
+            "2" => Some("ColumnGroup"),
+            "3" => Some("Pages"),
+            "4" => Some("Page"),
+            "5" => Some("UsualGroup"),
+            "6" => Some("ButtonGroup"),
+            "8" => Some("ContextMenu"),
+            _ => None,
+        },
+        "34" => Some("Button"),
+        "48" => match fields
+            .get(5 + form_layout_input_field_top_level_offset(text, fields))
+            .map(|range| text[range.clone()].trim())?
+        {
+            "1" => Some("LabelField"),
+            "2" => Some("InputField"),
+            "3" => Some("CheckBoxField"),
+            "7" => Some("TextDocumentField"),
+            _ => None,
+        },
+        "6" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" => Some("SearchStringAddition"),
+            "1" => Some("ViewStatusAddition"),
+            "2" => Some("SearchControlAddition"),
+            _ => None,
+        },
+        "73" => Some("Table"),
+        _ => None,
+    }
+}
+
+fn form_layout_child_item_name(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<String> {
+    form_layout_child_item_name_range(text, wrapper, fields)
+        .and_then(|range| parse_1c_quoted_string(&text[range]).ok())
+}
+
+fn form_layout_child_item_name_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "73" | "34" => &[5],
+        "48" => &[6, 7],
+        _ => &[6],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        parse_1c_quoted_string(&text[range.clone()])
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(|_| range)
+    })
+}
+
+fn form_layout_child_item_title_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "73" => &[9],
+        "34" => &[6],
+        "48" => &[9, 10],
+        _ => &[7],
+    };
+    indexes
+        .iter()
+        .find_map(|index| {
+            let range = fields.get(*index)?.clone();
+            parse_1c_localized_strings(text[range.clone()].trim())
+                .is_ok_and(|values| !values.is_empty())
+                .then_some(range)
+        })
+        .or_else(|| {
+            indexes.iter().find_map(|index| {
+                let range = fields.get(*index)?.clone();
+                scan_braced_fields(text, range.start).ok().map(|_| range)
+            })
+        })
+}
+
+fn form_layout_child_item_tooltip_range(
+    text: &str,
+    wrapper: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let indexes: &[usize] = match wrapper {
+        "22" => &[8],
+        _ => &[],
+    };
+    indexes.iter().find_map(|index| {
+        let range = fields.get(*index)?.clone();
+        scan_braced_fields(text, range.start).ok().map(|_| range)
+    })
+}
+
+fn form_layout_child_item_extended_tooltip_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Result<Option<Range<usize>>> {
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let nested = scan_braced_fields(text, range.start)?;
+        if nested.first().map(|field| text[field.clone()].trim()) == Some("12") {
+            return Ok(Some(range.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn patch_form_layout_child_item_extended_tooltip(
+    existing: &str,
+    tooltip: &FormXmlExtendedTooltip,
+) -> Result<Option<String>> {
+    let mut text = existing.trim().to_string();
+    let fields = scan_braced_fields(&text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("12") {
+        return Ok(None);
+    }
+    if let Some(identity_range) = fields.get(1).cloned() {
+        let mut identity = text[identity_range.clone()].to_string();
+        if identity.trim_start().starts_with('{')
+            && scan_braced_fields(&identity, 0)?.get(1).is_some()
+        {
+            replace_braced_field(&mut identity, 0, &tooltip.id)?;
+            text.replace_range(identity_range, &identity);
+        }
+    }
+    if let Some(name_range) = fields.get(6).cloned()
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replace_braced_field(&mut text, 6, &format_1c_string(&tooltip.name))?;
+    }
+    Ok(Some(text))
+}
+
+fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &str) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        if form_event_field_matches(&text[window[0].clone()], identifiers)
+            && parse_1c_quoted_string(&text[window[1].clone()]).is_ok()
+        {
+            text.replace_range(window[1].clone(), &format_1c_string(handler));
+            return Ok(true);
+        }
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_event(&mut nested, identifiers, handler)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn form_event_field_matches(field: &str, identifiers: &[&str]) -> bool {
+    let value = parse_1c_quoted_string(field).unwrap_or_else(|_| field.trim().to_string());
+    identifiers
+        .iter()
+        .any(|identifier| value.eq_ignore_ascii_case(identifier))
+}
+
+fn form_event_layout_identifiers(name: &str) -> Vec<&str> {
+    let mut identifiers = vec![name];
+    match name {
+        "OnOpen" => identifiers.push("3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+        "BeforeClose" => identifiers.push("52dbb775-1631-4fd5-8c55-1615b5881dac"),
+        "ChoiceProcessing" => identifiers.push("1d632984-de3c-4b4b-ad9f-d69682a10182"),
+        "NotificationProcessing" => identifiers.push("3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
+        "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
+        "OnChange" => identifiers.push("fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+        "OnGetDataAtServer" => identifiers.push("97365900-eadf-4dfd-a9aa-fbb9ecabd079"),
+        _ => {}
+    }
+    identifiers
+}
+
+fn form_window_opening_mode_code(value: FormXmlWindowOpeningMode) -> &'static str {
+    match value {
+        FormXmlWindowOpeningMode::DontBlock => "0",
+        FormXmlWindowOpeningMode::LockOwner => "1",
+        FormXmlWindowOpeningMode::LockWholeInterface => "2",
+    }
+}
+
+fn form_enter_key_behavior_code(value: FormXmlEnterKeyBehavior) -> &'static str {
+    match value {
+        FormXmlEnterKeyBehavior::DefaultButton => "0",
+    }
+}
+
+fn patch_form_body_commands(
+    text: &mut String,
+    commands: &[FormXmlCommand],
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    retain_form_body_commands(text, commands)?;
+    for command in commands {
+        let patched = patch_form_body_command(text, command, source)?;
+        if !patched {
+            let _ = append_form_body_command(text, command, command_uuids, source)?;
+        }
+    }
+    Ok(())
+}
+
+fn retain_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> Result<()> {
+    let keep_ids = commands
+        .iter()
+        .map(|command| command.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let keep_names = commands
+        .iter()
+        .map(|command| command.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(1) else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for range in fields.iter().skip(2) {
+        let entry = text[range.clone()].to_string();
+        match form_body_command_entry_identity(&entry)? {
+            Some((id, name))
+                if keep_ids.contains(id.as_str()) || keep_names.contains(name.as_str()) =>
+            {
+                entries.push(entry)
+            }
+            Some(_) => {}
+            None => entries.push(entry),
+        }
+    }
+    if entries.len() == count {
+        return Ok(());
+    }
+    let mut replacement = format!("{{0,{}", entries.len());
+    for entry in entries {
+        replacement.push(',');
+        replacement.push_str(&entry);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn form_body_command_entry_identity(text: &str) -> Result<Option<(String, String)>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+        return Ok(None);
+    }
+    let Some(identity_range) = fields.get(1) else {
+        return Ok(None);
+    };
+    let identity = scan_braced_fields(text, identity_range.start)?;
+    let Some(id) = identity
+        .first()
+        .map(|range| text[range.clone()].trim().to_string())
+        .filter(|id| !id.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(name) = fields
+        .get(2)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+    else {
+        return Ok(None);
+    };
+    Ok(Some((id, name)))
+}
+
+fn patch_form_command_interface(
+    text: &mut String,
+    items: &[FormXmlCommandInterfaceItem],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(());
+    }
+    if items.is_empty() {
+        *text = "{0}".to_string();
+        return Ok(());
+    }
+
+    let existing_count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if fields.len() != 1 && fields.len() != 2 + existing_count {
+        patch_existing_form_command_interface_items(text, items, source)?;
+        return Ok(());
+    }
+
+    let mut entries = fields
+        .iter()
+        .skip(2)
+        .filter_map(|range| {
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return None;
+            }
+            let item_fields = scan_braced_fields(text, range.start).ok()?;
+            (item_fields.first().map(|field| text[field.clone()].trim()) == Some("3"))
+                .then(|| text[range.clone()].to_string())
+        })
+        .collect::<Vec<_>>();
+    entries.truncate(items.len());
+
+    for (entry, item) in entries.iter_mut().zip(items) {
+        patch_form_command_interface_item(entry, item, source)?;
+    }
+
+    for item in items.iter().skip(entries.len()) {
+        if let Some(entry) = format_form_command_interface_item(item, source)? {
+            entries.push(entry);
+        }
+    }
+
+    if entries.is_empty() {
+        *text = "{0}".to_string();
+    } else {
+        *text = format!("{{0,{},{}}}", entries.len(), entries.join(","));
+    }
+    Ok(())
+}
+
+fn patch_existing_form_command_interface_items(
+    text: &mut String,
+    items: &[FormXmlCommandInterfaceItem],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let item_ranges = fields
+        .iter()
+        .skip(2)
+        .filter_map(|range| {
+            if !text[range.clone()].trim_start().starts_with('{') {
+                return None;
+            }
+            let item_fields = scan_braced_fields(text, range.start).ok()?;
+            (item_fields.first().map(|field| text[field.clone()].trim()) == Some("3"))
+                .then_some(range.clone())
+        })
+        .collect::<Vec<_>>();
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    for (range, item) in item_ranges.into_iter().zip(items) {
+        let mut item_text = text[range.clone()].to_string();
+        patch_form_command_interface_item(&mut item_text, item, source)?;
+        replacements.push((range, item_text));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn format_form_command_interface_item(
+    item: &FormXmlCommandInterfaceItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let Some(command) = &item.command else {
+        return Ok(None);
+    };
+    let command_uuid = source.resolve_command_reference_uuid(command)?;
+    let command_group_uuid = item
+        .command_group
+        .as_deref()
+        .and_then(common_command_group_uuid)
+        .unwrap_or_else(|| "eacad741-96b9-4b3a-bf79-dde9ecead1a1".to_string());
+    let index = item.index.unwrap_or(0);
+    let default_visible = if item.default_visible.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let visible_common = format_form_nested_common_bool(item.visible_common.unwrap_or(true));
+    Ok(Some(format!(
+        "{{3,0,{{0,{command_uuid}}},{{0}},1,{{0,{command_group_uuid}}},{index},{default_visible},{visible_common}}}"
+    )))
+}
+
+fn patch_form_command_interface_item(
+    text: &mut String,
+    item: &FormXmlCommandInterfaceItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(command) = &item.command
+        && let Some(range) = fields.get(2)
+        && let Some(source) = source
+    {
+        let uuid = source.resolve_command_reference_uuid(command)?;
+        replacements.push((range.clone(), format!("{{0,{uuid}}}")));
+    }
+    if let Some(command_group) = &item.command_group
+        && let Some(range) = fields.get(5)
+    {
+        let uuid = common_command_group_uuid(command_group).ok_or_else(|| {
+            anyhow!("unsupported Form CommandInterface CommandGroup: {command_group}")
+        })?;
+        replacements.push((range.clone(), format!("{{0,{uuid}}}")));
+    }
+    if let Some(index) = item.index
+        && let Some(range) = fields.get(6)
+    {
+        replacements.push((range.clone(), index.to_string()));
+    }
+    if let Some(default_visible) = item.default_visible
+        && let Some(range) = fields.get(7)
+    {
+        replacements.push((
+            range.clone(),
+            if default_visible { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if let Some(visible_common) = item.visible_common
+        && let Some(range) = fields.get(8)
+    {
+        replacements.push((
+            range.clone(),
+            format_form_nested_common_bool(visible_common),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn format_form_nested_common_bool(value: bool) -> String {
+    format!("{{0,{{0,{},0}}}}", format_form_setting_bool(value))
+}
+
+fn patch_form_body_parameters(
+    text: &mut String,
+    parameters: &[FormXmlParameter],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    retain_form_body_parameters(text, parameters)?;
+    for parameter in parameters {
+        let patched = patch_form_body_parameter(text, parameter, source)?;
+        if !patched {
+            let _ = append_form_body_parameter(text, parameter, source)?;
+        }
+    }
+    Ok(())
+}
+
+fn retain_form_body_parameters(text: &mut String, parameters: &[FormXmlParameter]) -> Result<()> {
+    let keep_names = parameters
+        .iter()
+        .map(|parameter| parameter.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(());
+    }
+    let Some(count_range) = fields.get(1) else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for range in fields.iter().skip(2) {
+        let entry = text[range.clone()].to_string();
+        match form_body_parameter_entry_name(&entry)? {
+            Some(name) if keep_names.contains(name.as_str()) => entries.push(entry),
+            Some(_) => {}
+            None => entries.push(entry),
+        }
+    }
+    if entries.len() == count {
+        return Ok(());
+    }
+    let mut replacement = format!("{{0,{}", entries.len());
+    for entry in entries {
+        replacement.push(',');
+        replacement.push_str(&entry);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn form_body_parameter_entry_name(text: &str) -> Result<Option<String>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(None);
+    }
+    Ok(fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok()))
+}
+
+fn patch_form_body_parameter(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_parameter_entry(&mut nested, parameter, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_parameter_entry(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    let existing_name = fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    if existing_name.as_deref() != Some(parameter.name.as_str()) {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = fields.get(1) {
+        replacements.push((name_range.clone(), format_1c_string(&parameter.name)));
+    }
+    if !parameter.types.is_empty()
+        && let Some(type_range) = fields.get(2)
+    {
+        let type_pattern = format_form_parameter_type_pattern(parameter, source)?;
+        if !one_c_values_equal_ignoring_ws(&text[type_range.clone()], &type_pattern) {
+            replacements.push((type_range.clone(), type_pattern));
+        }
+    }
+    if let Some(key_parameter) = parameter.key_parameter
+        && let Some(key_range) = fields.get(3)
+    {
+        replacements.push((
+            key_range.clone(),
+            if key_parameter { "1" } else { "0" }.to_string(),
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(true)
+}
+
+fn append_form_body_parameter(
+    text: &mut String,
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() != 2 + count {
+        return Ok(false);
+    }
+
+    let entry = format_form_body_new_parameter(parameter, source)?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form parameters section is not closed"))?;
+    text.insert_str(insert_at, &format!(",{entry}"));
+    Ok(true)
+}
+
+fn format_form_body_new_parameter(
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    Ok(format!(
+        "{{0,{},{},{}}}",
+        format_1c_string(&parameter.name),
+        format_form_parameter_type_pattern(parameter, source)?,
+        if parameter.key_parameter == Some(true) {
+            "1"
+        } else {
+            "0"
+        }
+    ))
+}
+
+fn format_form_parameter_type_pattern(
+    parameter: &FormXmlParameter,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value_types = parse_metadata_type_pattern_elements(
+        "Form Parameter",
+        &parameter.types,
+        parameter.string_length.clone(),
+        parameter.string_allowed_length.clone(),
+        parameter.number_digits.clone(),
+        parameter.number_fraction_digits.clone(),
+        parameter.number_allowed_sign.clone(),
+        source,
+        true,
+    )?;
+    Ok(format_metadata_type_pattern(&value_types))
+}
+
+fn patch_form_body_attributes(
+    text: &mut String,
+    attributes: &[FormXmlAttribute],
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    retain_form_body_attributes(text, attributes)?;
+    for attribute in attributes {
+        let patched = patch_form_body_attribute(text, attribute, source)?;
+        if !patched {
+            let _ = append_form_body_attribute(text, attribute, source)?;
+        }
+    }
+    Ok(())
+}
+
+fn retain_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute]) -> Result<()> {
+    let keep_ids = attributes
+        .iter()
+        .map(|attribute| attribute.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let keep_names = attributes
+        .iter()
+        .map(|attribute| attribute.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let fields = scan_braced_fields(text, 0)?;
+    match fields.first().map(|range| text[range.clone()].trim()) {
+        Some("0") => return Ok(()),
+        Some("4") => {}
+        _ => return Ok(()),
+    }
+    let Some(count_range) = fields.get(1) else {
+        return Ok(());
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(());
+    };
+    if fields.len() != 2 + count {
+        return Ok(());
+    }
+
+    let mut entries = Vec::new();
+    for range in fields.iter().skip(2) {
+        let entry = text[range.clone()].to_string();
+        match form_body_attribute_entry_identity(&entry)? {
+            Some((id, name))
+                if keep_ids.contains(id.as_str())
+                    || name
+                        .as_deref()
+                        .is_some_and(|name| keep_names.contains(name)) =>
+            {
+                entries.push(entry)
+            }
+            Some(_) => {}
+            None => entries.push(entry),
+        }
+    }
+    if entries.len() == count {
+        return Ok(());
+    }
+    if entries.is_empty() {
+        *text = "{0}".to_string();
+        return Ok(());
+    }
+
+    let mut replacement = format!("{{4,{}", entries.len());
+    for entry in entries {
+        replacement.push(',');
+        replacement.push_str(&entry);
+    }
+    replacement.push('}');
+    *text = replacement;
+    Ok(())
+}
+
+fn form_body_attribute_entry_identity(text: &str) -> Result<Option<(String, Option<String>)>> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("9") {
+        return Ok(None);
+    }
+    let Some(identity_range) = fields.get(1) else {
+        return Ok(None);
+    };
+    let identity = scan_braced_fields(text, identity_range.start)?;
+    let Some(id) = identity
+        .first()
+        .map(|range| text[range.clone()].trim().to_string())
+        .filter(|id| !id.is_empty())
+    else {
+        return Ok(None);
+    };
+    let name = fields
+        .get(3)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    Ok(Some((id, name)))
+}
+
+fn patch_form_body_attribute(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_attribute_entry(&mut nested, attribute, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+        if patch_form_body_attribute(&mut nested, attribute, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_attribute_entry(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("9") {
+        return Ok(false);
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = fields
+        .get(3)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    let matches_attribute = existing_id.as_deref() == Some(attribute.id.as_str())
+        || existing_name.as_deref() == Some(attribute.name.as_str());
+    if !matches_attribute {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+    if let Some(name_range) = fields.get(3)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range.clone(), format_1c_string(&attribute.name)));
+    }
+    if let Some(main_attribute) = attribute.main_attribute
+        && let Some(main_range) = fields.get(10)
+    {
+        replacements.push((
+            main_range.clone(),
+            if main_attribute { "1" } else { "0" }.to_string(),
+        ));
+    }
+    if let Some(settings) = &attribute.settings
+        && let Some(settings_range) = fields.get(14)
+    {
+        let mut settings_text = text[settings_range.clone()].to_string();
+        patch_form_dynamic_list_settings(&mut settings_text, settings, source)?;
+        replacements.push((settings_range.clone(), settings_text));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(true)
+}
+
+fn append_form_body_attribute(
+    text: &mut String,
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    if attribute.types.is_empty() {
+        return Ok(false);
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    match fields.first().map(|range| text[range.clone()].trim()) {
+        Some("0") if fields.len() == 1 => {
+            let entry = format_form_body_new_attribute(attribute, source)?;
+            *text = format!("{{4,1,{entry}}}");
+            Ok(true)
+        }
+        Some("4") => {
+            let Some(count_range) = fields.get(1).cloned() else {
+                return Ok(false);
+            };
+            let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+                return Ok(false);
+            };
+            if fields.len() != 2 + count {
+                return Ok(false);
+            }
+            let entry = format_form_body_new_attribute(attribute, source)?;
+            text.replace_range(count_range, &(count + 1).to_string());
+            let insert_at = text
+                .rfind('}')
+                .ok_or_else(|| anyhow!("Form attributes section is not closed"))?;
+            text.insert_str(insert_at, &format!(",{entry}"));
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn format_form_body_new_attribute(
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let settings_text = if let Some(settings) = &attribute.settings {
+        format_form_dynamic_list_settings_new(settings, source)?
+    } else {
+        "{0,0}".to_string()
+    };
+    Ok(format!(
+        "{{9,{{{}}},0,{},{},{},{},{},{},{},{},0,0,0,{},{}}}",
+        attribute.id,
+        format_1c_string(&attribute.name),
+        "{1,0}",
+        format_form_attribute_type_pattern(attribute, source)?,
+        r#"{0,{0,{"B",1},0}}"#,
+        r#"{0,{0,{"B",1},0}}"#,
+        "{0,0}",
+        "{0,0}",
+        if attribute.main_attribute == Some(true) {
+            "1"
+        } else {
+            "0"
+        },
+        settings_text,
+        "{0,0}"
+    ))
+}
+
+fn format_form_attribute_type_pattern(
+    attribute: &FormXmlAttribute,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    if attribute.types.len() == 1 && attribute.types[0].trim() == "cfg:DynamicList" {
+        return Ok(format!(
+            "{{\"Pattern\",{{\"#\",{}}}}}",
+            FORM_DYNAMIC_LIST_TYPE_UUID
+        ));
+    }
+    let value_types = parse_metadata_type_pattern_elements(
+        "Form Attribute",
+        &attribute.types,
+        attribute.string_length.clone(),
+        attribute.string_allowed_length.clone(),
+        attribute.number_digits.clone(),
+        attribute.number_fraction_digits.clone(),
+        attribute.number_allowed_sign.clone(),
+        source,
+        true,
+    )?;
+    Ok(format_metadata_type_pattern(&value_types))
+}
+
+fn format_form_dynamic_list_settings_new(
+    settings: &FormXmlDynamicListSettings,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut pairs = Vec::<(&str, String)>::new();
+    if let Some(query_text) = &settings.query_text {
+        pairs.push(("QueryText", format_form_setting_string(query_text)));
+    }
+    if let Some(main_table) = &settings.main_table
+        && let Some(source) = source
+    {
+        pairs.push((
+            "MainTable",
+            format_form_setting_metadata_ref(source, main_table)?,
+        ));
+    }
+    if let Some(dynamic_data_read) = settings.dynamic_data_read {
+        pairs.push((
+            "DynamicalDataSelection",
+            format_form_setting_bool(!dynamic_data_read),
+        ));
+    }
+    if let Some(manual_query) = settings.manual_query {
+        pairs.push(("ManualQuery", format_form_setting_bool(manual_query)));
+    }
+    if let Some(filter) = &settings.list_settings.filter {
+        pairs.push((
+            "Filter",
+            format_form_setting_dcs_standard_section(filter, "Filter", "", "Filter")?,
+        ));
+    }
+    if let Some(order) = &settings.list_settings.order {
+        pairs.push(("Order", format_form_setting_dcs_order(order, "", "Order")?));
+    }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        pairs.push((
+            "ConditionalAppearance",
+            format_form_setting_dcs_standard_section(
+                conditional_appearance,
+                "ConditionalAppearance",
+                "",
+                "ConditionalAppearance",
+            )?,
+        ));
+    }
+    if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
+        pairs.push(("ItemsViewMode", format_form_setting_string(items_view_mode)));
+    }
+    if let Some(items_user_setting_id) = &settings.list_settings.items_user_setting_id {
+        pairs.push((
+            "ItemsUserSettingID",
+            format_form_setting_string(items_user_setting_id),
+        ));
+    }
+
+    let mut text = format!("{{0,{}", pairs.len());
+    for (key, value) in pairs {
+        text.push(',');
+        text.push_str(&format_1c_string(key));
+        text.push(',');
+        text.push_str(&value);
+    }
+    text.push('}');
+    Ok(text)
+}
+
+fn patch_form_dynamic_list_settings(
+    text: &mut String,
+    settings: &FormXmlDynamicListSettings,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    if let Some(query_text) = &settings.query_text {
+        let current_matches = find_form_setting_value_range(text, "QueryText")
+            .is_some_and(|range| form_setting_string_matches(&text[range], query_text));
+        if !current_matches {
+            let _ = patch_form_setting_value(
+                text,
+                "QueryText",
+                &format_form_setting_string(query_text),
+            )?;
+        }
+    }
+    if let Some(manual_query) = settings.manual_query {
+        let _ =
+            patch_form_setting_value(text, "ManualQuery", &format_form_setting_bool(manual_query))?;
+    }
+    if let Some(dynamic_data_read) = settings.dynamic_data_read {
+        let data_selection = !dynamic_data_read;
+        let _ = patch_form_setting_value(
+            text,
+            "DynamicalDataSelection",
+            &format_form_setting_bool(data_selection),
+        )?;
+    }
+    if let Some(main_table) = &settings.main_table
+        && let Some(source) = source
+    {
+        let uuid = source.resolve_metadata_reference_uuid(main_table)?;
+        let current_matches = find_form_setting_value_range(text, "MainTable")
+            .is_some_and(|range| form_setting_metadata_ref_contains_uuid(&text[range], &uuid));
+        if !current_matches {
+            let _ = patch_form_setting_value(text, "MainTable", &format!("{{\"#\",{uuid}}}"))?;
+        }
+    }
+    let mut list_replacements = Vec::new();
+    let list_settings_text = text.clone();
+    if let Some(order) = &settings.list_settings.order {
+        push_form_setting_dcs_order_replacement(
+            &list_settings_text,
+            "Order",
+            order,
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(conditional_appearance) = &settings.list_settings.conditional_appearance {
+        push_form_setting_dcs_standard_replacement(
+            &list_settings_text,
+            "ConditionalAppearance",
+            conditional_appearance,
+            "ConditionalAppearance",
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(items_view_mode) = &settings.list_settings.items_view_mode {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ItemsViewMode",
+            format_form_setting_string(items_view_mode),
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(items_user_setting_id) = &settings.list_settings.items_user_setting_id {
+        push_form_setting_replacement(
+            &list_settings_text,
+            "ItemsUserSettingID",
+            format_form_setting_string(items_user_setting_id),
+            &mut list_replacements,
+        )?;
+    }
+    if let Some(filter) = &settings.list_settings.filter {
+        push_form_setting_dcs_standard_replacement(
+            &list_settings_text,
+            "Filter",
+            filter,
+            "Filter",
+            &mut list_replacements,
+        )?;
+    }
+    list_replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in list_replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+    Ok(())
+}
+
+fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> Result<bool> {
+    if let Some(range) = find_form_setting_value_range(text, key) {
+        text.replace_range(range, replacement);
+        return Ok(true);
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key == key {
+            text.replace_range(window[1].clone(), replacement);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn form_setting_metadata_ref_contains_uuid(value: &str, uuid: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields
+        .first()
+        .is_some_and(|range| value[range.clone()].trim() == "\"#\"")
+        && fields
+            .iter()
+            .skip(1)
+            .any(|range| value[range.clone()].trim().eq_ignore_ascii_case(uuid))
+}
+
+fn form_setting_string_matches(existing: &str, expected: &str) -> bool {
+    let existing = existing.trim();
+    let Ok(fields) = scan_braced_fields(existing, 0) else {
+        return false;
+    };
+    let text = existing.trim();
+    if fields.first().map(|range| text[range.clone()].trim()) != Some(r#""S""#) {
+        return false;
+    }
+    let Some(value) = fields
+        .get(1)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok())
+    else {
+        return false;
+    };
+    normalize_newlines(&value) == normalize_newlines(expected)
+}
+
+fn normalize_newlines(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn push_form_setting_replacement(
+    text: &str,
+    key: &str,
+    replacement: String,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key) {
+        replacements.push((range, replacement));
+        return Ok(());
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key == key {
+            replacements.push((window[1].clone(), replacement));
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn push_form_setting_dcs_standard_replacement(
+    text: &str,
+    key: &str,
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key)
+        && form_existing_dcs_standard_section_matches(&text[range.clone()], section)?
+    {
+        return Ok(());
+    }
+    push_form_setting_replacement(
+        text,
+        key,
+        format_form_setting_dcs_standard_section(section, root_name, text, key)?,
+        replacements,
+    )
+}
+
+fn push_form_setting_dcs_order_replacement(
+    text: &str,
+    key: &str,
+    order: &FormXmlListSettingsOrder,
+    replacements: &mut Vec<(Range<usize>, String)>,
+) -> Result<()> {
+    if let Some(range) = find_form_setting_value_range(text, key)
+        && form_existing_dcs_order_matches(&text[range.clone()], order)?
+    {
+        return Ok(());
+    }
+    push_form_setting_replacement(
+        text,
+        key,
+        format_form_setting_dcs_order(order, text, key)?,
+        replacements,
+    )
+}
+
+fn form_existing_dcs_order_matches(
+    existing: &str,
+    order: &FormXmlListSettingsOrder,
+) -> Result<bool> {
+    let Some(xml) = form_setting_base64_xml(existing)? else {
+        return Ok(false);
+    };
+    let parsed = parse_form_dcs_order_xml(&xml)?;
+    if parsed.items.len() != order.items.len() {
+        return Ok(false);
+    }
+    let items_match = order
+        .items
+        .iter()
+        .zip(parsed.items.iter())
+        .all(|(expected, actual)| {
+            expected
+                .field
+                .as_deref()
+                .is_none_or(|field| actual.field.as_deref() == Some(field))
+                && expected
+                    .order_type
+                    .as_deref()
+                    .is_none_or(|order_type| actual.order_type.as_deref() == Some(order_type))
+        });
+    let view_mode_matches = order
+        .view_mode
+        .as_deref()
+        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
+    let user_setting_matches = order
+        .user_setting_id
+        .as_deref()
+        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
+    Ok(items_match && view_mode_matches && user_setting_matches)
+}
+
+fn form_existing_dcs_standard_section_matches(
+    existing: &str,
+    section: &FormXmlListSettingsStandardSection,
+) -> Result<bool> {
+    let Some(xml) = form_setting_base64_xml(existing)? else {
+        return Ok(false);
+    };
+    let parsed = parse_form_dcs_standard_section_xml(&xml)?;
+    let view_mode_matches = section
+        .view_mode
+        .as_deref()
+        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
+    let user_setting_matches = section
+        .user_setting_id
+        .as_deref()
+        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
+    Ok(view_mode_matches && user_setting_matches)
+}
+
+fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
+    let text = existing.trim();
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some(r##""#""##) {
+        return Ok(None);
+    }
+    for range in fields.iter().skip(1) {
+        let value = text[range.clone()].trim();
+        if !value.starts_with("{#base64:") {
+            continue;
+        }
+        let bytes = decode_base64_payload_field(value)?;
+        let xml = String::from_utf8(bytes)
+            .context("Form DCS setting base64 payload is not valid UTF-8")?;
+        return Ok(Some(xml.trim_start_matches('\u{feff}').to_string()));
+    }
+    Ok(None)
+}
+
+#[derive(Default)]
+struct ParsedFormDcsStandardSection {
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Default)]
+struct ParsedFormDcsOrder {
+    items: Vec<ParsedFormDcsOrderItem>,
+    view_mode: Option<String>,
+    user_setting_id: Option<String>,
+}
+
+#[derive(Default)]
+struct ParsedFormDcsOrderItem {
+    field: Option<String>,
+    order_type: Option<String>,
+}
+
+fn parse_form_dcs_order_xml(xml: &str) -> Result<ParsedFormDcsOrder> {
+    let mut reader = Reader::from_reader(xml.as_bytes());
+    let mut buffer = Vec::new();
+    let mut current = None::<String>;
+    let mut text = String::new();
+    let mut parsed = ParsedFormDcsOrder::default();
+    let mut current_item = None::<ParsedFormDcsOrderItem>;
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "item" {
+                    current_item = Some(ParsedFormDcsOrderItem::default());
+                } else if matches!(
+                    local.as_str(),
+                    "field" | "orderType" | "viewMode" | "userSettingID"
+                ) {
+                    current = Some(local);
+                    text.clear();
+                }
+            }
+            Ok(Event::Text(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if current.is_some() {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if current.as_deref() == Some(local.as_str()) {
+                    match local.as_str() {
+                        "field" => {
+                            if let Some(item) = current_item.as_mut() {
+                                item.field = Some(text.trim().to_string());
+                            }
+                        }
+                        "orderType" => {
+                            if let Some(item) = current_item.as_mut() {
+                                item.order_type = Some(text.trim().to_string());
+                            }
+                        }
+                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
+                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
+                        _ => {}
+                    }
+                    current = None;
+                    text.clear();
+                }
+                if local == "item"
+                    && let Some(item) = current_item.take()
+                {
+                    parsed.items.push(item);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(error.into()),
+            _ => {}
+        }
+        buffer.clear();
+    }
+    Ok(parsed)
+}
+
+fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandardSection> {
+    let mut reader = Reader::from_reader(xml.as_bytes());
+    let mut buffer = Vec::new();
+    let mut current = None::<String>;
+    let mut text = String::new();
+    let mut parsed = ParsedFormDcsStandardSection::default();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if matches!(local.as_str(), "viewMode" | "userSettingID") {
+                    current = Some(local);
+                    text.clear();
+                }
+            }
+            Ok(Event::Text(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(event)) => {
+                if current.is_some() {
+                    text.push_str(event.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if current.is_some() {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text.push_str(&value);
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if current.as_deref() == Some(local.as_str()) {
+                    match local.as_str() {
+                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
+                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
+                        _ => {}
+                    }
+                    current = None;
+                    text.clear();
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(error.into()),
+            _ => {}
+        }
+        buffer.clear();
+    }
+    Ok(parsed)
+}
+
+fn find_form_setting_value_range(text: &str, key: &str) -> Option<Range<usize>> {
+    let needle = format!("\"{}\"", key.replace('"', "\"\""));
+    let mut offset = 0usize;
+    while let Some(relative) = text[offset..].find(&needle) {
+        let key_start = offset + relative;
+        let mut index = key_start + needle.len();
+        while text
+            .as_bytes()
+            .get(index)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            index += 1;
+        }
+        if text.as_bytes().get(index) != Some(&b',') {
+            offset = key_start + needle.len();
+            continue;
+        }
+        index += 1;
+        while text
+            .as_bytes()
+            .get(index)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            index += 1;
+        }
+        if let Some(range) = scan_1c_value_range(text, index) {
+            return Some(range);
+        }
+        offset = key_start + needle.len();
+    }
+    None
+}
+
+fn scan_1c_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    match text.as_bytes().get(start).copied()? {
+        b'{' => scan_1c_braced_value_range(text, start),
+        b'"' => scan_1c_quoted_value_range(text, start),
+        _ => {
+            let end = text[start..]
+                .find([',', '}'])
+                .map(|relative| start + relative)
+                .unwrap_or(text.len());
+            Some(trim_ascii_ws_range(text, start..end))
+        }
+    }
+}
+
+fn scan_1c_braced_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut index = start;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' if in_string && bytes.get(index + 1) == Some(&b'"') => {
+                index += 2;
+                continue;
+            }
+            b'"' => in_string = !in_string,
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start..index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn scan_1c_quoted_value_range(text: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = text.as_bytes();
+    let mut index = start + 1;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            if bytes.get(index + 1) == Some(&b'"') {
+                index += 2;
+                continue;
+            }
+            return Some(start..index + 1);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn format_form_setting_string(value: &str) -> String {
+    format!("{{\"S\",{}}}", format_1c_string(value))
+}
+
+fn format_form_setting_bool(value: bool) -> String {
+    format!("{{\"B\",{}}}", if value { "1" } else { "0" })
+}
+
+fn format_form_setting_metadata_ref(
+    source: &MetadataSourceContext,
+    reference: &str,
+) -> Result<String> {
+    let uuid = source.resolve_metadata_reference_uuid(reference)?;
+    Ok(format!("{{\"#\",{uuid}}}"))
+}
+
+fn format_form_setting_dcs_order(
+    order: &FormXmlListSettingsOrder,
+    settings_text: &str,
+    key: &str,
+) -> Result<String> {
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
+        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
+    let xml = format_form_dcs_order_xml(order);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    ))
+}
+
+fn format_form_setting_dcs_standard_section(
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+    settings_text: &str,
+    key: &str,
+) -> Result<String> {
+    let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
+        .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
+    let xml = format_form_dcs_standard_section_xml(section, root_name);
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    ))
+}
+
+fn default_form_setting_ref_uuid(key: &str) -> &'static str {
+    match key {
+        "Filter" => "21743ff3-2db3-4cfc-9404-90ed8209437f",
+        "ConditionalAppearance" => "31743ff3-2db3-4cfc-9404-90ed8209437f",
+        _ => "11743ff3-2db3-4cfc-9404-90ed8209437f",
+    }
+}
+
+fn find_form_setting_ref_uuid(text: &str, key: &str) -> Option<String> {
+    let fields = scan_braced_fields(text, 0).ok()?;
+    for window in fields.windows(2) {
+        let Ok(existing_key) = parse_1c_quoted_string(&text[window[0].clone()]) else {
+            continue;
+        };
+        if existing_key != key {
+            continue;
+        }
+        let value_fields = scan_braced_fields(text, window[1].start).ok()?;
+        if value_fields.first().map(|range| text[range.clone()].trim()) != Some(r##""#""##) {
+            return None;
+        }
+        return value_fields
+            .iter()
+            .skip(1)
+            .find_map(|range| parse_non_zero_uuid(text[range.clone()].trim()));
+    }
+    None
+}
+
+fn parse_non_zero_uuid(value: &str) -> Option<String> {
+    let uuid = Uuid::parse_str(value.trim()).ok()?;
+    (uuid != Uuid::nil()).then(|| uuid.hyphenated().to_string())
+}
+
+fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
+    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+        .to_string();
+    for item in &order.items {
+        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
+            continue;
+        };
+        xml.push_str("\t<item xsi:type=\"OrderItemField\">\r\n");
+        xml.push_str(&format!(
+            "\t\t<field>{}</field>\r\n",
+            escape_xml_text(field)
+        ));
+        if let Some(order_type) = item.order_type.as_deref().filter(|value| !value.is_empty()) {
+            xml.push_str(&format!(
+                "\t\t<orderType>{}</orderType>\r\n",
+                escape_xml_text(order_type)
+            ));
+        }
+        xml.push_str("\t</item>\r\n");
+    }
+    if let Some(view_mode) = order.view_mode.as_deref().filter(|value| !value.is_empty()) {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = order
+        .user_setting_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str("</Order>");
+    xml
+}
+
+fn format_form_dcs_standard_section_xml(
+    section: &FormXmlListSettingsStandardSection,
+    root_name: &str,
+) -> String {
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<{root_name} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+    );
+    if let Some(view_mode) = section
+        .view_mode
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<viewMode>{}</viewMode>\r\n",
+            escape_xml_text(view_mode)
+        ));
+    }
+    if let Some(user_setting_id) = section
+        .user_setting_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        xml.push_str(&format!(
+            "\t<userSettingID>{}</userSettingID>\r\n",
+            escape_xml_text(user_setting_id)
+        ));
+    }
+    xml.push_str(&format!("</{root_name}>"));
+    xml
+}
+
+fn escape_xml_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            _ => output.push(ch),
+        }
+    }
+    output
+}
+
+fn patch_form_body_command(
+    text: &mut String,
+    command: &FormXmlCommand,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_body_command_entry(&mut nested, command, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+        if patch_form_body_command(&mut nested, command, source)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn patch_form_body_command_entry(
+    text: &mut String,
+    command: &FormXmlCommand,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+        return Ok(false);
+    }
+    let existing_id = fields
+        .get(1)
+        .and_then(|range| scan_braced_fields(text, range.start).ok())
+        .and_then(|identity| {
+            identity
+                .first()
+                .map(|range| text[range.clone()].trim().to_string())
+        });
+    let existing_name = fields
+        .get(2)
+        .and_then(|range| parse_1c_quoted_string(&text[range.clone()]).ok());
+    let matches_command = existing_id.as_deref() == Some(command.id.as_str())
+        || existing_name.as_deref() == Some(command.name.as_str());
+    if !matches_command {
+        return Ok(false);
+    }
+
+    let mut replacements = Vec::<(Range<usize>, String)>::new();
+
+    if let Some(name_range) = fields.get(2)
+        && parse_1c_quoted_string(&text[name_range.clone()]).is_ok()
+    {
+        replacements.push((name_range.clone(), format_1c_string(&command.name)));
+    }
+    if !command.title.is_empty()
+        && let Some(title_range) = fields.get(3)
+        && let Some(replacement) =
+            form_command_localized_replacement(&text[title_range.clone()], &command.title)
+    {
+        replacements.push((title_range.clone(), replacement));
+    }
+    if !command.tooltip.is_empty()
+        && let Some(tooltip_range) = fields.get(4)
+        && let Some(replacement) =
+            form_command_localized_replacement(&text[tooltip_range.clone()], &command.tooltip)
+    {
+        replacements.push((tooltip_range.clone(), replacement));
+    }
+    if let Some(action) = &command.action
+        && let Some(action_range) = fields.get(8)
+        && parse_1c_quoted_string(&text[action_range.clone()]).is_ok()
+    {
+        replacements.push((action_range.clone(), format_1c_string(action)));
+    }
+    if let Some(current_row_use) = command.current_row_use
+        && let Some(current_row_use_range) = fields.get(9)
+    {
+        replacements.push((
+            current_row_use_range.clone(),
+            form_command_current_row_use_code(current_row_use).to_string(),
+        ));
+    }
+    if !command.functional_options.is_empty()
+        && let Some(functional_options_range) = fields.get(12)
+        && let Some(source) = source
+    {
+        replacements.push((
+            functional_options_range.clone(),
+            format_form_reference_list(source, &command.functional_options)?,
+        ));
+    }
+
+    replacements.sort_by_key(|(range, _)| range.start);
+    for (range, replacement) in replacements.into_iter().rev() {
+        text.replace_range(range, &replacement);
+    }
+
+    Ok(true)
+}
+
+fn form_command_localized_replacement(
+    existing: &str,
+    values: &[LocalizedString],
+) -> Option<String> {
+    form_localized_replacement(existing, values)
+}
+
+fn form_localized_replacement(existing: &str, values: &[LocalizedString]) -> Option<String> {
+    if parse_1c_localized_strings(existing).ok().as_deref() == Some(values) {
+        return None;
+    }
+    Some(if form_localized_uses_nested_pairs(existing) {
+        format_form_title_value(values)
+    } else {
+        format_1c_synonyms(values)
+    })
+}
+
+fn form_localized_uses_nested_pairs(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields
+        .first()
+        .is_some_and(|range| value[range.clone()].trim() == "1")
+        && fields
+            .get(1)
+            .is_some_and(|range| value[range.clone()].trim().parse::<usize>().is_ok())
+        && fields
+            .get(2)
+            .is_some_and(|range| value[range.clone()].trim_start().starts_with('{'))
+}
+
+fn parse_1c_localized_strings(value: &str) -> Result<Vec<LocalizedString>> {
+    let value = value.trim();
+    let fields = scan_braced_fields(value, 0)?;
+    if fields
+        .first()
+        .is_some_and(|range| value[range.clone()].trim() == "0")
+    {
+        return Ok(Vec::new());
+    }
+    let first = fields
+        .first()
+        .ok_or_else(|| anyhow!("localized value is empty"))?;
+    let first_value = value[first.clone()].trim();
+    if first_value != "1" {
+        let count = first_value.parse::<usize>()?;
+        return parse_1c_flat_localized_strings(value, &fields, count);
+    }
+    if fields
+        .get(1)
+        .is_some_and(|range| value[range.clone()].trim().parse::<usize>().is_ok())
+        && fields
+            .get(2)
+            .is_some_and(|range| value[range.clone()].trim_start().starts_with('{'))
+    {
+        let count = value[fields[1].clone()].trim().parse::<usize>()?;
+        parse_1c_nested_localized_strings(value, &fields, count)
+    } else {
+        parse_1c_flat_localized_strings(value, &fields, 1)
+    }
+}
+
+fn parse_1c_flat_localized_strings(
+    value: &str,
+    fields: &[Range<usize>],
+    count: usize,
+) -> Result<Vec<LocalizedString>> {
+    if fields.len() != 1 + count * 2 {
+        return Err(anyhow!("flat localized value field count mismatch"));
+    }
+    let mut output = Vec::with_capacity(count);
+    let mut index = 1usize;
+    for _ in 0..count {
+        let lang = parse_1c_quoted_string(&value[fields[index].clone()])?;
+        let content = parse_1c_quoted_string(&value[fields[index + 1].clone()])?;
+        output.push(LocalizedString { lang, content });
+        index += 2;
+    }
+    Ok(output)
+}
+
+fn parse_1c_nested_localized_strings(
+    value: &str,
+    fields: &[Range<usize>],
+    count: usize,
+) -> Result<Vec<LocalizedString>> {
+    if fields.len() != 2 + count {
+        return Err(anyhow!("nested localized value field count mismatch"));
+    }
+    let mut output = Vec::with_capacity(count);
+    for range in fields.iter().skip(2) {
+        let pair = scan_braced_fields(value, range.start)?;
+        if pair.len() != 2 {
+            return Err(anyhow!("nested localized pair field count mismatch"));
+        }
+        let lang = parse_1c_quoted_string(&value[pair[0].clone()])?;
+        let content = parse_1c_quoted_string(&value[pair[1].clone()])?;
+        output.push(LocalizedString { lang, content });
+    }
+    Ok(output)
+}
+
+fn one_c_values_equal_ignoring_ws(left: &str, right: &str) -> bool {
+    compact_1c_value(left) == compact_1c_value(right)
+}
+
+fn compact_1c_value(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    let mut in_string = false;
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            output.push(ch);
+            if in_string && chars.peek() == Some(&'"') {
+                output.push(chars.next().unwrap());
+            } else {
+                in_string = !in_string;
+            }
+            continue;
+        }
+        if !in_string && ch.is_ascii_whitespace() {
+            continue;
+        }
+        output.push(ch);
+    }
+    output
+}
+
+fn append_form_body_command(
+    text: &mut String,
+    command: &FormXmlCommand,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if fields.first().map(|range| text[range.clone()].trim()) != Some("0") {
+        return Ok(false);
+    }
+    let Some(count_range) = fields.get(1).cloned() else {
+        return Ok(false);
+    };
+    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
+        return Ok(false);
+    };
+    if fields.len() != 2 + count {
+        return Ok(false);
+    }
+    let Some(uuid) = command_uuids.get(&command.name) else {
+        return Ok(false);
+    };
+    let entry = format_form_body_new_command(command, uuid, source)?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form commands section is not closed"))?;
+    text.insert_str(insert_at, &format!(",{entry}"));
+    Ok(true)
+}
+
+fn format_form_body_new_command(
+    command: &FormXmlCommand,
+    uuid: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let action = command.action.as_deref().unwrap_or("");
+    let current_row_use = command
+        .current_row_use
+        .map(form_command_current_row_use_code)
+        .unwrap_or("0");
+    let functional_options = if command.functional_options.is_empty() {
+        "{0,0}".to_string()
+    } else if let Some(source) = source {
+        format_form_reference_list(source, &command.functional_options)?
+    } else {
+        "{0,0}".to_string()
+    };
+
+    Ok(format!(
+        "{{11,{{{},{}}},{},{},{},0,0,0,{},{},0,0,{}}}",
+        command.id,
+        uuid,
+        format_1c_string(&command.name),
+        format_1c_synonyms(&command.title),
+        format_1c_synonyms(&command.tooltip),
+        format_1c_string(action),
+        current_row_use,
+        functional_options
+    ))
+}
+
+fn form_command_current_row_use_code(value: FormXmlCommandCurrentRowUse) -> &'static str {
+    match value {
+        FormXmlCommandCurrentRowUse::DontUse => "3",
+    }
+}
+
+fn format_form_reference_list(
+    source: &MetadataSourceContext,
+    references: &[String],
+) -> Result<String> {
+    let mut text = format!("{{0,{}", references.len());
+    for reference in references {
+        let uuid = source.resolve_metadata_reference_uuid(reference)?;
+        text.push(',');
+        text.push_str(&uuid);
+    }
+    text.push('}');
+    Ok(text)
+}
+
+fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let range = fields
+        .get(index)
+        .ok_or_else(|| anyhow!("Form layout has no field {index}"))?
+        .clone();
+    text.replace_range(range, value);
+    Ok(())
 }
 
 pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
@@ -3101,6 +13206,11 @@ pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
     Ok(ParsedFormBodyBlob {
         layout,
         module_text,
+        trailing: container
+            .trailing_ranges
+            .into_iter()
+            .map(|range| plain[range].trim().to_string())
+            .collect(),
         trailing_fields: container.trailing_fields,
     })
 }
@@ -3109,6 +13219,7 @@ pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
 struct FormBodyContainer {
     layout_range: Range<usize>,
     module_range: Range<usize>,
+    trailing_ranges: Vec<Range<usize>>,
     trailing_fields: usize,
 }
 
@@ -3138,6 +13249,7 @@ impl FormBodyContainer {
         Ok(Self {
             layout_range,
             module_range,
+            trailing_ranges: fields.iter().skip(3).cloned().collect(),
             trailing_fields: fields.len().saturating_sub(3),
         })
     }
@@ -3246,14 +13358,11 @@ pub fn pack_command_interface_blob_from_xml(
     for (index, entry) in entries.iter().enumerate() {
         let common_range = fields[3 + index * 2 + 1].clone();
         let common = if entry.common { "1" } else { "0" };
-        replacements.push((
-            common_range,
-            format!("{{{{0,{{{{0,{{{{\"B\",{common}}}}},0}}}}}}}}"),
-        ));
+        replacements.push((common_range, format!("{{0,{{0,{{\"B\",{common}}},0}}}}")));
     }
     replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
     for (range, replacement) in replacements {
-        plain.replace_range(range, &replacement);
+        replace_1c_value_if_different(&mut plain, range, &replacement);
     }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
@@ -3468,7 +13577,10 @@ fn role_right_value_replacements(
     }
 
     let mut replacements = Vec::new();
-    for (object_index, object) in objects.iter().enumerate() {
+    for object_index in 0..base_count {
+        let object = objects.get(base_count - object_index - 1).ok_or_else(|| {
+            anyhow!("Role Rights.xml has no object for base entry {object_index}")
+        })?;
         let entry_range = object_fields[object_index + 1].clone();
         let entry_fields = scan_braced_fields(plain, entry_range.start)?;
         let rights_range = entry_fields.get(1).ok_or_else(|| {
@@ -3507,14 +13619,6 @@ fn role_object_right_value_replacements(
         }
         _ => return Err(anyhow!("unsupported base Role rights marker {marker}")),
     };
-    if object.rights.len() != count {
-        return Err(anyhow!(
-            "Role Rights.xml object {} right count {} does not match base blob right count {}",
-            object.name,
-            object.rights.len(),
-            count
-        ));
-    }
     let required_fields = start + count * 2;
     if fields.len() < required_fields {
         return Err(anyhow!(
@@ -3523,16 +13627,185 @@ fn role_object_right_value_replacements(
             required_fields
         ));
     }
+    let rights_by_name = object
+        .rights
+        .iter()
+        .map(|right| (right.name.as_str(), right.value))
+        .collect::<BTreeMap<_, _>>();
     let mut replacements = Vec::with_capacity(count);
-    for (right_index, right) in object.rights.iter().enumerate() {
+    for right_index in 0..count {
+        let uuid = plain[fields[start + right_index * 2].clone()].trim();
+        let name = role_right_name(uuid)
+            .ok_or_else(|| anyhow!("unsupported base Role right UUID {uuid}"))?;
+        let value = rights_by_name.get(name).copied().ok_or_else(|| {
+            anyhow!(
+                "Role Rights.xml object {} has no right {}",
+                object.name,
+                name
+            )
+        })?;
         let value_range = fields[start + right_index * 2 + 1].clone();
-        replacements.push((
-            value_range,
-            if right.value { "1" } else { "-1" }.to_string(),
-        ));
+        replacements.push((value_range, if value { "1" } else { "-1" }.to_string()));
     }
     Ok(replacements)
 }
+
+fn role_right_name(uuid: &str) -> Option<&'static str> {
+    ROLE_RIGHT_NAMES
+        .iter()
+        .find_map(|(right_uuid, name)| (*right_uuid == uuid).then_some(*name))
+}
+
+const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
+    ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
+    ("900e3c92-6e18-4874-846a-b28780b5b54c", "Administration"),
+    (
+        "f7c6a0bb-bca6-4cd3-9146-832971cd7073",
+        "AnalyticsSystemClient",
+    ),
+    ("07ef4641-f7da-417a-bd75-35c40a17c2f7", "Automation"),
+    (
+        "399d7390-8d83-4a57-b4d7-c902c15b701f",
+        "ConfigurationExtensionsAdministration",
+    ),
+    ("10b8ce49-ae3d-4a2e-afe7-1e3648bd59f7", "DataAdministration"),
+    ("c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4", "Delete"),
+    ("b7bab52d-c1b1-4bd8-8276-02db08d42352", "Edit"),
+    (
+        "8497054a-ffd1-4ca7-bdfe-340b9ddc050a",
+        "EditDataHistoryVersionComment",
+    ),
+    ("1c799cf9-342d-4bf7-9b6f-951a009228ce", "EventLog"),
+    ("8fb221e3-0d4f-43f2-ad71-1984cad63375", "ExclusiveMode"),
+    ("74fd69fa-368e-4292-956a-65eb2f9877bd", "Execute"),
+    ("02119c69-f08a-4142-9426-3725d74b7719", "ExternalConnection"),
+    ("499e8968-ca89-43f0-9955-8756058b1b53", "Get"),
+    ("b5f861d3-d9c5-45ec-98bf-0ed4d489a351", "InputByString"),
+    ("33200740-82b0-4de7-8556-d3fb25ca4328", "Insert"),
+    (
+        "3b869658-ebc9-49ff-9bb3-e7c59686f538",
+        "InteractiveActivate",
+    ),
+    (
+        "b0c0cbfc-f2cc-4b80-8460-5d5d7a599d9d",
+        "InteractiveChangeOfPosted",
+    ),
+    (
+        "798cf688-ad74-44fe-a464-236b49e910e0",
+        "InteractiveClearDeletionMark",
+    ),
+    (
+        "e7f9daf9-eac2-4ada-9c26-c380858f3589",
+        "InteractiveClearDeletionMarkPredefinedData",
+    ),
+    ("b53db6ed-6e5b-4035-8d24-f10083d646ed", "InteractiveDelete"),
+    (
+        "fa6dbe86-856a-4ac4-b8ac-bce99f8b8b22",
+        "InteractiveDeleteMarked",
+    ),
+    (
+        "65e5f92c-40ff-4130-9652-c0e7612d0609",
+        "InteractiveDeleteMarkedPredefinedData",
+    ),
+    (
+        "013a262e-165f-4815-bdae-7a1bed6a68e4",
+        "InteractiveDeletePredefinedData",
+    ),
+    ("fb88c756-91c9-4351-9cdf-e027879886c6", "InteractiveInsert"),
+    (
+        "7b8359dd-7d4e-4bcd-a61c-b4b26eae19c6",
+        "InteractiveOpenExtDataProcessors",
+    ),
+    (
+        "eb29e198-c338-4a20-a253-be6fc3dd44d9",
+        "InteractiveOpenExtReports",
+    ),
+    ("5d167fcc-b11f-403a-9a37-1eda64c19df1", "InteractivePosting"),
+    (
+        "21b4742a-d335-4234-bf0f-a3074a0e31ac",
+        "InteractivePostingRegular",
+    ),
+    (
+        "d76b72ba-5388-4b7f-af64-1b351f63a1e1",
+        "InteractiveSetDeletionMark",
+    ),
+    (
+        "408c56c0-e210-4e2e-8e82-610050a08a39",
+        "InteractiveSetDeletionMarkPredefinedData",
+    ),
+    (
+        "4d0d77ec-8511-430d-bd77-8407f27bc8f4",
+        "InteractiveUndoPosting",
+    ),
+    ("5e664189-f0ee-439c-bdc5-eb81cca41ddf", "InteractiveExecute"),
+    (
+        "b9b44b51-3ac9-47cd-8b5a-df51afdcceb0",
+        "MainWindowModeEmbeddedWorkplace",
+    ),
+    (
+        "818fc6c3-4691-44e3-a80c-e8d424730ead",
+        "MainWindowModeFullscreenWorkplace",
+    ),
+    (
+        "155a0b35-4343-4047-989b-d385373b063e",
+        "MainWindowModeKiosk",
+    ),
+    (
+        "d066966a-ff6a-4a41-bd68-6191cab083bc",
+        "MainWindowModeNormal",
+    ),
+    (
+        "f6168734-8b8d-4a88-ab39-ef6b51758e83",
+        "MainWindowModeWorkplace",
+    ),
+    ("1e50809b-73ed-4935-bb77-2616c4cabdf5", "MobileClient"),
+    ("31c3d4f6-7d02-4654-a14e-06aacafcb4fa", "Output"),
+    ("e060de25-bffd-42fd-bb09-f3a788d65760", "Posting"),
+    ("1c87578f-9e09-4ec0-a991-5629c87b1588", "Read"),
+    ("64319ca1-f3d8-472e-82ce-5da233e6daaa", "ReadDataHistory"),
+    (
+        "1b762bf9-df7f-4255-bbe6-f7578f41368d",
+        "ReadDataHistoryOfMissingData",
+    ),
+    ("d8682bbb-7800-4aa0-8590-d3cb11fe2a29", "SaveUserData"),
+    ("1d306db2-d97e-4b57-9b28-5d21e838cd9e", "Set"),
+    ("65b6855f-85d5-4d33-ab75-be4485326dd5", "Start"),
+    ("84487e82-eb6c-4c51-ae16-3a6db17e886d", "InteractiveStart"),
+    (
+        "479a42c0-c3e9-4ae7-bf4a-75cebc14fec4",
+        "SwitchToDataHistoryVersion",
+    ),
+    (
+        "265eec41-3ce1-4a07-bc3b-253d44c9a4f4",
+        "TechnicalSpecialistMode",
+    ),
+    ("29da0973-3b85-40e5-89da-bce02dbab08e", "ThickClient"),
+    ("3c00c6ee-844e-4620-85e4-671e72f114d9", "ThinClient"),
+    ("24abfe06-289a-48c5-8bb4-032c733e45c5", "TotalsControl"),
+    ("f55a8f7f-2c65-404f-b530-093d9006adba", "UndoPosting"),
+    ("287b74b8-3a66-4a76-ba27-4f1f6a93770e", "Update"),
+    (
+        "4d87a22d-ca7f-40ba-a367-a4eae62f4a7f",
+        "UpdateDataBaseConfiguration",
+    ),
+    ("b162ff57-0296-483e-9af8-dc37576802cb", "UpdateDataHistory"),
+    (
+        "c4ab1331-e58d-4a46-ad2e-fe6d80b72aa4",
+        "UpdateDataHistoryOfMissingData",
+    ),
+    (
+        "a679c969-8ea1-4b8b-9e61-8a414ba448f4",
+        "UpdateDataHistorySettings",
+    ),
+    (
+        "5b3ea0e2-fdb9-41f6-bf6c-25747906b4cb",
+        "UpdateDataHistoryVersionComment",
+    ),
+    ("c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1", "Use"),
+    ("aa6448f2-be0f-42ea-ba26-1af7f52b5b65", "View"),
+    ("9342b152-a7ae-4c79-9b7b-f4f028a36479", "ViewDataHistory"),
+    ("bd33c881-192c-4ef7-a51d-b146e38c5078", "WebClient"),
+];
 
 fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
     let mut reader = Reader::from_reader(xml);
@@ -4097,11 +14370,11 @@ fn parse_predefined_string_value_from_plain(plain: &str, range: Range<usize>) ->
 }
 
 fn format_predefined_bool_value(value: bool) -> String {
-    format!(r#"{{{{"B",{}}}}}"#, if value { "1" } else { "0" })
+    format!(r#"{{"B",{}}}"#, if value { "1" } else { "0" })
 }
 
 fn format_predefined_string_value(value: &str) -> String {
-    format!(r#"{{{{"S",{}}}}}"#, format_1c_string(value))
+    format!(r#"{{"S",{}}}"#, format_1c_string(value))
 }
 
 fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
@@ -4521,8 +14794,27 @@ pub fn pack_base64_payload_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDefl
 }
 
 pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPictureBlob> {
+    pack_ext_picture_blob_from_bytes_with_base(None, bytes)
+}
+
+pub fn pack_ext_picture_blob_from_bytes_with_base(
+    base_blob: Option<&[u8]>,
+    bytes: &[u8],
+) -> Result<PackedExtPictureBlob> {
     let payload = encode_base64(bytes);
-    let plain = format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes();
+    let plain = if let Some(base_blob) = base_blob {
+        let mut plain = String::from_utf8(
+            inflate_raw(base_blob).context("failed to inflate base ExtPicture blob")?,
+        )
+        .context("base ExtPicture blob is not valid UTF-8")?;
+        if replace_first_base64_payload(&mut plain, &payload) {
+            plain.into_bytes()
+        } else {
+            format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes()
+        }
+    } else {
+        format!("{{1,{{0,0,-1,-1}},{{{{#base64:{payload}}}}}}}").into_bytes()
+    };
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedExtPictureBlob {
@@ -4530,6 +14822,20 @@ pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPicture
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn replace_first_base64_payload(text: &mut String, payload: &str) -> bool {
+    let prefix = "{#base64:";
+    let Some(start) = text.find(prefix) else {
+        return false;
+    };
+    let payload_start = start + prefix.len();
+    let Some(relative_end) = text[payload_start..].find('}') else {
+        return false;
+    };
+    let payload_end = payload_start + relative_end;
+    text.replace_range(payload_start..payload_end, payload);
+    true
 }
 
 pub fn parse_ext_picture_file_name_from_xml(xml: &[u8]) -> Result<String> {
@@ -5008,6 +15314,10 @@ enum CommonCommandPicture {
     Empty,
     CommonPicture {
         uuid: String,
+        load_transparent: bool,
+    },
+    StdPictureCode {
+        code: i32,
         load_transparent: bool,
     },
 }
@@ -5953,6 +16263,37 @@ fn patch_simple_metadata_header_text(
     Ok(text)
 }
 
+fn patch_configuration_metadata_text(
+    text: String,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<String> {
+    let marker = "{1,0,";
+    let marker_start = text
+        .find(marker)
+        .ok_or_else(|| anyhow!("configuration metadata tuple not found"))?;
+    let uuid_start = marker_start + marker.len();
+    let uuid_end = uuid_start + 36;
+    let header_uuid = text
+        .get(uuid_start..uuid_end)
+        .ok_or_else(|| anyhow!("configuration metadata tuple UUID is truncated"))?;
+    if !is_uuid_text(header_uuid) {
+        return Err(anyhow!(
+            "configuration metadata tuple UUID is invalid: {header_uuid}"
+        ));
+    }
+    let header_uuid = header_uuid.to_string();
+    patch_simple_metadata_header_text(
+        text,
+        &SimpleMetadataXmlProperties {
+            kind: properties.kind.clone(),
+            uuid: header_uuid,
+            name: properties.name.clone(),
+            synonyms: properties.synonyms.clone(),
+            comment: properties.comment.clone(),
+        },
+    )
+}
+
 fn patch_constant_metadata_text(
     mut text: String,
     properties: &ConstantXmlProperties,
@@ -5975,7 +16316,13 @@ fn patch_constant_metadata_text(
         ));
     }
     let type_text = format_constant_type_pattern(&properties.value_type);
-    text.replace_range(fields[2].clone(), &type_text);
+    if !metadata_type_pattern_matches_existing(
+        &text[fields[2].clone()],
+        &type_text,
+        std::slice::from_ref(&properties.value_type),
+    ) {
+        text.replace_range(fields[2].clone(), &type_text);
+    }
 
     let marker_start = text
         .find(&marker)
@@ -6020,7 +16367,13 @@ fn patch_defined_type_metadata_text(
     }
 
     let type_text = format_metadata_type_pattern(&properties.value_types);
-    text.replace_range(fields[4].clone(), &type_text);
+    if !metadata_type_pattern_matches_existing(
+        &text[fields[4].clone()],
+        &type_text,
+        &properties.value_types,
+    ) {
+        text.replace_range(fields[4].clone(), &type_text);
+    }
 
     Ok(text)
 }
@@ -6049,47 +16402,52 @@ fn patch_common_command_metadata_text(
         ));
     }
 
-    let replacements = [
-        (
-            fields[12].clone(),
-            common_command_on_main_server_unavailable_behavior_code(
-                properties.on_main_server_unavailable_behavior,
-            )
-            .to_string(),
-        ),
-        (
-            fields[11].clone(),
-            common_command_parameter_use_mode_code(properties.parameter_use_mode).to_string(),
-        ),
-        (
-            fields[10].clone(),
-            bool_flag(properties.modifies_data).to_string(),
-        ),
-        (
+    text.replace_range(
+        fields[12].clone(),
+        &common_command_on_main_server_unavailable_behavior_code(
+            properties.on_main_server_unavailable_behavior,
+        )
+        .to_string(),
+    );
+    text.replace_range(
+        fields[11].clone(),
+        &common_command_parameter_use_mode_code(properties.parameter_use_mode).to_string(),
+    );
+    text.replace_range(fields[10].clone(), &bool_flag(properties.modifies_data));
+    if !matches!(
+        properties.command_parameter_type,
+        CommonCommandParameterType::Empty
+    ) {
+        replace_1c_value_if_different(
+            &mut text,
             fields[8].clone(),
-            format_common_command_parameter_type(&properties.command_parameter_type),
-        ),
-        (
-            fields[7].clone(),
-            format_common_command_group_reference(&properties.group),
-        ),
-        (
-            fields[6].clone(),
-            bool_flag(properties.include_help_in_contents).to_string(),
-        ),
-        (fields[3].clone(), format_1c_synonyms(&properties.tooltip)),
-        (
-            fields[2].clone(),
-            common_command_representation_code(properties.representation).to_string(),
-        ),
-        (
+            &format_common_command_parameter_type(&properties.command_parameter_type),
+        );
+    }
+    replace_1c_value_if_different(
+        &mut text,
+        fields[7].clone(),
+        &format_common_command_group_reference(&properties.group),
+    );
+    text.replace_range(
+        fields[6].clone(),
+        &bool_flag(properties.include_help_in_contents),
+    );
+    replace_1c_value_if_different(
+        &mut text,
+        fields[3].clone(),
+        &format_1c_synonyms(&properties.tooltip),
+    );
+    text.replace_range(
+        fields[2].clone(),
+        &common_command_representation_code(properties.representation).to_string(),
+    );
+    if !matches!(properties.picture, CommonCommandPicture::Empty) {
+        replace_1c_value_if_different(
+            &mut text,
             fields[1].clone(),
-            format_common_command_picture(&properties.picture),
-        ),
-    ];
-
-    for (range, replacement) in replacements {
-        text.replace_range(range, &replacement);
+            &format_common_command_picture(&properties.picture),
+        );
     }
 
     Ok(text)
@@ -6121,29 +16479,68 @@ fn patch_command_group_metadata_text(
 
     let inner_text = text[fields[6].clone()].to_string();
     let inner_text = patch_simple_metadata_header_text(inner_text, &properties.simple)?;
-    let replacements = [
-        (fields[6].clone(), inner_text),
-        (fields[5].clone(), r#"{0}"#.to_string()),
-        (fields[4].clone(), format_1c_synonyms(&properties.tooltip)),
-        (
-            fields[3].clone(),
-            common_command_representation_code(properties.representation).to_string(),
-        ),
-        (
-            fields[2].clone(),
-            command_group_category_code(properties.category).to_string(),
-        ),
-        (
-            fields[1].clone(),
-            format_command_group_picture(&properties.picture),
-        ),
-    ];
-
-    for (range, replacement) in replacements {
-        text.replace_range(range, &replacement);
-    }
+    text.replace_range(fields[6].clone(), &inner_text);
+    replace_1c_value_if_different(&mut text, fields[5].clone(), r#"{0}"#);
+    replace_1c_value_if_different(
+        &mut text,
+        fields[4].clone(),
+        &format_1c_synonyms(&properties.tooltip),
+    );
+    text.replace_range(
+        fields[3].clone(),
+        &common_command_representation_code(properties.representation).to_string(),
+    );
+    text.replace_range(
+        fields[2].clone(),
+        &command_group_category_code(properties.category).to_string(),
+    );
+    replace_1c_value_if_different(
+        &mut text,
+        fields[1].clone(),
+        &format_command_group_picture(&properties.picture),
+    );
 
     Ok(text)
+}
+
+fn replace_1c_value_if_different(text: &mut String, range: Range<usize>, replacement: &str) {
+    if !one_c_values_equal_ignoring_ws(&text[range.clone()], replacement) {
+        text.replace_range(range, replacement);
+    }
+}
+
+fn metadata_type_pattern_matches_existing(
+    existing: &str,
+    formatted: &str,
+    expected: &[MetadataTypePatternElement],
+) -> bool {
+    if one_c_values_equal_ignoring_ws(existing, formatted) {
+        return true;
+    }
+
+    let Ok(fields) = scan_braced_fields(existing.trim(), 0) else {
+        return false;
+    };
+    if fields.len() != expected.len() + 1 {
+        return false;
+    }
+    if existing[fields[0].clone()].trim() != r#""Pattern""# {
+        return false;
+    }
+
+    expected
+        .iter()
+        .zip(fields.iter().skip(1))
+        .all(|(expected, range)| match expected {
+            MetadataTypePatternElement::DateTime => {
+                let compact = compact_1c_value(&existing[range.clone()]);
+                compact == r#"{"D"}"# || compact.starts_with(r#"{"D","#)
+            }
+            _ => one_c_values_equal_ignoring_ws(
+                &existing[range.clone()],
+                &format_metadata_type_pattern_element(expected),
+            ),
+        })
 }
 
 fn parse_required_xml_bool(name: &str, value: Option<String>) -> Result<bool> {
@@ -6276,6 +16673,13 @@ fn parse_metadata_type_pattern_element(
             allowed_sign_flag: parse_number_allowed_sign_flag(number_allowed_sign)?,
         }),
         "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime),
+        other if other.starts_with("v8:") => {
+            let type_id = builtin_v8_type_id(other)
+                .ok_or_else(|| anyhow!("{kind} type is not supported yet: {other}"))?;
+            Ok(MetadataTypePatternElement::Reference {
+                type_id: type_id.to_string(),
+            })
+        }
         other if other.starts_with("cfg:") => {
             let source = source.ok_or_else(|| {
                 anyhow!("{kind} type {other} requires --source-root to resolve TypeId")
@@ -6285,6 +16689,13 @@ fn parse_metadata_type_pattern_element(
             })
         }
         other => Err(anyhow!("{kind} type is not supported yet: {other}")),
+    }
+}
+
+fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
+    match type_name.trim() {
+        "v8:ValueStorage" => Some("e199ca70-93cf-46ce-a54b-6edc88c3a296"),
+        _ => None,
     }
 }
 
@@ -6299,14 +16710,25 @@ fn parse_common_command_picture(
     if reference.is_empty() {
         return Ok(CommonCommandPicture::Empty);
     }
-    if reference == "StdPicture.User" {
+    if let Some(code) = common_command_standard_picture_code(&reference) {
+        let load_transparent = parse_required_metadata_bool(
+            "CommonCommand",
+            "Picture/LoadTransparent",
+            load_transparent,
+        )?;
+        return Ok(CommonCommandPicture::StdPictureCode {
+            code,
+            load_transparent,
+        });
+    }
+    if let Some(uuid) = common_command_standard_picture_uuid(&reference) {
         let load_transparent = parse_required_metadata_bool(
             "CommonCommand",
             "Picture/LoadTransparent",
             load_transparent,
         )?;
         return Ok(CommonCommandPicture::CommonPicture {
-            uuid: STD_PICTURE_USER_UUID.to_string(),
+            uuid: uuid.to_string(),
             load_transparent,
         });
     }
@@ -6334,6 +16756,30 @@ fn parse_common_command_picture(
         uuid,
         load_transparent,
     })
+}
+
+fn common_command_standard_picture_code(reference: &str) -> Option<i32> {
+    match reference.trim() {
+        "StdPicture.InputFieldOpen" => Some(-7),
+        _ => None,
+    }
+}
+
+fn common_command_standard_picture_uuid(reference: &str) -> Option<&'static str> {
+    match reference.trim() {
+        "StdPicture.User" => Some(STD_PICTURE_USER_UUID),
+        "StdPicture.LoadReportSettings" => Some(STD_PICTURE_LOAD_REPORT_SETTINGS_UUID),
+        "StdPicture.Task" => Some("37cf7cc0-abad-4385-b597-6fd2d8dc085a"),
+        "StdPicture.ChooseValue" => Some("2f130057-bb2a-4e22-bba5-e108fac26940"),
+        "StdPicture.DataHistory" => Some("e8a49985-fef7-45a9-b6bb-ddd2b9028172"),
+        "StdPicture.BusinessProcessObject" => Some("a24cff7f-a1a5-4403-af82-a7b31852cde9"),
+        "StdPicture.CloneListItem" => Some("448d6f55-d885-496c-870d-d1bd78374745"),
+        "StdPicture.EventLog" => Some("723765ab-0b92-4745-a621-1ba0f77c92c9"),
+        "StdPicture.CreateInitialImage" => Some("4d2570b5-205f-413c-b4cc-b2097f61684f"),
+        "StdPicture.Write" => Some("894cf65b-4109-4533-a1d7-c87b1fcc80a3"),
+        "StdPicture.Delete" => Some("08a45a70-c221-4339-b3b1-9f11cb22147d"),
+        _ => None,
+    }
 }
 
 fn parse_command_group_picture(
@@ -6523,12 +16969,14 @@ fn common_command_group_uuid(reference: &str) -> Option<String> {
     match reference.trim() {
         "NavigationPanelOrdinary" => Some("77ea1b8f-dd79-4717-9dba-5628e7f348cf".to_string()),
         "NavigationPanelSeeAlso" => Some("bc80566a-86a5-4e87-acd4-872239385a2e".to_string()),
+        "NavigationPanelImportant" => Some("1af6d528-0b86-4fba-ab95-bd7475db03ba".to_string()),
         "ActionsPanelCreate" => Some("4f499c31-050b-47c5-aa84-d0366c0a0da8".to_string()),
         "ActionsPanelReports" => Some("5b360bff-01a1-49b6-93d2-26e7e8e3a038".to_string()),
         "ActionsPanelTools" => Some("aabb34e1-98c1-4bd0-bf7f-243f95437b44".to_string()),
         "FormCommandBarCreateBasedOn" => Some("dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0".to_string()),
         "FormCommandBarImportant" => Some("cb50f5c0-8013-4262-93a2-f0db379d6b6b".to_string()),
         "FormNavigationPanelGoTo" => Some("eacad741-96b9-4b3a-bf79-dde9ecead1a1".to_string()),
+        "FormNavigationPanelSeeAlso" => Some("8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8".to_string()),
         "FormNavigationPanelImportant" => Some("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2".to_string()),
         _ => None,
     }
@@ -6555,8 +17003,8 @@ fn parse_required_u32(name: &str, value: Option<&str>) -> Result<u32> {
 
 fn parse_string_allowed_length_flag(value: Option<&str>) -> Result<u8> {
     match value.map(str::trim).unwrap_or("Variable") {
-        "Fixed" => Ok(0),
-        "Variable" => Ok(1),
+        "Variable" => Ok(0),
+        "Fixed" => Ok(1),
         other => Err(anyhow!(
             "unsupported metadata StringQualifiers/AllowedLength: {other}"
         )),
@@ -6613,6 +17061,13 @@ fn format_common_command_picture(picture: &CommonCommandPicture) -> String {
             load_transparent,
         } => format!(
             r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
+            bool_flag(*load_transparent)
+        ),
+        CommonCommandPicture::StdPictureCode {
+            code,
+            load_transparent,
+        } => format!(
+            r#"{{4,1,{{{code}}},"",-1,-1,{},0,""}}"#,
             bool_flag(*load_transparent)
         ),
     }
@@ -7435,6 +17890,47 @@ fn read_base_elements_from_blob(blob: &[u8]) -> Result<BTreeMap<String, ParsedEl
         .collect())
 }
 
+fn read_element_from_blob(blob: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
+    let inner = inflate_raw(blob).context("failed to inflate base blob")?;
+    read_element_from_v8_container(&inner, target_name).context("failed to parse base blob")
+}
+
+fn read_element_from_v8_container(bytes: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
+    if bytes.len() < FILE_HEADER_SIZE + BLOCK_HEADER_SIZE {
+        return Err(anyhow!("container is too short"));
+    }
+    if read_u32(bytes, 0)? != V8_MAGIC_NUMBER {
+        return Err(anyhow!("unexpected file header next page marker"));
+    }
+    if read_u32(bytes, 8)? != 1 {
+        return Err(anyhow!("unsupported module container storage version"));
+    }
+
+    let toc_header = read_block_header(bytes, FILE_HEADER_SIZE)?;
+    let toc_start = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
+    let toc_end = toc_start + toc_header.data_size;
+    if toc_end > bytes.len() {
+        return Err(anyhow!("TOC block exceeds container length"));
+    }
+    if toc_header.data_size % ELEM_ADDR_SIZE != 0 {
+        return Err(anyhow!("TOC size is not divisible by element address size"));
+    }
+
+    for entry in bytes[toc_start..toc_end].chunks_exact(ELEM_ADDR_SIZE) {
+        let header_addr = read_u32(entry, 0)? as usize;
+        let data_addr = read_u32(entry, 4)? as usize;
+        let marker = read_u32(entry, 8)?;
+        if marker != V8_MAGIC_NUMBER {
+            continue;
+        }
+        let header = read_block_payload(bytes, header_addr)?;
+        if element_name(&header)? == target_name {
+            return read_block_payload(bytes, data_addr).map(Some);
+        }
+    }
+    Ok(None)
+}
+
 fn build_module_inner(elements: &[ModuleElement; 2]) -> Result<Vec<u8>> {
     let toc_len = elements.len() * ELEM_ADDR_SIZE;
     let toc_block_total = BLOCK_HEADER_SIZE + toc_len;
@@ -7644,6 +18140,52 @@ fn encode_base64(bytes: &[u8]) -> String {
     output
 }
 
+fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
+    let values = input
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect::<Vec<_>>();
+    if values.len() % 4 != 0 {
+        return None;
+    }
+
+    let mut output = Vec::with_capacity(values.len() / 4 * 3);
+    for chunk in values.chunks(4) {
+        let mut decoded = [0u8; 4];
+        let mut padding = 0usize;
+        for (index, byte) in chunk.iter().copied().enumerate() {
+            if byte == b'=' {
+                padding += 1;
+                decoded[index] = 0;
+                continue;
+            }
+            if padding > 0 {
+                return None;
+            }
+            decoded[index] = base64_value(byte)?;
+        }
+        output.push((decoded[0] << 2) | (decoded[1] >> 4));
+        if padding < 2 {
+            output.push((decoded[1] << 4) | (decoded[2] >> 2));
+        }
+        if padding < 1 {
+            output.push((decoded[2] << 6) | decoded[3]);
+        }
+    }
+    Some(output)
+}
+
+fn base64_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
 fn parse_hex_u32(bytes: &[u8]) -> Result<u32> {
     let text = std::str::from_utf8(bytes)?;
     Ok(u32::from_str_radix(text, 16)?)
@@ -7785,6 +18327,68 @@ mod tests {
         parse_common_command_representation, parse_v8_container,
     };
     use crate::module_blob::ModuleElement;
+
+    fn decode_base64_for_test(input: &str) -> anyhow::Result<Vec<u8>> {
+        fn value(byte: u8) -> anyhow::Result<u8> {
+            match byte {
+                b'A'..=b'Z' => Ok(byte - b'A'),
+                b'a'..=b'z' => Ok(byte - b'a' + 26),
+                b'0'..=b'9' => Ok(byte - b'0' + 52),
+                b'+' => Ok(62),
+                b'/' => Ok(63),
+                _ => anyhow::bail!("invalid base64 byte {byte}"),
+            }
+        }
+
+        let bytes: Vec<u8> = input
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect();
+        let mut output = Vec::with_capacity(bytes.len() / 4 * 3);
+        for chunk in bytes.chunks(4) {
+            if chunk.len() != 4 {
+                anyhow::bail!("invalid base64 length");
+            }
+            let first = value(chunk[0])?;
+            let second = value(chunk[1])?;
+            let third = if chunk[2] == b'=' {
+                0
+            } else {
+                value(chunk[2])?
+            };
+            let fourth = if chunk[3] == b'=' {
+                0
+            } else {
+                value(chunk[3])?
+            };
+            output.push((first << 2) | (second >> 4));
+            if chunk[2] != b'=' {
+                output.push((second << 4) | (third >> 2));
+            }
+            if chunk[3] != b'=' {
+                output.push((third << 6) | fourth);
+            }
+        }
+        Ok(output)
+    }
+
+    fn form_setting_base64_xml_for_test(text: &str, key: &str) -> anyhow::Result<String> {
+        let key_start = text
+            .find(&format!("\"{key}\""))
+            .ok_or_else(|| anyhow::anyhow!("setting {key} not found"))?;
+        let payload_prefix = "{#base64:";
+        let payload_start = text[key_start..]
+            .find(payload_prefix)
+            .map(|relative| key_start + relative + payload_prefix.len())
+            .ok_or_else(|| anyhow::anyhow!("setting {key} base64 payload not found"))?;
+        let payload_end = text[payload_start..]
+            .find('}')
+            .map(|relative| payload_start + relative)
+            .ok_or_else(|| anyhow::anyhow!("setting {key} base64 payload is not closed"))?;
+        let bytes = decode_base64_for_test(&text[payload_start..payload_end])?;
+        let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+        String::from_utf8(bytes.to_vec()).map_err(Into::into)
+    }
 
     #[test]
     fn packs_module_inner_with_plain_info_and_text() {
@@ -7949,6 +18553,40 @@ mod tests {
         assert_eq!(properties.synonyms.len(), 1);
         assert_eq!(properties.synonyms[0].lang, "en");
         assert_eq!(properties.synonyms[0].content, "Demo app");
+    }
+
+    #[test]
+    fn patches_configuration_header_with_root_uuid_xml() {
+        let root_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let base_text = format!(
+            "{{2,{{{root_uuid}}},1,{{9cd510cd-abfc-11d4-9434-004095e12fc7,{{1,{{68,{{0,{{3,{{1,0,{header_uuid}}},\"OldApp\",{{1,\"en\",\"Old app\"}},\"Old comment\",0,0,00000000-0000-0000-0000-000000000000,0}}}}}}}}}}}}"
+        );
+        let base_blob = deflate_raw(base_text.as_bytes()).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Configuration uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>NewApp</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>New app</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>New comment</Comment>
+    </Properties>
+  </Configuration>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains(&format!("{{1,0,{header_uuid}}}")));
+        assert!(inflated.contains("\"NewApp\""));
+        assert!(inflated.contains("{1,\"en\",\"New app\"}"));
+        assert!(inflated.contains("\"New comment\""));
     }
 
     #[test]
@@ -8609,8 +19247,146 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("\"NewConstant\""));
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
         assert!(inflated.contains("\"New comment\""));
-        assert!(inflated.contains(r#"{"Pattern",{"S",50,1}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"S",50,0}}"#));
         assert!(inflated.contains(",1,1,{0}"));
+    }
+
+    #[test]
+    fn patches_constant_preserving_equivalent_type_pattern_format() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            r#"{1,
+{16,
+{27,
+{2,
+{3,
+{1,0,cccccccc-cccc-4ccc-cccc-cccccccccccc},"OldName",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",
+{"S",4,1}
+}
+},0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,0,{5006,0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0},
+aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddddd-dddd-dddddddddddd,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee,1,0,{0},{0},00000000-0000-0000-0000-000000000000,0,0,ffffffff-ffff-4fff-ffff-ffffffffffff,99999999-9999-4999-9999-999999999999,0,0},0}"#
+                .as_bytes(),
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Constant uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties>
+      <Name>NewConstant</Name>
+      <Synonym/>
+      <Comment/>
+      <Type>
+        <v8:Type>xs:string</v8:Type>
+        <v8:StringQualifiers>
+          <v8:Length>4</v8:Length>
+          <v8:AllowedLength>Fixed</v8:AllowedLength>
+        </v8:StringQualifiers>
+      </Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{\"Pattern\",\n{\"S\",4,1}\n}"));
+    }
+
+    #[test]
+    fn patches_constant_preserving_datetime_type_qualifier() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            r#"{1,
+{16,
+{27,
+{2,
+{3,
+{1,0,cccccccc-cccc-4ccc-cccc-cccccccccccc},"OldConstant",
+{1,"ru","Old constant"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",
+{"D","T"}
+}
+},0,
+{1,"ru","ДФ=HH"},
+{0},0,"",0,
+{"U"},
+{"U"},0,00000000-0000-0000-0000-000000000000,2,0,
+{5006,0},
+{3,0,0},
+{0,0},0,
+{1,"ru","ДФ=HH"},
+{"S",""},0,0,0},
+aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddddd-dddd-4ddd-dddd-dddddddddddd,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee,1,0,{0},{0},00000000-0000-0000-0000-000000000000,0,0,ffffffff-ffff-4fff-ffff-ffffffffffff,99999999-9999-4999-9999-999999999999,0,0},0}"#
+                .as_bytes(),
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Constant uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties>
+      <Name>OldConstant</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old constant</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Old comment</Comment>
+      <Type>
+        <v8:Type>xs:dateTime</v8:Type>
+      </Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{\"Pattern\",\n{\"D\",\"T\"}\n}"));
+    }
+
+    #[test]
+    fn patches_constant_valuestorage_type_pattern() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{16,
+{27,
+{2,
+{3,
+{1,0,cccccccc-cccc-4ccc-cccc-cccccccccccc},"OldName",
+{1,"ru","Old synonym"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},
+{"Pattern",{"B"}}
+},0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,0,{5006,0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0},
+aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddddd-dddd-4ddd-dddd-dddddddddddd,eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee,1,0,{0},{0},00000000-0000-0000-0000-000000000000,0,0,ffffffff-ffff-4fff-ffff-ffffffffffff,99999999-9999-4999-9999-999999999999,0,0},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <Constant uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties>
+      <Name>ValueStorageConstant</Name>
+      <Synonym/>
+      <Comment/>
+      <Type>
+        <v8:Type>v8:ValueStorage</v8:Type>
+      </Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains(r##"{"Pattern",{"#",e199ca70-93cf-46ce-a54b-6edc88c3a296}}"##));
     }
 
     #[test]
@@ -8657,7 +19433,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(packed.properties.kind, "DefinedType");
         assert!(inflated.contains("\"NewType\""), "{inflated}");
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
-        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,1}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,0}}"#));
     }
 
     #[test]
@@ -8788,6 +19564,173 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("{4,0,{0},\"\",-1,-1,1,0,\"\"},2,"));
         assert!(inflated.contains("{0,0,0},1,"));
         assert!(inflated.contains("},1,0,0}"));
+    }
+
+    #[test]
+    fn patches_common_command_preserving_equivalent_picture_format() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,
+{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>OldCommand</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>NavigationPanelOrdinary</Group>
+      <Representation>Auto</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>true</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{4,0,\n{0},\"\",-1,-1,1,0,\"\"},3,"));
+    }
+
+    #[test]
+    fn patches_common_command_preserving_existing_picture_when_xml_empty() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,1,
+{0,1f046bc2-d6c5-46a3-a459-b2c0508f86fb},"",-1,-1,1,0,""},2,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>OldCommand</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>NavigationPanelOrdinary</Group>
+      <Representation>PictureAndText</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>true</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains("{0,1f046bc2-d6c5-46a3-a459-b2c0508f86fb}"));
+    }
+
+    #[test]
+    fn patches_common_command_preserving_existing_parameter_type_when_xml_empty() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br##"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern",
+{"#",225a597b-50b5-499c-b93b-9cd248b3f18e},
+{"#",2c2dfd96-3d8c-4420-b46c-e87260ddb55a}},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"##,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>OldCommand</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>ru</v8:lang>
+          <v8:content>Old synonym</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment/>
+      <Group>NavigationPanelOrdinary</Group>
+      <Representation>Auto</Representation>
+      <ToolTip/>
+      <Picture/>
+      <Shortcut/>
+      <IncludeHelpInContents>true</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#;
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+
+        assert!(inflated.contains(r##"{"#",225a597b-50b5-499c-b93b-9cd248b3f18e}"##));
+        assert!(inflated.contains(r##"{"#",2c2dfd96-3d8c-4420-b46c-e87260ddb55a}"##));
     }
 
     #[test]
@@ -9173,6 +20116,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_style_body_xml_preserving_base_order_and_format() -> anyhow::Result<()> {
+        let mut base_text = b"\xEF\xBB\xBF".to_vec();
+        base_text.extend_from_slice(
+            b"{2,3,\n{\n{-44},0,\n{4,3,\n{-44},3}\n},\n{\n{-42},0,\n{4,0,\n{14474460},0}\n},\n{\n{-43},0,\n{4,0,\n{15658734},0}\n},\n{0}\n}",
+        );
+        let base = super::deflate_raw(&base_text)?;
+        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
+<Style xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" version="2.21">
+	<Item name="NavigationColor">
+		<Color>#DCDCDC</Color>
+	</Item>
+	<Item name="AuxiliaryNavigationColor">
+		<Color>#EEEEEE</Color>
+	</Item>
+	<Item name="ActivityColor">
+		<Color>style:ActivityColor</Color>
+	</Item>
+</Style>
+"##;
+
+        let packed = super::pack_style_body_blob_from_xml_with_base(&base, xml, None)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text.as_bytes(), base_text.as_slice());
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_scheduled_job_schedule_xml() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <JobSchedule xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" version="2.17">
@@ -9188,7 +20160,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0}"
+            "\u{feff}{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -9838,6 +20810,5288 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_item_picture_assets_from_source_layout() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-item-assets-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let assets_root = root.join("Items");
+        std::fs::create_dir_all(assets_root.join("ДеревоТоваров"))?;
+        let new_png = b"\x89PNG\r\n\x1a\nnew";
+        std::fs::write(
+            assets_root.join("ДеревоТоваров").join("RowsPicture.png"),
+            new_png,
+        )?;
+        let base = super::deflate_raw(
+            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}}}}"
+                .as_bytes(),
+        )?;
+
+        let packed = super::pack_form_body_blob_from_form_xml_with_source_and_assets(
+            &base,
+            b"",
+            None,
+            None,
+            Some(&assets_root),
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(&format!("{{#base64:{}}}", super::encode_base64(new_png))));
+        assert!(!text.contains("{#base64:iVBORw0KGgo=}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_item_picture_assets_preserving_equal_wrapped_payload() -> anyhow::Result<()>
+    {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-item-assets-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let assets_root = root.join("Items");
+        std::fs::create_dir_all(assets_root.join("ДеревоТоваров"))?;
+        let png = b"\x89PNG\r\n\x1a\n";
+        std::fs::write(
+            assets_root.join("ДеревоТоваров").join("RowsPicture.png"),
+            png,
+        )?;
+        let base = super::deflate_raw(
+            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBOR\r\nw0KGgo=}}}}"
+                .as_bytes(),
+        )?;
+
+        let packed = super::pack_form_body_blob_from_form_xml_with_source_and_assets(
+            &base,
+            b"",
+            None,
+            None,
+            Some(&assets_root),
+        )?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{#base64:iVBOR\r\nw0KGgo=}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_top_level_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,1,1,1,0,1,1,1},\"Old module\",{0}}",
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Title>
+		<v8:item>
+			<v8:lang>ru</v8:lang>
+			<v8:content>Новый заголовок</v8:content>
+		</v8:item>
+		<v8:item>
+			<v8:lang>en</v8:lang>
+			<v8:content>New title</v8:content>
+		</v8:item>
+	</Title>
+	<Width>80</Width>
+	<Height>30</Height>
+	<WindowOpeningMode>LockWholeInterface</WindowOpeningMode>
+	<EnterKeyBehavior>DefaultButton</EnterKeyBehavior>
+	<AutoTitle>false</AutoTitle>
+	<SaveDataInSettings>UseList</SaveDataInSettings>
+	<AutoSaveDataInSettings>Use</AutoSaveDataInSettings>
+	<Group>Horizontal</Group>
+	<CommandBarLocation>Bottom</CommandBarLocation>
+	<ShowCommandBar>true</ShowCommandBar>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[2].clone()], "2");
+        assert_eq!(&parsed.layout[fields[3].clone()], "80");
+        assert_eq!(&parsed.layout[fields[4].clone()], "30");
+        assert_eq!(&parsed.layout[fields[5].clone()], "0");
+        assert_eq!(&parsed.layout[fields[6].clone()], "1");
+        assert_eq!(&parsed.layout[fields[7].clone()], "1");
+        assert_eq!(&parsed.layout[fields[9].clone()], "0");
+        assert_eq!(
+            &parsed.layout[fields[10].clone()],
+            r#"{1,2,{"ru","Новый заголовок"},{"en","New title"}}"#
+        );
+        assert_eq!(&parsed.layout[fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
+        assert_eq!(&parsed.layout[fields[17].clone()], "3");
+        assert_eq!(&parsed.layout[fields[18].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_preserves_equivalent_root_title_format() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,1,
+{"ru","Title"}
+},1,0,1,1,1,0,1,1,1},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Title>
+		<v8:item>
+			<v8:lang>ru</v8:lang>
+			<v8:content>Title</v8:content>
+		</v8:item>
+	</Title>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("{1,1,\n{\"ru\",\"Title\"}\n}"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_auto_fill_check_false() -> anyhow::Result<()> {
+        let base_text = r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,24,{"B",1},0,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}},"Old module",{0}}"##;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoFillCheck>false</AutoFillCheck>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"24,{"B",0}"#));
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_false_text = base_text.replace(r#"24,{"B",1}"#, r#"24,{"B",0}"#);
+        let base = super::deflate_raw(base_false_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoFillCheck>true</AutoFillCheck>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"24,{"B",1}"#));
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_save_window_settings_false() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<SaveWindowSettings>false</SaveWindowSettings>
+</Form>
+"#;
+
+        assert_eq!(
+            super::parse_form_xml_body_properties(xml)?.save_window_settings,
+            Some(false)
+        );
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 23].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_true_text = base_text.replace("{59,0},1,{1,0}", "{59,0},0,{1,0}");
+        let base = super::deflate_raw(base_true_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<SaveWindowSettings>true</SaveWindowSettings>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 23].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_show_close_button_false() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowCloseButton>false</ShowCloseButton>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 18].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_true_text = base_text.replace("100,1,1,0,0,0,{59,0}", "100,1,0,0,0,0,{59,0}");
+        let base = super::deflate_raw(base_true_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowCloseButton>true</ShowCloseButton>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 18].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_show_title_false() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowTitle>false</ShowTitle>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 17].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_false_text = base_text.replace("100,1,1,0,0,0,{59,0}", "100,0,1,0,0,0,{59,0}");
+        let base = super::deflate_raw(base_false_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowTitle>true</ShowTitle>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 17].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_root_horizontal_align() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<HorizontalAlign>Center</HorizontalAlign>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 11].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<HorizontalAlign>Right</HorizontalAlign>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 11].clone()], "2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_root_scaling_mode() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ScalingMode>Compact</ScalingMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        let base_compact_text = base_text.replace(r#""",0,0,0,0,0,0,3,3"#, r#""",0,2,0,0,0,0,3,3"#);
+        let base = super::deflate_raw(base_compact_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ScalingMode>Normal</ScalingMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_items_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_root_scaling_mode_with_pages_item() -> anyhow::Result<()> {
+        let base_text = r#"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}},1,cd5394d0-7dda-4b56-8927-93ccbe967a01,{22,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"PagesGroup",{1,0}},"","",0,1,"",0,0,0,0,0,0,3,3,0,0,0,100,1,1,0,0,0,{59,0},1,{1,0},{4,0,{0},"",-1,-1,1,0,""},0,0,1,0,2,0,0,0,2,0},"Old module",{0}}"#;
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ScalingMode>Compact</ScalingMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let tail_start =
+            super::form_layout_child_item_pairs_tail_start(&parsed.layout, &fields).unwrap();
+
+        assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_report_form_body_xml_show_command_bar_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,21,5,{\"B\",0}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ShowCommandBar>true</ShowCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[6].clone()], "0");
+        assert_eq!(&parsed.layout[fields[18].clone()], "21");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_customizable_false_for_vertical_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Group>Vertical</Group>
+	<Customizable>false</Customizable>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[11].clone()], "0");
+        assert_eq!(&parsed.layout[fields[13].clone()], "1");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_auto_url_false_for_vertical_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Group>Vertical</Group>
+	<AutoURL>false</AutoURL>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[11].clone()], "0");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_auto_url_and_customizable_false_for_vertical_layout()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Group>Vertical</Group>
+	<AutoURL>false</AutoURL>
+	<Customizable>false</Customizable>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[11].clone()], "0");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn skips_form_auto_url_for_property_bag_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,0,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoURL>true</AutoURL>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[18].clone()], "4");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_document_posting_options_auto_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,6,2,{\"#\",adeb08a0-415c-11d6-b9d1-0050bae0a95d,3},3,{\"#\",20d89b09-bd04-4304-a8c7-4d07fac6338a,0},4,{\"B\",0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoTime>DontUse</AutoTime>
+	<UsePostingMode>Auto</UsePostingMode>
+	<RepostOnWrite>true</RepostOnWrite>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"2,{"#",adeb08a0-415c-11d6-b9d1-0050bae0a95d,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"3,{"#",20d89b09-bd04-4304-a8c7-4d07fac6338a,3}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains(r#"4,{"B",1}"#), "{}", parsed.layout);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_document_posting_options_regular_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,6,2,{\"#\",adeb08a0-415c-11d6-b9d1-0050bae0a95d,0},3,{\"#\",20d89b09-bd04-4304-a8c7-4d07fac6338a,3},4,{\"B\",1},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoTime>CurrentOrLast</AutoTime>
+	<UsePostingMode>Regular</UsePostingMode>
+	<RepostOnWrite>false</RepostOnWrite>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"2,{"#",adeb08a0-415c-11d6-b9d1-0050bae0a95d,3}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"3,{"#",20d89b09-bd04-4304-a8c7-4d07fac6338a,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains(r#"4,{"B",0}"#), "{}", parsed.layout);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_report_form_options_auto_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,5,7,{\"#\",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,1},21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},23,{\"N\",1},27,{\"#\",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,1},29,{\"#\",874260df-7e23-4f02-9e10-5794914b5adf,0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ReportFormType>Main</ReportFormType>
+	<AutoShowState>Auto</AutoShowState>
+	<ReportResultViewMode>Auto</ReportResultViewMode>
+	<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"7,{"#",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"29,{"#",874260df-7e23-4f02-9e10-5794914b5adf,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_report_form_options_variant_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,5,7,{\"#\",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,0},21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},23,{\"N\",0},27,{\"#\",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,0},29,{\"#\",874260df-7e23-4f02-9e10-5794914b5adf,0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ReportFormType>Variant</ReportFormType>
+	<AutoShowState>ShowOnComposition</AutoShowState>
+	<ReportResultViewMode>Default</ReportResultViewMode>
+	<ViewModeApplicationOnSetReportResult>Auto</ViewModeApplicationOnSetReportResult>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"7,{"#",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,2}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"21,{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,3}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"27,{"#",b9311bea-b26b-4ae0-8b5d-7b64048fd2df,1}"##),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_report_result_and_details_data_refs() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r##"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,2,5,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{0,""}},6,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{0,""}},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormCommandBar",{1,0}}},"Old module",{4,2,{9,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,"Результат",0,0,0,0,0,0,0},{9,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,"ДанныеРасшифровки",0,0,0,0,0,0,0}}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ReportResult>Результат</ReportResult>
+	<DetailsData>ДанныеРасшифровки</DetailsData>
+	<Attributes>
+		<Attribute name="Результат" id="3"></Attribute>
+		<Attribute name="ДанныеРасшифровки" id="4"></Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"5,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{1,{3},""}}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r##"6,{"#",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{1,{4},""}}"##),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_command_set_single_excluded_command() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,{0},{1,342c531d-dc73-458a-8ac4-6a746916a33b},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandSet>
+		<ExcludedCommand>CustomizeForm</ExcludedCommand>
+	</CommandSet>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{1,198ea630-fda2-4cda-8a23-f999f4c67ee6}"),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("342c531d-dc73-458a-8ac4-6a746916a33b")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_command_set_multiple_excluded_commands() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{\"N\",0},{0,1,0},{1,198ea630-fda2-4cda-8a23-f999f4c67ee6},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandSet>
+		<ExcludedCommand>Change</ExcludedCommand>
+		<ExcludedCommand>Copy</ExcludedCommand>
+		<ExcludedCommand>Create</ExcludedCommand>
+	</CommandSet>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[22].clone()],
+            "{3,342c531d-dc73-458a-8ac4-6a746916a33b,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608}"
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_use_for_folders_and_items_items_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<UseForFoldersAndItems>Items</UseForFoldersAndItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_use_for_folders_and_items_folders_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,4,0,{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},24,{\"B\",0},25,{\"U\"},26,{\"B\",1},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<UseForFoldersAndItems>Folders</UseForFoldersAndItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_conversations_representation_show_property_bag() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0},24,{\"B\",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ConversationsRepresentation>Show</ConversationsRepresentation>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_conversations_representation_dont_show_property_bag()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,2,21,{\"#\",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,1},24,{\"B\",0},{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ConversationsRepresentation>DontShow</ConversationsRepresentation>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(
+            &parsed.layout[fields[20].clone()],
+            r##"{"#",f26c3706-a6ca-45cb-869a-e6ad38cd5f78,0}"##
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_vertical_scroll_use_if_necessary() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}},1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{48,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,\"Field\"},\"\",\"\",0,1,\"\",0,0,0,0,0,0,3,3,0,0,0,100},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<VerticalScroll>useIfNecessary</VerticalScroll>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[30].clone()], "2");
+        assert_eq!(&parsed.layout[fields[40].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn skips_form_customizable_for_non_vertical_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},1,0,0,0,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Customizable>false</Customizable>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[fields[13].clone()], "0");
+        assert_eq!(&parsed.layout[fields[14].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn skips_form_save_data_in_settings_for_property_bag_layout() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,21,5,{\"B\",0}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<SaveDataInSettings>UseList</SaveDataInSettings>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[6].clone()], "0");
+        assert_eq!(&parsed.layout[fields[18].clone()], "21");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_events() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"},{2,\"AfterWrite\",\"OldAfterWrite\"},{3,\"BeforeWrite\",\"OldBeforeWrite\"},{4,\"OnWriteAtServer\",\"OldWriteAtServer\"},{5,\"FillCheckProcessingAtServer\",\"OldFillCheck\"},{6,\"52dbb775-1631-4fd5-8c55-1615b5881dac\",\"OldBeforeClose\"}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="OnOpen">NewOpen</Event>
+		<Event name="ChoiceProcessing">NewChoice</Event>
+		<Event name="AfterWrite">NewAfterWrite</Event>
+		<Event name="BeforeWrite">NewBeforeWrite</Event>
+		<Event name="OnWriteAtServer">NewWriteAtServer</Event>
+		<Event name="FillCheckProcessingAtServer">NewFillCheck</Event>
+		<Event name="BeforeClose">NewBeforeClose</Event>
+	</Events>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"OnOpen\",\"NewOpen\""));
+        assert!(parsed.layout.contains("\"ChoiceProcessing\",\"NewChoice\""));
+        assert!(parsed.layout.contains("\"AfterWrite\",\"NewAfterWrite\""));
+        assert!(parsed.layout.contains("\"BeforeWrite\",\"NewBeforeWrite\""));
+        assert!(
+            parsed
+                .layout
+                .contains("\"OnWriteAtServer\",\"NewWriteAtServer\"")
+        );
+        assert!(
+            parsed
+                .layout
+                .contains("\"FillCheckProcessingAtServer\",\"NewFillCheck\"")
+        );
+        assert!(
+            parsed
+                .layout
+                .contains("\"52dbb775-1631-4fd5-8c55-1615b5881dac\",\"NewBeforeClose\"")
+        );
+        assert!(!parsed.layout.contains("OldOpen"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert!(!parsed.layout.contains("OldAfterWrite"));
+        assert!(!parsed.layout.contains("OldBeforeWrite"));
+        assert!(!parsed.layout.contains("OldWriteAtServer"));
+        assert!(!parsed.layout.contains("OldFillCheck"));
+        assert!(!parsed.layout.contains("OldBeforeClose"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,\"OldBar\",{1,0}}},\"Old module\",{3,{\"picture\"},\"payload\"}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1"/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"NewBar\""));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec![r#"{3,{"picture"},"payload"}"#]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar_autofill() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,"OldBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,1,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1">
+		<HorizontalAlign>Center</HorizontalAlign>
+		<Autofill>false</Autofill>
+	</AutoCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"NewBar\""));
+        assert!(parsed.layout.contains("{1,1,0,0}"), "{}", parsed.layout);
+        assert!(!parsed.layout.contains("{1,0,1,0}"));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_auto_command_bar_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,{22,{-1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,9,"OldBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,1,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="NewBar" id="-1">
+		<ChildItems>
+			<Button name="NewButton" id="54">
+				<Type>CommandBarButton</Type>
+			</Button>
+		</ChildItems>
+	</AutoCommandBar>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, fields[1].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, bar_fields[23].start)?;
+
+        assert_eq!(&parsed.layout[bar_fields[6].clone()], r#""NewBar""#);
+        assert_eq!(&parsed.layout[bar_fields[21].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""NewButton""#);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_context_menu() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "2".to_string();
+        field_parts[6] = r#""Field""#.to_string();
+        field_parts[7] = "1".to_string();
+        field_parts[9] = "{1,0}".to_string();
+        field_parts[10] = "{1,0}".to_string();
+        field_parts[11] = "{0}".to_string();
+        field_parts[18] = "{1,0}".to_string();
+        field_parts[19] = "{1,0}".to_string();
+        field_parts[41] = "1".to_string();
+        field_parts[42] =
+            format!(r#"{{22,{{23,{form_uuid}}},0,0,0,8,"OldMenu",{{1,0}},{{1,0}},0,1,0}}"#);
+        let field = format!("{{{}}}", field_parts.join(","));
+        let base_text = format!(
+            "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{field}}},\"Old module\",{{0}}}}"
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<InputField name="Field" id="22">
+			<ContextMenu name="NewMenu" id="23"/>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
+
+        assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
+        assert_eq!(&parsed.layout[context_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
+        assert!(!parsed.layout.contains("OldMenu"));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_attributes() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-main-table-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,9,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Filter",{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}},"ConditionalAppearance",{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}},"ItemsViewMode",{"S","Normal"},"ItemsUserSettingID",{"S","911b6018-f537-43e8-a417-da56b22f9aec"}},{0,0}}},{0,0},{0,0},{0}}"##,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="Список" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<QueryText>ВЫБРАТЬ Ссылка ИЗ Справочник.Товары</QueryText>
+				<MainTable>Catalog.Products</MainTable>
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Quick</dcsset:viewMode>
+						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+					</dcsset:filter>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Код</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
+					</dcsset:order>
+					<dcsset:conditionalAppearance>
+						<dcsset:viewMode>Compact</dcsset:viewMode>
+						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+					</dcsset:conditionalAppearance>
+					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
+					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let parsed_xml = super::parse_form_xml_body_properties(xml)?;
+        let parsed_order = parsed_xml.attributes[0]
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.list_settings.order.as_ref())
+            .ok_or_else(|| anyhow::anyhow!("order was not parsed from form XML"))?;
+        assert_eq!(parsed_order.items[0].field.as_deref(), Some("Код"));
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[0].contains(r#""Список""#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,9,"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
+        );
+        assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
+        assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
+        assert!(parsed.trailing[0].contains("\"MainTable\",{\"#\","));
+        assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
+        assert!(
+            filter_xml
+                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let order_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+        assert!(order_xml.contains("<field>Код</field>"), "{order_xml}");
+        assert!(
+            order_xml.contains("<orderType>Asc</orderType>"),
+            "{order_xml}"
+        );
+        assert!(parsed.trailing[0].contains(
+            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
+        ));
+        let appearance_xml =
+            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
+        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        assert!(
+            appearance_xml
+                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
+        );
+        assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""ItemsUserSettingID",{"S","cccccccc-cccc-4ccc-cccc-cccccccccccc"}"#)
+        );
+        assert!(!parsed.trailing[0].contains("88888888-8888-4888-8888-888888888888"));
+        assert!(!parsed.trailing[0].contains("OldList"));
+        assert!(!parsed.trailing[0].contains("Old query"));
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_filter_preserves_unspecified_items()
+    -> anyhow::Result<()> {
+        let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item xsi:type=\"FilterItemComparison\">\r\n\
+\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<comparisonType>Equal</comparisonType>\r\n\
+\t\t<right>false</right>\r\n\
+\t</item>\r\n\
+\t<viewMode>Normal</viewMode>\r\n\
+\t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
+</Filter>";
+        let mut filter_bytes = b"\xEF\xBB\xBF".to_vec();
+        filter_bytes.extend_from_slice(filter_xml.as_bytes());
+        let filter_payload = super::encode_base64(&filter_bytes);
+        let base_text = format!(
+            r##"{{4,{{7,{{"layout"}}}},"Old module",{{4,1,{{9,{{1}},0,"List",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,2,"Filter",{{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:{filter_payload}}}}},"DynamicalDataSelection",{{"B",1}}}},{{0,0}}}}}},{{0,0}},{{0,0}},{{0}}}}"##
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<DynamicDataRead>true</DynamicDataRead>
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
+					</dcsset:filter>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+
+        assert!(
+            filter_after.contains("FilterItemComparison"),
+            "{filter_after}"
+        );
+        assert!(
+            filter_after.contains("<left>ЭтоГруппа</left>"),
+            "{filter_after}"
+        );
+        assert!(
+            filter_after
+                .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_order_preserves_equivalent_wrapped_payload()
+    -> anyhow::Result<()> {
+        let order_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item xsi:type=\"OrderItemField\">\r\n\
+\t\t<field>Код</field>\r\n\
+\t\t<orderType>Asc</orderType>\r\n\
+\t</item>\r\n\
+\t<viewMode>Normal</viewMode>\r\n\
+\t<userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</userSettingID>\r\n\
+</Order>";
+        let mut order_bytes = b"\xEF\xBB\xBF".to_vec();
+        order_bytes.extend_from_slice(order_xml.as_bytes());
+        let order_payload = super::encode_base64(&order_bytes);
+        let base_text = format!(
+            r##"{{4,{{7,{{"layout"}}}},"Old module",{{4,1,{{9,{{1}},0,"List",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,1,"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,
+{{#base64:{order_payload}
+}}
+}}}},{{0,0}}}}}},{{0,0}},{{0,0}},{{0}}}}"##
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<ListSettings>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Код</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>
+					</dcsset:order>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let order_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+
+        assert!(order_after.contains("<field>Код</field>"), "{order_after}");
+        assert!(
+            order_after
+                .contains("<userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,\n{#base64:"),
+            "{}",
+            parsed.trailing[0]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_query_text_preserves_crlf_and_entity_ref()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{4,1,{9,{1},0,\"List\",{1,0},{\"Pattern\",{\"#\",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},{0,0},0,0,0,0,{0,1,\"QueryText\",{\"S\",\"SELECT\r\n\t&Param\"}},{0,0}}},{0,0},{0,0},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<QueryText>SELECT
+	&amp;Param</QueryText>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[0].contains("SELECT\r\n\t&Param"));
+        assert!(!parsed.trailing[0].contains("&amp;Param"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_events() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="OnOpen">NewOpen</Event>
+	</Events>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"OnOpen\",\"NewOpen\""));
+        assert!(!parsed.layout.contains("ChoiceProcessing"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_events_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{0,\"OnOpen\",\"OldOpen\"},{1,\"ChoiceProcessing\",\"OldChoice\"}},\"Old module\",{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, "{7}");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_attribute() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Attributes>
+		<Attribute name="Description" id="1">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			<v8:StringQualifiers>
+				<v8:Length>80</v8:Length>
+				<v8:AllowedLength>Variable</v8:AllowedLength>
+			</v8:StringQualifiers>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let attributes_fields = super::scan_braced_fields(&parsed.trailing[0], 0)?;
+        let attribute_fields =
+            super::scan_braced_fields(&parsed.trailing[0], attributes_fields[2].start)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(&parsed.trailing[0][attributes_fields[0].clone()], "4");
+        assert_eq!(&parsed.trailing[0][attributes_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[0][attribute_fields[0].clone()], "9");
+        assert_eq!(&parsed.trailing[0][attribute_fields[1].clone()], "{1}");
+        assert_eq!(
+            &parsed.trailing[0][attribute_fields[3].clone()],
+            r#""Description""#
+        );
+        assert_eq!(&parsed.trailing[0][attribute_fields[10].clone()], "1");
+        assert!(
+            parsed.trailing[0].contains(r#""S",80"#),
+            "{}",
+            parsed.trailing[0]
+        );
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_dynamic_list_attribute() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-new-dynamic-list-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>true</DynamicDataRead>
+				<QueryText>SELECT Ref FROM Catalog.Products</QueryText>
+				<MainTable>Catalog.Products</MainTable>
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:viewMode>Quick</dcsset:viewMode>
+						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+					</dcsset:filter>
+					<dcsset:order>
+						<dcsset:item xsi:type="dcsset:OrderItemField">
+							<dcsset:field>Code</dcsset:field>
+							<dcsset:orderType>Asc</dcsset:orderType>
+						</dcsset:item>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</dcsset:userSettingID>
+					</dcsset:order>
+					<dcsset:conditionalAppearance>
+						<dcsset:viewMode>Compact</dcsset:viewMode>
+						<dcsset:userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</dcsset:userSettingID>
+					</dcsset:conditionalAppearance>
+					<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>
+					<dcsset:itemsUserSettingID>cccccccc-cccc-4ccc-cccc-cccccccccccc</dcsset:itemsUserSettingID>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let attributes_fields = super::scan_braced_fields(&parsed.trailing[0], 0)?;
+        let attribute_fields =
+            super::scan_braced_fields(&parsed.trailing[0], attributes_fields[2].start)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(&parsed.trailing[0][attributes_fields[0].clone()], "4");
+        assert_eq!(&parsed.trailing[0][attributes_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[0][attribute_fields[0].clone()], "9");
+        assert_eq!(&parsed.trailing[0][attribute_fields[1].clone()], "{1}");
+        assert_eq!(
+            &parsed.trailing[0][attribute_fields[3].clone()],
+            r#""List""#
+        );
+        assert_eq!(&parsed.trailing[0][attribute_fields[10].clone()], "1");
+        assert!(parsed.trailing[0].contains(super::FORM_DYNAMIC_LIST_TYPE_UUID));
+        assert!(
+            parsed.trailing[0].contains(r#""QueryText",{"S","SELECT Ref FROM Catalog.Products"}"#)
+        );
+        assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
+        assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
+        assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
+        assert!(
+            filter_xml
+                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+        );
+        assert!(
+            parsed.trailing[0]
+                .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
+        );
+        let order_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Order")?;
+        assert!(order_xml.contains("<field>Code</field>"), "{order_xml}");
+        assert!(
+            order_xml.contains("<orderType>Asc</orderType>"),
+            "{order_xml}"
+        );
+        assert!(order_xml.contains("<viewMode>Normal</viewMode>"));
+        assert!(
+            order_xml
+                .contains("<userSettingID>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</userSettingID>")
+        );
+        assert!(parsed.trailing[0].contains(
+            "\"ConditionalAppearance\",{\"#\",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:"
+        ));
+        let appearance_xml =
+            form_setting_base64_xml_for_test(&parsed.trailing[0], "ConditionalAppearance")?;
+        assert!(appearance_xml.contains("<viewMode>Compact</viewMode>"));
+        assert!(
+            appearance_xml
+                .contains("<userSettingID>dddddddd-dddd-4ddd-dddd-dddddddddddd</userSettingID>")
+        );
+        assert!(parsed.trailing[0].contains(r#""ItemsViewMode",{"S","Compact"}"#));
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""ItemsUserSettingID",{"S","cccccccc-cccc-4ccc-cccc-cccccccccccc"}"#)
+        );
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_attributes() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{4,2,{9,{1},0,"Keep",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}},{9,{2},0,"Drop",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}},{0,0},{0,0},{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Attributes>
+		<Attribute name="Keep" id="1">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let attributes_fields = super::scan_braced_fields(&parsed.trailing[0], 0)?;
+
+        assert_eq!(&parsed.trailing[0][attributes_fields[0].clone()], "4");
+        assert_eq!(&parsed.trailing[0][attributes_fields[1].clone()], "1");
+        assert!(parsed.trailing[0].contains(r#""Keep""#));
+        assert!(!parsed.trailing[0].contains(r#""Drop""#));
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_attributes_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"Drop",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}},{0,0},{0,0},{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Attributes/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_parameters() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-parameter-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("ChartsOfAccounts"))?;
+        std::fs::write(
+            root.join("ChartsOfAccounts").join("Хозрасчетный.xml"),
+            r#"<MetaDataObject><ChartOfAccounts><InternalInfo><GeneratedType name="ChartOfAccountsRef.Хозрасчетный"><TypeId>99999999-9999-4999-8999-999999999999</TypeId></GeneratedType></InternalInfo><Properties><Name>Хозрасчетный</Name></Properties></ChartOfAccounts></MetaDataObject>"#
+                .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            r##"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Счет",{"Pattern",{"#",88888888-8888-4888-8888-888888888888}},0}},{0,0},{0}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Счет">
+			<Type>
+				<v8:Type>cfg:ChartOfAccountsRef.Хозрасчетный</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(
+            parsed.trailing[1]
+                .contains(r##""Счет",{"Pattern",{"#",99999999-9999-4999-8999-999999999999}},1"##)
+        );
+        assert!(!parsed.trailing[1].contains("88888888-8888-4888-8888-888888888888"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_parameter_preserves_equivalent_type_format()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Text",{"Pattern",
+{"S"}
+},1}},{0,0},{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Text">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[1].contains("\"Text\",{\"Pattern\",\n{\"S\"}\n},1"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_parameter_string_qualifiers() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Text">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+				<v8:StringQualifiers>
+					<v8:Length>30</v8:Length>
+					<v8:AllowedLength>Fixed</v8:AllowedLength>
+				</v8:StringQualifiers>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.trailing[1].contains(r#""Text",{"Pattern",{"S",30,1}},1"#),
+            "{}",
+            parsed.trailing[1]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_parameter() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-new-parameter-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Catalogs"))?;
+        std::fs::write(
+            root.join("Catalogs").join("Products.xml"),
+            r#"<MetaDataObject><Catalog><InternalInfo><GeneratedType name="CatalogRef.Products"><TypeId>99999999-9999-4999-8999-999999999999</TypeId></GeneratedType></InternalInfo><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#
+                .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(br#"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Product">
+			<Type>
+				<v8:Type>cfg:CatalogRef.Products</v8:Type>
+			</Type>
+			<KeyParameter>true</KeyParameter>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let parameters_fields = super::scan_braced_fields(&parsed.trailing[1], 0)?;
+        let parameter_fields =
+            super::scan_braced_fields(&parsed.trailing[1], parameters_fields[2].start)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(&parsed.trailing[1][parameters_fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[1][parameters_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[1][parameter_fields[0].clone()], "0");
+        assert_eq!(
+            &parsed.trailing[1][parameter_fields[1].clone()],
+            r#""Product""#
+        );
+        assert!(
+            parsed.trailing[1].contains(
+                r##""Product",{"Pattern",{"#",99999999-9999-4999-8999-999999999999}},1"##
+            ),
+            "{}",
+            parsed.trailing[1]
+        );
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_parameters() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{0},{0,2,{0,"Keep",{"Pattern",{"S"}},0},{0,"Drop",{"Pattern",{"S"}},0}},{0,0},{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Parameters>
+		<Parameter name="Keep">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+		</Parameter>
+	</Parameters>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let parameters_fields = super::scan_braced_fields(&parsed.trailing[1], 0)?;
+
+        assert_eq!(&parsed.trailing[1][parameters_fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[1][parameters_fields[1].clone()], "1");
+        assert!(parsed.trailing[1].contains(r#""Keep""#));
+        assert!(!parsed.trailing[1].contains(r#""Drop""#));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_parameters_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{7,{"layout"}},"Old module",{0},{0,1,{0,"Drop",{"Pattern",{"S"}},0}},{0,0},{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Parameters/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_commands() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-command-options-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("FunctionalOptions"))?;
+        std::fs::write(
+            root.join("FunctionalOptions").join("UseFeature.xml"),
+            br#"<MetaDataObject><FunctionalOption uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>UseFeature</Name></Properties></FunctionalOption></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,\"ru\",\"Old title\"},{1,\"ru\",\"Old tip\"},0,0,0,\"OldAction\",0,0,0,{0,1,88888888-8888-4888-8888-888888888888}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>New title</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>New tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>NewAction</Action>
+			<CurrentRowUse>DontUse</CurrentRowUse>
+			<FunctionalOptions>
+				<Item>FunctionalOption.UseFeature</Item>
+			</FunctionalOptions>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[2].contains(r#""Do",{1,"ru","New title"}"#));
+        assert!(parsed.trailing[2].contains(r#"{1,"ru","New tip"}"#));
+        assert!(
+            parsed.trailing[2]
+                .contains(r#""NewAction",3,0,0,{0,1,99999999-9999-4999-8999-999999999999}"#)
+        );
+        assert!(!parsed.trailing[2].contains("Old title"));
+        assert!(!parsed.trailing[2].contains("Old tip"));
+        assert!(!parsed.trailing[2].contains("OldAction"));
+        assert!(!parsed.trailing[2].contains("88888888-8888-4888-8888-888888888888"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_command_preserves_nested_localized_values() -> anyhow::Result<()>
+    {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Do\",{1,1,{\"ru\",\"Title\"}},{1,1,{\"ru\",\"Tip\"}},0,0,0,\"Do\",0,0,0,{0,0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Title</v8:content>
+				</v8:item>
+			</Title>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<Action>Do</Action>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[2].contains(r#""Do",{1,1,{"ru","Title"}},{1,1,{"ru","Tip"}}"#));
+        assert!(!parsed.trailing[2].contains(r#"{1,"ru","Title"}"#));
+        assert!(!parsed.trailing[2].contains(r#"{1,"ru","Tip"}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_commands() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,2,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Keep\",{0},{0},0,0,0,\"KeepAction\",0,0,0,{0,0}},{11,{2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},\"Drop\",{0},{0},0,0,0,\"DropAction\",0,0,0,{0,0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Commands>
+		<Command name="Keep" id="1">
+			<Action>KeepActionNew</Action>
+		</Command>
+	</Commands>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let commands_fields = super::scan_braced_fields(&parsed.trailing[2], 0)?;
+
+        assert_eq!(&parsed.trailing[2][commands_fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[2][commands_fields[1].clone()], "1");
+        assert!(parsed.trailing[2].contains(r#""Keep""#));
+        assert!(parsed.trailing[2].contains(r#""KeepActionNew""#));
+        assert!(!parsed.trailing[2].contains(r#""Drop""#));
+        assert!(!parsed.trailing[2].contains("DropAction"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_commands_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{4,{7,{\"layout\"}},\"Old module\",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\"Drop\",{0},{0},0,0,0,\"DropAction\",0,0,0,{0,0}}},{0}}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Commands/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(parsed.trailing[3], "{0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_command_interface() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>2</Index>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+        assert!(parsed.trailing[3].contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(!parsed.trailing[3].contains("eacad741-96b9-4b3a-bf79-dde9ecead1a1"));
+        assert!(parsed.trailing[3].contains("},2,0,{0,{0,{\"B\",0},0}}"));
+        assert_eq!(parsed.trailing[0], "{0}");
+        assert_eq!(parsed.trailing[1], "{0,0}");
+        assert_eq!(parsed.trailing[2], "{0,0}");
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_command_interface_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,2,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}},{3,0,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0},1,{0,dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2},1,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>2</Index>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.trailing[3], 0)?;
+
+        assert_eq!(&parsed.trailing[3][fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[3][fields[1].clone()], "1");
+        assert!(parsed.trailing[3].contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
+        assert!(!parsed.trailing[3].contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(parsed.trailing[3].contains("},2,1,"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_command_interface_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandInterface/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.trailing[3], "{0}");
+        assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_command_interface_item_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-new-interface-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0}}"##)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelImportant</CommandGroup>
+				<Index>3</Index>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.trailing[3], 0)?;
+
+        assert_eq!(&parsed.trailing[3][fields[0].clone()], "0");
+        assert_eq!(&parsed.trailing[3][fields[1].clone()], "1");
+        assert!(parsed.trailing[3].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(parsed.trailing[3].contains("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2"));
+        assert!(parsed.trailing[3].contains("},3,0,{0,{0,{\"B\",0},0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{64,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,0,"OldBar",{1,"en","Old bar"},0,1,1,cccccccc-cccc-4ccc-cccc-cccccccccccc,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,"en","Old button"},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},ffffffff-ffff-4fff-ffff-ffffffffffff,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,2,"Наименование",1,0,{1,0},"OnChange","OldChange","StartChoice","OldChoice"},"97365900-eadf-4dfd-a9aa-fbb9ecabd079","OldGetData"}},"Old module",{0}}"##
+                .as_bytes(),
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Action>Do</Action>
+		</Command>
+	</Commands>
+	<ChildItems>
+		<CommandBar name="NewBar" id="64">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>New bar</v8:content>
+				</v8:item>
+			</Title>
+			<ChildItems>
+				<Button name="NewButton" id="44">
+					<Type>UsualButton</Type>
+					<CommandName>Form.Command.Do</CommandName>
+					<DataPath>Items.Rows.CurrentData.Наименование</DataPath>
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>New button</v8:content>
+						</v8:item>
+					</Title>
+				</Button>
+				<InputField name="Наименование" id="40">
+					<Events>
+						<Event name="OnChange">NewChange</Event>
+						<Event name="StartChoice">NewChoice</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</CommandBar>
+		<Table name="Rows" id="25">
+			<Events>
+				<Event name="OnGetDataAtServer">NewGetData</Event>
+			</Events>
+			<ChildItems/>
+		</Table>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""NewBar""#));
+        assert!(parsed.layout.contains(r#"{1,"en","New bar"}"#));
+        assert!(parsed.layout.contains(r#""NewButton""#));
+        assert!(parsed.layout.contains(r#"{1,"en","New button"}"#));
+        assert!(
+            parsed
+                .layout
+                .contains(r#""NewButton",{1,"en","New button"},0,"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains("{2,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert!(parsed.layout.contains("{2,{25},{40}}"));
+        assert!(
+            parsed
+                .layout
+                .contains(r#""97365900-eadf-4dfd-a9aa-fbb9ecabd079","NewGetData""#)
+        );
+        assert!(parsed.layout.contains(r#""OnChange","NewChange""#));
+        assert!(parsed.layout.contains(r#""StartChoice","NewChoice""#));
+        assert!(!parsed.layout.contains("OldGetData"));
+        assert!(!parsed.layout.contains("OldChange"));
+        assert!(!parsed.layout.contains("OldChoice"));
+        assert!(!parsed.layout.contains("OldBar"));
+        assert!(!parsed.layout.contains("Old bar"));
+        assert!(!parsed.layout.contains("OldButton"));
+        assert!(!parsed.layout.contains("Old button"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+        assert_eq!(
+            packed.plain_bytes,
+            String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_checkbox_preserves_shifted_title_slot() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{48,{104,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"RequiredApproval",1,0,{1,0},{1,1,{"ru","""Approval"" text"}},{2,{1},{0,5651130b-3653-479e-ac26-905647417c29}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{8,3,0,1,100},{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{12,{106,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"RequiredApprovalExtendedTooltip",{1,0},{1,0},1,0,0,2,2},{0},0,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CheckBoxField name="RequiredApproval" id="104">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>&quot;Approval&quot; text</v8:content>
+				</v8:item>
+			</Title>
+			<ExtendedTooltip name="RequiredApprovalExtendedTooltip" id="106"/>
+		</CheckBoxField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r#""RequiredApproval",1,0,{1,0},{1,1,{"ru","""Approval"" text"}}"#)
+        );
+        assert!(!parsed.layout.contains(
+            r#""RequiredApproval",1,0,{1,"ru","""Approval"" text"},{1,1,{"ru","""Approval"" text"}}"#
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_table_preserves_extended_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{52,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},{1,0},{2,{1},{0,573cf342-5482-4ff7-ae70-2b91deaeaf0d}},0,1,0,0,0,1,1,0,0,0,{0}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="52">
+			<DataPath>Object</DataPath>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Object" id="1"/>
+	</Attributes>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{2,{1},{0,573cf342-5482-4ff7-ae70-2b91deaeaf0d}}")
+        );
+        assert!(!parsed.layout.contains("{1,{1}},0,1,0,0,0"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_table_preserves_root_object_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{52,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},{1,0},{0},0,1,0,0,0,1,1,0,0,0,{0}}},"Old module",{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="52">
+			<DataPath>Объект</DataPath>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1"/>
+	</Attributes>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""Rows",0,0,1,{1,0},{1,0},{0}"#));
+        assert!(!parsed.layout.contains("{1,{1}},0,1,0,0,0"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_extended_tooltip_preserves_empty_name_slot()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"InfoLabel",1,0,{1,0},{1,0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{8,3,0,1,100},{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{12,0,0,2,2,2,{1,0},0,{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},2,{0,1,0},{4,4,{0},4},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0,2},{0},0,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<LabelField name="InfoLabel" id="20">
+			<ExtendedTooltip name="InfoLabelExtendedTooltip" id="22"/>
+		</LabelField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("{12,0,0,2,2,2,{1,0},0"));
+        assert!(!parsed.layout.contains("InfoLabelExtendedTooltip"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_top_level_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{34,{44,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,"KeepButton",{0},1,{0},{0}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{73,{25,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,1,0,"DropTable",0,0,0,{1,0},1}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="KeepButton" id="44"></Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[0].clone()], "59");
+        assert_eq!(&parsed.layout[fields[1].clone()], "1");
+        assert!(parsed.layout.contains("KeepButton"));
+        assert!(!parsed.layout.contains("DropTable"));
+        assert!(
+            !parsed
+                .layout
+                .contains("cccccccc-cccc-4ccc-cccc-cccccccccccc")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("dddddddd-dddd-4ddd-dddd-dddddddddddd")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_clears_empty_child_items_section() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{34,{44,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,"DropButton",{0},1,{0},{0}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems/>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert_eq!(parsed.layout, "{59,0}");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_top_level_button() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Button name="HelpButton" id="44">
+			<Type>Hyperlink</Type>
+			<CommandName>Form.StandardCommand.Help</CommandName>
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Help</v8:content>
+				</v8:item>
+			</Title>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[0].clone()], "59");
+        assert_eq!(&parsed.layout[fields[1].clone()], "1");
+        assert!(super::is_uuid_text(&parsed.layout[fields[2].clone()]));
+        assert!(parsed.layout.contains(r#"{34,{44,"#), "{}", parsed.layout);
+        assert!(parsed.layout.contains(r#""HelpButton""#));
+        assert!(parsed.layout.contains(r#"{1,"en","Help"}"#));
+        assert!(
+            parsed
+                .layout
+                .contains(",2,{0,39bb0fe9-771d-4dd5-8a6e-2d16984523af},{0}")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_top_level_button_with_local_command() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0},{0,0},{0,0},{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Commands>
+		<Command name="Do" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Run</v8:content>
+				</v8:item>
+			</Title>
+			<Action>Do</Action>
+			<CurrentRowUse>DontUse</CurrentRowUse>
+		</Command>
+	</Commands>
+	<ChildItems>
+		<Button name="RunButton" id="44">
+			<Type>CommandBarButton</Type>
+			<CommandName>Form.Command.Do</CommandName>
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Run</v8:content>
+				</v8:item>
+			</Title>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_command_fields =
+            super::scan_braced_fields(&parsed.layout, button_fields[8].start)?;
+        let command_uuid = parsed.layout[button_command_fields[1].clone()].to_string();
+        let commands_fields = super::scan_braced_fields(&parsed.trailing[2], 0)?;
+        let command_entry_fields =
+            super::scan_braced_fields(&parsed.trailing[2], commands_fields[2].start)?;
+        let command_identity_fields =
+            super::scan_braced_fields(&parsed.trailing[2], command_entry_fields[1].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[button_command_fields[0].clone()], "2");
+        assert!(super::is_uuid_text(&command_uuid));
+        assert_eq!(&parsed.trailing[2][commands_fields[1].clone()], "1");
+        assert_eq!(&parsed.trailing[2][command_identity_fields[0].clone()], "2");
+        assert_eq!(
+            &parsed.trailing[2][command_identity_fields[1].clone()],
+            command_uuid
+        );
+        assert!(parsed.trailing[2].contains(r#""Do",{1,"en","Run"}"#));
+        assert!(parsed.trailing[2].contains(r#""Do",3,0,0,{0,0}"#));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_extended_button_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{34,{44,22222222-2222-4222-8222-222222222222},0,0,0,"Save",{1,0},1,{0},{0},3,0,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",0,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<Type>CommandBarButton</Type>
+			<Representation>PictureAndText</Representation>
+			<DefaultButton>true</DefaultButton>
+			<ExtendedTooltip name="SaveHelp" id="46"/>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[button_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[button_fields[10].clone()], "2");
+        assert_eq!(&parsed.layout[button_fields[11].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains(r#"{12,{46,02023637-7868-4a5f-8576-835a76e0c9ba}"#)
+        );
+        assert!(parsed.layout.contains(r#""SaveHelp""#));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_button_skip_on_input() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{34,{44,22222222-2222-4222-8222-222222222222},0,0,0,"Save",{1,0},1,{0},{0},3,0,0,0,2,2,0,0,0,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{8,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{45,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"SaveExtendedTooltip",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0}},"Old module",{0}}"#,
+            )?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<SkipOnInput>{value}</SkipOnInput>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+            assert_eq!(&parsed.layout[button_fields[29].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_button_location_in_command_bar() -> anyhow::Result<()> {
+        for (value, expected_code) in [
+            ("InAdditionalSubmenu", "1"),
+            ("InCommandBar", "2"),
+            ("InCommandBarAndInAdditionalSubmenu", "3"),
+        ] {
+            let button = [
+                "34",
+                "{44,22222222-2222-4222-8222-222222222222}",
+                "0",
+                "0",
+                "0",
+                "\"Save\"",
+                "{1,0}",
+                "1",
+                "{0}",
+                "{0}",
+                "3",
+                "0",
+                "0",
+                "0",
+                "2",
+                "2",
+                "0",
+                "0",
+                "0",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{4,4,{0},4}",
+                "{8,3,0,1,100}",
+                "{0,0,0}",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "1",
+                "{\"Pattern\"}",
+                "\"\"",
+                "2",
+                "0",
+                "1",
+                "{0}",
+                "{\"U\"}",
+                "1",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "0",
+                "3",
+                "3",
+                "3",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+                "1",
+                "0",
+                "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "0",
+                "0",
+                "0",
+                "1",
+                "\"\"",
+            ]
+            .join(",");
+            let layout = format!(
+                "{{4,{{59,1,11111111-1111-4111-8111-111111111111,{{{button}}}}},\"Old module\",{{0}}}}"
+            );
+            let base = super::deflate_raw(layout.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<LocationInCommandBar>{value}</LocationInCommandBar>
+		</Button>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+            assert_eq!(&parsed.layout[button_fields[49].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_top_level_groups() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Actions</v8:content>
+				</v8:item>
+			</Title>
+		</CommandBar>
+		<UsualGroup name="MainGroup" id="22">
+			<Group>Horizontal</Group>
+			<ShowTitle>false</ShowTitle>
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Main</v8:content>
+				</v8:item>
+			</Title>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[0].clone()], "59");
+        assert_eq!(&parsed.layout[fields[1].clone()], "2");
+        assert!(super::is_uuid_text(&parsed.layout[fields[2].clone()]));
+        assert!(super::is_uuid_text(&parsed.layout[fields[4].clone()]));
+        assert!(parsed.layout.contains(r#"{22,{64,"#), "{}", parsed.layout);
+        assert!(
+            parsed
+                .layout
+                .contains(r#",0,"Actions",{1,"en","Actions"},0,1,0}"#)
+        );
+        assert!(parsed.layout.contains(r#"{22,{22,"#), "{}", parsed.layout);
+        assert!(
+            parsed
+                .layout
+                .contains(r#",5,"MainGroup",{1,"en","Main"},1,0,0}"#)
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_group_layout_group() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{0},0,1,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Group>HorizontalIfPossible</Group>
+			<ShowTitle>false</ShowTitle>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[5].clone()], "5");
+        assert_eq!(&parsed.layout[group_fields[8].clone()], "3");
+        assert_eq!(&parsed.layout[group_fields[9].clone()], "0");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_pages_and_page() -> anyhow::Result<()> {
+        let pages = r#"{22,{8,22222222-2222-4222-8222-222222222222},0,0,0,3,"PagesGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{4,0,{0},2,0,0},1,33333333-3333-4333-8333-333333333333,{22,{9,22222222-2222-4222-8222-222222222222},0,0,0,4,"MainPage",{1,0},{1,0},0,1,1}}"#;
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{pages}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<ChildItems>
+		<Pages name="PagesGroup" id="8">
+			<Height>14</Height>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Pages tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<ChildItems>
+				<Page name="MainPage" id="9">
+					<Group>HorizontalIfPossible</Group>
+					<ScrollOnCompress>false</ScrollOnCompress>
+					<ToolTip>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Page tip</v8:content>
+						</v8:item>
+					</ToolTip>
+				</Page>
+			</ChildItems>
+		</Pages>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r#",3,"PagesGroup",{1,0},{1,"en","Pages tip"},0,1,0,0,14,2,2,"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r#",4,"MainPage",{1,0},{1,"en","Page tip"},3,1,0}"#),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_extended_usual_group_properties_and_children()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,
+{0},4},{8,3,0,1,100},{0,0,0},1,{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupРасширеннаяПодсказка",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}},"Old module",{0}}"#
+                .as_bytes(),
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Group>HorizontalIfPossible</Group>
+			<Behavior>Collapsible</Behavior>
+			<Representation>NormalSeparation</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ChildItems>
+				<Button name="Run" id="44">
+					<Type>UsualButton</Type>
+				</Button>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, group_fields[20].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, group_fields[23].start)?;
+
+        assert_eq!(&parsed.layout[group_fields[9].clone()], "0");
+        assert_eq!(&parsed.layout[group_fields[21].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""Run""#);
+        assert_eq!(&parsed.layout[options_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[3].clone()], "3");
+        assert_eq!(&parsed.layout[options_fields[4].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[22].clone()], "2");
+        assert_eq!(&parsed.layout[options_fields[24].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[27].clone()], "2");
+        assert_eq!(&parsed.layout[options_fields[28].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[35].clone()], "3");
+        assert_eq!(&parsed.layout[options_fields[36].clone()], "2");
+        assert!(parsed.layout.contains("{4,4,\n{0},4}"));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_group_with_nested_button() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<Button name="HelpButton" id="44">
+					<Type>CommandBarButton</Type>
+					<CommandName>Form.StandardCommand.Help</CommandName>
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Help</v8:content>
+						</v8:item>
+					</Title>
+				</Button>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[5].clone()], "0");
+        assert_eq!(&parsed.layout[group_fields[6].clone()], r#""Actions""#);
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[group_fields[11].clone()]
+        ));
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""HelpButton""#);
+        assert_eq!(&parsed.layout[button_fields[7].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_nested_group_tree() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<ButtonGroup name="MoreActions" id="22">
+					<ChildItems>
+						<Button name="HelpButton" id="44">
+							<Type>CommandBarButton</Type>
+							<CommandName>Form.StandardCommand.Help</CommandName>
+						</Button>
+					</ChildItems>
+				</ButtonGroup>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let command_bar_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_group_fields =
+            super::scan_braced_fields(&parsed.layout, command_bar_fields[12].start)?;
+        let button_fields =
+            super::scan_braced_fields(&parsed.layout, button_group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[command_bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[command_bar_fields[5].clone()], "0");
+        assert_eq!(&parsed.layout[command_bar_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[button_group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[button_group_fields[5].clone()], "6");
+        assert_eq!(&parsed.layout[button_group_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""HelpButton""#);
+        assert_eq!(&parsed.layout[button_fields[7].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_event_uuid_alias() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            r#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{48,{40,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,2,"Name",1,0,{1,0},"fe115cc8-9e33-4684-a166-bd5136fe7a9f","OldChange"}},"Old module",{0}}"#
+                .as_bytes(),
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Name" id="40">
+			<Events>
+				<Event name="OnChange">NewChange</Event>
+			</Events>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r#""fe115cc8-9e33-4684-a166-bd5136fe7a9f","NewChange""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains("OldChange"));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_appends_button_to_existing_group() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{64,22222222-2222-4222-8222-222222222222},0,0,0,0,"Actions",{0},0,1,0}},"Old module",{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<Button name="HelpButton" id="44">
+					<Type>CommandBarButton</Type>
+					<CommandName>Form.StandardCommand.Help</CommandName>
+				</Button>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(
+            &parsed.layout[group_fields[1].clone()],
+            "{64,22222222-2222-4222-8222-222222222222}"
+        );
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[group_fields[11].clone()]
+        ));
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""HelpButton""#);
+        assert_eq!(&parsed.layout[button_fields[7].clone()], "1");
+        assert!(
+            parsed
+                .layout
+                .contains("39bb0fe9-771d-4dd5-8a6e-2d16984523af")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_nested_group_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{64,22222222-2222-4222-8222-222222222222},0,0,0,0,"Actions",{0},0,1,2,33333333-3333-4333-8333-333333333333,{34,{44,44444444-4444-4444-8444-444444444444},0,0,0,"KeepButton",{0},1,{0},{0}},55555555-5555-4555-8555-555555555555,{34,{45,66666666-6666-4666-8666-666666666666},0,0,0,"DropButton",{0},1,{0},{0}}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<Button name="KeepButton" id="44"/>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert!(parsed.layout.contains("KeepButton"));
+        assert!(!parsed.layout.contains("DropButton"));
+        assert!(
+            !parsed
+                .layout
+                .contains("55555555-5555-4555-8555-555555555555")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("66666666-6666-4666-8666-666666666666")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_read_only() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ReadOnly>true</ReadOnly>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[14].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_skip_on_input() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+            )?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<SkipOnInput>{value}</SkipOnInput>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[15].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_title_location() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<TitleLocation>Left</TitleLocation>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[7].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_title_location_right() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<TitleLocation>Right</TitleLocation>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[7].clone()], "4");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_edit_mode() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<EditMode>EnterOnInput</EditMode>
+			<AutoEditMode>true</AutoEditMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[26].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_edit_mode_directly() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<EditMode>Directly</EditMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[26].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_auto_max_width_false() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 51];
+        options[0] = "38".to_string();
+        options[49] = "1".to_string();
+        options[50] = "35".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<AutoMaxWidth>false</AutoMaxWidth>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[49].clone()], "0");
+        assert_eq!(&parsed.layout[options_fields[50].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_width() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[2] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<Width>22</Width>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[2].clone()], "22");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_height() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[3] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<Height>2</Height>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[3].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_text_document_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+        )?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<TextDocumentField name="ProcedureEditor" id="20">
+			<DataPath>ProcedureText</DataPath>
+			<TitleLocation>None</TitleLocation>
+			<Height>5</Height>
+		</TextDocumentField>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="ProcedureText" id="8"/>
+	</Attributes>
+</Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let text_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+        assert_eq!(
+            &parsed.layout[text_fields[6].clone()],
+            r#""ProcedureEditor""#
+        );
+        assert_eq!(&parsed.layout[text_fields[7].clone()], "0");
+        assert_eq!(&parsed.layout[text_fields[11].clone()], "{1,{8}}");
+        assert_eq!(&parsed.layout[text_fields[23].clone()], "5");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_max_width() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[49] = "1".to_string();
+        options[50] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<AutoMaxWidth>false</AutoMaxWidth>
+			<MaxWidth>54</MaxWidth>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[49].clone()], "0");
+        assert_eq!(&parsed.layout[options_fields[50].clone()], "54");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_auto_max_height_false() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[52] = "1".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<AutoMaxHeight>false</AutoMaxHeight>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[52].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_max_height() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 54];
+        options[0] = "38".to_string();
+        options[52] = "1".to_string();
+        options[53] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<AutoMaxHeight>false</AutoMaxHeight>
+			<MaxHeight>28</MaxHeight>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[52].clone()], "0");
+        assert_eq!(&parsed.layout[options_fields[53].clone()], "28");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_horizontal_stretch() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 51];
+        options[0] = "38".to_string();
+        options[4] = "2".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<HorizontalStretch>false</HorizontalStretch>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[4].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_vertical_stretch() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 51];
+        options[0] = "38".to_string();
+        options[5] = "2".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<VerticalStretch>true</VerticalStretch>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[5].clone()], "1");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_multi_line() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[8] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<MultiLine>{value}</MultiLine>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[8].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_wrap() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[6] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<Wrap>{value}</Wrap>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[6].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_text_edit() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[41] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<TextEdit>{value}</TextEdit>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[41].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_auto_cell_height() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 75];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{83,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[4] = "1".to_string();
+            input_fields[5] = r#"{0,{0,{"B",0},0}}"#.to_string();
+            input_fields[6] = "2".to_string();
+            input_fields[7] = r#""Author""#.to_string();
+            input_fields[29] = "0".to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            input_fields[40] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="83">
+			<AutoCellHeight>{value}</AutoCellHeight>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[29].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_item_show_in_header() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 75];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{83,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[4] = "1".to_string();
+            input_fields[5] = r#"{0,{0,{"B",0},0}}"#.to_string();
+            input_fields[6] = "2".to_string();
+            input_fields[7] = r#""Author""#.to_string();
+            input_fields[21] = "1".to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            input_fields[40] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="83">
+			<ShowInHeader>{value}</ShowInHeader>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[21].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_column_group_show_in_header() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let column_group = r#"{22,{140,22222222-2222-4222-8222-222222222222},0,0,0,2,"DebitAccountGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{5,1,1,0,3,{4,0,{0},"",-1,-1,1,0,""},{4,4,{0},4},{0},{"Pattern"},"",{1,0},0,1,2,2,2},0}"#;
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{column_group}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<ColumnGroup name="DebitAccountGroup" id="140">
+			<Group>InCell</Group>
+			<ShowInHeader>{value}</ShowInHeader>
+		</ColumnGroup>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let option_fields = super::scan_braced_fields(&parsed.layout, group_fields[20].start)?;
+
+            assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+            assert_eq!(&parsed.layout[group_fields[5].clone()], "2");
+            assert_eq!(&parsed.layout[option_fields[1].clone()], "2");
+            assert_eq!(&parsed.layout[option_fields[3].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_password_mode() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[7] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<PasswordMode>{value}</PasswordMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[7].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_drop_list_button() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 40];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[47] = "2".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<DropListButton>false</DropListButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[options_fields[47].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_clear_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[13] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ClearButton>{value}</ClearButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[13].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_open_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[15] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<OpenButton>{value}</OpenButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[15].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_choice_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[12] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ChoiceButton>{value}</ChoiceButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[12].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_choice_list_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[11] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ChoiceListButton>{value}</ChoiceListButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[11].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_spin_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[14] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<SpinButton>{value}</SpinButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[14].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_list_choice_mode() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[19] = "0".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ListChoiceMode>{value}</ListChoiceMode>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[19].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_create_button() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[45] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<CreateButton>{value}</CreateButton>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[45].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_quick_choice() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[23] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<QuickChoice>{value}</QuickChoice>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[23].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_shifted_extended_options() -> anyhow::Result<()> {
+        let mut input_fields = vec!["0".to_string(); 41];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Author""#.to_string();
+        input_fields[39] = "1".to_string();
+        let mut options = vec!["2".to_string(); 53];
+        options[0] = "38".to_string();
+        options[13] = "2".to_string();
+        options[23] = "2".to_string();
+        input_fields[40] = format!("{{{}}}", options.join(","));
+        let input_field = format!("{{{}}}", input_fields.join(","));
+        let base_text = format!(
+            r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ClearButton>true</ClearButton>
+			<QuickChoice>false</QuickChoice>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[40].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[39].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[13].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[23].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_choose_type() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[32] = "1".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ChooseType>{value}</ChooseType>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[32].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_auto_mark_incomplete() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[31] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<AutoMarkIncomplete>{value}</AutoMarkIncomplete>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[31].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_mark_required_complete() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[31] = "2".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<MarkRequiredComplete>{value}</MarkRequiredComplete>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[31].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_choice_button_representation() -> anyhow::Result<()>
+    {
+        for (value, expected_code) in [
+            ("ShowInDropList", "1"),
+            ("ShowInDropListAndInInputField", "2"),
+            ("ShowInInputField", "3"),
+        ] {
+            let mut input_fields = vec!["0".to_string(); 40];
+            input_fields[0] = "48".to_string();
+            input_fields[1] = "{78,22222222-2222-4222-8222-222222222222}".to_string();
+            input_fields[5] = "2".to_string();
+            input_fields[6] = r#""Author""#.to_string();
+            let mut options = vec!["2".to_string(); 53];
+            options[0] = "38".to_string();
+            options[46] = "0".to_string();
+            input_fields[39] = format!("{{{}}}", options.join(","));
+            let input_field = format!("{{{}}}", input_fields.join(","));
+            let base_text = format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{input_field}}},"Old module",{{0}}}}"#
+            );
+            let base = super::deflate_raw(base_text.as_bytes())?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ChoiceButtonRepresentation>{value}</ChoiceButtonRepresentation>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+            let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[options_fields[46].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_nested_input_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Main</v8:content>
+				</v8:item>
+			</Title>
+			<ChildItems>
+				<InputField name="Description" id="40">
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Description</v8:content>
+						</v8:item>
+					</Title>
+					<Events>
+						<Event name="OnChange">DescriptionOnChange</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[5].clone()], "5");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[input_fields[5].clone()], "2");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Description""#);
+        assert_eq!(
+            &parsed.layout[input_fields[9].clone()],
+            r#"{1,"en","Description"}"#
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnChange","DescriptionOnChange""#)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_with_input_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Rows</v8:content>
+				</v8:item>
+			</Title>
+			<Events>
+				<Event name="OnGetDataAtServer">RowsGetData</Event>
+			</Events>
+			<ChildItems>
+				<InputField name="Description" id="40">
+					<Events>
+						<Event name="OnChange">DescriptionOnChange</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[3].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[5].clone()], r#""Rows""#);
+        assert_eq!(
+            &parsed.layout[table_fields[9].clone()],
+            r#"{1,"en","Rows"}"#
+        );
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Description""#);
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnGetDataAtServer","RowsGetData""#)
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnChange","DescriptionOnChange""#)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_appends_input_field_to_existing_table() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},0}},"Old module",{0}}"#,
+        )?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<ChildItems>
+				<InputField name="Description" id="40">
+					<Events>
+						<Event name="OnChange">DescriptionOnChange</Event>
+					</Events>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(
+            &parsed.layout[table_fields[1].clone()],
+            "{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}"
+        );
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[table_fields[11].clone()]
+        ));
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Description""#);
+        assert!(
+            parsed
+                .layout
+                .contains(r#""OnChange","DescriptionOnChange""#)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_table_layout_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},0,{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<Attributes>
+		<Attribute name="Rows" id="6">
+			<MainAttribute>true</MainAttribute>
+		</Attribute>
+	</Attributes>
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<Representation>List</Representation>
+			<HeightInTableRows>6</HeightInTableRows>
+			<RowSelectionMode>Cell</RowSelectionMode>
+			<EnableStartDrag>true</EnableStartDrag>
+			<EnableDrag>true</EnableDrag>
+			<FileDragMode>AsFile</FileDragMode>
+			<DataPath>Rows</DataPath>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[table_fields[8].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[11].clone()], "{1,{6}}");
+        assert_eq!(&parsed.layout[table_fields[21].clone()], "6");
+        assert_eq!(&parsed.layout[table_fields[24].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[26].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[29].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[30].clone()], "2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_removes_missing_nested_table_child_items() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},2,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{48,{40,dddddddd-dddd-4ddd-8ddd-dddddddddddd},0,0,0,2,"KeepColumn",1,0,{0}},eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,{48,{41,ffffffff-ffff-4fff-8fff-ffffffffffff},0,0,0,2,"DropColumn",1,0,{0}}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<ChildItems>
+				<InputField name="KeepColumn" id="40"/>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert!(parsed.layout.contains("KeepColumn"));
+        assert!(!parsed.layout.contains("DropColumn"));
+        assert!(
+            !parsed
+                .layout
+                .contains("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("ffffffff-ffff-4fff-8fff-ffffffffffff")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_nested_label_field() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<ChildItems>
+				<LabelField name="DescriptionLabel" id="41">
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Description</v8:content>
+						</v8:item>
+					</Title>
+				</LabelField>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let label_fields = super::scan_braced_fields(&parsed.layout, group_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[label_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[label_fields[4].clone()], "1");
+        assert_eq!(
+            &parsed.layout[label_fields[6].clone()],
+            r#""DescriptionLabel""#
+        );
+        assert_eq!(
+            &parsed.layout[label_fields[9].clone()],
+            r#"{1,"en","Description"}"#
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_with_search_addition() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<SearchStringAddition name="SearchRows" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+			</SearchStringAddition>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
+        assert_eq!(&parsed.layout[addition_fields[5].clone()], "0");
+        assert_eq!(
+            &parsed.layout[addition_fields[6].clone()],
+            r#""SearchRows""#
+        );
+        assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_with_auto_command_bar() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<AutoCommandBar name="RowsBar" id="27"/>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[bar_fields[5].clone()], "9");
+        assert_eq!(&parsed.layout[bar_fields[6].clone()], r#""RowsBar""#);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_search_addition_type() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"OldStatus",{1,0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<ViewStatusAddition name="NewStatus" id="134">
+			<AdditionSource>
+				<Type>ViewStatusRepresentation</Type>
+			</AdditionSource>
+		</ViewStatusAddition>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewStatus""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains("OldStatus"));
+        assert!(
+            parsed
+                .layout
+                .contains(r#",{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"NewStatus""#)
+                || parsed.layout.contains(
+                    r#"{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"NewStatus""#
+                ),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_search_addition_source_item() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{6,{134,33333333-3333-4333-8333-333333333333},0,0,0,0,"OldSearch",{1,0},{1,0},1,1,0,1,{1,0},0,0,0,0,0,{26,0}}},{73,{26,44444444-4444-4444-8444-444444444444},0,1,0,"OldRows"}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<SearchStringAddition name="NewSearch" id="134">
+			<AdditionSource>
+				<Item>Rows</Item>
+				<Type>SearchStringRepresentation</Type>
+			</AdditionSource>
+		</SearchStringAddition>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewSearch""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains("{25,0}"), "{}", parsed.layout);
+        assert!(!parsed.layout.contains("{26,0}"));
+        assert!(!parsed.layout.contains("OldSearch"));
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_direct_search_addition_removes_missing_table_children()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},2,22222222-2222-4222-8222-222222222222,{6,{134,33333333-3333-4333-8333-333333333333},0,0,0,0,"OldSearch",{1,0},{1,0},1,1,0,1,{1,0},0,0,0,0,0,{25,0}},44444444-4444-4444-8444-444444444444,{48,{40,55555555-5555-4555-8555-555555555555},0,0,0,2,"OldColumn",1,0,{1,0}}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<SearchStringAddition name="NewSearch" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+			</SearchStringAddition>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
+        assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
+        assert!(!parsed.layout.contains("OldColumn"), "{}", parsed.layout);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_adds_direct_search_addition_to_existing_table() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},0}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<SearchStringAddition name="NewSearch" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+			</SearchStringAddition>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
+        assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
+        assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_nested_child_does_not_patch_other_parent() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Left",0,0,0,{1,0},1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{48,{40,22222222-2222-4222-8222-222222222222},0,0,0,2,"OldLeft",1,0,{1,0}}},cccccccc-cccc-4ccc-cccc-cccccccccccc,{73,{26,33333333-3333-4333-8333-333333333333},0,1,0,"Rows",0,0,0,{1,0},0}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Left" id="25"/>
+		<Table name="Rows" id="26">
+			<ChildItems>
+				<InputField name="NewRows" id="40"/>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#""OldLeft""#), "{}", parsed.layout);
+        assert!(parsed.layout.contains(r#""NewRows""#), "{}", parsed.layout);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_external_button_command_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{59,{34,{44,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"OldButton",{1,0},1,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="OldButton" id="44">
+			<CommandName>DataProcessor.Loader.Command.Load</CommandName>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains("{0,99999999-9999-4999-8999-999999999999}")
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains("{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee}")
+        );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_command_interface_external_command_from_source() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-interface-command-source-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/Loader.xml"),
+            br#"<MetaDataObject><DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Loader</Name></Properties><ChildObjects><Command uuid="99999999-9999-4999-8999-999999999999"><Properties><Name>Load</Name></Properties></Command></ChildObjects></DataProcessor></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{0},{0,0},{0,0},{0,1,{3,0,{0,eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee},{0},1,{0,eacad741-96b9-4b3a-bf79-dde9ecead1a1},0,1,{0,{0,{"B",1},0}}}}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandInterface>
+		<NavigationPanel>
+			<Item>
+				<Command>DataProcessor.Loader.Command.Load</Command>
+				<Type>Added</Type>
+				<CommandGroup>FormNavigationPanelGoTo</CommandGroup>
+				<DefaultVisible>false</DefaultVisible>
+				<Visible>
+					<xr:Common>false</xr:Common>
+				</Visible>
+			</Item>
+		</NavigationPanel>
+	</CommandInterface>
+</Form>
+"#;
+
+        let packed =
+            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.trailing[3].contains("99999999-9999-4999-8999-999999999999"));
+        assert!(!parsed.trailing[3].contains("eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee"));
+        assert!(parsed.trailing[3].contains("},0,0,{0,{0,{\"B\",0},0}}"));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_uuid_based_events() -> anyhow::Result<()> {
+        let unknown_event_uuid = "213d1900-dcad-4616-9f20-3f077156a40f";
+        let base = super::deflate_raw(
+            format!(r#"{{4,{{59,{{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"СтарыйВыбор",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"СтароеОповещение",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"СтароеСоздание",{unknown_event_uuid},"СтарыйUuid",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}}}},"",{{0}}}}"#).as_bytes(),
+        )?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="ChoiceProcessing">НовыйВыбор</Event>
+		<Event name="NotificationProcessing">НовоеОповещение</Event>
+		<Event name="OnCreateAtServer">НовоеСоздание</Event>
+		<Event name="{unknown_event_uuid}">НовыйUuid</Event>
+	</Events>
+</Form>
+"#
+        )
+        .into_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, &xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("\"НовыйВыбор\""));
+        assert!(parsed.layout.contains("\"НовоеОповещение\""));
+        assert!(parsed.layout.contains("\"НовоеСоздание\""));
+        assert!(parsed.layout.contains("\"НовыйUuid\""));
+        assert!(!parsed.layout.contains("СтарыйВыбор"));
+        assert!(!parsed.layout.contains("СтароеОповещение"));
+        assert!(!parsed.layout.contains("СтароеСоздание"));
+        assert!(!parsed.layout.contains("СтарыйUuid"));
+        assert_eq!(parsed.module_text, "");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
     fn rejects_non_form_body_blob() -> anyhow::Result<()> {
         let base = super::deflate_raw(b"{5,{\"not a form\"},\"module\"}")?;
         let error = super::parse_form_body_blob(&base).unwrap_err();
@@ -9850,23 +26104,24 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_role_rights_xml_preserving_base_identifiers() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,11111111-1111-4111-8111-111111111111,1,22222222-2222-4222-8222-222222222222,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,33333333-3333-4333-8333-333333333333,-1,0}}},{0},4294967295,0,0,4294967295}",
+            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,499e8968-ca89-43f0-9955-8756058b1b53,-1,0}}},{0},4294967295,0,0,4294967295}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
 	<setForNewObjects>true</setForNewObjects>
 	<object>
-		<name>Catalog.Products</name>
-		<right><name>Read</name><value>false</value></right>
-		<right><name>Update</name><value>true</value></right>
-	</object>
-	<object>
 		<name>InformationRegister.Prices</name>
 		<right>
-			<name>Read</name>
+			<name>Get</name>
 			<value>true</value>
 			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
 		</right>
+	</object>
+	<object>
+		<name>Catalog.Products</name>
+		<right><name>View</name><value>true</value></right>
+		<right><name>Read</name><value>false</value></right>
+		<right><name>Update</name><value>true</value></right>
 	</object>
 </Rights>
 "#;
@@ -9875,9 +26130,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"));
-        assert!(text.contains("11111111-1111-4111-8111-111111111111,-1"));
-        assert!(text.contains("22222222-2222-4222-8222-222222222222,1"));
-        assert!(text.contains("33333333-3333-4333-8333-333333333333,1"));
+        assert!(text.contains("1c87578f-9e09-4ec0-a991-5629c87b1588,-1"));
+        assert!(text.contains("aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1"));
+        assert!(text.contains("499e8968-ca89-43f0-9955-8756058b1b53,1"));
         assert!(text.ends_with(",4294967295,1,0,4294967295}"));
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -9887,7 +26142,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_command_interface_xml_preserving_command_refs() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{7,1,2,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{{0,{{0,{{\"B\",0}},0}}}},{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
+            b"{7,1,2,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",0},0}},{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",1},0}},0,0,0,0,0}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
@@ -9905,13 +26160,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_command_interface_blob_from_xml(&base, xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(
-            text.contains("{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{{0,{{0,{{\"B\",1}},0}}}}")
-        );
-        assert!(
-            text.contains("{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",0}},0}}}}")
-        );
+        assert!(text.contains("{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}}"));
+        assert!(text.contains("{100,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}}"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_command_interface_xml_preserving_equivalent_visibility_format() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{7,1,1,\n{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\n{0,\n{0,\n{\"B\",0},0}\n},0,0,0,0,0}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="Catalog.Products.StandardCommand.OpenList">
+			<Visibility><xr:Common>false</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#;
+
+        let packed = super::pack_command_interface_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{0,\n{0,\n{\"B\",0},0}\n}"), "{text:?}");
 
         Ok(())
     }
@@ -9993,12 +26267,12 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_predefined_data_blob_from_xml(&base, xml.as_bytes())?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains(r#"{{"S","NewFolder"}}"#));
-        assert!(text.contains(r#"{{"S","NF"}}"#));
-        assert!(text.contains(r#"{{"S","New folder description"}}"#));
-        assert!(text.contains(r#"{{"S","NewItem"}}"#));
-        assert!(text.contains(r#"{{"S","NI"}}"#));
-        assert!(text.contains(r#"{{"S","New item description"}}"#));
+        assert!(text.contains(r#"{"S","NewFolder"}"#));
+        assert!(text.contains(r#"{"S","NF"}"#));
+        assert!(text.contains(r#"{"S","New folder description"}"#));
+        assert!(text.contains(r#"{"S","NewItem"}"#));
+        assert!(text.contains(r#"{"S","NI"}"#));
+        assert!(text.contains(r#"{"S","New item description"}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -10112,6 +26386,29 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn recognizes_raw_deflated_help_blob_shape() -> anyhow::Result<()> {
+        let help = super::pack_help_blob_from_parts(&[("ru".to_string(), b"body".to_vec())], &[])?;
+        let module_like = super::deflate_raw(b"{4,{59,0},\"module\",{0}}")?;
+
+        assert!(super::raw_deflated_looks_like_help_blob(&help.blob));
+        assert!(!super::raw_deflated_looks_like_help_blob(&module_like));
+        Ok(())
+    }
+
+    #[test]
+    fn hashes_help_content_without_base64_format_noise() -> anyhow::Result<()> {
+        let packed =
+            super::pack_help_blob_from_parts(&[("ru".to_string(), b"body".to_vec())], &[])?;
+        let legacy = super::deflate_raw(b"{5,1,\"ru\",\r\n{#base64:Ym9k\r\neQ==}}")?;
+
+        assert_eq!(
+            super::raw_deflated_help_content_sha256(&packed.blob)?,
+            super::raw_deflated_help_content_sha256(&legacy)?
+        );
+        Ok(())
+    }
+
+    #[test]
     fn packs_ext_picture_blob_from_xml_referenced_bytes() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <ExtPicture xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.17">
@@ -10131,6 +26428,31 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(text, "{1,{0,0,-1,-1},{{#base64:UEsDBA==}}}");
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_ext_picture_blob_preserving_base_wrapper() -> anyhow::Result<()> {
+        let base = super::deflate_raw(b"{1,{7,8,9,10},{{#base64:T0xE}},\"tail\"}")?;
+        let packed = super::pack_ext_picture_blob_from_bytes_with_base(Some(&base), b"PK\x03\x04")?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert_eq!(text, "{1,{7,8,9,10},{{#base64:UEsDBA==}},\"tail\"}");
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn hashes_first_base64_payload_from_raw_deflated_blob() -> anyhow::Result<()> {
+        let left = super::deflate_raw(b"{1,{0},{{#base64:UEsDBA==}}}")?;
+        let right = super::deflate_raw(b"{9,\"wrapper\",{#base64:UEsDBA==}}")?;
+
+        assert_eq!(
+            super::raw_deflated_first_base64_payload_sha256(&left)?,
+            super::raw_deflated_first_base64_payload_sha256(&right)?
+        );
 
         Ok(())
     }
@@ -10292,6 +26614,97 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             inflated.contains("{4,1,{0,6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f},\"\",-1,-1,0,0,\"\"}")
         );
         assert!(!inflated.contains("StdPicture.User"));
+    }
+
+    #[test]
+    fn packs_common_command_load_report_settings_picture_reference() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewCommand</Name>
+      <Synonym/>
+      <Comment/>
+      <Group>FormCommandBarImportant</Group>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture>
+        <xr:Ref>StdPicture.LoadReportSettings</xr:Ref>
+        <xr:LoadTransparent>true</xr:LoadTransparent>
+      </Picture>
+      <Shortcut/>
+      <IncludeHelpInContents>false</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+        assert!(inflated.contains(super::STD_PICTURE_LOAD_REPORT_SETTINGS_UUID));
+        assert!(
+            inflated.contains("{4,1,{0,283ecabd-aaed-41d1-ad46-6cca91c29120},\"\",-1,-1,1,0,\"\"}")
+        );
+        assert!(!inflated.contains("StdPicture.LoadReportSettings"));
+    }
+
+    #[test]
+    fn resolves_common_command_builtin_group_uuids() {
+        assert_eq!(
+            super::common_command_group_uuid("NavigationPanelImportant").as_deref(),
+            Some("1af6d528-0b86-4fba-ab95-bd7475db03ba")
+        );
+        assert_eq!(
+            super::common_command_group_uuid("FormNavigationPanelSeeAlso").as_deref(),
+            Some("8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8")
+        );
+    }
+
+    #[test]
+    fn resolves_common_command_standard_picture_uuids() {
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.Task"),
+            Some("37cf7cc0-abad-4385-b597-6fd2d8dc085a")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.EventLog"),
+            Some("723765ab-0b92-4745-a621-1ba0f77c92c9")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_code("StdPicture.InputFieldOpen"),
+            Some(-7)
+        );
+        assert_eq!(
+            super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
+                code: -7,
+                load_transparent: true
+            }),
+            r#"{4,1,{-7},"",-1,-1,1,0,""}"#
+        );
     }
 
     #[test]

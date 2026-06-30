@@ -1,11 +1,23 @@
 use anyhow::Result;
 use clap::Parser;
-use ibcmd_rs::cli::{Cli, Commands};
+use ibcmd_rs::cli::{Cli, Commands, InfobaseCommands, InfobaseConfigCommands};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Infobase(args) => match args.command {
+            InfobaseCommands::Config(config_args) => match config_args.command {
+                InfobaseConfigCommands::Export(args) => {
+                    let report = ibcmd_rs::infobase::export_config(&args)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                InfobaseConfigCommands::Import(args) => {
+                    let report = ibcmd_rs::infobase::import_config(&args)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+            },
+        },
         Commands::Probe(args) => {
             let report = ibcmd_rs::probe::probe_environment(args);
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -65,6 +77,15 @@ fn main() -> Result<()> {
                 ibcmd_rs::plan::write_plan(&plan, &output)?;
             } else {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
+            }
+        }
+        Commands::SourceDiff(args) => {
+            let report =
+                ibcmd_rs::plan::diff_source_trees(&args.left, &args.right, &args.path_prefix)?;
+            if let Some(output) = args.output {
+                ibcmd_rs::plan::write_source_diff(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
         Commands::Compatibility(args) => {

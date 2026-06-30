@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(name = "ibcmd-rs")]
@@ -13,6 +13,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// ibcmd-compatible infobase commands.
+    Infobase(InfobaseArgs),
     /// Locate installed 1C command-line tools and print environment details.
     Probe(ProbeArgs),
     /// Scan a 1C XML source tree and produce a deterministic manifest.
@@ -27,6 +29,8 @@ pub enum Commands {
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
+    /// Compare two 1C XML source trees by path and content hash.
+    SourceDiff(SourceDiffArgs),
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
@@ -170,6 +174,166 @@ pub enum Commands {
 }
 
 #[derive(Debug, Args)]
+pub struct InfobaseArgs {
+    #[command(subcommand)]
+    pub command: InfobaseCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum InfobaseCommands {
+    /// Configuration export/import commands.
+    Config(InfobaseConfigArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct InfobaseConfigArgs {
+    #[command(subcommand)]
+    pub command: InfobaseConfigCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum InfobaseConfigCommands {
+    /// Export infobase configuration to source files.
+    Export(InfobaseConfigExportArgs),
+    /// Import source files into infobase configuration staging.
+    Import(InfobaseConfigImportArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InfobaseConfigFormat {
+    /// Hierarchical 1C XML source tree compatible with ibcmd config export/import.
+    #[value(name = "xml", alias = "ibcmd-xml", alias = "source-tree")]
+    Xml,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InfobaseConfigSourceVersion {
+    /// Source XML version used by 1C 8.3.27.
+    #[value(name = "2.20", alias = "20", alias = "8.3", alias = "8.3.27")]
+    V2_20,
+    /// Source XML version used by 1C 8.5.1.
+    #[value(name = "2.21", alias = "21", alias = "8.5", alias = "8.5.1")]
+    V2_21,
+}
+
+impl InfobaseConfigSourceVersion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V2_20 => "2.20",
+            Self::V2_21 => "2.21",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct InfobaseConfigExportArgs {
+    /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
+    #[arg(long)]
+    pub settings: Option<PathBuf>,
+    /// Source format. Can also be set in settings as format/config-format.
+    #[arg(long)]
+    pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. 2.20 matches 1C 8.3.27, 2.21 matches 1C 8.5.1. Can also be set in settings.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
+    /// DBMS type. Currently MSSQLServer is supported by the direct exporter.
+    #[arg(long)]
+    pub dbms: Option<String>,
+    /// Database server.
+    #[arg(long)]
+    pub db_server: Option<String>,
+    /// Database name.
+    #[arg(long)]
+    pub db_name: Option<String>,
+    /// Database user for SQL authentication.
+    #[arg(long)]
+    pub db_user: Option<String>,
+    /// Database password. Prefer --db-pwd-env for shell history.
+    #[arg(long)]
+    pub db_pwd: Option<String>,
+    /// Environment variable containing the database password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub db_pwd_env: String,
+    /// Infobase user name. Accepted for ibcmd CLI compatibility; direct SQL export does not use it.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase user password. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase user password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Replace files under the output directory.
+    #[arg(long, alias = "force")]
+    pub overwrite: bool,
+    /// Output directory for hierarchical XML sources.
+    pub output_dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct InfobaseConfigImportArgs {
+    /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
+    #[arg(long)]
+    pub settings: Option<PathBuf>,
+    /// Source format. Can also be set in settings as format/config-format.
+    #[arg(long)]
+    pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. Accepted for CLI/settings symmetry with export.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
+    /// DBMS type. Currently MSSQLServer is supported by the direct importer.
+    #[arg(long)]
+    pub dbms: Option<String>,
+    /// Database server.
+    #[arg(long)]
+    pub db_server: Option<String>,
+    /// Database name.
+    #[arg(long)]
+    pub db_name: Option<String>,
+    /// Database user for SQL authentication. Accepted by the compatible CLI; importer SQL-auth is still pending.
+    #[arg(long)]
+    pub db_user: Option<String>,
+    /// Database password. Accepted by the compatible CLI; importer SQL-auth is still pending.
+    #[arg(long)]
+    pub db_pwd: Option<String>,
+    /// Environment variable containing the database password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub db_pwd_env: String,
+    /// Infobase user name. Accepted for ibcmd CLI compatibility; direct SQL import does not use it.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase user password. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase user password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// Replace existing ConfigSave rows before staging import rows.
+    #[arg(long, alias = "force")]
+    pub replace_config_save: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional maximum number of staged XML objects per SQL batch.
+    #[arg(long)]
+    pub batch_size: Option<usize>,
+    /// Optional source path prefix to import. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
+    /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+    /// Root directory with hierarchical XML sources.
+    pub source_dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
 pub struct ProbeArgs {
     /// Also search common 1C installation folders under Program Files.
     #[arg(long)]
@@ -234,6 +398,20 @@ pub struct PlanArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct SourceDiffArgs {
+    /// Left/reference source tree.
+    pub left: PathBuf,
+    /// Right/candidate source tree.
+    pub right: PathBuf,
+    /// Optional source path prefix to compare. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
 pub struct CompatibilityArgs {
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
@@ -276,6 +454,15 @@ pub struct DumpSourcesArgs {
     /// Environment variable containing the database password.
     #[arg(long, default_value = "IBCMD_DB_PSW")]
     pub db_pwd_env: String,
+    /// Infobase user passed to ibcmd.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase password passed to ibcmd. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
     /// Output directory for hierarchical XML sources.
     #[arg(short, long)]
     pub output_dir: PathBuf,
@@ -304,6 +491,15 @@ pub struct MssqlDumpConfigArgs {
     /// SQL Server name.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL Server login. Uses sqlcmd default authentication when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL Server password. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL Server password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// SQL Server database name.
     #[arg(long)]
     pub database: String,
@@ -319,6 +515,9 @@ pub struct MssqlDumpConfigArgs {
     /// Dump only selected Config/ConfigSave FileName values. Can be repeated.
     #[arg(long = "file-name")]
     pub file_names: Vec<String>,
+    /// Read selected Config/ConfigSave FileName values from a text file. Can be repeated.
+    #[arg(long = "file-name-list")]
+    pub file_name_lists: Vec<PathBuf>,
     /// Try to inflate raw deflate blobs and write readable *.txt files.
     #[arg(long)]
     pub inflate: bool,
@@ -328,6 +527,18 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Source XML version for reconstructed source files.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Do not write raw Config/ConfigSave BinaryData rows. Useful for source parity and faster runs.
+    #[arg(long)]
+    pub no_binary_rows: bool,
+    /// Write raw Config/ConfigSave BinaryData rows under <table>/*.bin.
+    #[arg(long, default_value_t = true, hide = true)]
+    pub write_binary_rows: bool,
+    /// Write manifest.json with row-level dump details.
+    #[arg(long, default_value_t = true, hide = true)]
+    pub write_manifest: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2762,6 +2973,29 @@ mod tests {
             other => panic!("unexpected command: {other:?}"),
         }
 
+        let diff = Cli::parse_from([
+            "ibcmd-rs",
+            "source-diff",
+            r"C:\reference",
+            r"C:\candidate",
+            "--path-prefix",
+            "Catalogs/Products",
+            "-o",
+            r"C:\audit\source-diff.json",
+        ]);
+        match diff.command {
+            Commands::SourceDiff(args) => {
+                assert_eq!(args.left, PathBuf::from(r"C:\reference"));
+                assert_eq!(args.right, PathBuf::from(r"C:\candidate"));
+                assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\source-diff.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
         let metadata = Cli::parse_from([
             "ibcmd-rs",
             "mssql-stage-source-metadata-objects",
@@ -2884,6 +3118,10 @@ mod tests {
             r"C:\repo\src\cfe\EmergingTravelGroup",
             "--timeout-sec",
             "180",
+            "--user",
+            "ws",
+            "--password-env",
+            "IBCMD_USER_PSW",
             "--overwrite",
             "--normalize-taxi-old",
         ]);
@@ -2900,9 +3138,112 @@ mod tests {
                     PathBuf::from(r"C:\repo\src\cfe\EmergingTravelGroup")
                 );
                 assert_eq!(args.timeout_sec, 180);
+                assert_eq!(args.user.as_deref(), Some("ws"));
+                assert_eq!(args.password_env, "IBCMD_USER_PSW");
                 assert!(args.overwrite);
                 assert!(args.normalize_taxi_old);
             }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_infobase_config_export_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "infobase",
+            "config",
+            "export",
+            "--db-server=localhost",
+            "--db-name=servicedesk",
+            "--db-user=test-sql-user",
+            "--db-pwd=dummy-value-for-parser-test",
+            "--user=ws",
+            "--password=dummy-infobase-value-for-parser-test",
+            "--format=ibcmd-xml",
+            "--source-version=2.21",
+            "--force",
+            r"C:\repo\src\cf",
+        ]);
+
+        match cli.command {
+            Commands::Infobase(args) => match args.command {
+                InfobaseCommands::Config(config) => match config.command {
+                    InfobaseConfigCommands::Export(args) => {
+                        assert_eq!(args.db_server.as_deref(), Some("localhost"));
+                        assert_eq!(args.db_name.as_deref(), Some("servicedesk"));
+                        assert_eq!(args.db_user.as_deref(), Some("test-sql-user"));
+                        assert_eq!(args.db_pwd.as_deref(), Some("dummy-value-for-parser-test"));
+                        assert_eq!(args.user.as_deref(), Some("ws"));
+                        assert_eq!(
+                            args.password.as_deref(),
+                            Some("dummy-infobase-value-for-parser-test")
+                        );
+                        assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
+                        assert_eq!(
+                            args.source_version,
+                            Some(InfobaseConfigSourceVersion::V2_21)
+                        );
+                        assert!(args.overwrite);
+                        assert_eq!(args.output_dir, PathBuf::from(r"C:\repo\src\cf"));
+                    }
+                    other => panic!("unexpected config command: {other:?}"),
+                },
+            },
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_infobase_config_import_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "infobase",
+            "config",
+            "import",
+            "--settings",
+            r"C:\repo\autumn-properties.json",
+            "--format=xml",
+            "--source-version=8.3.27",
+            "--replace-config-save",
+            "--allow-non-lab",
+            "--batch-size=3",
+            "-u",
+            "ws",
+            "-P",
+            "dummy-infobase-value-for-parser-test",
+            "--path-prefix",
+            "CommonModules",
+            r"C:\repo\src\cf",
+        ]);
+
+        match cli.command {
+            Commands::Infobase(args) => match args.command {
+                InfobaseCommands::Config(config) => match config.command {
+                    InfobaseConfigCommands::Import(args) => {
+                        assert_eq!(
+                            args.settings,
+                            Some(PathBuf::from(r"C:\repo\autumn-properties.json"))
+                        );
+                        assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
+                        assert_eq!(
+                            args.source_version,
+                            Some(InfobaseConfigSourceVersion::V2_20)
+                        );
+                        assert!(args.replace_config_save);
+                        assert!(args.allow_non_lab);
+                        assert_eq!(args.batch_size, Some(3));
+                        assert_eq!(args.user.as_deref(), Some("ws"));
+                        assert_eq!(
+                            args.password.as_deref(),
+                            Some("dummy-infobase-value-for-parser-test")
+                        );
+                        assert_eq!(args.path_prefix, vec!["CommonModules"]);
+                        assert_eq!(args.source_dir, PathBuf::from(r"C:\repo\src\cf"));
+                    }
+                    other => panic!("unexpected config command: {other:?}"),
+                },
+            },
             other => panic!("unexpected command: {other:?}"),
         }
     }
@@ -2914,29 +3255,46 @@ mod tests {
             "mssql-dump-config",
             "--database",
             "TestDb",
+            "--sql-user",
+            "test-sql-user",
+            "--sql-pwd",
+            "dummy-sql-value-for-parser-test",
             "--file-name",
             "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "--file-name-list",
+            r"C:\dump\selected.txt",
             "-o",
             r"C:\dump",
             "--include-config-save",
             "--inflate",
             "--extract-module-text",
             "--extract-metadata-xml",
+            "--no-binary-rows",
             "--overwrite",
         ]);
 
         match cli.command {
             Commands::MssqlDumpConfig(args) => {
                 assert_eq!(args.database, "TestDb");
+                assert_eq!(args.sql_user.as_deref(), Some("test-sql-user"));
+                assert_eq!(
+                    args.sql_pwd.as_deref(),
+                    Some("dummy-sql-value-for-parser-test")
+                );
                 assert_eq!(
                     args.file_names,
                     vec!["aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()]
+                );
+                assert_eq!(
+                    args.file_name_lists,
+                    vec![PathBuf::from(r"C:\dump\selected.txt")]
                 );
                 assert_eq!(args.output_dir, PathBuf::from(r"C:\dump"));
                 assert!(args.include_config_save);
                 assert!(args.inflate);
                 assert!(args.extract_module_text);
                 assert!(args.extract_metadata_xml);
+                assert!(args.no_binary_rows);
                 assert!(args.overwrite);
             }
             other => panic!("unexpected command: {other:?}"),

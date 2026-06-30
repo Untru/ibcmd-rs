@@ -15,7 +15,7 @@ use crate::module_blob::{
 };
 use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
-use crate::source::{SourceKind, scan_sources};
+use crate::source::{SourceKind, SourceManifest, scan_sources};
 
 #[derive(Debug, Serialize)]
 pub struct SpreadsheetTemplateAuditReport {
@@ -79,6 +79,10 @@ pub struct FormSourceAuditReport {
     pub ignored_ext_form_bytes: u64,
     pub top_level_elements: Vec<FormElementCount>,
     pub elements: Vec<FormElementCount>,
+    pub child_item_elements: Vec<FormElementCount>,
+    pub child_item_properties: Vec<FormElementCount>,
+    pub child_item_property_contexts: Vec<FormElementCount>,
+    pub child_item_property_value_contexts: Vec<FormElementCount>,
     pub errors: Vec<FormSourceAuditError>,
 }
 
@@ -107,6 +111,8 @@ pub struct SourceLoadCoverageAuditReport {
     pub module_files: usize,
     pub supported_module_files: usize,
     pub supported_ext_body_files: usize,
+    pub partially_supported_form_xml_files: usize,
+    pub partially_supported_form_xml_bytes: u64,
     pub unsupported_form_xml_files: usize,
     pub unsupported_form_xml_bytes: u64,
     pub form_xml_stageable_by_module: usize,
@@ -136,6 +142,10 @@ pub struct SourceLoadCoverageItem {
 struct FormXmlShape {
     top_level_elements: BTreeMap<String, usize>,
     elements: BTreeMap<String, usize>,
+    child_item_elements: BTreeMap<String, usize>,
+    child_item_properties: BTreeMap<String, usize>,
+    child_item_property_contexts: BTreeMap<String, usize>,
+    child_item_property_value_contexts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -150,12 +160,20 @@ struct SpreadsheetTemplateRoundTripItemAudit {
 
 pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAuditReport> {
     let manifest = scan_sources(root)?;
+    audit_source_load_coverage_from_manifest(&manifest)
+}
+
+pub fn audit_source_load_coverage_from_manifest(
+    manifest: &SourceManifest,
+) -> Result<SourceLoadCoverageAuditReport> {
     let mut files_by_kind = BTreeMap::<String, (usize, u64)>::new();
     let mut stage_metadata_xml_files = 0usize;
     let mut stage_common_module_xml_files = 0usize;
     let mut module_files = 0usize;
     let mut supported_module_files = 0usize;
     let mut supported_ext_body_files = 0usize;
+    let mut partially_supported_form_xml_files = 0usize;
+    let mut partially_supported_form_xml_bytes = 0u64;
     let mut unsupported_form_xml_files = 0usize;
     let mut unsupported_form_xml_bytes = 0u64;
     let mut form_xml_stageable_by_module = 0usize;
@@ -187,6 +205,8 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
         }
 
         if is_form_ext_xml_path(&file.path) {
+            partially_supported_form_xml_files += 1;
+            partially_supported_form_xml_bytes += file.size_bytes;
             unsupported_form_xml_files += 1;
             unsupported_form_xml_bytes += file.size_bytes;
             if form_module_path_exists(&manifest.files, &file.path) {
@@ -195,9 +215,12 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
             known_uncovered.push(SourceLoadCoverageItem {
                 path: file.path.clone(),
                 bytes: file.size_bytes,
-                reason: "full Form.xml body is not compiled by current loader".to_string(),
+                reason: "Form.xml body is partially compiled; full ibcmd parity is not complete"
+                    .to_string(),
             });
-        } else if is_form_ext_non_module_file(&file.path) {
+        } else if is_form_ext_non_module_file(&file.path)
+            && !is_supported_form_item_asset_file(&file.path)
+        {
             ignored_form_ext_files += 1;
             ignored_form_ext_bytes += file.size_bytes;
             known_uncovered.push(SourceLoadCoverageItem {
@@ -205,12 +228,6 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
                 bytes: file.size_bytes,
                 reason: "non-module file under Ext/Form is not loaded by current form body packer"
                     .to_string(),
-            });
-        } else if is_known_uncovered_configuration_asset(&file.path) {
-            known_uncovered.push(SourceLoadCoverageItem {
-                path: file.path.clone(),
-                bytes: file.size_bytes,
-                reason: "configuration asset is not routed by current loader".to_string(),
             });
         }
     }
@@ -226,12 +243,13 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
     known_uncovered.truncate(50);
 
     let stage_entry_files = stage_metadata_xml_files + stage_common_module_xml_files;
-    let potentially_stageable_body_files = supported_module_files + supported_ext_body_files;
+    let potentially_stageable_body_files =
+        supported_module_files + supported_ext_body_files + partially_supported_form_xml_files;
     let form_xml_without_stageable_module =
         unsupported_form_xml_files.saturating_sub(form_xml_stageable_by_module);
 
     Ok(SourceLoadCoverageAuditReport {
-        root: manifest.root,
+        root: manifest.root.clone(),
         total_files: manifest.files.len(),
         total_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
         files_by_kind: sorted_source_kind_counts(files_by_kind),
@@ -242,6 +260,8 @@ pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAudit
         module_files,
         supported_module_files,
         supported_ext_body_files,
+        partially_supported_form_xml_files,
+        partially_supported_form_xml_bytes,
         unsupported_form_xml_files,
         unsupported_form_xml_bytes,
         form_xml_stageable_by_module,
@@ -448,6 +468,10 @@ fn is_supported_module_file(path: &str) -> bool {
             | Some("recordsetmodule.bsl")
             | Some("valuemanagermodule.bsl")
             | Some("commandmodule.bsl")
+            | Some("ordinaryapplicationmodule.bsl")
+            | Some("externalconnectionmodule.bsl")
+            | Some("managedapplicationmodule.bsl")
+            | Some("sessionmodule.bsl")
     )
 }
 
@@ -464,7 +488,21 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/flowchart.xml")
         || lower.ends_with("/ext/help.xml")
         || lower.ends_with("/ext/commandinterface.xml")
+        || is_supported_additional_indexes_file(&lower)
         || lower.ends_with("/ext/style.xml")
+        || lower == "ext/commandinterface.xml"
+        || lower == "ext/homepageworkarea.xml"
+        || lower == "ext/mobileclientsignature.bin"
+        || lower == "ext/mainsectioncommandinterface.xml"
+        || lower == "ext/clientapplicationinterface.xml"
+        || lower == "ext/standaloneconfigurationcontent.bin"
+        || is_supported_form_item_asset_file(&lower)
+}
+
+fn is_supported_additional_indexes_file(lower_path: &str) -> bool {
+    lower_path.ends_with("/ext/additionalindexes.xml")
+        && (lower_path.starts_with("documents/")
+            || lower_path.starts_with("accumulationregisters/"))
 }
 
 fn is_form_ext_xml_path(path: &str) -> bool {
@@ -481,6 +519,26 @@ fn is_form_ext_non_module_file(path: &str) -> bool {
         && !lower.ends_with("/ext/form.xml")
 }
 
+fn is_supported_form_item_asset_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.contains("/ext/form/items/") {
+        return false;
+    }
+    let Some(name) = lower.rsplit('/').next() else {
+        return false;
+    };
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        stem,
+        "picture" | "rowspicture" | "valuespicture" | "headerpicture"
+    ) && matches!(
+        extension,
+        "png" | "bmp" | "gif" | "svg" | "jpg" | "jpeg" | "ico"
+    )
+}
+
 fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &str) -> bool {
     let module_path = normalize_source_path(form_xml_path)
         .trim_end_matches("Form.xml")
@@ -489,19 +547,6 @@ fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &
     files
         .iter()
         .any(|file| normalize_source_path(&file.path).eq_ignore_ascii_case(&module_path))
-}
-
-fn is_known_uncovered_configuration_asset(path: &str) -> bool {
-    let lower = normalize_source_path(path).to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "ext/additionalindexes.xml"
-            | "ext/mobileclientsignature.bin"
-            | "ext/standaloneconfigurationcontent.bin"
-            | "ext/mainsectioncommandinterface.xml"
-            | "ext/clientapplicationinterface.xml"
-            | "ext/homepageworkarea.xml"
-    )
 }
 
 fn normalize_source_path(path: &str) -> String {
@@ -607,6 +652,10 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
     let mut top_level_elements = BTreeMap::new();
     let mut elements = BTreeMap::new();
+    let mut child_item_elements = BTreeMap::new();
+    let mut child_item_properties = BTreeMap::new();
+    let mut child_item_property_contexts = BTreeMap::new();
+    let mut child_item_property_value_contexts = BTreeMap::new();
     let mut report = FormSourceAuditReport {
         root: root.clone(),
         form_xml_files: 0,
@@ -629,6 +678,10 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
         ignored_ext_form_bytes: 0,
         top_level_elements: Vec::new(),
         elements: Vec::new(),
+        child_item_elements: Vec::new(),
+        child_item_properties: Vec::new(),
+        child_item_property_contexts: Vec::new(),
+        child_item_property_value_contexts: Vec::new(),
         errors: Vec::new(),
     };
 
@@ -681,6 +734,16 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
                 report.parsed += 1;
                 merge_counts(&mut top_level_elements, shape.top_level_elements);
                 merge_counts(&mut elements, shape.elements);
+                merge_counts(&mut child_item_elements, shape.child_item_elements);
+                merge_counts(&mut child_item_properties, shape.child_item_properties);
+                merge_counts(
+                    &mut child_item_property_contexts,
+                    shape.child_item_property_contexts,
+                );
+                merge_counts(
+                    &mut child_item_property_value_contexts,
+                    shape.child_item_property_value_contexts,
+                );
             }
             Err(error) => {
                 report.failed += 1;
@@ -703,6 +766,11 @@ pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
     report.unsupported_form_xml_bytes = report.total_xml_bytes;
     report.top_level_elements = sorted_element_counts(top_level_elements);
     report.elements = sorted_element_counts(elements);
+    report.child_item_elements = sorted_element_counts(child_item_elements);
+    report.child_item_properties = sorted_element_counts(child_item_properties);
+    report.child_item_property_contexts = sorted_element_counts(child_item_property_contexts);
+    report.child_item_property_value_contexts =
+        sorted_element_counts(child_item_property_value_contexts);
     Ok(report)
 }
 
@@ -745,19 +813,29 @@ fn is_form_module_file(form_ext_dir: &Path, path: &Path) -> bool {
 fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut depth = 0usize;
+    let mut path = Vec::<String>::new();
+    let mut text_value = String::new();
     let mut shape = FormXmlShape::default();
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
-                push_form_element(&mut shape, &event, depth)?;
-                depth += 1;
+                let name = push_form_element(&mut shape, &event, &path)?;
+                path.push(name);
+                text_value.clear();
             }
             Ok(Event::Empty(event)) => {
-                push_form_element(&mut shape, &event, depth)?;
+                push_form_element(&mut shape, &event, &path)?;
             }
             Ok(Event::End(_)) => {
-                depth = depth.saturating_sub(1);
+                count_form_child_item_value_context(&mut shape, &path, text_value.trim());
+                path.pop();
+                text_value.clear();
+            }
+            Ok(Event::Text(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
             }
             Ok(Event::Eof) => break,
             Err(error) => return Err(anyhow!("invalid Form.xml: {error}")),
@@ -767,13 +845,103 @@ fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
     Ok(shape)
 }
 
-fn push_form_element(shape: &mut FormXmlShape, event: &BytesStart<'_>, depth: usize) -> Result<()> {
+fn push_form_element(
+    shape: &mut FormXmlShape,
+    event: &BytesStart<'_>,
+    path: &[String],
+) -> Result<String> {
     let name = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
     *shape.elements.entry(name.clone()).or_insert(0) += 1;
-    if depth == 1 {
-        *shape.top_level_elements.entry(name).or_insert(0) += 1;
+    if path.len() == 1 {
+        *shape.top_level_elements.entry(name.clone()).or_insert(0) += 1;
     }
-    Ok(())
+    let is_child_item = is_form_child_item_xml_tag(&name);
+    let parent_is_child_items = path.last().is_some_and(|parent| parent == "ChildItems");
+    let parent_is_child_item = path
+        .last()
+        .is_some_and(|parent| is_form_child_item_xml_tag(parent));
+    if is_child_item && (parent_is_child_items || parent_is_child_item) {
+        *shape.child_item_elements.entry(name.clone()).or_insert(0) += 1;
+    }
+    if parent_is_child_item && !is_child_item {
+        *shape.child_item_properties.entry(name.clone()).or_insert(0) += 1;
+        if let Some(parent) = path.last() {
+            *shape
+                .child_item_property_contexts
+                .entry(format!("{parent}/{name}"))
+                .or_insert(0) += 1;
+        }
+    }
+    Ok(name)
+}
+
+fn count_form_child_item_value_context(shape: &mut FormXmlShape, path: &[String], value: &str) {
+    if value.is_empty() || value.len() > 120 {
+        return;
+    }
+    if value.chars().any(char::is_whitespace) {
+        return;
+    }
+    let Some(property) = path.last().map(String::as_str) else {
+        return;
+    };
+    if !is_form_child_item_scalar_property(property) {
+        return;
+    }
+    let Some((child_index, child_item)) = path
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, part)| is_form_child_item_xml_tag(part))
+    else {
+        return;
+    };
+    if child_index + 1 >= path.len() {
+        return;
+    }
+    let property_path = path[child_index + 1..].join("/");
+    *shape
+        .child_item_property_value_contexts
+        .entry(format!("{child_item}/{property_path}/{value}"))
+        .or_insert(0) += 1;
+}
+
+fn is_form_child_item_scalar_property(property: &str) -> bool {
+    matches!(
+        property,
+        "Group"
+            | "Behavior"
+            | "Representation"
+            | "ShowTitle"
+            | "Type"
+            | "DefaultButton"
+            | "EditMode"
+            | "AutoEditMode"
+            | "TitleLocation"
+            | "HorizontalStretch"
+            | "ReadOnly"
+            | "SkipOnInput"
+            | "AutoMaxWidth"
+            | "AutoMaxHeight"
+            | "LocationInCommandBar"
+    )
+}
+
+fn is_form_child_item_xml_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "UsualGroup"
+            | "CommandBar"
+            | "Popup"
+            | "ButtonGroup"
+            | "Button"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
 }
 
 fn merge_counts(target: &mut BTreeMap<String, usize>, source: BTreeMap<String, usize>) {
@@ -1166,6 +1334,35 @@ mod tests {
   <Items>
     <Item name="List"/>
   </Items>
+  <ChildItems>
+    <UsualGroup name="Page" id="1">
+      <Group>Vertical</Group>
+      <Behavior>Collapsible</Behavior>
+      <Representation>WeakSeparation</Representation>
+      <ShowTitle>false</ShowTitle>
+      <ChildItems>
+        <Table name="Rows" id="2">
+          <DataPath>Items.Rows</DataPath>
+          <SearchStringAddition name="RowsSearch" id="5">
+            <AdditionSource>
+              <Item>Rows</Item>
+              <Type>SearchStringRepresentation</Type>
+            </AdditionSource>
+          </SearchStringAddition>
+          <ChildItems>
+            <InputField name="Name" id="3">
+              <DataPath>Items.Rows.CurrentData.Name</DataPath>
+              <Title/>
+            </InputField>
+          </ChildItems>
+        </Table>
+        <Button name="Open" id="4">
+          <CommandName>Form.Command.Open</CommandName>
+          <DefaultButton>true</DefaultButton>
+        </Button>
+      </ChildItems>
+    </UsualGroup>
+  </ChildItems>
   <Commands/>
 </Form>
 "#,
@@ -1212,8 +1409,106 @@ mod tests {
         }));
         assert!(report.elements.contains(&FormElementCount {
             name: "Item".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "UsualGroup".to_string(),
             count: 1
         }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "Table".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "InputField".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "SearchStringAddition".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "Button".to_string(),
+            count: 1
+        }));
+        assert!(!report.child_item_properties.contains(&FormElementCount {
+            name: "SearchStringAddition".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "ChildItems".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "DataPath".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "CommandName".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "DefaultButton".to_string(),
+            count: 1
+        }));
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Table/DataPath".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "InputField/DataPath".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "SearchStringAddition/AdditionSource".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Button/CommandName".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Button/DefaultButton".to_string(),
+                    count: 1
+                })
+        );
+        for name in [
+            "UsualGroup/Group/Vertical",
+            "UsualGroup/Behavior/Collapsible",
+            "UsualGroup/Representation/WeakSeparation",
+            "UsualGroup/ShowTitle/false",
+            "SearchStringAddition/AdditionSource/Type/SearchStringRepresentation",
+            "Button/DefaultButton/true",
+        ] {
+            assert!(
+                report
+                    .child_item_property_value_contexts
+                    .contains(&FormElementCount {
+                        name: name.to_string(),
+                        count: 1
+                    }),
+                "missing {name}"
+            );
+        }
         assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
 
         let _ = fs::remove_dir_all(root);
@@ -1229,6 +1524,8 @@ mod tests {
         fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
         fs::create_dir_all(root.join("Catalogs/Products/Ext"))?;
         fs::create_dir_all(root.join("CommonModules/Foo/Ext"))?;
+        fs::create_dir_all(root.join("Documents/Order/Ext"))?;
+        fs::create_dir_all(root.join("Ext"))?;
         fs::write(
             root.join("Catalogs/Products.xml"),
             br#"<MetaDataObject><Catalog uuid="11111111-1111-4111-8111-111111111111"/></MetaDataObject>"#,
@@ -1261,28 +1558,75 @@ mod tests {
             root.join("CommonModules/Foo/Ext/Module.bsl"),
             b"Procedure Run()\nEndProcedure\n",
         )?;
+        fs::write(
+            root.join("Documents/Order.xml"),
+            br#"<MetaDataObject><Document uuid="44444444-4444-4444-8444-444444444444"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Documents/Order/Ext/AdditionalIndexes.xml"),
+            b"<AdditionalIndexes/>",
+        )?;
+        fs::write(
+            root.join("Ext/OrdinaryApplicationModule.bsl"),
+            b"Procedure OnStart()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/ExternalConnectionModule.bsl"),
+            b"Procedure OnConnect()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/ManagedApplicationModule.bsl"),
+            b"Procedure BeforeStart()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/SessionModule.bsl"),
+            b"Procedure SetSessionParameters(Names)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/CommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
+        fs::write(
+            root.join("Ext/MobileClientSignature.bin"),
+            b"{2,\"\",\"\",{0},0}",
+        )?;
+        fs::write(
+            root.join("Ext/MainSectionCommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
+        fs::write(
+            root.join("Ext/HomePageWorkArea.xml"),
+            b"<HomePageWorkArea/>",
+        )?;
+        fs::write(
+            root.join("Ext/ClientApplicationInterface.xml"),
+            b"<ClientApplicationInterface/>",
+        )?;
+        fs::write(
+            root.join("Ext/StandaloneConfigurationContent.bin"),
+            b"<StandaloneContent/>",
+        )?;
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 8);
-        assert_eq!(report.stage_metadata_xml_files, 2);
+        assert_eq!(report.total_files, 20);
+        assert_eq!(report.stage_metadata_xml_files, 3);
         assert_eq!(report.stage_common_module_xml_files, 1);
-        assert_eq!(report.stage_entry_files, 3);
-        assert_eq!(report.module_files, 2);
-        assert_eq!(report.supported_module_files, 2);
-        assert_eq!(report.supported_ext_body_files, 1);
-        assert_eq!(report.potentially_stageable_body_files, 3);
+        assert_eq!(report.stage_entry_files, 4);
+        assert_eq!(report.module_files, 6);
+        assert_eq!(report.supported_module_files, 6);
+        assert_eq!(report.supported_ext_body_files, 9);
+        assert_eq!(report.potentially_stageable_body_files, 16);
+        assert_eq!(report.partially_supported_form_xml_files, 1);
+        assert_eq!(report.partially_supported_form_xml_bytes, 26);
         assert_eq!(report.unsupported_form_xml_files, 1);
         assert_eq!(report.form_xml_stageable_by_module, 1);
         assert_eq!(report.form_xml_without_stageable_module, 0);
-        assert_eq!(report.ignored_form_ext_files, 1);
-        assert_eq!(report.known_uncovered_files, 2);
-        assert!(
-            report
-                .top_known_uncovered
-                .iter()
-                .any(|item| item.path == "Catalogs/Products/Forms/ListForm/Ext/Form.xml")
-        );
+        assert_eq!(report.ignored_form_ext_files, 0);
+        assert_eq!(report.known_uncovered_files, 1);
+        assert!(report.top_known_uncovered.iter().any(|item| item.path
+            == "Catalogs/Products/Forms/ListForm/Ext/Form.xml"
+            && item.reason.contains("partially compiled")));
 
         let _ = fs::remove_dir_all(root);
         Ok(())

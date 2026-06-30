@@ -2,7 +2,7 @@ use anyhow::Result;
 use rayon::ThreadPoolBuilder;
 use std::sync::OnceLock;
 
-const MAX_WORKERS: usize = 8;
+const MAX_WORKERS: usize = 16;
 static THREAD_POOL: OnceLock<Result<rayon::ThreadPool, String>> = OnceLock::new();
 
 pub fn bounded_worker_count() -> usize {
@@ -49,9 +49,9 @@ mod tests {
     fn clamps_worker_count_to_supported_bounds() {
         assert_eq!(bounded_worker_count_from(None, 1), 1);
         assert_eq!(bounded_worker_count_from(None, 4), 4);
-        assert_eq!(bounded_worker_count_from(None, 16), 8);
+        assert_eq!(bounded_worker_count_from(None, 16), 16);
         assert_eq!(bounded_worker_count_from(Some(0), 16), 1);
         assert_eq!(bounded_worker_count_from(Some(2), 16), 2);
-        assert_eq!(bounded_worker_count_from(Some(64), 16), 8);
+        assert_eq!(bounded_worker_count_from(Some(64), 16), 16);
     }
 }
