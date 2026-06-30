@@ -1339,10 +1339,7 @@ fn selected_metadata_source_reference_index_needs(
     let mut needs = SourceReferenceIndexNeeds::none();
     for row in selected_metadata_texts {
         match row.kind.as_deref() {
-            Some(kind)
-                if matches!(kind, "Enum")
-                    || simple_metadata_kind_uses_form_template_child_objects(kind) =>
-            {
+            Some(kind) if metadata_kind_needs_form_template_reference_indexes(kind) => {
                 needs.form_refs = true;
                 needs.template_refs = true;
             }
@@ -14417,6 +14414,10 @@ fn metadata_kind_can_own_templates(kind: &str) -> bool {
     )
 }
 
+fn metadata_kind_needs_form_template_reference_indexes(kind: &str) -> bool {
+    matches!(kind, "Enum") || metadata_kind_uses_simple_form_template_child_objects(kind)
+}
+
 fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
     nested_headers_from_text_inside_object_code(text, owner_uuid, 9)
 }
@@ -16812,7 +16813,7 @@ fn simple_metadata_form_template_child_objects_xml(
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> String {
-    if !simple_metadata_kind_uses_form_template_child_objects(kind) {
+    if !metadata_kind_uses_simple_form_template_child_objects(kind) {
         return String::new();
     }
 
@@ -16834,15 +16835,17 @@ fn simple_metadata_form_template_child_objects_xml(
     xml
 }
 
-fn simple_metadata_kind_uses_form_template_child_objects(kind: &str) -> bool {
+fn metadata_kind_uses_simple_form_template_child_objects(kind: &str) -> bool {
     matches!(
         kind,
         "AccumulationRegister"
             | "AccountingRegister"
             | "BusinessProcess"
             | "CalculationRegister"
+            | "DocumentJournal"
             | "ExchangePlan"
             | "InformationRegister"
+            | "SettingsStorage"
             | "Task"
     )
 }
@@ -33016,6 +33019,36 @@ mod tests {
     }
 
     #[test]
+    fn selected_document_journal_metadata_requests_child_reference_indexes() {
+        let journal_metadata = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            text: String::new(),
+            object_code: Some(26),
+            header: Some(MetadataHeader {
+                uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                name: "Interactions".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("DocumentJournal".to_string()),
+            folder: Some("DocumentJournals"),
+        };
+
+        let needs = selected_metadata_source_reference_index_needs(&[journal_metadata])
+            .expect("document journal selected metadata needs");
+
+        assert!(needs.needs_broad_metadata());
+        assert!(needs.form_refs);
+        assert!(needs.template_refs);
+        assert!(!needs.object_refs);
+        assert!(!needs.field_refs);
+        assert!(!needs.functional_option_refs);
+        assert!(!needs.command_refs);
+        assert!(!needs.type_index);
+    }
+
+    #[test]
     fn extracts_task_child_form_and_template_refs_from_current_indexes() {
         let task_uuid = "11111111-1111-4111-8111-111111111111";
         let task_object_type_id = "22222222-2222-4222-8222-222222222221";
@@ -33180,6 +33213,92 @@ mod tests {
         );
         assert_eq!(xml.matches("<Form>NodeForm</Form>").count(), 1);
         assert_eq!(xml.matches("<Template>Rules</Template>").count(), 1);
+    }
+
+    #[test]
+    fn extracts_document_journal_child_form_and_template_refs_from_current_indexes() {
+        let journal_uuid = "11111111-1111-4111-8111-111111111111";
+        let form_uuid = "22222222-2222-4222-8222-222222222222";
+        let template_uuid = "33333333-3333-4333-8333-333333333333";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let form_list_marker = FORM_LIST_MARKERS[0];
+        let journal_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{26,\r\n{{3,\r\n{{1,0,{journal_uuid}}},\"Interactions\",{{1,\"en\",\"Interactions\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let template_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,4,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Print\",{{1,\"en\",\"Print\"}},\"\"}}\r\n,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let row = |file_name: &str, data: &[u8]| ConfigRow {
+            file_name: file_name.to_string(),
+            part_no: 0,
+            data_size: data.len() as i64,
+            binary_hex: encode_hex_for_test(data),
+        };
+        let rows = vec![
+            row(journal_uuid, &journal_blob),
+            row(form_uuid, &form_blob),
+            row(template_uuid, &template_blob),
+        ];
+        let form_refs = build_form_source_reference_index(&rows);
+        let template_refs = build_template_source_reference_index(&rows);
+
+        assert_eq!(
+            form_refs
+                .get(form_uuid)
+                .map(|form_ref| form_ref.relative_path.as_path()),
+            Some(Path::new(
+                "DocumentJournals/Interactions/Forms/ListForm.xml"
+            ))
+        );
+        assert_eq!(
+            template_refs
+                .get(template_uuid)
+                .map(|template_ref| template_ref.relative_path.as_path()),
+            Some(Path::new(
+                "DocumentJournals/Interactions/Templates/Print.xml"
+            ))
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &journal_blob,
+            journal_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &template_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("DocumentJournals").join("Interactions.xml")
+        );
+        assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Form>ListForm</Form>"));
+        assert!(xml.contains("<Template>Print</Template>"));
+        assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
+        assert!(
+            xml.find("<Form>ListForm</Form>").unwrap()
+                < xml.find("<Template>Print</Template>").unwrap()
+        );
+        assert_eq!(xml.matches("<Form>ListForm</Form>").count(), 1);
+        assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
     }
 
     #[test]
