@@ -206,6 +206,25 @@ pub enum InfobaseConfigFormat {
     Xml,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InfobaseConfigSourceVersion {
+    /// Source XML version used by 1C 8.3.27.
+    #[value(name = "2.20", alias = "20", alias = "8.3", alias = "8.3.27")]
+    V2_20,
+    /// Source XML version used by 1C 8.5.1.
+    #[value(name = "2.21", alias = "21", alias = "8.5", alias = "8.5.1")]
+    V2_21,
+}
+
+impl InfobaseConfigSourceVersion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V2_20 => "2.20",
+            Self::V2_21 => "2.21",
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct InfobaseConfigExportArgs {
     /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
@@ -214,6 +233,9 @@ pub struct InfobaseConfigExportArgs {
     /// Source format. Can also be set in settings as format/config-format.
     #[arg(long)]
     pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. 2.20 matches 1C 8.3.27, 2.21 matches 1C 8.5.1. Can also be set in settings.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
     /// DBMS type. Currently MSSQLServer is supported by the direct exporter.
     #[arg(long)]
     pub dbms: Option<String>,
@@ -259,6 +281,9 @@ pub struct InfobaseConfigImportArgs {
     /// Source format. Can also be set in settings as format/config-format.
     #[arg(long)]
     pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. Accepted for CLI/settings symmetry with export.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
     /// DBMS type. Currently MSSQLServer is supported by the direct importer.
     #[arg(long)]
     pub dbms: Option<String>,
@@ -499,6 +524,9 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Source XML version for reconstructed source files.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
     /// Write raw Config/ConfigSave BinaryData rows under <table>/*.bin.
     #[arg(long, default_value_t = true, hide = true)]
     pub write_binary_rows: bool,
@@ -3107,6 +3135,7 @@ mod tests {
             "--user=ws",
             "--password=4677473",
             "--format=ibcmd-xml",
+            "--source-version=2.21",
             "--force",
             r"C:\repo\src\cf",
         ]);
@@ -3122,6 +3151,10 @@ mod tests {
                         assert_eq!(args.user.as_deref(), Some("ws"));
                         assert_eq!(args.password.as_deref(), Some("4677473"));
                         assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
+                        assert_eq!(
+                            args.source_version,
+                            Some(InfobaseConfigSourceVersion::V2_21)
+                        );
                         assert!(args.overwrite);
                         assert_eq!(args.output_dir, PathBuf::from(r"C:\repo\src\cf"));
                     }
@@ -3142,6 +3175,7 @@ mod tests {
             "--settings",
             r"C:\repo\autumn-properties.json",
             "--format=xml",
+            "--source-version=8.3.27",
             "--replace-config-save",
             "--allow-non-lab",
             "--batch-size=3",
@@ -3163,6 +3197,10 @@ mod tests {
                             Some(PathBuf::from(r"C:\repo\autumn-properties.json"))
                         );
                         assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
+                        assert_eq!(
+                            args.source_version,
+                            Some(InfobaseConfigSourceVersion::V2_20)
+                        );
                         assert!(args.replace_config_save);
                         assert!(args.allow_non_lab);
                         assert_eq!(args.batch_size, Some(3));
