@@ -16805,6 +16805,7 @@ struct ReportProperties {
     include_help_in_contents: bool,
     extended_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
+    child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
     child_commands: Vec<MetadataChildCommand>,
@@ -16841,6 +16842,7 @@ struct DocumentProperties {
     auxiliary_list_form: Option<String>,
     auxiliary_choice_form: Option<String>,
     include_help_in_contents: bool,
+    child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
@@ -17849,8 +17851,14 @@ fn extract_metadata_source_xml_from_text_row(
         )?;
         format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
-        let document =
-            parse_document_properties_from_text(text, uuid, object_refs, form_refs, template_refs)?;
+        let document = parse_document_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            form_refs,
+            template_refs,
+        )?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
     } else if kind == "BusinessProcess" {
         let business_process = parse_business_process_properties_from_text(text, uuid)?;
@@ -19328,6 +19336,14 @@ fn parse_report_properties_from_text(
         include_help_in_contents: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
         extended_presentation: parse_1c_synonyms(fields.get(15).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
+        child_metadata_objects: parse_attribute_tabular_section_child_objects(
+            "Report",
+            &header.name,
+            text,
+            uuid,
+            type_index,
+            object_refs,
+        ),
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: parse_report_child_templates_from_text(text, template_refs),
         child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
@@ -19337,6 +19353,7 @@ fn parse_report_properties_from_text(
 fn parse_document_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
@@ -19406,6 +19423,14 @@ fn parse_document_properties_from_text(
         ),
         include_help_in_contents: parse_1c_bool_field(fields.get(header_index + 20).copied())
             .unwrap_or(false),
+        child_metadata_objects: parse_attribute_tabular_section_child_objects(
+            "Document",
+            &header.name,
+            text,
+            uuid,
+            type_index,
+            object_refs,
+        ),
         child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_document_template_names_in_text_order(
             text,
@@ -23528,11 +23553,15 @@ fn format_report_source_xml(
     push_localized_property(&mut xml, "\t\t\t", "Explanation", &report.explanation);
     xml.push_str("\t\t</Properties>\r\n");
 
-    if !report.child_forms.is_empty()
+    if !report.child_metadata_objects.is_empty()
+        || !report.child_forms.is_empty()
         || !report.child_templates.is_empty()
         || !report.child_commands.is_empty()
     {
         xml.push_str("\t\t<ChildObjects>\r\n");
+        for child in &report.child_metadata_objects {
+            push_metadata_child_object_xml(&mut xml, child);
+        }
         for form in &report.child_forms {
             xml.push_str(&format!(
                 "\t\t\t<Form>{}</Form>\r\n",
@@ -23626,8 +23655,14 @@ fn format_document_source_xml(
         ));
         xml.insert_str(index, &properties);
     }
-    if !document.child_forms.is_empty() || !document.child_templates.is_empty() {
+    if !document.child_metadata_objects.is_empty()
+        || !document.child_forms.is_empty()
+        || !document.child_templates.is_empty()
+    {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+        for child in &document.child_metadata_objects {
+            push_metadata_child_object_xml(&mut child_objects, child);
+        }
         for form in &document.child_forms {
             child_objects.push_str(&format!(
                 "\t\t\t<Form>{}</Form>\r\n",
@@ -41674,6 +41709,62 @@ mod tests {
     }
 
     #[test]
+    fn extracts_report_child_attribute_data_history_tail() {
+        let report_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let object_type_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let object_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+        let manager_type_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
+        let manager_value_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let report_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
+{zero_uuid},{zero_uuid},{zero_uuid},1,{zero_uuid},{zero_uuid},{zero_uuid},0,{manager_type_id},{manager_value_id},{zero_uuid},\
+{{0}},{{0}},{zero_uuid}}},\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"TrackChanges\",{{1,\"en\",\"Track changes\"}},\"\"}},\
+0,{{0}},{{0}},{{0}},0,\"\",0,0,{{0}},{{0}},0,{{0}},0,0,{{0}},{{0}},0,0,0,{{0}},0,0,0,0,1,0,0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &report_blob,
+            report_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(attribute_xml.contains("<ChoiceForm/>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<DataHistory>Use</DataHistory>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceForm/>").unwrap()
+                < attribute_xml
+                    .find("<DataHistory>Use</DataHistory>")
+                    .unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
     fn extracts_integration_service_channels_to_metadata_xml() {
         let uuid = "c512a1cd-1240-4e46-8bad-8b7b27c5c25a";
         let blob = deflate_for_test(
@@ -42520,6 +42611,72 @@ mod tests {
         assert!(
             xml.find("<Form>MainForm</Form>").unwrap()
                 < xml.find("<Template>Print</Template>").unwrap()
+        );
+    }
+
+    #[test]
+    fn extracts_document_child_attribute_data_history_tail() {
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let owner_fields = [
+            "1", zero_uuid, "1", "9", "1", "4", "0", "0", "0", "0", "0", "0", "0", zero_uuid,
+            zero_uuid, zero_uuid, zero_uuid, zero_uuid, zero_uuid, "0",
+        ]
+        .join(",");
+        let document_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},\
+{owner_fields},{manager_type_id},{manager_value_id}}},\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"TrackChanges\",{{1,\"en\",\"Track changes\"}},\"\"}},\
+0,{{0}},{{0}},{{0}},0,\"\",0,0,{{0}},{{0}},0,{{0}},0,0,{{0}},{{0}},0,0,0,{{0}},0,1,0,1,1,0,0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &document_blob,
+            document_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(attribute_xml.contains("<ChoiceForm/>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<DataHistory>Use</DataHistory>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceForm/>").unwrap()
+                < attribute_xml
+                    .find("<DataHistory>Use</DataHistory>")
+                    .unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<StandardAttributes>").unwrap() < xml.find("<Attribute uuid=").unwrap(),
+            "{xml}"
         );
     }
 
