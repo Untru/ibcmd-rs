@@ -14859,7 +14859,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     if let Some(print_area) = &spreadsheet.print_area {
         push_moxel_print_area_xml(&mut xml, print_area);
     }
-    if let Some(print_settings) = &spreadsheet.print_settings {
+    if let Some(print_settings) = &spreadsheet.print_settings
+        && !print_settings.is_default_margins_only()
+    {
         push_moxel_print_settings_xml(&mut xml, print_settings);
     }
     for line in &spreadsheet.lines {
@@ -14940,6 +14942,29 @@ fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPrintSettings
     push_moxel_format_usize(xml, "pageWidth", settings.page_width);
     push_moxel_format_usize(xml, "pageHeight", settings.page_height);
     xml.push_str("\t</printSettings>\r\n");
+}
+
+impl MoxelPrintSettings {
+    fn is_default_margins_only(&self) -> bool {
+        self.page_orientation.is_none()
+            && self.scale.is_none()
+            && self.collate.is_none()
+            && self.copies.is_none()
+            && self.per_page.is_none()
+            && self.top_margin == Some(1000)
+            && self.left_margin == Some(1000)
+            && self.bottom_margin == Some(1000)
+            && self.right_margin == Some(1000)
+            && self.header_size == Some(1000)
+            && self.footer_size == Some(1000)
+            && self.fit_to_page.is_none()
+            && self.black_and_white.is_none()
+            && self.printer_name.is_none()
+            && self.paper.is_none()
+            && self.paper_source.is_none()
+            && self.page_width.is_none()
+            && self.page_height.is_none()
+    }
 }
 
 fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, format_index: usize) {
@@ -32259,6 +32284,50 @@ mod tests {
 
         assert_eq!(extracted, extracted_again);
         assert!(extracted.contains("<empty>true</empty>"));
+    }
+
+    #[test]
+    fn spreadsheet_extract_omits_default_print_settings() {
+        let print_settings = parse_moxel_print_settings_field(
+            r#"{{0,6,6,{"N",1000},7,{"N",1000},8,{"N",1000},9,{"N",1000},10,{"N",1000},11,{"N",1000}}}"#,
+        )
+        .unwrap();
+        assert!(print_settings.is_default_margins_only());
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: vec![MoxelColumnSet {
+                id: None,
+                size: 0,
+                columns: Vec::new(),
+            }],
+            column_formats: Vec::new(),
+            default_format_width: Some(72),
+            default_format: MoxelFormat::default(),
+            formats: Vec::new(),
+            rows: vec![MoxelRow {
+                index: 0,
+                index_to: None,
+                format_index: 0,
+                columns_id: None,
+                cells: Vec::new(),
+            }],
+            merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: Some(print_settings),
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            default_format_index: Some(1),
+            height: 0,
+        };
+
+        let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(!extracted.contains("<printSettings>"));
     }
 
     #[test]
