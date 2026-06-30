@@ -82,6 +82,9 @@ Incremental selected verification after this snapshot:
 | Round 19 Form.xml slice | unit-level packer verification | new `InputField` items preserve extended options (`Width`, `HorizontalStretch`, `AutoMaxWidth`, `MaxWidth`) |
 | Round 19 partial metadata slice | unit-level metadata XML verification | `Subsystem` emits `UseStandardCommands` from the metadata blob |
 | Round 19 source staging readiness slice | unit-level staging verification | `WSReference` definition rows are covered as base-free raw-deflated bodies |
+| Round 20 Form.xml slice | unit-level packer verification | new `UsualGroup` items preserve extended `Behavior`, `Representation`, `ShowTitle=false`, and nested children |
+| Round 20 partial metadata slice | unit-level metadata XML verification | register-family metadata emits `UseStandardCommands` from the metadata blob |
+| Round 20 source staging readiness slice | unit-level staging verification | configuration `Ext/StandaloneConfigurationContent.bin` rows are covered as base-free raw-deflated bodies |
 
 Performance note for selected extraction:
 
@@ -215,5 +218,8 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #16 | Form.xml new `InputField` extended options generation | merged to `master` in round 19 |
 | #18 | Subsystem `UseStandardCommands` metadata XML | merged to `master` in round 19 |
 | #21 | WSReference definition raw-deflated base-free coverage | merged to `master` in round 19 |
+| #16 | Form.xml new `UsualGroup` extended properties generation | merged to `master` in round 20 |
+| #18 | register-family `UseStandardCommands` metadata XML | merged to `master` in round 20 |
+| #21 | configuration StandaloneConfigurationContent raw-deflated base-free coverage | merged to `master` in round 20 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

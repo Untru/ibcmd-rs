@@ -62,6 +62,9 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 20 | Form.xml | new `UsualGroup` items preserve extended `Behavior`, `Representation`, `ShowTitle=false`, and nested children |
+| 20 | Partial metadata XML | register-family metadata emits `UseStandardCommands` from the metadata blob |
+| 20 | Source staging readiness | configuration `Ext/StandaloneConfigurationContent.bin` rows are covered as base-free raw-deflated bodies |
 | 19 | Form.xml | new `InputField` items preserve extended options (`Width`, `HorizontalStretch`, `AutoMaxWidth`, `MaxWidth`) |
 | 19 | Partial metadata XML | `Subsystem` emits `UseStandardCommands` from the metadata blob |
 | 19 | Source staging readiness | `WSReference` definition rows are covered as base-free raw-deflated bodies |
