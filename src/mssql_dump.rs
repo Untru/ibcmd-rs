@@ -15153,8 +15153,15 @@ struct CatalogProperties {
     list_presentation: Vec<(String, String)>,
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
+    standard_attribute_details: BTreeMap<&'static str, CatalogStandardAttributeDetails>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+}
+
+#[derive(Default)]
+struct CatalogStandardAttributeDetails {
+    tooltip: Vec<(String, String)>,
+    synonym: Vec<(String, String)>,
 }
 
 struct ReportProperties {
@@ -16808,6 +16815,9 @@ fn parse_catalog_properties_from_text(
         list_presentation: parse_1c_synonyms(fields.get(48).copied().unwrap_or("{0}")),
         extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
+        standard_attribute_details: parse_catalog_standard_attribute_details(
+            fields.get(45).copied(),
+        ),
         child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_catalog_template_names_in_text_order(
             text,
@@ -17341,6 +17351,82 @@ fn parse_catalog_input_by_string_fields(field: Option<&str>, catalog_name: &str)
         }
     }
     values
+}
+
+const CATALOG_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID: &str =
+    "4690ff70-e3fa-4914-9127-6a9acc5fc949";
+const CATALOG_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID: &str =
+    "cf4abea3-37b2-11d4-940f-008048da11f9";
+
+fn parse_catalog_standard_attribute_details(
+    field: Option<&str>,
+) -> BTreeMap<&'static str, CatalogStandardAttributeDetails> {
+    let mut details = BTreeMap::new();
+    if let Some(field) = field {
+        parse_catalog_standard_attribute_details_from_field(field, &mut details);
+    }
+    details
+}
+
+fn parse_catalog_standard_attribute_details_from_field(
+    field: &str,
+    details: &mut BTreeMap<&'static str, CatalogStandardAttributeDetails>,
+) {
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return;
+    };
+
+    for index in 0..fields.len().saturating_sub(2) {
+        let Some(code_fields) = split_1c_braced_fields(fields[index], 0) else {
+            continue;
+        };
+        let Some(name) = code_fields
+            .first()
+            .and_then(|code| catalog_standard_attribute_name(code.trim()))
+        else {
+            continue;
+        };
+        let detail = parse_catalog_standard_attribute_detail(fields[index + 2]);
+        if !detail.tooltip.is_empty() || !detail.synonym.is_empty() {
+            details.insert(name, detail);
+        }
+    }
+
+    for nested in fields {
+        if nested.starts_with('{') {
+            parse_catalog_standard_attribute_details_from_field(nested, details);
+        }
+    }
+}
+
+fn parse_catalog_standard_attribute_detail(field: &str) -> CatalogStandardAttributeDetails {
+    let mut detail = CatalogStandardAttributeDetails::default();
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return detail;
+    };
+
+    for pair in fields.get(2..).unwrap_or_default().chunks(2) {
+        let [key, value] = pair else {
+            continue;
+        };
+        match key.trim() {
+            CATALOG_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID => {
+                detail.tooltip = parse_wrapped_1c_synonyms(value);
+            }
+            CATALOG_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => {
+                detail.synonym = parse_wrapped_1c_synonyms(value);
+            }
+            _ => {}
+        }
+    }
+
+    detail
+}
+
+fn parse_wrapped_1c_synonyms(value: &str) -> Vec<(String, String)> {
+    split_1c_braced_fields(value, 0)
+        .and_then(|fields| fields.get(2).map(|field| parse_1c_synonyms(field)))
+        .unwrap_or_else(|| parse_1c_synonyms(value))
 }
 
 fn parse_report_child_templates_from_text(
@@ -21256,6 +21342,7 @@ fn push_catalog_standard_attribute_xml(
     attribute: &CatalogStandardAttribute,
     catalog: &CatalogProperties,
 ) {
+    let details = catalog.standard_attribute_details.get(attribute.name);
     xml.push_str(&format!(
         "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
 \t\t\t\t\t<xr:LinkByType/>\r\n\
@@ -21264,9 +21351,22 @@ fn push_catalog_standard_attribute_xml(
 \t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 \t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 \t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
-\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:ToolTip/>\r\n\
-\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
+        escape_xml_text(attribute.name),
+        attribute.fill_checking,
+        xml_bool(attribute.fill_from_filling_value),
+        attribute.type_reduction_mode
+    ));
+    push_localized_property(
+        xml,
+        "\t\t\t\t\t",
+        "xr:ToolTip",
+        details
+            .map(|detail| detail.tooltip.as_slice())
+            .unwrap_or(&[]),
+    );
+    xml.push_str(
+        "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
 \t\t\t\t\t<xr:Format/>\r\n\
 \t\t\t\t\t<xr:ChoiceForm/>\r\n\
 \t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
@@ -21275,16 +21375,21 @@ fn push_catalog_standard_attribute_xml(
 \t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
 \t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
 \t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:Synonym/>\r\n\
-\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
+    );
+    push_localized_property(
+        xml,
+        "\t\t\t\t\t",
+        "xr:Synonym",
+        details
+            .map(|detail| detail.synonym.as_slice())
+            .unwrap_or(&[]),
+    );
+    xml.push_str(
+        "\t\t\t\t\t<xr:Comment/>\r\n\
 \t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
 \t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n",
-        escape_xml_text(attribute.name),
-        attribute.fill_checking,
-        xml_bool(attribute.fill_from_filling_value),
-        attribute.type_reduction_mode
-    ));
+    );
     push_catalog_standard_attribute_fill_value(xml, attribute, catalog);
     xml.push_str(
         "\t\t\t\t\t<xr:Mask/>\r\n\
@@ -36970,6 +37075,67 @@ mod tests {
         assert!(xml.contains(
             "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
         ));
+    }
+
+    #[test]
+    fn extracts_catalog_standard_attribute_tooltips_and_synonyms_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let standard_attribute_details = r##"{1,{1,2,{-3},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Description & help"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Description caption"}}},{-2},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Code & help"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Code caption"}}}}}"##;
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{0}},1,1,{standard_attribute_details},{{0}},{{0}},{{0}},{{0}},{{0}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        let description_start = xml
+            .find(r#"<xr:StandardAttribute name="Description">"#)
+            .unwrap();
+        let description_end = description_start
+            + xml[description_start..]
+                .find("</xr:StandardAttribute>")
+                .unwrap();
+        let description_xml = &xml[description_start..description_end];
+        assert!(description_xml.contains("<xr:ToolTip>"));
+        assert!(description_xml.contains("<v8:content>Description &amp; help</v8:content>"));
+        assert!(description_xml.contains("<xr:Synonym>"));
+        assert!(description_xml.contains("<v8:content>Description caption</v8:content>"));
+        assert!(
+            description_xml.find("<xr:MaxValue").unwrap()
+                < description_xml.find("<xr:ToolTip>").unwrap()
+        );
+        assert!(
+            description_xml.find("<xr:Synonym>").unwrap()
+                < description_xml.find("<xr:Comment/>").unwrap()
+        );
+
+        let code_start = xml.find(r#"<xr:StandardAttribute name="Code">"#).unwrap();
+        let code_end = code_start + xml[code_start..].find("</xr:StandardAttribute>").unwrap();
+        let code_xml = &xml[code_start..code_end];
+        assert!(code_xml.contains("<v8:content>Code &amp; help</v8:content>"));
+        assert!(code_xml.contains("<v8:content>Code caption</v8:content>"));
+        assert!(!xml.contains("<v8:lang>#</v8:lang>"));
     }
 
     #[test]
