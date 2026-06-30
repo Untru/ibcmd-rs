@@ -14761,39 +14761,43 @@ fn moxel_format_values<'a>(flags: u64, fields: &[&'a str]) -> Option<[Option<&'a
         if flags & (1u64 << bit) == 0 {
             continue;
         }
-        if !matches!(
-            bit,
-            0 | 1
-                | 2
-                | 3
-                | 4
-                | 5
-                | 6
-                | 7
-                | 8
-                | 9
-                | 10
-                | 11
-                | 14
-                | 15
-                | 16
-                | 19
-                | 20
-                | 26
-                | 30
-                | 31
-                | 34
-                | 35
-                | 36
-                | 37
-                | 38
-        ) {
-            return None;
+        let field = *fields.get(field_index)?;
+        if moxel_format_bit_is_supported(bit) {
+            *value = Some(field);
         }
-        *value = Some(*fields.get(field_index)?);
         field_index += 1;
     }
     (field_index == fields.len()).then_some(values)
+}
+
+fn moxel_format_bit_is_supported(bit: usize) -> bool {
+    matches!(
+        bit,
+        0 | 1
+            | 2
+            | 3
+            | 4
+            | 5
+            | 6
+            | 7
+            | 8
+            | 9
+            | 10
+            | 11
+            | 14
+            | 15
+            | 16
+            | 19
+            | 20
+            | 26
+            | 30
+            | 31
+            | 34
+            | 35
+            | 36
+            | 37
+            | 38
+    )
 }
 
 fn parse_moxel_format_usize(values: &[Option<&str>; 64], bit: usize) -> Option<usize> {
@@ -34604,6 +34608,29 @@ mod tests {
         assert_eq!(moxel_text_placement(0), Some("Auto"));
         assert_eq!(moxel_text_placement(2), Some("Block"));
         assert_eq!(moxel_text_placement(3), Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_ignores_unknown_format_bits_without_dropping_known_values() {
+        let format = parse_moxel_format("{24704,72,900,3}", &[]).unwrap();
+
+        assert_eq!(format.width, Some(72));
+        assert_eq!(format.text_placement, Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_table_with_unknown_format_bits_preserves_known_format_indexes() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{24704,72,900,3},{1,0}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("<f>2</f>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<width>72</width>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t</format>"
+        ));
     }
 
     #[test]
