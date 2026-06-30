@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 36 | Diff mining | reusable `source-diff-signatures` CLI added; bounded scan of the last full diff sampled 2,101 XML pairs and shows the largest remaining clusters are still MXL `document/format/*` and `formatIndex` signatures |
+| 36 | Form.xml | default `Page/ScrollOnCompress=false` is suppressed while explicit `true` remains exported and packable |
+| 36 | Flowchart.xml | BusinessProcess/GraphicalSchema `Font` now decodes serialized style font tuples for connection lines |
+| 36 | MXL templates | spreadsheet `textOrientation` format bit 13 extracts to XML and packs back into MOXCEL bodies |
+| 36 | CommonAttributes | native property-tail `FillChecking` now emits `ShowError` / `DontCheck` after `FillValue` in source XML order |
+| 36 | Source staging readiness | `CommonCommand/Ext/CommandInterface.xml` raw command-interface rows are covered as base-free staging |
 | 35 | Diff mining | sampled XML-path mining report added to drive agents by repeated signatures instead of object families |
 | 35 | Form.xml | default `ShowCommandBar=true` is suppressed while explicit `false` and explicit packer values remain supported |
 | 35 | Object metadata XML | Catalog child attributes now reuse generic property-tail parsing with resolved `ChoiceParameters` refs |

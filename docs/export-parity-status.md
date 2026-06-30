@@ -27,6 +27,9 @@ target\release\ibcmd-rs.exe source-diff `
 
 The full JSON report is retained at
 `E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\diff_full_source_only.json`.
+Round 36 also produced a bounded signature-mining report at
+`E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\source-diff-signatures-round36.json`
+to rank repeated XML path differences for the next agent batches.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated after the round 32
@@ -48,6 +51,12 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 36 diff-mining slice | reusable XML-path signature mining | added `source-diff-signatures`; a bounded run sampled 2,101 XML pairs from the last full diff and confirmed the largest remaining clusters are MXL `document/format/*` and `formatIndex` signatures |
+| Round 36 Form.xml slice | unit-level extractor/packer verification | default `Page/ScrollOnCompress=false` is omitted from source XML while explicit `true` remains supported |
+| Round 36 Flowchart.xml slice | unit-level source asset verification | BusinessProcess/GraphicalSchema connection-line `Font` now decodes serialized style font tuples instead of always emitting the default GUI font |
+| Round 36 MXL template slice | unit-level extractor/packer verification | spreadsheet `textOrientation` format bit 13 exports to `<textOrientation>` and packs back into MOXCEL bodies |
+| Round 36 CommonAttribute metadata slice | unit-level metadata XML verification | CommonAttribute property-tail `FillChecking` is parsed from the native tail and emitted as `ShowError` / `DontCheck` after `FillValue` |
+| Round 36 source staging readiness slice | unit-level readiness/row-generation verification | `CommonCommand/Ext/CommandInterface.xml` raw command-interface source rows can be staged base-free |
 | Round 35 diff-mining slice | sampled XML-path diff mining | added `docs/diff-mining-2026-07-01-round35.md` to prioritize repeated signatures such as MXL format indexes, Catalog child tails and Form default over-emission |
 | Round 35 Form.xml slice | unit-level extractor/packer verification | default `ShowCommandBar=true` is omitted from source XML while explicit `false` and explicit packer `true` remain supported |
 | Round 35 Catalog metadata slice | unit-level metadata XML verification | Catalog child attributes now pass `object_refs` into the shared property-tail parser, resolving `ChoiceParameters` design-time refs |
@@ -219,6 +228,12 @@ Verification history:
 | Round 35 MXL template slice | unit-level template body verification | unknown MOXCEL format bits no longer invalidate the entire format table |
 | Round 35 source staging readiness slice | unit-level readiness/row-generation verification | configuration application modules have explicit base-free readiness and row-generation coverage |
 | Round 35 Role Rights.xml slice | unit-level extractor/packer verification | role rights extraction and packing support form refs including owned forms |
+| Round 36 diff-mining slice | reusable XML-path signature mining | `source-diff-signatures` turns a `source-diff` JSON into ranked repeated XML path signatures with per-kind sampling |
+| Round 36 Form.xml slice | unit-level extractor/packer verification | `Page/ScrollOnCompress=false` is treated as a native omitted default; explicit `true` still round-trips |
+| Round 36 Flowchart.xml slice | unit-level source asset verification | flowchart connection-line fonts decode from serialized style tuples, including standard style-item refs |
+| Round 36 MXL template slice | unit-level extractor/packer verification | MXL `textOrientation` format bit 13 is preserved in export and import packing |
+| Round 36 CommonAttribute metadata slice | unit-level metadata XML verification | CommonAttribute `FillChecking` is emitted from native property details in native XML order |
+| Round 36 source staging readiness slice | unit-level readiness/row-generation verification | raw `CommonCommand/Ext/CommandInterface.xml` staging no longer needs an active base blob |
 
 Performance note for selected extraction:
 
