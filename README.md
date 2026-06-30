@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 38 | Form.xml | default `WindowOpeningMode=DontBlock` is suppressed in export while explicit XML still packs into the form layout |
+| 38 | MXL templates | native empty format slots `{0}` are preserved, so later width-bearing formats are no longer dropped |
+| 38 | MXL templates | mixed `NamedItemCells` / `NamedItemDrawing` lists now preserve valid named areas without packing bogus drawing areas |
+| 38 | Object metadata XML | Document and Report child attributes now reuse shared property-tail extraction, including `DataHistory` after `ChoiceForm` |
+| 38 | Subsystems | metadata scalar tail now emits `IncludeHelpInContents`, `IncludeInCommandInterface`, and native `UseOneCommand` |
+| 38 | Source staging readiness | `XDTOPackages/*/Ext/Package.bin` is covered as base-free raw-deflated staging and source-load coverage |
 | 37 | Form.xml | dynamic-list `Settings/Field` entries now export `dataPath`/`field` and pack back into the serialized settings bag |
 | 37 | MXL templates | `textPlacement=Cut` now extracts from MOXCEL code `1` and packs back to the same format bit |
 | 37 | MXL templates | non-1-based column `formatIndex` values are preserved separately from the normalized internal indexes used for row/cell decoding |

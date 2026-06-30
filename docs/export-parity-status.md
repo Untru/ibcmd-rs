@@ -51,6 +51,12 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 38 Form.xml slice | unit-level extractor/packer verification | default `WindowOpeningMode=DontBlock` is omitted from source XML while explicit XML still packs into the form layout |
+| Round 38 MXL format slice | unit-level extractor/packer verification | native empty format slots `{0}` no longer drop later format-table entries such as width-bearing formats |
+| Round 38 MXL named-area slice | unit-level template body verification | mixed `NamedItemCells` / `NamedItemDrawing` lists preserve valid named areas and skip drawing items in the named-area packer |
+| Round 38 object metadata slice | unit-level metadata XML verification | Document and Report child attributes use shared property-tail extraction and emit `DataHistory` after `ChoiceForm` |
+| Round 38 Subsystem metadata slice | unit-level metadata XML verification | Subsystem scalar tail emits `IncludeHelpInContents`, `IncludeInCommandInterface`, and native `UseOneCommand` |
+| Round 38 source staging readiness slice | unit-level readiness/row-generation verification | `XDTOPackages/*/Ext/Package.bin` stages from source bytes without fetching an active Config blob and is counted by source-load coverage |
 | Round 37 Form.xml slice | unit-level extractor/packer verification | dynamic-list `Settings/Field` entries now export `dataPath`/`field` and pack back into the serialized settings bag |
 | Round 37 MXL text-placement slice | unit-level extractor/packer verification | `textPlacement=Cut` maps to MOXCEL code `1` in both export and import packing |
 | Round 37 MXL format-index slice | unit-level template body verification | raw column `formatIndex` values are preserved separately from normalized internal indexes, keeping non-1-based column format references stable |
@@ -246,6 +252,12 @@ Verification history:
 | Round 37 Configuration.xml slice | unit-level metadata XML verification | root `CommonPicture` child objects are emitted without misclassifying other code-4 root children |
 | Round 37 object metadata slice | unit-level metadata XML verification | shared child attribute property tails now include resolved non-empty `ChoiceForm` refs |
 | Round 37 source staging readiness slice | unit-level readiness/row-generation verification | `Ext/MainSectionPicture.xml` is covered by base-free row generation and source-load audit classification |
+| Round 38 Form.xml slice | unit-level extractor/packer verification | `WindowOpeningMode=DontBlock` is treated as a native omitted default while explicit XML still round-trips |
+| Round 38 MXL format slice | unit-level extractor/packer verification | empty format slots pack as native `{0}` and extract as valid empty slots |
+| Round 38 MXL named-area slice | unit-level template body verification | named-area parsing skips drawing named items without losing later cell named areas |
+| Round 38 object metadata slice | unit-level metadata XML verification | Document/Report child attribute metadata now includes shared property tails such as `DataHistory` |
+| Round 38 Subsystem metadata slice | unit-level metadata XML verification | Subsystem native scalar tail no longer emits the obsolete `UseStandardCommands` property |
+| Round 38 source staging readiness slice | unit-level readiness/row-generation verification | XDTO package `Ext/Package.bin` source bytes are prepared as base-free raw-deflated body rows |
 
 Performance note for selected extraction:
 
