@@ -4612,25 +4612,49 @@ fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<Strin
 fn build_command_interface_reference_index_from_texts(
     rows: &[MetadataTextRow],
 ) -> BTreeMap<String, String> {
+    let row_entries = parallel::install(|| {
+        rows.par_iter()
+            .enumerate()
+            .map(|(index, row)| (index, command_interface_reference_entries_from_text(row)))
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        rows.iter()
+            .enumerate()
+            .map(|(index, row)| (index, command_interface_reference_entries_from_text(row)))
+            .collect::<Vec<_>>()
+    });
     let mut index = BTreeMap::new();
-    for row in rows {
-        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
-            continue;
-        };
-        if kind == "CommonCommand" {
-            index.insert(
-                row.file_name.clone(),
-                format!("CommonCommand.{}", header.name),
-            );
-        }
-        for command in nested_command_headers_from_text(&row.text, &row.file_name) {
-            index.insert(
-                command.uuid,
-                format!("{}.{}.Command.{}", kind, header.name, command.name),
-            );
+    for (_, entries) in row_entries {
+        for (uuid, reference) in entries {
+            index.insert(uuid, reference);
         }
     }
     index
+}
+
+fn command_interface_reference_entries_from_text(row: &MetadataTextRow) -> Vec<(String, String)> {
+    let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    if kind == "CommonCommand" {
+        entries.push((
+            row.file_name.clone(),
+            format!("CommonCommand.{}", header.name),
+        ));
+    }
+    entries.extend(
+        nested_command_headers_from_text(&row.text, &row.file_name)
+            .into_iter()
+            .map(|command| {
+                (
+                    command.uuid,
+                    format!("{}.{}.Command.{}", kind, header.name, command.name),
+                )
+            }),
+    );
+    entries
 }
 
 #[allow(dead_code)]
@@ -30413,6 +30437,46 @@ mod tests {
                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.f".to_string(),
             ]))
             .is_none()
+        );
+    }
+
+    #[test]
+    fn command_interface_reference_index_preserves_row_order_overwrites() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let old_row = MetadataTextRow {
+            file_name: uuid.to_string(),
+            text: String::new(),
+            object_code: Some(9),
+            header: Some(MetadataHeader {
+                uuid: uuid.to_string(),
+                name: "OpenOld".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("CommonCommand".to_string()),
+            folder: Some("CommonCommands"),
+        };
+        let new_row = MetadataTextRow {
+            file_name: uuid.to_string(),
+            text: String::new(),
+            object_code: Some(9),
+            header: Some(MetadataHeader {
+                uuid: uuid.to_string(),
+                name: "OpenNew".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("CommonCommand".to_string()),
+            folder: Some("CommonCommands"),
+        };
+
+        let index = build_command_interface_reference_index_from_texts(&[old_row, new_row]);
+
+        assert_eq!(
+            index.get(uuid).map(String::as_str),
+            Some("CommonCommand.OpenNew")
         );
     }
 
