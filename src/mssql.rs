@@ -54,7 +54,6 @@ use crate::module_blob::{
     raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
     raw_deflated_plain_sha256,
 };
-use crate::mssql_dump::extract_moxel_spreadsheet_xml;
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
 use crate::source_audit::{
@@ -1206,8 +1205,8 @@ fn template_bootstrap_rows(
             "0",
             "template_spreadsheet_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "SpreadsheetDocument packer can build a MOXCEL blob from Template.xml; current staging fetches base only to preserve a semantically equal active blob",
+            false,
+            "SpreadsheetDocument packer builds the MOXCEL blob from Template.xml without reading the active Config row",
         )),
         "AddIn" | "BinaryData" => rows.extend(optional_body_bootstrap_row(
             source_root,
@@ -3260,9 +3259,9 @@ fn prepare_template_body_row(
 }
 
 fn prepare_spreadsheet_template_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
@@ -3272,7 +3271,6 @@ fn prepare_spreadsheet_template_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read SpreadsheetDocument Template body {}",
@@ -3286,45 +3284,12 @@ fn prepare_spreadsheet_template_body_row(
                 body_path.display()
             )
         })?;
-    let (blob, blob_sha256) =
-        preserve_moxel_base_blob_if_semantically_equal(&base_body, &xml, &packed, source)
-            .with_context(|| {
-                format!(
-                    "failed to compare SpreadsheetDocument Template body {} with base",
-                    body_path.display()
-                )
-            })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
-        blob,
-        blob_sha256,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
     }])
-}
-
-fn preserve_moxel_base_blob_if_semantically_equal(
-    base_body: &[u8],
-    source_xml: &[u8],
-    packed: &crate::module_blob::PackedRawDeflatedBlob,
-    source: Option<&MetadataSourceContext>,
-) -> Result<(Vec<u8>, String)> {
-    let object_refs = match source {
-        Some(source) => source.moxel_object_refs()?,
-        None => BTreeMap::new(),
-    };
-    if let Some(base_xml) = extract_moxel_spreadsheet_xml(base_body, &object_refs)
-        && base_xml.as_bytes() == source_xml
-    {
-        return Ok((base_body.to_vec(), hex_sha256(base_body)));
-    }
-    if let (Some(base_xml), Some(packed_xml)) = (
-        extract_moxel_spreadsheet_xml(base_body, &object_refs),
-        extract_moxel_spreadsheet_xml(&packed.blob, &object_refs),
-    ) && base_xml == packed_xml
-    {
-        return Ok((base_body.to_vec(), hex_sha256(base_body)));
-    }
-    Ok((packed.blob.clone(), packed.output_sha256.clone()))
 }
 
 fn prepare_html_template_body_row(
@@ -6183,8 +6148,9 @@ mod tests {
     use crate::module_blob::{
         CommonModuleXmlProperties, MetadataSourceContext, ReturnValuesReuse,
         SimpleMetadataXmlProperties, hex_sha256, module_blob_text_sha256,
-        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
-        raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
+        pack_help_blob_from_parts, pack_moxel_spreadsheet_blob_from_xml_with_source,
+        pack_raw_deflated_blob_from_bytes, raw_deflated_first_base64_payload_sha256,
+        raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::fs;
@@ -6243,6 +6209,32 @@ mod tests {
 </ExtPicture>
 "#
         )
+    }
+
+    fn sample_spreadsheet_template_xml() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Total</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#
     }
 
     #[test]
@@ -7691,6 +7683,58 @@ mod tests {
     }
 
     #[test]
+    fn reports_spreadsheet_template_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-spreadsheet-template-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Table.xml");
+        let template_ext = root.join("CommonTemplates").join("Table").join("Ext");
+        fs::create_dir_all(&template_ext).unwrap();
+        fs::write(
+            &template_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>Table</Name>
+      <TemplateType>SpreadsheetDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            template_ext.join("Template.xml"),
+            sample_spreadsheet_template_xml(),
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&template_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "template_spreadsheet_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd.0"
+        );
+        assert_eq!(row.source_path, "CommonTemplates/Table/Ext/Template.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_binary_template_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-binary-template-readiness-{}",
@@ -7997,6 +8041,51 @@ mod tests {
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(b"{#base64:UEsDBA==}")
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_spreadsheet_template_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-spreadsheet-template-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Table.xml");
+        let body_path = root
+            .join("CommonTemplates")
+            .join("Table")
+            .join("Ext")
+            .join("Template.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&template_xml, b"<CommonTemplate/>").unwrap();
+        fs::write(&body_path, sample_spreadsheet_template_xml()).unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonTemplate",
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+            "Table",
+        );
+
+        let rows = super::prepare_spreadsheet_template_body_row(
+            PathBuf::from("missing-sqlcmd-for-spreadsheet-template-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &template_xml,
+            &properties,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "dddddddd-dddd-4ddd-dddd-dddddddddddd.0");
+        assert_eq!(rows[0].path, body_path);
+        let expected = pack_moxel_spreadsheet_blob_from_xml_with_source(
+            sample_spreadsheet_template_xml(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(rows[0].blob, expected.blob);
+        assert_eq!(rows[0].blob_sha256, hex_sha256(&rows[0].blob));
 
         let _ = fs::remove_dir_all(root);
     }
