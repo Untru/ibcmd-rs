@@ -17845,6 +17845,7 @@ fn parse_register_properties_from_text(
                 header,
                 value_types,
                 properties,
+                tabular_section_properties: None,
                 child_objects: Vec::new(),
             })
         })
