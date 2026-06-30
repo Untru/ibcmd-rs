@@ -7449,7 +7449,8 @@ fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
+    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
+        && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
 }
 
 fn path_ends_with_for_child_skip_on_input(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -10116,7 +10117,7 @@ fn patch_form_layout_child_item_entry(
             if default_button { "1" } else { "0" }.to_string(),
         ));
     }
-    if item.tag == "InputField"
+    if matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
         && let Some(read_only) = item.read_only
         && form_layout_input_field_is_extended(fields)
         && let Some(read_only_range) = fields.get(14)
@@ -25470,6 +25471,36 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[text_fields[11].clone()], "{1,{8}}");
         assert_eq!(&parsed.layout[text_fields[23].clone()], "5");
         assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_text_document_field_read_only() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+            )?;
+            let xml = format!(
+                r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<TextDocumentField name="ProcedureEditor" id="20">
+			<ReadOnly>{value}</ReadOnly>
+		</TextDocumentField>
+	</ChildItems>
+</Form>"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let text_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+            assert_eq!(&parsed.layout[text_fields[14].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
 
         Ok(())
     }
