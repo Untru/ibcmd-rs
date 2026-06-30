@@ -361,3 +361,108 @@ blocker is not the ExchangePlan content framing. The next step is to determine
 why this real Constant row is not present in the source-layout object reference
 index during the selected/full extraction path, or to add a targeted reference
 index path for ExchangePlan content ids.
+
+## Round 30 ExchangePlan Constant reference index
+
+Root cause: selected ExchangePlan owner metadata was classified as needing
+form/template/type reference indexes, but not `object_refs`. When a selected
+`ExchangePlans\Полный\Ext\Content.xml` export includes the owner metadata row,
+that selected needs profile overrides the full source-layout reference profile.
+The `.1` ExchangePlan content body can reference direct metadata object UUIDs,
+including Constants, so direct object references must be prepared for selected
+ExchangePlan source-asset extraction even when metadata XML is disabled.
+
+The real Constant row exists in `ut_ibcmd.dbo.Config` and is included by the
+broad metadata predicate:
+
+```text
+FileName: ff76e85a-6d29-41d3-a83e-f4a34139c6b2
+PartNo: 0
+DataSize: 404
+```
+
+Its inflated direct metadata shape is a code `16` Constant named
+`ВыгружатьВнутренниеШтрихкодыШтучныхТоваров`. The selected needs rule now sets
+`object_refs` for `ExchangePlan`, and the focused unit expectation was updated
+accordingly.
+
+Selected repro after the fix:
+
+```powershell
+E:\ibcmd_lab\worktrees\issue-19-exchange-constant-ref-v2\target\debug\ibcmd-rs.exe `
+  mssql-dump-config `
+  --server localhost `
+  --database ut_ibcmd `
+  --output-dir E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-polny-selected-after-fix `
+  --overwrite `
+  --no-binary-rows `
+  --file-name-list E:\ibcmd_lab\perf\issue-19-exchange-content-v1-polny-selected-file-names.txt
+```
+
+Result: completed successfully, wrote 2 files, did not generate
+`ConfigDumpInfo.xml`, and the first content entry resolved as:
+
+```xml
+<Metadata>Constant.ВыгружатьВнутренниеШтрихкодыШтучныхТоваров</Metadata>
+```
+
+Selected timing evidence:
+
+| Metric | Value |
+|---|---:|
+| `rows` | 2 |
+| `source_asset_rows` | 1 |
+| `prepare_indexes_ms` | 122,332 |
+| `prepare_metadata_texts_ms` | 7,830 |
+| `prepare_reference_indexes_ms` | 113,950 |
+| `prepare_object_refs_ms` | 111,000 |
+| `source_asset_exchange_plan_cpu_ms` | 10 |
+
+Artifacts:
+
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-polny-selected-after-fix-report.json`
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-polny-selected-after-fix.log`
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-polny-selected-after-fix`
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-constant-inflated.txt`
+
+Because the selected repro passed, a full release source-layout run was retried:
+
+```powershell
+E:\ibcmd_lab\worktrees\issue-19-exchange-constant-ref-v2\target\release\ibcmd-rs.exe `
+  mssql-dump-config `
+  --server localhost `
+  --database ut_ibcmd `
+  --output-dir E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source `
+  --overwrite `
+  --no-binary-rows
+```
+
+Result: completed successfully, wrote 13,428 files from 40,576 rows, emitted
+10,277 source assets, and did not generate `ConfigDumpInfo.xml`.
+
+Full-run timing evidence:
+
+| Metric | Value |
+|---|---:|
+| `total_rows` | 40,576 |
+| `total_binary_bytes` | 927,826,268 |
+| `total_source_asset_rows` | 10,277 |
+| `prepare_indexes_ms` | 17,461 |
+| `prepare_metadata_texts_ms` | 1,570 |
+| `prepare_reference_indexes_ms` | 15,520 |
+| `prepare_object_refs_ms` | 10,621 |
+| `fetch_rows_ms` | 5,043 |
+| `process_rows_wall_ms` | 15,598 |
+| `source_asset_cpu_ms` | 191,976 |
+| `source_asset_exchange_plan_cpu_ms` | 96 |
+
+Artifacts:
+
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source-report.json`
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source.log`
+- `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source`
+
+Follow-up: the selected one-row ExchangePlan content repro is now correct but
+expensive because it must build broad object refs. A future performance pass can
+target direct metadata UUIDs from the selected ExchangePlan content body instead
+of building the full object reference index.

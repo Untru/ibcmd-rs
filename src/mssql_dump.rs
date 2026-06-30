@@ -1664,6 +1664,9 @@ fn selected_metadata_source_reference_index_needs(
                 needs.form_refs = true;
                 needs.template_refs = true;
                 needs.type_index = true;
+                if kind == "ExchangePlan" {
+                    needs.object_refs = true;
+                }
             }
             _ => return None,
         }
@@ -37952,7 +37955,7 @@ mod tests {
         assert!(needs.needs_broad_metadata());
         assert!(needs.form_refs);
         assert!(needs.template_refs);
-        assert!(!needs.object_refs);
+        assert!(needs.object_refs);
         assert!(!needs.field_refs);
         assert!(!needs.functional_option_refs);
         assert!(!needs.command_refs);
