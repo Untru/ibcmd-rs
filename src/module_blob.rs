@@ -9650,6 +9650,10 @@ fn format_form_layout_new_extended_button_item(
 }
 
 fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    if item.read_only.is_some() {
+        return format_form_layout_new_extended_input_field_item(item, item_uuid);
+    }
+
     let title_location = item
         .title_location
         .map(form_input_field_title_location_code)
@@ -9661,6 +9665,33 @@ fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &
         format_1c_string(&item.name),
         title_location,
         format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_extended_input_field_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+) -> String {
+    let title_location = item
+        .title_location
+        .map(form_input_field_title_location_code)
+        .unwrap_or("1");
+    let read_only = if item.read_only.unwrap_or(false) {
+        "1"
+    } else {
+        "0"
+    };
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,2,{},{},0,{},{{1,0}},{{0}},{{0}},1,{},2,0,2,{{1,0}},{{1,0}},1,1,0,3,0",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        title_location,
+        format_1c_synonyms(&item.title),
+        read_only
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
@@ -25568,6 +25599,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
         assert_eq!(&parsed.layout[input_fields[14].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_input_field_read_only() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<ReadOnly>{value}</ReadOnly>
+		</InputField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[input_fields[5].clone()], "2");
+            assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Author""#);
+            assert_eq!(&parsed.layout[input_fields[14].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
 
         Ok(())
     }
