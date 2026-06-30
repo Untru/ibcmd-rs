@@ -137,3 +137,29 @@ Acceptance:
   reason analogous to the round 22 form-body audit;
 - add targeted unit tests around readiness or row generation;
 - run targeted tests, `cargo fmt --check`, `cargo check`, and `git diff --check`.
+
+## Task F - Issue #19, Native Dump SQL Fetch Performance
+
+Worktree: `E:\ibcmd_lab\worktrees\issue-19-performance-v4`
+
+Goal: verify and reduce remaining `sqlcmd` use in the native
+`mssql-dump-config` hot path. The project already has a faster `bcp` path for
+some full-row reads, but filtered/direct reads and controlling queries still use
+`sqlcmd`.
+
+Scope:
+
+- primary file: `src/mssql_dump.rs`;
+- do not change source XML semantics;
+- avoid unrelated CLI/storage command rewrites.
+
+Acceptance:
+
+- identify whether the latest full dump still spends meaningful wall time in
+  `sqlcmd` row fetching versus CPU/source generation;
+- if a narrow safe change exists, route a hot `mssql-dump-config` read path
+  through the existing native `bcp` parser or an equivalent bulk path;
+- otherwise add precise timing/diagnostic evidence explaining why `sqlcmd` is
+  not the current primary bottleneck;
+- add focused tests for any changed fetch/parser behavior;
+- run targeted tests, `cargo fmt --check`, `cargo check`, and `git diff --check`.
