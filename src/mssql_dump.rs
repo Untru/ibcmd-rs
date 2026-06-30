@@ -16174,11 +16174,7 @@ fn parse_register_properties_from_text(
             "RecordManager",
         );
     }
-    let header_index = metadata_header_field_index(&fields, uuid);
-    let use_standard_commands = header_index
-        .and_then(|index| fields.get(index + 1))
-        .and_then(|field| parse_1c_bool_field(Some(*field)))
-        .unwrap_or(true);
+    let use_standard_commands = parse_register_use_standard_commands(kind, &fields, uuid);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
@@ -16191,6 +16187,23 @@ fn parse_register_properties_from_text(
         use_standard_commands,
         child_objects,
     })
+}
+
+fn parse_register_use_standard_commands(kind: &str, fields: &[&str], uuid: &str) -> bool {
+    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
+        return true;
+    };
+    if kind == "InformationRegister"
+        && let Some(value) = fields
+            .get(header_index + 6)
+            .and_then(|field| parse_1c_bool_field(Some(*field)))
+    {
+        return value;
+    }
+    fields
+        .get(header_index + 1)
+        .and_then(|field| parse_1c_bool_field(Some(*field)))
+        .unwrap_or(true)
 }
 
 fn push_register_generated_type_entries(
@@ -31191,6 +31204,49 @@ mod tests {
                     .find("<UseStandardCommands>false</UseStandardCommands>")
                     .unwrap()
         );
+    }
+
+    #[test]
+    fn extracts_information_register_use_standard_commands_from_extended_owner_fields() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let record_form_uuid = "99999999-9999-4999-8999-999999999999";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
+88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"FreshAuth\",{{1,\"en\",\"Fresh auth\"}},\"\"}}\r\n}},\
+{record_form_uuid},00000000-0000-0000-0000-000000000000,0,0,1,0,0,0,1,0,\
+{{0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,\
+{{0}},{{0}},{{0}},{{0}},{{0}},0,0,0,0,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("InformationRegisters/FreshAuth.xml")
+        );
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(!xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
     }
 
     #[test]
