@@ -14724,6 +14724,7 @@ struct ExchangePlanProperties {
 
 struct RegisterProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
     child_objects: Vec<RegisterChildObject>,
 }
 
@@ -16135,6 +16136,11 @@ fn parse_register_properties_from_text(
             "RecordManager",
         );
     }
+    let header_index = metadata_header_field_index(&fields, uuid);
+    let use_standard_commands = header_index
+        .and_then(|index| fields.get(index + 1))
+        .and_then(|field| parse_1c_bool_field(Some(*field)))
+        .unwrap_or(true);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
@@ -16144,6 +16150,7 @@ fn parse_register_properties_from_text(
         .collect();
     Some(RegisterProperties {
         generated_types,
+        use_standard_commands,
         child_objects,
     })
 }
@@ -19434,6 +19441,15 @@ fn format_register_source_xml(
     let internal_info = format_generated_types_internal_info_xml(&register.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        xml.insert_str(
+            index,
+            &format!(
+                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(register.use_standard_commands)
+            ),
+        );
     }
     if register.child_objects.is_empty() {
         return xml;
@@ -31004,6 +31020,51 @@ mod tests {
                 xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap()
             );
         }
+    }
+
+    #[test]
+    fn extracts_information_register_use_standard_commands_to_metadata_xml() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
+88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"register comment\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("InformationRegisters/Prices.xml")
+        );
+        assert!(xml.contains("<Comment>register comment</Comment>"));
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(
+            xml.find("<Comment>register comment</Comment>").unwrap()
+                < xml
+                    .find("<UseStandardCommands>false</UseStandardCommands>")
+                    .unwrap()
+        );
     }
 
     #[test]
