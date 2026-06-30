@@ -152,6 +152,7 @@ struct FormXmlCommand {
     tooltip: Vec<LocalizedString>,
     action: Option<String>,
     functional_options: Vec<String>,
+    modifies_saved_data: Option<bool>,
     current_row_use: Option<FormXmlCommandCurrentRowUse>,
 }
 
@@ -4168,6 +4169,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Autofill"
                         | "Event"
                         | "Action"
+                        | "ModifiesSavedData"
                         | "CurrentRowUse"
                         | "Item"
                         | "MainAttribute"
@@ -4508,6 +4510,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Title", "item", "content"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
                     || path_ends_with(
                         &path,
@@ -4940,6 +4943,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Title", "item", "content"])
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
                     || path_ends_with(
                         &path,
@@ -5560,6 +5564,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         if let Some(command) = current_command.as_mut() {
                             command.action = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "ModifiesSavedData"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "ModifiesSavedData"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.modifies_saved_data = Some(parse_xml_bool_text(
+                                "Form Command ModifiesSavedData",
+                                text_value.trim(),
+                            )?);
                         }
                     }
                     "CurrentRowUse"
@@ -6924,6 +6941,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Group"
                         | "Event"
                         | "Action"
+                        | "ModifiesSavedData"
                         | "CurrentRowUse"
                         | "Item"
                         | "MainAttribute"
@@ -7058,6 +7076,7 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         tooltip: Vec::new(),
         action: None,
         functional_options: Vec::new(),
+        modifies_saved_data: None,
         current_row_use: None,
     }))
 }
@@ -14010,6 +14029,14 @@ fn patch_form_body_command_entry(
             form_command_current_row_use_code(current_row_use).to_string(),
         ));
     }
+    if let Some(modifies_saved_data) = command.modifies_saved_data
+        && let Some(modifies_saved_data_range) = fields.get(10)
+    {
+        replacements.push((
+            modifies_saved_data_range.clone(),
+            if modifies_saved_data { "1" } else { "0" }.to_string(),
+        ));
+    }
     if !command.functional_options.is_empty()
         && let Some(functional_options_range) = fields.get(12)
         && let Some(source) = source
@@ -14200,6 +14227,11 @@ fn format_form_body_new_command(
         .current_row_use
         .map(form_command_current_row_use_code)
         .unwrap_or("0");
+    let modifies_saved_data = if command.modifies_saved_data == Some(true) {
+        "1"
+    } else {
+        "0"
+    };
     let functional_options = if command.functional_options.is_empty() {
         "{0,0}".to_string()
     } else if let Some(source) = source {
@@ -14209,7 +14241,7 @@ fn format_form_body_new_command(
     };
 
     Ok(format!(
-        "{{11,{{{},{}}},{},{},{},0,0,0,{},{},0,0,{}}}",
+        "{{11,{{{},{}}},{},{},{},0,0,0,{},{},{},0,{}}}",
         command.id,
         uuid,
         format_1c_string(&command.name),
@@ -14217,6 +14249,7 @@ fn format_form_body_new_command(
         format_1c_synonyms(&command.tooltip),
         format_1c_string(action),
         current_row_use,
+        modifies_saved_data,
         functional_options
     ))
 }
@@ -24384,6 +24417,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				</v8:item>
 			</ToolTip>
 			<Action>NewAction</Action>
+			<ModifiesSavedData>true</ModifiesSavedData>
 			<CurrentRowUse>DontUse</CurrentRowUse>
 			<FunctionalOptions>
 				<Item>FunctionalOption.UseFeature</Item>
@@ -24403,7 +24437,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[2].contains(r#"{1,"ru","New tip"}"#));
         assert!(
             parsed.trailing[2]
-                .contains(r#""NewAction",3,0,0,{0,1,99999999-9999-4999-8999-999999999999}"#)
+                .contains(r#""NewAction",3,1,0,{0,1,99999999-9999-4999-8999-999999999999}"#)
         );
         assert!(!parsed.trailing[2].contains("Old title"));
         assert!(!parsed.trailing[2].contains("Old tip"));
