@@ -2479,7 +2479,7 @@ fn apply_spreadsheet_text_value(
                 area.end_column = end_column;
             }
         }
-        "columnsID" if path_ends_with(path, &["namedItem", "area", "columnsID"]) => {
+        "columnsID" if spreadsheet_area_property_path(path, "columnsID") => {
             if let Some(area) = area
                 && !value.is_empty()
             {
@@ -20936,6 +20936,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<endRow>7</endRow>
 		<beginColumn>0</beginColumn>
 		<endColumn>4</endColumn>
+		<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
 	</printArea>
 </document>
 "#;
@@ -20946,7 +20947,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             text.contains(r#"{1,"Header",{1,{3,2,1,4,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0}}"#)
         );
-        assert!(text.contains("{1,0,5,4,7,00000000-0000-0000-0000-000000000000}"));
+        assert!(text.contains("{1,0,5,4,7,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

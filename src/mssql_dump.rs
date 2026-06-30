@@ -13748,6 +13748,12 @@ fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
         "\t\t<endColumn>{}</endColumn>\r\n",
         area.end_column
     ));
+    if let Some(columns_id) = &area.columns_id {
+        xml.push_str(&format!(
+            "\t\t<columnsID>{}</columnsID>\r\n",
+            escape_xml_text(columns_id)
+        ));
+    }
     xml.push_str("\t</printArea>\r\n");
 }
 
@@ -28327,6 +28333,24 @@ mod tests {
         assert!(xml.contains("<formatIndex>5</formatIndex>"));
         assert!(xml.contains("<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
         assert!(xml.contains("<f>7</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
+    }
+
+    #[test]
+    fn formats_moxel_print_area_preserves_columns_id() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,0,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{0},{0},1,2,1,0,0,0,{1,0,00000000-0000-0000-0000-000000000000,1,0,1},1,1,{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,2},0,{2,0,0,0,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let print_area = xml
+            .split("<printArea>")
+            .nth(1)
+            .and_then(|tail| tail.split("</printArea>").next())
+            .unwrap();
+
+        assert!(print_area.contains("<type>Columns</type>"));
+        assert!(print_area.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
     }
 
     #[test]
