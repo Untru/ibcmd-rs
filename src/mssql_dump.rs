@@ -4967,8 +4967,9 @@ fn extract_configuration_source_xml(
     }
     let mut header = parse_metadata_header_from_text(text, header_uuid)?;
     header.uuid = uuid.to_string();
+    let properties = parse_configuration_properties_from_text(text).unwrap_or_default();
     let child_objects = parse_configuration_child_objects(text, uuid, header_uuid);
-    let mut xml = format_metadata_source_xml("Configuration", &header, source_version);
+    let mut xml = format_configuration_source_xml(&header, &properties, source_version);
     if !child_objects.is_empty() {
         let mut child_xml = String::new();
         for child_object in &child_objects {
@@ -4981,6 +4982,73 @@ fn extract_configuration_source_xml(
         insert_metadata_child_objects_xml(&mut xml, "Configuration", &child_xml);
     }
     Some(xml)
+}
+
+fn parse_configuration_properties_from_text(text: &str) -> Option<ConfigurationProperties> {
+    let fields = configuration_root_fields(text)?;
+    Some(ConfigurationProperties {
+        name_prefix: fields
+            .get(2)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        configuration_extension_compatibility_mode: fields
+            .get(26)
+            .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
+        default_run_mode: fields
+            .get(3)
+            .and_then(|field| configuration_default_run_mode_xml(field.trim())),
+        script_variant: fields
+            .get(13)
+            .and_then(|field| configuration_script_variant_xml(field.trim())),
+        vendor: fields
+            .get(14)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        version: fields
+            .get(15)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        update_catalog_address: fields
+            .get(16)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        compatibility_mode: fields
+            .get(43)
+            .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
+    })
+}
+
+fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
+    let start = text.find("{68,")?;
+    split_1c_braced_fields(text, start)
+}
+
+fn configuration_default_run_mode_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("OrdinaryApplication"),
+        "1" => Some("ManagedApplication"),
+        _ => None,
+    }
+}
+
+fn configuration_script_variant_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Russian"),
+        "1" => Some("English"),
+        _ => None,
+    }
+}
+
+fn configuration_compatibility_mode_xml(value: &str) -> Option<String> {
+    if let Some(value) = parse_1c_quoted_string(value) {
+        return if value.is_empty() { None } else { Some(value) };
+    }
+    let version = value.parse::<u32>().ok()?;
+    if version < 80000 {
+        return None;
+    }
+    Some(format!(
+        "Version{}_{}_{}",
+        version / 10000,
+        (version / 100) % 100,
+        version % 100
+    ))
 }
 
 struct ConfigurationChildObject {
@@ -15219,6 +15287,18 @@ struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+struct ConfigurationProperties {
+    name_prefix: Option<String>,
+    configuration_extension_compatibility_mode: Option<String>,
+    default_run_mode: Option<&'static str>,
+    script_variant: Option<&'static str>,
+    vendor: Option<String>,
+    version: Option<String>,
+    update_catalog_address: Option<String>,
+    compatibility_mode: Option<String>,
+}
+
 struct CommonAttributeProperties {
     value_types: Vec<ConstantValueType>,
     auto_use: &'static str,
@@ -19843,6 +19923,48 @@ fn format_metadata_source_xml(
         comment = escape_xml_text(&header.comment),
         source_version = source_version.as_str(),
     )
+}
+
+fn format_configuration_source_xml(
+    header: &MetadataHeader,
+    properties: &ConfigurationProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Configuration", header, source_version);
+    let mut insert = String::new();
+    push_optional_simple_property_xml(&mut insert, "NamePrefix", properties.name_prefix.as_deref());
+    push_optional_simple_property_xml(
+        &mut insert,
+        "ConfigurationExtensionCompatibilityMode",
+        properties
+            .configuration_extension_compatibility_mode
+            .as_deref(),
+    );
+    push_optional_simple_property_xml(&mut insert, "DefaultRunMode", properties.default_run_mode);
+    push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
+    push_optional_simple_property_xml(&mut insert, "Vendor", properties.vendor.as_deref());
+    push_optional_simple_property_xml(&mut insert, "Version", properties.version.as_deref());
+    push_optional_simple_property_xml(
+        &mut insert,
+        "UpdateCatalogAddress",
+        properties.update_catalog_address.as_deref(),
+    );
+    push_optional_simple_property_xml(
+        &mut insert,
+        "CompatibilityMode",
+        properties.compatibility_mode.as_deref(),
+    );
+    insert_metadata_properties_xml(&mut xml, &insert);
+    xml
+}
+
+fn push_optional_simple_property_xml(xml: &mut String, name: &str, value: Option<&str>) {
+    let Some(value) = value else {
+        return;
+    };
+    xml.push_str("\t\t\t");
+    xml.push_str(&format_simple_property_xml(name, value));
+    xml.push_str("\r\n");
 }
 
 fn format_subsystem_source_xml(
@@ -33088,6 +33210,71 @@ mod tests {
         let xml_v21 = String::from_utf8_lossy(&extracted_v21.xml);
         assert!(xml_v21.contains(r#"version="2.21""#));
         assert!(!xml_v21.contains(r#"version="2.20""#));
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_native_scalar_properties() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let plain = r#"{2,
+{@UUID@},1,
+{9cd510cd-abfc-11d4-9434-004095e12fc7,
+{1,
+{68,
+{0,
+{3,
+{1,0,@HEADER_UUID@},"DemoApp",{1,"en","Demo app"},"",0,0,00000000-0000-0000-0000-000000000000,0}
+},"CF",1,
+{0},{0},{0},{0},{0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,"Vendor ""Name""","1.2.3","https://updates.example.invalid/",0,
+{0,0},0,
+{0,0},0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,80327,
+{0,0},0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,
+{0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,00000000-0000-0000-0000-000000000000,0,
+{0,0},{0,0},0,"",80320}
+}
+}
+}"#
+        .replace("@UUID@", uuid)
+        .replace("@HEADER_UUID@", header_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.starts_with('\u{feff}'));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+            assert!(xml.contains("<Comment/>"));
+            assert!(xml.contains("<NamePrefix>CF</NamePrefix>"));
+            assert!(xml.contains(
+                "<ConfigurationExtensionCompatibilityMode>Version8_3_27</ConfigurationExtensionCompatibilityMode>"
+            ));
+            assert!(xml.contains("<DefaultRunMode>ManagedApplication</DefaultRunMode>"));
+            assert!(xml.contains("<ScriptVariant>Russian</ScriptVariant>"));
+            assert!(xml.contains("<Vendor>Vendor \"Name\"</Vendor>"));
+            assert!(xml.contains("<Version>1.2.3</Version>"));
+            assert!(xml.contains(
+                "<UpdateCatalogAddress>https://updates.example.invalid/</UpdateCatalogAddress>"
+            ));
+            assert!(xml.contains("<CompatibilityMode>Version8_3_20</CompatibilityMode>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
     }
 
     #[test]
