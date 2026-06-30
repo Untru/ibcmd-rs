@@ -9806,6 +9806,31 @@ fn format_form_layout_new_group_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    if item.tag == "Pages" && (!item.tooltip.is_empty() || item.height.is_some()) {
+        return format_form_layout_new_extended_pages_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        );
+    }
+    if item.tag == "Page" && (!item.tooltip.is_empty() || item.scroll_on_compress.is_some()) {
+        return format_form_layout_new_extended_page_item(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        );
+    }
+
     let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
     let group = item.group.and_then(form_child_group_code).unwrap_or("0");
     let show_title = if item.show_title.unwrap_or(true) {
@@ -9827,6 +9852,147 @@ fn format_form_layout_new_group_item(
         format_1c_synonyms(&item.title),
         group,
         show_title,
+        creatable_children.len()
+    );
+    for child in creatable_children {
+        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_text = format_form_layout_new_child_item(
+            child,
+            &child_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        )?;
+        text.push(',');
+        text.push_str(&child_uuid);
+        text.push(',');
+        text.push_str(&child_text);
+    }
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn format_form_layout_new_extended_pages_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    format_form_layout_new_extended_group_with_child_span(
+        item,
+        item_uuid,
+        commands,
+        attribute_ids_by_name,
+        table_ids_by_name,
+        table_column_ids_by_name,
+        command_uuids,
+        source,
+        "0",
+        item.height.as_deref().unwrap_or("0"),
+    )
+}
+
+fn format_form_layout_new_extended_page_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let creatable_children = item
+        .child_items
+        .iter()
+        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .collect::<Vec<_>>();
+    let scroll_on_compress = if item.scroll_on_compress.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    if !creatable_children.is_empty() {
+        return format_form_layout_new_extended_group_with_child_span(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+            scroll_on_compress,
+            "0",
+        );
+    }
+
+    let group = item.group.and_then(form_child_group_code).unwrap_or("0");
+    let show_title = if item.show_title.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let mut text = format!(
+        "{{22,{{{},{}}},0,0,0,4,{},{},{},{},{},{}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        format_1c_synonyms(&item.tooltip),
+        group,
+        show_title,
+        scroll_on_compress
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn format_form_layout_new_extended_group_with_child_span(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    attribute_ids_by_name: &BTreeMap<String, String>,
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+    scroll_on_compress: &str,
+    height: &str,
+) -> Result<String> {
+    let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
+    let group = item.group.and_then(form_child_group_code).unwrap_or("0");
+    let show_title = if item.show_title.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let creatable_children = item
+        .child_items
+        .iter()
+        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .collect::<Vec<_>>();
+    let mut text = format!(
+        "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{},{},0,{},2,2,{{4,4,{{0}},4}},{{8,3,0,1,100}},{{0,0,0}},1,{{4,0,{{0}},2,0,0}},{}",
+        item.id,
+        item_uuid,
+        group_type,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        format_1c_synonyms(&item.tooltip),
+        group,
+        show_title,
+        scroll_on_compress,
+        height,
         creatable_children.len()
     );
     for child in creatable_children {
@@ -10393,7 +10559,7 @@ fn patch_form_layout_child_item_entry(
             | "ButtonGroup"
             | "ContextMenu"
     ) && let Some(show_title) = item.show_title
-        && let Some(show_title_range) = fields.get(9)
+        && let Some(show_title_range) = form_layout_child_item_show_title_range(text, fields, item)
     {
         replacements.push((
             show_title_range.clone(),
@@ -10461,7 +10627,7 @@ fn form_layout_child_item_group_range(
     fields: &[Range<usize>],
     item: &FormXmlChildItem,
 ) -> Option<Range<usize>> {
-    if item.tag == "Page" {
+    if matches!(item.tag.as_str(), "Pages" | "Page") {
         for index in [8, 9] {
             let range = fields.get(index)?.clone();
             if form_child_group_code(item.group?) == Some(text[range.clone()].trim()) {
@@ -10475,6 +10641,21 @@ fn form_layout_child_item_group_range(
     } else {
         fields.get(8).cloned()
     }
+}
+
+fn form_layout_child_item_show_title_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+) -> Option<Range<usize>> {
+    if matches!(item.tag.as_str(), "Pages" | "Page")
+        && fields
+            .get(8)
+            .is_some_and(|range| text[range.clone()].trim_start().starts_with('{'))
+    {
+        return fields.get(10).cloned();
+    }
+    fields.get(9).cloned()
 }
 
 fn form_layout_page_scroll_on_compress_range(
@@ -24871,6 +25052,78 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             parsed.layout
         );
         assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_pages_and_page_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Pages name="PagesGroup" id="8">
+			<Group>HorizontalIfPossible</Group>
+			<ShowTitle>false</ShowTitle>
+			<Height>14</Height>
+			<ToolTip>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Pages tip</v8:content>
+				</v8:item>
+			</ToolTip>
+			<ChildItems>
+				<Page name="MainPage" id="9">
+					<Group>HorizontalIfPossible</Group>
+					<ShowTitle>false</ShowTitle>
+					<ScrollOnCompress>false</ScrollOnCompress>
+					<ToolTip>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Page tip</v8:content>
+						</v8:item>
+					</ToolTip>
+				</Page>
+			</ChildItems>
+		</Pages>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let pages_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let page_fields = super::scan_braced_fields(&parsed.layout, pages_fields[23].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[pages_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[pages_fields[5].clone()], "3");
+        assert_eq!(&parsed.layout[pages_fields[6].clone()], r#""PagesGroup""#);
+        assert_eq!(
+            &parsed.layout[pages_fields[8].clone()],
+            r#"{1,"en","Pages tip"}"#
+        );
+        assert_eq!(&parsed.layout[pages_fields[9].clone()], "3");
+        assert_eq!(&parsed.layout[pages_fields[10].clone()], "0");
+        assert_eq!(&parsed.layout[pages_fields[13].clone()], "14");
+        assert_eq!(&parsed.layout[pages_fields[21].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[pages_fields[22].clone()]
+        ));
+        assert_eq!(&parsed.layout[page_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[page_fields[5].clone()], "4");
+        assert_eq!(&parsed.layout[page_fields[6].clone()], r#""MainPage""#);
+        assert_eq!(
+            &parsed.layout[page_fields[8].clone()],
+            r#"{1,"en","Page tip"}"#
+        );
+        assert_eq!(&parsed.layout[page_fields[9].clone()], "3");
+        assert_eq!(&parsed.layout[page_fields[10].clone()], "0");
+        assert_eq!(&parsed.layout[page_fields[11].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }
