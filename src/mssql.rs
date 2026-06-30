@@ -975,10 +975,10 @@ fn metadata_body_bootstrap_rows(
             object_path,
             infer_ws_reference_definition_path(xml_path),
             "0",
-            "raw_deflated_body",
+            "ws_reference_definition_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "raw deflated body packer builds the Config blob directly from source bytes without reading the active Config row",
+            "WSReference definition body is stored as a raw deflated body generated from source bytes without reading the active Config row",
         )),
         "CommonTemplate" | "Template" => rows.extend(template_bootstrap_rows(
             source_root,
@@ -7715,6 +7715,59 @@ mod tests {
     }
 
     #[test]
+    fn reports_ws_reference_definition_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-ws-reference-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let reference_xml = root.join("WSReferences").join("UpdateFiles.xml");
+        let reference_ext = root.join("WSReferences").join("UpdateFiles").join("Ext");
+        fs::create_dir_all(&reference_ext).unwrap();
+        fs::write(
+            &reference_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <WSReference uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+    <Properties><Name>UpdateFiles</Name></Properties>
+  </WSReference>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(reference_ext.join("WSDefinition.xml"), b"<definitions/>").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&reference_xml),
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(report.config_rows, 3);
+        assert_eq!(report.rows_requiring_base_blob, 2);
+        assert_eq!(report.rows_generatable_without_base_blob, 1);
+        assert_eq!(report.current_staging_rows_fetching_base_blob, 2);
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "ws_reference_definition_body")
+            .unwrap();
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0"
+        );
+        assert_eq!(
+            row.source_path,
+            "WSReferences/UpdateFiles/Ext/WSDefinition.xml"
+        );
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_raw_template_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-raw-template-readiness-{}",
@@ -8130,6 +8183,47 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "cccccccc-cccc-4ccc-cccc-cccccccccccc.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(body)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_ws_reference_definition_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-ws-reference-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let body_path = root
+            .join("WSReferences")
+            .join("UpdateFiles")
+            .join("Ext")
+            .join("WSDefinition.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let body = b"<definitions name=\"UpdateFiles\"/>";
+        fs::write(&body_path, body).unwrap();
+        let properties = test_simple_metadata_properties(
+            "WSReference",
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+            "UpdateFiles",
+        );
+
+        let rows = super::prepare_raw_deflated_body_row(
+            PathBuf::from("missing-sqlcmd-for-ws-reference-test").as_path(),
+            "missing-server",
+            "missing-database",
+            body_path.clone(),
+            &properties,
+            "WSReference definition",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0");
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
