@@ -47,7 +47,7 @@ use crate::module_blob::{
     pack_help_blob_from_parts, pack_module_blob_bytes,
     pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
     pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml_with_base,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
@@ -943,8 +943,8 @@ fn metadata_body_bootstrap_rows(
             "0",
             "style_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "Style body packer can build a new body from Style.xml; current staging fetches the active body to patch matching style entries",
+            false,
+            "Style body packer builds a new body from Style.xml and source-root StyleItem references without reading the active Config row",
         )),
         "ScheduledJob" => rows.extend(optional_body_bootstrap_row(
             source_root,
@@ -3136,9 +3136,9 @@ fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
 }
 
 fn prepare_style_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
@@ -3154,10 +3154,9 @@ fn prepare_style_body_row(
         )
     })?;
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read Style body XML {}", body_path.display()))?;
-    let packed = pack_style_body_blob_from_xml_with_base(&base_body, &xml, Some(source))
+    let packed = pack_style_body_blob_from_xml(&xml, Some(source))
         .with_context(|| format!("failed to pack Style body {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
@@ -6149,8 +6148,8 @@ mod tests {
         CommonModuleXmlProperties, MetadataSourceContext, ReturnValuesReuse,
         SimpleMetadataXmlProperties, hex_sha256, module_blob_text_sha256,
         pack_help_blob_from_parts, pack_moxel_spreadsheet_blob_from_xml_with_source,
-        pack_raw_deflated_blob_from_bytes, raw_deflated_first_base64_payload_sha256,
-        raw_deflated_plain_sha256,
+        pack_raw_deflated_blob_from_bytes, pack_style_body_blob_from_xml,
+        raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::fs;
@@ -6234,6 +6233,16 @@ mod tests {
 		</row>
 	</rowsItem>
 </document>
+"#
+    }
+
+    fn sample_style_body_xml() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<Style xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" version="2.21">
+	<Item name="FormBackColor">
+		<Color>web:Cream</Color>
+	</Item>
+</Style>
 "#
     }
 
@@ -7735,6 +7744,48 @@ mod tests {
     }
 
     #[test]
+    fn reports_style_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-style-body-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let style_xml = root.join("Styles").join("Main.xml");
+        let style_ext = root.join("Styles").join("Main").join("Ext");
+        fs::create_dir_all(&style_ext).unwrap();
+        fs::write(
+            &style_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Style uuid="eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee">
+    <Properties><Name>Main</Name></Properties>
+  </Style>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(style_ext.join("Style.xml"), sample_style_body_xml()).unwrap();
+
+        let report =
+            super::source_bootstrap_readiness_report(&root, std::slice::from_ref(&style_xml), &[])
+                .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "style_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0"
+        );
+        assert_eq!(row.source_path, "Styles/Main/Ext/Style.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_binary_template_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-binary-template-readiness-{}",
@@ -8084,6 +8135,49 @@ mod tests {
             None,
         )
         .unwrap();
+        assert_eq!(rows[0].blob, expected.blob);
+        assert_eq!(rows[0].blob_sha256, hex_sha256(&rows[0].blob));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_style_body_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-style-body-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let style_xml = root.join("Styles").join("Main.xml");
+        let body_path = root
+            .join("Styles")
+            .join("Main")
+            .join("Ext")
+            .join("Style.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&style_xml, b"<Style/>").unwrap();
+        fs::write(&body_path, sample_style_body_xml()).unwrap();
+        let properties = test_simple_metadata_properties(
+            "Style",
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+            "Main",
+        );
+        let source = MetadataSourceContext::new(root.clone());
+
+        let rows = super::prepare_style_body_row(
+            PathBuf::from("missing-sqlcmd-for-style-body-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &style_xml,
+            &properties,
+            Some(&source),
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0");
+        assert_eq!(rows[0].path, body_path);
+        let expected =
+            pack_style_body_blob_from_xml(sample_style_body_xml(), Some(&source)).unwrap();
         assert_eq!(rows[0].blob, expected.blob);
         assert_eq!(rows[0].blob_sha256, hex_sha256(&rows[0].blob));
 
