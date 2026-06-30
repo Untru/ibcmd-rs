@@ -51,11 +51,15 @@ import hierarchy, not as a production runtime dependency.
 | CommonForms | partial | 36.8% | 705 |
 | FilterCriteria | partial | 14.3% | 6 |
 | Subsystems | partial | 9.9% | 690 |
-| CommonAttributes | not started | 0.0% | 7 |
-| Configuration.xml | not started | 0.0% | 1 |
+| CommonAttributes | partial | 14.3% | 6 |
+| Configuration.xml | partial | 100.0% | 0 |
 
 Scope exclusion: `ConfigDumpInfo.xml` is intentionally not generated and is not
 counted as parity debt.
+
+`Configuration.xml` support currently covers the root metadata header
+(name/synonym/comment/uuid) and source XML version selection; deeper root
+properties remain tracked under Issue #22.
 
 ## Commands
 

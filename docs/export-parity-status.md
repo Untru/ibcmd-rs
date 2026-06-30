@@ -103,15 +103,19 @@ Diff by file kind:
 | FilterCriteria | partial | 7 | 1 | 6 | 14.3 |
 | HTTPServices | partial | 10 | 5 | 5 | 50.0 |
 | Ext | done | 15 | 15 | 0 | 100.0 |
-| CommonAttributes | not_started | 7 | 0 | 7 | 0.0 |
+| CommonAttributes | partial | 7 | 1 | 6 | 14.3 |
 | ConfigDumpInfo.xml | excluded | 1 | 0 | 0 | n/a |
-| Configuration.xml | not_started | 1 | 0 | 1 | 0.0 |
+| Configuration.xml | partial | 1 | 1 | 0 | 100.0 |
 
 ## Scope Exclusions
 
 | Artifact | Decision | Reason |
 |---|---|---|
 | ConfigDumpInfo.xml | do not generate | Not required for the replacement export/import workflow; do not count it as parity debt. |
+
+Note: `Configuration.xml` currently covers the root metadata header
+(uuid/name/synonym/comment) and source XML version selection. Deeper root
+properties are still tracked as Issue #22 follow-up work.
 
 ## Delegation History
 

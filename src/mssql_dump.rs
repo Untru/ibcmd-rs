@@ -4566,7 +4566,11 @@ fn parse_configuration_reference_text(text: &str) -> Option<String> {
     parse_metadata_header_from_text(text, uuid).map(|header| header.name)
 }
 
-fn extract_configuration_source_xml(text: &str, uuid: &str) -> Option<String> {
+fn extract_configuration_source_xml(
+    text: &str,
+    uuid: &str,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<String> {
     if !text.trim_start().starts_with("{2,") {
         return None;
     }
@@ -4588,7 +4592,11 @@ fn extract_configuration_source_xml(text: &str, uuid: &str) -> Option<String> {
     }
     let mut header = parse_metadata_header_from_text(text, header_uuid)?;
     header.uuid = uuid.to_string();
-    Some(format_metadata_source_xml("Configuration", &header))
+    Some(format_metadata_source_xml(
+        "Configuration",
+        &header,
+        source_version,
+    ))
 }
 
 #[allow(dead_code)]
@@ -14865,7 +14873,7 @@ fn extract_metadata_source_xml_from_text_row(
         return None;
     }
     let text = row.text.as_str();
-    if let Some(xml) = extract_configuration_source_xml(text, uuid) {
+    if let Some(xml) = extract_configuration_source_xml(text, uuid, source_version) {
         return Some(ExtractedMetadataSourceXml {
             relative_path: PathBuf::from("Configuration.xml"),
             xml: xml.into_bytes(),
@@ -15085,7 +15093,7 @@ fn extract_metadata_source_xml_from_text_row(
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
     } else {
-        format_metadata_source_xml(kind, &header).into_bytes()
+        format_metadata_source_xml(kind, &header, source_version).into_bytes()
     };
     if !nested_commands.is_empty() {
         let mut xml_text = String::from_utf8(xml).ok()?;
@@ -17858,7 +17866,11 @@ fn format_full_metadata_source_xml(
     xml
 }
 
-fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
+fn format_metadata_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
     let mut synonyms = String::new();
     if header.synonyms.is_empty() {
         synonyms.push_str("\t\t\t<Synonym/>\r\n");
@@ -17881,7 +17893,7 @@ fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
 
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"2.21\">\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{source_version}\">\r\n\
 \t<{kind} uuid=\"{uuid}\">\r\n\
 \t\t<Properties>\r\n\
 \t\t\t<Name>{name}</Name>\r\n\
@@ -17893,6 +17905,7 @@ fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
         uuid = escape_xml_text(&header.uuid),
         name = escape_xml_text(&header.name),
         comment = escape_xml_text(&header.comment),
+        source_version = source_version.as_str(),
     )
 }
 
@@ -29124,6 +29137,24 @@ mod tests {
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "DemoApp");
         assert_eq!(properties.comment, "Configuration comment");
+        let xml = String::from_utf8_lossy(&extracted.xml);
+        assert!(xml.contains(r#"version="2.20""#));
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8_lossy(&extracted_v21.xml);
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
     }
 
     #[test]
@@ -29359,6 +29390,22 @@ mod tests {
         assert!(xml.contains("<v8:Length>50</v8:Length>"));
         assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
         assert!(!repacked.blob.is_empty());
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8_lossy(&extracted_v21.xml);
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
     }
 
     #[test]
