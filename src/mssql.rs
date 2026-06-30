@@ -9394,6 +9394,56 @@ mod tests {
     }
 
     #[test]
+    fn prepares_xdto_package_body_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-xdto-package-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let xml_path = root.join("XDTOPackages").join("Exchange.xml");
+        let body_path = root
+            .join("XDTOPackages")
+            .join("Exchange")
+            .join("Ext")
+            .join("Package.bin");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <XDTOPackage uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+    <Properties><Name>Exchange</Name></Properties>
+  </XDTOPackage>
+</MetaDataObject>"#;
+        let body = b"raw-package-body";
+        fs::write(&xml_path, xml).unwrap();
+        fs::write(&body_path, body).unwrap();
+        let properties = test_simple_metadata_properties(
+            "XDTOPackage",
+            "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+            "Exchange",
+        );
+
+        let rows = super::prepare_metadata_body_rows(
+            PathBuf::from("missing-sqlcmd-for-xdto-package-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &xml_path,
+            xml,
+            &properties,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "cccccccc-cccc-4ccc-cccc-cccccccccccc.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(body)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn prepares_ws_reference_definition_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-ws-reference-no-fetch-{}",
