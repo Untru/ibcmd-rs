@@ -4471,11 +4471,15 @@ fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
         return Some("BinaryData");
     };
     let text = text.trim_start_matches('\u{feff}').trim_start();
-    if text.starts_with("<?xml") && text.contains("data-composition-system/appearance-template") {
+    let xml_text = text
+        .starts_with("<?xml")
+        .then_some(text)
+        .or_else(|| text.find("<?xml").map(|index| &text[index..]));
+    if xml_text.is_some_and(|xml| xml.contains("data-composition-system/appearance-template")) {
         Some("DataCompositionAppearanceTemplate")
-    } else if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
+    } else if xml_text.is_some_and(|xml| xml.contains("data-composition-system/schema")) {
         Some("DataCompositionSchema")
-    } else if text.starts_with("<?xml") && text.contains("8.3/xcf/scheme") {
+    } else if xml_text.is_some_and(|xml| xml.contains("8.3/xcf/scheme")) {
         Some("GraphicalSchema")
     } else if text.starts_with("<!DOCTYPE")
         || text.starts_with("<html")
@@ -8499,7 +8503,7 @@ fn parse_form_attribute(
         .unwrap_or_default();
     let value_types = fields
         .get(5)
-        .and_then(|field| parse_metadata_type_pattern(field, object_refs))
+        .and_then(|field| parse_form_type_pattern(field, object_refs))
         .unwrap_or_default();
     let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
     let settings = fields
@@ -8839,7 +8843,7 @@ fn parse_form_parameter(
     }
     let value_types = fields
         .get(2)
-        .and_then(|field| parse_metadata_type_pattern(field, object_refs))?;
+        .and_then(|field| parse_form_type_pattern(field, object_refs))?;
     let key_parameter = match fields.get(3).map(|field| field.trim()) {
         Some("1") => true,
         Some("0") | None => false,
@@ -8926,6 +8930,33 @@ fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
         "3" => Some("DontUse"),
         _ => None,
     }
+}
+
+fn parse_form_type_pattern(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    parse_metadata_type_pattern(field, object_refs).map(normalize_form_type_pattern)
+}
+
+fn normalize_form_type_pattern(value_types: Vec<ConstantValueType>) -> Vec<ConstantValueType> {
+    value_types
+        .into_iter()
+        .map(|value_type| match value_type {
+            ConstantValueType::String {
+                length,
+                allowed_length_flag,
+            } => ConstantValueType::String {
+                length,
+                allowed_length_flag: match allowed_length_flag {
+                    0 => 1,
+                    1 => 0,
+                    other => other,
+                },
+            },
+            other => other,
+        })
+        .collect()
 }
 
 fn extract_form_child_items(
@@ -14453,6 +14484,11 @@ struct EventSubscriptionProperties {
     handler: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct XdtoPackageProperties {
+    namespace: String,
+}
+
 struct StyleBodyItem {
     name: String,
     standard_order: Option<usize>,
@@ -15103,6 +15139,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "IntegrationService" {
         let service = parse_integration_service_properties_from_text(text, uuid)?;
         format_integration_service_source_xml(&header, &service, source_version).into_bytes()
+    } else if kind == "XDTOPackage" {
+        let package = parse_xdto_package_properties_from_text(text, uuid)?;
+        format_xdto_package_source_xml(&header, &package, source_version).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
@@ -16317,6 +16356,23 @@ fn parse_integration_service_properties_from_text(
             .unwrap_or_default(),
         channels,
     })
+}
+
+fn parse_xdto_package_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<XdtoPackageProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("1")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+    let namespace = fields
+        .get(2)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
+        .unwrap_or_default();
+    Some(XdtoPackageProperties { namespace })
 }
 
 fn parse_integration_service_channels_from_text(
@@ -19475,6 +19531,23 @@ fn format_functional_options_parameter_source_xml(
         }
         insert.push_str("\t\t\t</Use>\r\n");
     }
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_xdto_package_source_xml(
+    header: &MetadataHeader,
+    package: &XdtoPackageProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("XDTOPackage", header, source_version);
+    let insert = format!(
+        "\t\t\t<Namespace>{}</Namespace>\r\n",
+        escape_xml_element_text(&package.namespace)
+    );
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
@@ -26907,6 +26980,25 @@ mod tests {
     }
 
     #[test]
+    fn detects_data_composition_schema_template_body_with_container_prefix() {
+        let body = deflate_for_test(
+            concat!(
+                "\0\0\0\0\0\0\0\0",
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                "<SchemaFile xmlns=\"\">\r\n",
+                "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n",
+                "</SchemaFile>"
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            infer_template_type_from_body(&body),
+            Some("DataCompositionSchema")
+        );
+    }
+
+    #[test]
     fn detects_graphical_schema_template_body() {
         let body = deflate_for_test(
             br#"<?xml version="1.0" encoding="UTF-8"?>
@@ -30102,6 +30194,27 @@ mod tests {
             assert_eq!(extracted.relative_path, expected_path);
             assert_eq!(properties.kind, expected_kind);
             assert_eq!(properties.uuid, uuid);
+            if expected_kind == "XDTOPackage" {
+                let xml = String::from_utf8(extracted.xml.clone()).unwrap();
+                assert!(xml.contains("<Namespace>http://example.com/exchange</Namespace>"));
+                assert!(xml.contains(r#"version="2.20""#));
+                let extracted_v21 = extract_metadata_source_xml_with_refs(
+                    blob,
+                    uuid,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    InfobaseConfigSourceVersion::V2_21,
+                )
+                .unwrap();
+                let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+                assert!(xml_v21.contains("<Namespace>http://example.com/exchange</Namespace>"));
+                assert!(xml_v21.contains(r#"version="2.21""#));
+                assert!(!xml_v21.contains(r#"version="2.20""#));
+            }
             assert!(!repacked.blob.is_empty());
         }
     }
