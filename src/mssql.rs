@@ -1034,8 +1034,8 @@ fn metadata_body_bootstrap_rows(
             "1",
             "exchange_plan_content_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "Content.xml packer can generate the content body after resolving metadata references from the source tree",
+            false,
+            "Content.xml packer generates the content body after resolving metadata references from the source tree without reading the active Config row",
         )),
         "Form" | "CommonForm" => {
             let form_path = infer_form_body_path(xml_path);
@@ -3636,9 +3636,9 @@ fn prepare_configuration_binary_body_row(
 }
 
 fn prepare_exchange_plan_content_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
@@ -3654,7 +3654,6 @@ fn prepare_exchange_plan_content_body_row(
         )
     })?;
     let body_id = format!("{}.1", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read ExchangePlan Content {}",
@@ -3662,7 +3661,7 @@ fn prepare_exchange_plan_content_body_row(
         )
     })?;
     let packed =
-        pack_exchange_plan_content_blob_from_xml(&base_body, &xml, source).with_context(|| {
+        pack_exchange_plan_content_blob_from_xml(&[], &xml, source).with_context(|| {
             format!(
                 "failed to pack ExchangePlan Content {}",
                 body_path.display()
@@ -6182,8 +6181,9 @@ mod tests {
     };
     use crate::cli::InfobaseConfigSourceVersion;
     use crate::module_blob::{
-        CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties, hex_sha256,
-        module_blob_text_sha256, pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
+        CommonModuleXmlProperties, MetadataSourceContext, ReturnValuesReuse,
+        SimpleMetadataXmlProperties, hex_sha256, module_blob_text_sha256,
+        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
         raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
@@ -7395,6 +7395,55 @@ mod tests {
     }
 
     #[test]
+    fn reports_exchange_plan_content_readiness_without_base_fetch() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-exchange-content-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let exchange_xml = root.join("ExchangePlans").join("Sync.xml");
+        let content_path = root
+            .join("ExchangePlans")
+            .join("Sync")
+            .join("Ext")
+            .join("Content.xml");
+        fs::create_dir_all(content_path.parent().unwrap()).unwrap();
+        fs::write(
+            &exchange_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <ExchangePlan uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Sync</Name></Properties>
+  </ExchangePlan>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &content_path,
+            br#"<ExchangePlanContent xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20"/>"#,
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&exchange_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "exchange_plan_content_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(row.source_path, "ExchangePlans/Sync/Ext/Content.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn prepares_object_help_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-help-no-fetch-{}",
@@ -7990,6 +8039,77 @@ mod tests {
         assert_eq!(
             raw_deflated_first_base64_payload_sha256(&rows[0].blob).unwrap(),
             hex_sha256(b"PNG")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_exchange_plan_content_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-exchange-plan-content-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let exchange_xml = root.join("ExchangePlans").join("Sync.xml");
+        let content_path = root
+            .join("ExchangePlans")
+            .join("Sync")
+            .join("Ext")
+            .join("Content.xml");
+        fs::create_dir_all(content_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(root.join("Catalogs")).unwrap();
+        fs::create_dir_all(root.join("InformationRegisters")).unwrap();
+        fs::write(&exchange_xml, b"<ExchangePlan/>").unwrap();
+        fs::write(
+            root.join("Catalogs/Customers.xml"),
+            br#"<MetaDataObject><Catalog uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"><Properties><Name>Customers</Name></Properties></Catalog></MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("InformationRegisters/Prices.xml"),
+            br#"<MetaDataObject><InformationRegister uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc"><Properties><Name>Prices</Name></Properties></InformationRegister></MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &content_path,
+            br#"<ExchangePlanContent xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Item>
+		<Metadata>Catalog.Customers</Metadata>
+		<AutoRecord>Deny</AutoRecord>
+	</Item>
+	<Item>
+		<Metadata>InformationRegister.Prices</Metadata>
+		<AutoRecord>Auto</AutoRecord>
+	</Item>
+</ExchangePlanContent>
+"#,
+        )
+        .unwrap();
+        let properties = test_simple_metadata_properties(
+            "ExchangePlan",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Sync",
+        );
+        let source = MetadataSourceContext::new(root.clone());
+
+        let rows = super::prepare_exchange_plan_content_body_row(
+            PathBuf::from("missing-sqlcmd-for-exchange-plan-content-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &exchange_xml,
+            &properties,
+            Some(&source),
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1");
+        assert_eq!(rows[0].path, content_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(
+                b"{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,1}"
+            )
         );
 
         let _ = fs::remove_dir_all(root);
