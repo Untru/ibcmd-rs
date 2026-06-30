@@ -13033,6 +13033,7 @@ fn parse_moxel_style_ref_slot(
         "3" => match payload.first()?.trim() {
             "-1" | "-3" => Some(None),
             "-10" => Some(Some("style:FieldBackColor".to_string())),
+            "-21" => Some(Some("style:FieldSelectionBackColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
             "-28" => Some(Some("style:ReportLineColor".to_string())),
             "0" => {
@@ -28789,6 +28790,37 @@ mod tests {
         assert_eq!(style_refs[5].as_deref(), Some("d3p1:Crimson"));
         assert_eq!(moxel_details_use(0), Some("Cell"));
         assert_eq!(moxel_details_use(1), Some("Row"));
+    }
+
+    #[test]
+    fn formats_moxel_field_selection_back_color_style() {
+        let style_refs = parse_moxel_style_refs(&["{3,3,{-21}}"], &BTreeMap::new());
+        let format = parse_moxel_format("{2048,0}", &style_refs).unwrap();
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: Vec::new(),
+            column_formats: Vec::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![format],
+            rows: Vec::new(),
+            merges: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            default_format_index: None,
+            height: 0,
+        };
+        let mut xml = String::new();
+
+        push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+
+        assert!(xml.contains("<backColor>style:FieldSelectionBackColor</backColor>"));
     }
 
     #[test]
