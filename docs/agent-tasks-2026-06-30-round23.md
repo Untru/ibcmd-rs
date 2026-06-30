@@ -70,7 +70,7 @@ Acceptance:
 
 ## Task C - Issue #17, Template Body Parity
 
-Worktree: `E:\ibcmd_lab\worktrees\issue-17-templates-v9`
+Worktree: `E:\ibcmd_lab\worktrees\issue-17-templates-v11`
 
 Goal: reduce template diff debt for one concrete subtype, preferably
 `DataCompositionSchema`, MXL/SpreadsheetDocument, HTML/Text/BinaryData, or a
