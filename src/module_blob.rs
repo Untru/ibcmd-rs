@@ -10949,14 +10949,17 @@ fn form_layout_single_child_item_slot(
     text: &str,
     fields: &[Range<usize>],
 ) -> Option<(Range<usize>, Option<Range<usize>>)> {
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("48") {
-        return None;
-    }
-    let count_range = fields.get(41)?.clone();
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let (count_index, item_index) = match wrapper {
+        "48" => (41, 42),
+        "6" => (15, 16),
+        _ => return None,
+    };
+    let count_range = fields.get(count_index)?.clone();
     let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
     match count {
         0 => Some((count_range, None)),
-        1 => fields.get(42).cloned().and_then(|item_range| {
+        1 => fields.get(item_index).cloned().and_then(|item_range| {
             text[item_range.clone()]
                 .trim_start()
                 .starts_with('{')
@@ -10990,7 +10993,13 @@ fn retain_form_layout_single_child_items(
     if keep {
         return Ok(());
     }
-    text.replace_range(count_range.start..item_range.end, "0");
+    let wrapper = fields.first().map(|range| text[range.clone()].trim());
+    if wrapper == Some("6") {
+        text.replace_range(item_range, "0");
+        text.replace_range(count_range, "0");
+    } else {
+        text.replace_range(count_range.start..item_range.end, "0");
+    }
     Ok(())
 }
 
@@ -11047,6 +11056,13 @@ fn patch_or_append_form_layout_single_child_item(
         command_uuids,
         source,
     )?;
+    if fields.first().map(|range| text[range.clone()].trim()) == Some("6")
+        && let Some(placeholder_range) = fields.get(16).cloned()
+    {
+        text.replace_range(placeholder_range, &child_text);
+        text.replace_range(count_range, "1");
+        return Ok(true);
+    }
     text.insert_str(count_range.end, &format!(",{child_text}"));
     text.replace_range(count_range, "1");
     Ok(true)
@@ -27066,6 +27082,59 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[addition_fields[0].clone()], "6");
         assert_eq!(&parsed.layout[addition_fields[6].clone()], r#""NewSearch""#);
         assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_direct_search_addition_context_menu() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{6,{134,33333333-3333-4333-8333-333333333333},0,0,0,0,"RowsSearch",{1,0},{1,0},1,1,0,1,{1,0},0,1,{22,{30,44444444-4444-4444-8444-444444444444},0,0,0,8,"OldSearchContext",{1,0},{1,0},0,1,0},0,0,{25,0}}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<SearchStringAddition name="RowsSearch" id="134">
+				<AdditionSource>
+					<Item>Rows</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsSearchContext" id="30">
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>Search actions</v8:content>
+						</v8:item>
+					</Title>
+				</ContextMenu>
+			</SearchStringAddition>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let addition_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+        let context_fields = super::scan_braced_fields(&parsed.layout, addition_fields[16].start)?;
+
+        assert_eq!(&parsed.layout[addition_fields[15].clone()], "1");
+        assert_eq!(&parsed.layout[addition_fields[19].clone()], "{25,0}");
+        assert_eq!(&parsed.layout[context_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[context_fields[5].clone()], "8");
+        assert_eq!(
+            &parsed.layout[context_fields[6].clone()],
+            r#""RowsSearchContext""#
+        );
+        assert_eq!(
+            &parsed.layout[context_fields[7].clone()],
+            r#"{1,"en","Search actions"}"#
+        );
+        assert!(!parsed.layout.contains("OldSearchContext"));
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
