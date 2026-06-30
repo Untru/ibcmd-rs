@@ -4926,13 +4926,6 @@ fn parse_configuration_child_objects(
 }
 
 fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
-    const ROOT_CHILD_OBJECT_CODES: &[(u32, &str)] = &[
-        (12, "CommonModule"),
-        (5, "CommonAttribute"),
-        (16, "Constant"),
-        (57, "Catalog"),
-    ];
-
     for (code, tag) in ROOT_CHILD_OBJECT_CODES {
         if is_offset_inside_metadata_object_code(text, marker_start, *code) {
             return Some(*tag);
@@ -4940,6 +4933,29 @@ fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'s
     }
     None
 }
+
+const ROOT_CHILD_OBJECT_CODES: &[(u32, &str)] = &[
+    (12, "CommonModule"),
+    (5, "CommonAttribute"),
+    (6, "Role"),
+    (14, "FilterCriterion"),
+    (16, "Constant"),
+    (17, "DataProcessor"),
+    (19, "Report"),
+    (20, "Enum"),
+    (21, "CalculationRegister"),
+    (22, "Subsystem"),
+    (26, "DocumentJournal"),
+    (28, "AccumulationRegister"),
+    (30, "BusinessProcess"),
+    (32, "ChartOfAccounts"),
+    (33, "InformationRegister"),
+    (34, "ChartOfCharacteristicTypes"),
+    (35, "ChartOfCalculationTypes"),
+    (37, "ExchangePlan"),
+    (40, "Document"),
+    (57, "Catalog"),
+];
 
 #[allow(dead_code)]
 fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
@@ -14968,8 +14984,14 @@ struct TypedMetadataProperties {
 
 struct CommonAttributeProperties {
     value_types: Vec<ConstantValueType>,
-    auto_use: bool,
-    use_refs: Vec<String>,
+    auto_use: &'static str,
+    content: Vec<CommonAttributeContentItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CommonAttributeContentItem {
+    metadata: String,
+    use_mode: &'static str,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -17359,29 +17381,38 @@ fn parse_common_attribute_properties_from_text(
     let auto_use = use_fields
         .as_deref()
         .and_then(parse_common_attribute_auto_use)
-        .unwrap_or(false);
-    let use_refs = use_fields
+        .unwrap_or("DontUse");
+    let content = use_fields
         .as_deref()
-        .map(|fields| parse_common_attribute_use_refs(fields, object_refs))
+        .map(|fields| parse_common_attribute_content(fields, object_refs))
         .unwrap_or_default();
 
     Some(CommonAttributeProperties {
         value_types: typed.value_types,
         auto_use,
-        use_refs,
+        content,
     })
 }
 
-fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<bool> {
+fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<&'static str> {
     fields
         .first()
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
+        .and_then(|field| common_attribute_auto_use_xml(field.trim()))
 }
 
-fn parse_common_attribute_use_refs(
+fn common_attribute_auto_use_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        "2" => Some("AutoUse"),
+        _ => None,
+    }
+}
+
+fn parse_common_attribute_content(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
-) -> Vec<String> {
+) -> Vec<CommonAttributeContentItem> {
     let Some(count) = fields
         .get(1)
         .and_then(|field| field.trim().parse::<usize>().ok())
@@ -17392,8 +17423,28 @@ fn parse_common_attribute_use_refs(
         .iter()
         .skip(2)
         .take(count)
-        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .filter_map(|field| {
+            Some(CommonAttributeContentItem {
+                metadata: parse_design_time_reference(field, object_refs)?,
+                use_mode: parse_common_attribute_content_use(field).unwrap_or("Use"),
+            })
+        })
         .collect()
+}
+
+fn parse_common_attribute_content_use(field: &str) -> Option<&'static str> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    fields
+        .get(1)
+        .and_then(|field| common_attribute_content_use_xml(field.trim()))
+}
+
+fn common_attribute_content_use_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        _ => None,
+    }
 }
 
 fn parse_functional_options_parameter_properties_from_text(
@@ -21057,25 +21108,30 @@ fn format_common_attribute_source_xml(
     };
     let mut xml =
         format_typed_metadata_source_xml("CommonAttribute", header, &typed, source_version);
-    if !common_attribute.use_refs.is_empty() {
-        let mut insert = "\t\t\t<Use>\r\n".to_string();
-        for use_ref in &common_attribute.use_refs {
+    let mut insert = String::new();
+    if common_attribute.content.is_empty() {
+        insert.push_str("\t\t\t<Content/>\r\n");
+    } else {
+        insert.push_str("\t\t\t<Content>\r\n");
+        for item in &common_attribute.content {
             insert.push_str(&format!(
-                "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
-                escape_xml_element_text(use_ref)
+                "\t\t\t\t<xr:Item>\r\n\
+\t\t\t\t\t<xr:Metadata>{}</xr:Metadata>\r\n\
+\t\t\t\t\t<xr:Use>{}</xr:Use>\r\n\
+\t\t\t\t\t<xr:ConditionalSeparation/>\r\n\
+\t\t\t\t</xr:Item>\r\n",
+                escape_xml_element_text(&item.metadata),
+                escape_xml_text(item.use_mode)
             ));
         }
-        insert.push_str("\t\t\t</Use>\r\n");
-        let marker = "\t\t</Properties>\r\n";
-        if let Some(index) = xml.find(marker) {
-            xml.insert_str(index, &insert);
-        }
+        insert.push_str("\t\t\t</Content>\r\n");
     }
+    insert_metadata_properties_xml(&mut xml, &insert);
     insert_metadata_properties_xml(
         &mut xml,
         &format!(
             "\t\t\t<AutoUse>{}</AutoUse>\r\n",
-            xml_bool(common_attribute.auto_use)
+            escape_xml_text(common_attribute.auto_use)
         ),
     );
     xml
@@ -32017,6 +32073,62 @@ mod tests {
     }
 
     #[test]
+    fn extracts_configuration_xml_with_additional_root_child_families() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let document_uuid = "11111111-2222-4222-8222-111111111111";
+        let report_uuid = "22222222-3333-4333-8333-222222222222";
+        let register_uuid = "33333333-4444-4444-8444-333333333333";
+        let blob = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{40,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"Document comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{19,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"Report comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{28,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Balances\",{{1,\"en\",\"Balances\"}},\"Register comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains(&format!(r#"<Document uuid="{document_uuid}">"#)));
+        assert!(xml.contains("<Name>Invoice</Name>"));
+        assert!(xml.contains(&format!(r#"<Report uuid="{report_uuid}">"#)));
+        assert!(xml.contains("<Name>Sales</Name>"));
+        assert!(xml.contains(&format!(r#"<AccumulationRegister uuid="{register_uuid}">"#)));
+        assert!(xml.contains("<Name>Balances</Name>"));
+        assert!(!xml.contains(header_uuid));
+        assert!(!xml.contains("ConfigDumpInfo"));
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8_lossy(&extracted_v21.xml);
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
+    }
+
+    #[test]
     fn extracts_constant_xml_from_metadata_blob() {
         let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
         let blob = deflate_for_test(
@@ -32253,9 +32365,11 @@ mod tests {
         assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
         assert!(xml.contains("<v8:Length>50</v8:Length>"));
         assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
-        assert!(xml.contains("<Use>"));
-        assert!(xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Catalog.Products</xr:Item>"#));
-        assert!(xml.contains("<AutoUse>false</AutoUse>"));
+        assert!(xml.contains("<Content>"));
+        assert!(xml.contains("<xr:Metadata>Catalog.Products</xr:Metadata>"));
+        assert!(xml.contains("<xr:Use>Use</xr:Use>"));
+        assert!(xml.contains("<xr:ConditionalSeparation/>"));
+        assert!(xml.contains("<AutoUse>DontUse</AutoUse>"));
         assert!(!repacked.blob.is_empty());
         let repacked_plain =
             String::from_utf8(inflate_raw_deflate(&repacked.blob).unwrap()).unwrap();
@@ -32306,7 +32420,8 @@ mod tests {
         );
         assert!(xml.contains(r#"version="2.21""#));
         assert!(xml.contains("<v8:Type>xs:boolean</v8:Type>"));
-        assert!(xml.contains("<AutoUse>true</AutoUse>"));
+        assert!(xml.contains("<Content/>"));
+        assert!(xml.contains("<AutoUse>Use</AutoUse>"));
         assert!(!xml.contains("<Use>"));
         assert!(!xml.contains("ConfigDumpInfo"));
     }
