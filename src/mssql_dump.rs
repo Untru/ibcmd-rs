@@ -5696,6 +5696,11 @@ fn parse_configuration_properties_from_text(
         default_run_mode: fields
             .get(3)
             .and_then(|field| configuration_default_run_mode_xml(field.trim())),
+        brief_information: parse_configuration_localized_property(&fields, 4),
+        detailed_information: parse_configuration_localized_property(&fields, 5),
+        copyright: parse_configuration_localized_property(&fields, 6),
+        vendor_information_address: parse_configuration_localized_property(&fields, 7),
+        configuration_information_address: parse_configuration_localized_property(&fields, 8),
         default_style: parse_configuration_root_reference(&fields, 9, object_refs, "Style."),
         default_language: parse_configuration_root_reference(&fields, 10, object_refs, "Language."),
         script_variant: fields
@@ -5770,6 +5775,13 @@ fn parse_configuration_default_roles(
 fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
     let start = text.find("{68,")?;
     split_1c_braced_fields(text, start)
+}
+
+fn parse_configuration_localized_property(fields: &[&str], index: usize) -> Vec<(String, String)> {
+    fields
+        .get(index)
+        .map(|field| parse_1c_synonyms(field))
+        .unwrap_or_default()
 }
 
 fn parse_configuration_root_reference(
@@ -16502,6 +16514,11 @@ struct ConfigurationProperties {
     name_prefix: Option<String>,
     configuration_extension_compatibility_mode: Option<String>,
     default_run_mode: Option<&'static str>,
+    brief_information: Vec<(String, String)>,
+    detailed_information: Vec<(String, String)>,
+    copyright: Vec<(String, String)>,
+    vendor_information_address: Vec<(String, String)>,
+    configuration_information_address: Vec<(String, String)>,
     default_style: Option<String>,
     default_language: Option<String>,
     script_variant: Option<&'static str>,
@@ -22168,6 +22185,27 @@ fn format_configuration_source_xml(
             .as_deref(),
     );
     push_optional_simple_property_xml(&mut insert, "DefaultRunMode", properties.default_run_mode);
+    push_optional_localized_property_xml(
+        &mut insert,
+        "BriefInformation",
+        &properties.brief_information,
+    );
+    push_optional_localized_property_xml(
+        &mut insert,
+        "DetailedInformation",
+        &properties.detailed_information,
+    );
+    push_optional_localized_property_xml(&mut insert, "Copyright", &properties.copyright);
+    push_optional_localized_property_xml(
+        &mut insert,
+        "VendorInformationAddress",
+        &properties.vendor_information_address,
+    );
+    push_optional_localized_property_xml(
+        &mut insert,
+        "ConfigurationInformationAddress",
+        &properties.configuration_information_address,
+    );
     push_optional_simple_property_xml(
         &mut insert,
         "DefaultStyle",
@@ -22232,6 +22270,30 @@ fn push_optional_simple_property_xml(xml: &mut String, name: &str, value: Option
     xml.push_str("\t\t\t");
     xml.push_str(&format_simple_property_xml(name, value));
     xml.push_str("\r\n");
+}
+
+fn push_optional_localized_property_xml(xml: &mut String, name: &str, values: &[(String, String)]) {
+    if values.is_empty() {
+        return;
+    }
+    xml.push_str("\t\t\t<");
+    xml.push_str(name);
+    xml.push_str(">\r\n");
+    for (lang, content) in values {
+        xml.push_str("\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(content)
+        ));
+        xml.push_str("\t\t\t\t</v8:item>\r\n");
+    }
+    xml.push_str("\t\t\t</");
+    xml.push_str(name);
+    xml.push_str(">\r\n");
 }
 
 fn push_optional_root_reference_xml(
@@ -37352,6 +37414,87 @@ mod tests {
                         .find("<DefaultLanguage>Language.English</DefaultLanguage>")
                         .unwrap()
             );
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_localized_info_properties() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let style_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let mut fields = vec!["0".to_string(); 44];
+        fields[0] = "68".to_string();
+        fields[1] = format!(
+            "{{0,{{3,{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,{zero_uuid},0}}}}"
+        );
+        fields[2] = "\"\"".to_string();
+        fields[3] = "1".to_string();
+        fields[4] = r#"{2,"en","Brief info","ru","Кратко"}"#.to_string();
+        fields[5] = r#"{1,"en","Detailed & ""quoted"" info"}"#.to_string();
+        fields[6] = r#"{1,"en","Copyright (c) Vendor"}"#.to_string();
+        fields[7] = r#"{1,"en","https://vendor.example.invalid/?a=1&b=2"}"#.to_string();
+        fields[8] = r#"{1,"en","https://config.example.invalid/"}"#.to_string();
+        fields[9] = style_uuid.to_string();
+        fields[10] = zero_uuid.to_string();
+        fields[13] = "0".to_string();
+        fields[14] = "\"Vendor\"".to_string();
+        fields[15] = "\"1.2.3\"".to_string();
+        fields[16] = "\"\"".to_string();
+        fields[26] = "80327".to_string();
+        fields[39] = "{0,0}".to_string();
+        fields[43] = "80320".to_string();
+        let plain = format!(
+            "{{2,{{{uuid}}},1,{{9cd510cd-abfc-11d4-9434-004095e12fc7,{{1,{{{}}}}}}}}}",
+            fields.join(",")
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs = BTreeMap::from([(style_uuid.to_string(), "Style.Main".to_string())]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<BriefInformation>"));
+            assert!(xml.contains("<v8:content>Brief info</v8:content>"));
+            assert!(xml.contains("<v8:content>Кратко</v8:content>"));
+            assert!(xml.contains("<v8:content>Detailed &amp; \"quoted\" info</v8:content>"));
+            assert!(xml.contains("<Copyright>"));
+            assert!(xml.contains("<v8:content>Copyright (c) Vendor</v8:content>"));
+            assert!(xml.contains("<VendorInformationAddress>"));
+            assert!(
+                xml.contains(
+                    "<v8:content>https://vendor.example.invalid/?a=1&amp;b=2</v8:content>"
+                )
+            );
+            assert!(xml.contains("<ConfigurationInformationAddress>"));
+            assert!(
+                xml.find("<DefaultRunMode>ManagedApplication</DefaultRunMode>")
+                    .unwrap()
+                    < xml.find("<BriefInformation>").unwrap()
+            );
+            assert!(
+                xml.find("</ConfigurationInformationAddress>").unwrap()
+                    < xml.find("<DefaultStyle>Style.Main</DefaultStyle>").unwrap()
+            );
+            assert!(!xml.contains(style_uuid));
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
