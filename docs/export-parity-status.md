@@ -187,6 +187,12 @@ Verification history:
 | Round 32 ExchangePlan metadata slice | unit-level metadata XML verification | ExchangePlan code-4/code-27 child attributes are emitted with value types and property tails |
 | Round 32 Configuration.xml slice | unit-level metadata XML verification | localized root information fields are emitted: `BriefInformation`, `DetailedInformation`, `Copyright`, `VendorInformationAddress`, and `ConfigurationInformationAddress` |
 | Round 32 source staging readiness slice | unit-level readiness audit verification | unsupported `AdditionalIndexes.xml` families now report a precise `requires_base_blob` blocker instead of being silently omitted |
+| Round 33 Role Rights.xml slice | unit-level extractor/packer verification | HTTPService URL template method refs resolve as `HTTPService.<service>.URLTemplate.<template>.Method.<method>` and pack back from source XML |
+| Round 33 DCS template slice | unit-level template body verification | unqualified DCS core `xsi:type` values normalize to `dcscor:*`; data-core `StandardPeriod` / `StandardPeriodVariant` normalize to `v8:*` |
+| Round 33 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `Period` extracts and packs through property-bag key `7` as `v8:StandardPeriodVariant=Custom` |
+| Round 33 object metadata slice | unit-level metadata XML verification | DataProcessor child metadata emits non-empty `ChoiceParameters`, resolving design-time UUIDs to stable refs and fixed arrays |
+| Round 33 ExchangePlan metadata slice | unit-level metadata XML verification | optional `xr:ThisNode` is emitted in `InternalInfo`, and `UseStandardCommands` is read relative to the detected header slot |
+| Round 33 source staging readiness slice | unit-level row-generation verification | module `.bin` source assets containing inflated V8 containers can stage base-free for common/object/nested module bodies |
 
 Performance note for selected extraction:
 
@@ -413,5 +419,11 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #19 | form child-item support-index performance optimization and after-run timing | merged to `master` in round 32 |
 | #21 | precise unmapped `AdditionalIndexes.xml` base-free staging blocker audit | merged to `master` in round 32 |
 | #22 | Configuration.xml localized root information fields | merged to `master` in round 32 |
+| #13 | HTTPService URL template method Role Rights.xml refs and source packing | merged to `master` in round 33 |
+| #15 | child `ChoiceParameters` metadata XML with design-time refs | merged to `master` in round 33 |
+| #16 | Form.xml wrapper `55` table `Period` extraction and packing | merged to `master` in round 33 |
+| #17 | DCS core/data-core `xsi:type` normalization | merged to `master` in round 33 |
+| #18 | ExchangePlan `xr:ThisNode` and header-relative `UseStandardCommands` | merged to `master` in round 33 |
+| #21 | base-free module `.bin` V8 container body staging | merged to `master` in round 33 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

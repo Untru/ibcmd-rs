@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 33 | Role Rights.xml | HTTPService URL template method refs resolve as `HTTPService.<service>.URLTemplate.<template>.Method.<method>` and pack back from source XML |
+| 33 | DCS templates | unqualified DCS core `xsi:type` values normalize to `dcscor:*`; data-core `StandardPeriod` / `StandardPeriodVariant` normalize to `v8:*` |
+| 33 | Form.xml | wrapper `55` table `Period` extracts and packs through property-bag key `7` as `v8:StandardPeriodVariant=Custom` |
+| 33 | Object metadata XML | DataProcessor child metadata emits non-empty `ChoiceParameters`, resolving design-time UUIDs to stable refs and fixed arrays |
+| 33 | ExchangePlan metadata XML | optional `xr:ThisNode` is emitted in `InternalInfo`, and `UseStandardCommands` is read relative to the detected header slot |
+| 33 | Source staging readiness | module `.bin` source assets containing inflated V8 containers can stage base-free for common/object/nested module bodies |
 | 32 | Native dump performance / Form.xml CPU | consolidated form child-item support index traversal; full source-layout after-run completed without `ConfigDumpInfo.xml`, with `source_asset_form_child_items_cpu_ms` reduced from 68,886 to 40,598 and `source_asset_form_xml_cpu_ms` from 118,673 to 102,296 |
 | 32 | Form.xml | wrapper `55` table `RestoreCurrentRow` extracts and packs through property-bag key `12` |
 | 32 | Object metadata XML | Document owner `<IncludeHelpInContents>` is emitted after default/auxiliary form properties |
