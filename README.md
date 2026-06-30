@@ -61,6 +61,11 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 40 | Configuration.xml | root child object tags now reuse the shared metadata classifier for Languages, XDTOPackages, SettingsStorages, ScheduledJobs, CommandGroups, Styles and DocumentNumerators in source XML 2.20/2.21 |
+| 40 | Catalog metadata XML | `QuickChoice` and `ChoiceMode` are extracted from native root fields with backward-compatible defaults |
+| 40 | Form.xml | `TextDocumentField` now exports explicit `ReadOnly=true` through the shared child-item path |
+| 40 | Source staging readiness | sectionless `Form.xml` bodies keep the existing-base requirement, but now report the exact native container skeleton blocker |
+| 40 | Native dump performance | timing summary output now exposes sorted source-asset and Form CPU breakdowns; latest saved full-run evidence still points at Form XML reconstruction CPU, not BCP/direct fetch |
 | 39 | Form.xml | default `Table` child item `SkipOnInput=false` is suppressed while explicit `true` remains exported |
 | 39 | MXL templates | MOXCEL system style refs `-25`, `-26`, `-27`, `-34`, `-35`, `-36`, `-37`, and `-38` now map to native report/table/button style color refs |
 | 39 | InformationRegister metadata XML | extended owner tuple field emits `DataLockControlMode` for `InformationRegister` as well as `AccumulationRegister` |

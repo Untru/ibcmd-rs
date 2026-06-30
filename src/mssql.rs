@@ -7982,6 +7982,59 @@ mod tests {
     }
 
     #[test]
+    fn reports_sectionless_form_body_with_precise_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-empty-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let metadata_xml = root.join("CommonForms").join("Item.xml");
+        let body_path = root
+            .join("CommonForms")
+            .join("Item")
+            .join("Ext")
+            .join("Form.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(
+            &metadata_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonForm uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Item</Name></Properties>
+  </CommonForm>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &body_path,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"/>"#,
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&metadata_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "form_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(row.source_path, "CommonForms/Item/Ext/Form.xml");
+        assert!(row.reason.contains("Form body requires active base blob"));
+        assert!(row.reason.contains("Form.xml has no exported layout"));
+        assert!(row.reason.contains("native Form body container skeleton"));
+        assert!(row.reason.contains("trailing empty section fields"));
+        assert!(row.reason.contains("platform-specific tail slots"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_form_body_section_blockers_in_readiness_audit() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-form-section-readiness-{}",

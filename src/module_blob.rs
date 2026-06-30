@@ -4114,10 +4114,15 @@ pub fn form_body_base_free_blockers(
         ));
     }
     if blockers.is_empty() {
-        blockers.push(
-            "base-free Form body container synthesis is not implemented or platform-validated"
-                .to_string(),
-        );
+        if form_xml.is_empty() {
+            blockers.push(
+                "Form body source is absent, and base-free staging cannot synthesize the native Form body row skeleton".to_string(),
+            );
+        } else {
+            blockers.push(
+                "Form.xml has no exported layout, attribute, parameter, command, command-interface, module, or item-asset sections, but the Config row still stores a native Form body container skeleton with layout defaults, trailing empty section fields, and platform-specific tail slots that source XML does not represent".to_string(),
+            );
+        }
     }
     Ok(blockers)
 }
@@ -30964,6 +30969,19 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(blockers.len(), 1);
         assert!(blockers[0].contains("same Form body row as layout"));
+        Ok(())
+    }
+
+    #[test]
+    fn audits_sectionless_form_body_as_base_dependent() -> anyhow::Result<()> {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"/>"#;
+        let blockers = super::form_body_base_free_blockers(xml, false, 0)?;
+
+        assert_eq!(blockers.len(), 1);
+        assert!(blockers[0].contains("Form.xml has no exported layout"));
+        assert!(blockers[0].contains("native Form body container skeleton"));
+        assert!(blockers[0].contains("trailing empty section fields"));
+        assert!(blockers[0].contains("platform-specific tail slots"));
         Ok(())
     }
 

@@ -97,9 +97,19 @@ pub struct MssqlDumpTimingSummary {
     pub fetch_rows_ms: u64,
     pub fetch_rows_bcp_ms: u64,
     pub process_rows_wall_ms: u64,
+    pub source_asset_cpu_ms: u64,
+    pub source_asset_cpu_ms_per_row: Option<u64>,
+    pub source_asset_cpu_breakdown: Vec<MssqlDumpCpuTimingSummary>,
+    pub form_cpu_breakdown: Vec<MssqlDumpCpuTimingSummary>,
     pub fetch_rows_ms_per_gib: Option<u64>,
     pub process_rows_wall_ms_per_gib: Option<u64>,
     pub tables: Vec<MssqlDumpTableTimingSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlDumpCpuTimingSummary {
+    pub metric: &'static str,
+    pub cpu_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -120,6 +130,10 @@ pub struct MssqlDumpTableTimingSummary {
     pub fetch_rows_ms: u64,
     pub fetch_rows_bcp_ms: u64,
     pub process_rows_wall_ms: u64,
+    pub source_asset_cpu_ms: u64,
+    pub source_asset_cpu_ms_per_row: Option<u64>,
+    pub source_asset_cpu_breakdown: Vec<MssqlDumpCpuTimingSummary>,
+    pub form_cpu_breakdown: Vec<MssqlDumpCpuTimingSummary>,
     pub fetch_rows_ms_per_gib: Option<u64>,
     pub process_rows_wall_ms_per_gib: Option<u64>,
 }
@@ -172,6 +186,13 @@ impl MssqlDumpTimingSummary {
             fetch_rows_ms: report.timings.fetch_rows_ms,
             fetch_rows_bcp_ms: report.timings.fetch_rows_bcp_ms,
             process_rows_wall_ms: report.timings.process_rows_wall_ms,
+            source_asset_cpu_ms: report.timings.source_asset_cpu_ms,
+            source_asset_cpu_ms_per_row: ms_per_row(
+                report.timings.source_asset_cpu_ms,
+                report.total_source_asset_rows as u64,
+            ),
+            source_asset_cpu_breakdown: source_asset_cpu_breakdown(&report.timings),
+            form_cpu_breakdown: form_cpu_breakdown(&report.timings),
             fetch_rows_ms_per_gib: ms_per_gib(
                 report.timings.fetch_rows_ms,
                 report.total_binary_bytes as u64,
@@ -210,6 +231,13 @@ impl MssqlDumpTableTimingSummary {
             fetch_rows_ms: table.timings.fetch_rows_ms,
             fetch_rows_bcp_ms: table.timings.fetch_rows_bcp_ms,
             process_rows_wall_ms: table.timings.process_rows_wall_ms,
+            source_asset_cpu_ms: table.timings.source_asset_cpu_ms,
+            source_asset_cpu_ms_per_row: ms_per_row(
+                table.timings.source_asset_cpu_ms,
+                table.source_asset_rows as u64,
+            ),
+            source_asset_cpu_breakdown: source_asset_cpu_breakdown(&table.timings),
+            form_cpu_breakdown: form_cpu_breakdown(&table.timings),
             fetch_rows_ms_per_gib: ms_per_gib(
                 table.timings.fetch_rows_ms,
                 table.binary_bytes as u64,
@@ -222,12 +250,94 @@ impl MssqlDumpTableTimingSummary {
     }
 }
 
+fn source_asset_cpu_breakdown(timings: &MssqlDumpTimingReport) -> Vec<MssqlDumpCpuTimingSummary> {
+    sorted_nonzero_cpu_timings([
+        ("form", timings.source_asset_form_cpu_ms),
+        ("help", timings.source_asset_help_cpu_ms),
+        ("moxel", timings.source_asset_moxel_cpu_ms),
+        ("inflated", timings.source_asset_inflated_cpu_ms),
+        (
+            "command_interface",
+            timings.source_asset_command_interface_cpu_ms,
+        ),
+        ("ext_picture", timings.source_asset_ext_picture_cpu_ms),
+        (
+            "predefined_data",
+            timings.source_asset_predefined_data_cpu_ms,
+        ),
+        ("role_rights", timings.source_asset_role_rights_cpu_ms),
+        (
+            "standalone_content",
+            timings.source_asset_standalone_content_cpu_ms,
+        ),
+        ("style_body", timings.source_asset_style_body_cpu_ms),
+        ("exchange_plan", timings.source_asset_exchange_plan_cpu_ms),
+        (
+            "business_process",
+            timings.source_asset_business_process_cpu_ms,
+        ),
+        ("schedule", timings.source_asset_schedule_cpu_ms),
+        (
+            "config_dump_info",
+            timings.source_asset_config_dump_info_cpu_ms,
+        ),
+        ("other", timings.source_asset_other_cpu_ms),
+    ])
+}
+
+fn form_cpu_breakdown(timings: &MssqlDumpTimingReport) -> Vec<MssqlDumpCpuTimingSummary> {
+    sorted_nonzero_cpu_timings([
+        ("form_xml", timings.source_asset_form_xml_cpu_ms),
+        ("split", timings.source_asset_form_split_cpu_ms),
+        ("properties", timings.source_asset_form_properties_cpu_ms),
+        ("events", timings.source_asset_form_events_cpu_ms),
+        ("attributes", timings.source_asset_form_attributes_cpu_ms),
+        ("parameters", timings.source_asset_form_parameters_cpu_ms),
+        ("commands", timings.source_asset_form_commands_cpu_ms),
+        (
+            "auto_command_bar",
+            timings.source_asset_form_auto_command_bar_cpu_ms,
+        ),
+        ("child_items", timings.source_asset_form_child_items_cpu_ms),
+        (
+            "command_interface",
+            timings.source_asset_form_command_interface_cpu_ms,
+        ),
+        ("format", timings.source_asset_form_format_cpu_ms),
+        ("items", timings.source_asset_form_items_cpu_ms),
+    ])
+}
+
+fn sorted_nonzero_cpu_timings<const N: usize>(
+    timings: [(&'static str, u64); N],
+) -> Vec<MssqlDumpCpuTimingSummary> {
+    let mut timings: Vec<_> = timings
+        .into_iter()
+        .filter(|(_, cpu_ms)| *cpu_ms > 0)
+        .map(|(metric, cpu_ms)| MssqlDumpCpuTimingSummary { metric, cpu_ms })
+        .collect();
+    timings.sort_by(|left, right| {
+        right
+            .cpu_ms
+            .cmp(&left.cpu_ms)
+            .then_with(|| left.metric.cmp(right.metric))
+    });
+    timings
+}
+
 fn bytes_to_mib_ceil(bytes: u64) -> u64 {
     if bytes == 0 {
         0
     } else {
         bytes.div_ceil(1024 * 1024)
     }
+}
+
+fn ms_per_row(elapsed_ms: u64, rows: u64) -> Option<u64> {
+    if rows == 0 {
+        return None;
+    }
+    Some(elapsed_ms / rows)
 }
 
 fn ms_per_gib(elapsed_ms: u64, bytes: u64) -> Option<u64> {

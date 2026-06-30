@@ -51,6 +51,16 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 40 Configuration.xml slice | unit-level metadata XML verification | root child object tags are detected through the shared metadata classifier for Language, XDTOPackage, SettingsStorage, ScheduledJob, CommandGroup, Style and DocumentNumerator in source XML 2.20/2.21 |
+| Round 40 Catalog metadata slice | unit-level metadata XML verification | `QuickChoice` and `ChoiceMode` are read from native root fields while older shorter blobs keep the previous defaults |
+| Round 40 Form.xml slice | unit-level extractor verification | `TextDocumentField` uses the shared read-only path and emits explicit `ReadOnly=true` |
+| Round 40 source staging readiness slice | unit-level readiness audit verification | sectionless `Form.xml` bodies report the precise native container skeleton blocker instead of a generic base-free note |
+| Round 40 performance evidence slice | timing-summary report verification | `mssql-dump-timing-summary` exposes sorted source-asset and Form CPU breakdowns; latest saved full source-only evidence still points at Form XML reconstruction CPU as the proven bottleneck |
+| Round 39 Form.xml slice | unit-level extractor verification | default `Table` child item `SkipOnInput=false` is omitted from source XML while explicit `true` remains supported |
+| Round 39 MXL template slice | unit-level template body verification | MOXCEL system style refs `-25`, `-26`, `-27`, `-34`, `-35`, `-36`, `-37`, and `-38` map to native report/table/button style color refs |
+| Round 39 InformationRegister metadata slice | unit-level metadata XML verification | extended owner tuple field emits `DataLockControlMode` for `InformationRegister` as well as `AccumulationRegister` |
+| Round 39 Role Rights.xml slice | unit-level extractor verification | role rights object ordering can follow metadata tree order while preserving serialized order within one owner |
+| Round 39 source staging readiness slice | unit-level readiness audit verification | Form body base-dependency audit reports precise counts for root/layout scalars, child items, trailing sections and `Ext/Form/Items/**` assets |
 | Round 38 Form.xml slice | unit-level extractor/packer verification | default `WindowOpeningMode=DontBlock` is omitted from source XML while explicit XML still packs into the form layout |
 | Round 38 MXL format slice | unit-level extractor/packer verification | native empty format slots `{0}` no longer drop later format-table entries such as width-bearing formats |
 | Round 38 MXL named-area slice | unit-level template body verification | mixed `NamedItemCells` / `NamedItemDrawing` lists preserve valid named areas and skip drawing items in the named-area packer |
@@ -503,5 +513,15 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | BusinessProcess Flowchart `ZOrder` export | merged to `master` in round 35 |
 | #19 | sampled XML-path diff-mining report for round35 planning | merged to `master` in round 35 |
 | #21 | configuration application module base-free staging audit | merged to `master` in round 35 |
+| #16 | Form.xml `Table/SkipOnInput=false` default suppression | merged to `master` in round 39 |
+| #17 | MOXCEL report/table/button system color style refs | merged to `master` in round 39 |
+| #18 | InformationRegister `DataLockControlMode` metadata XML | merged to `master` in round 39 |
+| #21 | precise Form body section-count base dependency audit | merged to `master` in round 39 |
+| #13 | Role Rights.xml metadata-order object sorting | merged to `master` in round 39 |
+| #22 | generic `Configuration.xml` root child classifier for additional families | merged to `master` in round 40 |
+| #15 | Catalog root `QuickChoice` / `ChoiceMode` metadata XML | merged to `master` in round 40 |
+| #16 | Form.xml `TextDocumentField/ReadOnly=true` extraction | merged to `master` in round 40 |
+| #21 | sectionless Form body native skeleton readiness audit | merged to `master` in round 40 |
+| #19 | source-asset/Form CPU timing summary breakdown and existing evidence audit | merged to `master` in round 40 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

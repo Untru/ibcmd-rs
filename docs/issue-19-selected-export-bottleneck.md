@@ -605,3 +605,56 @@ Artifacts:
 - `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after-report.json`
 - `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after.log`
 - `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after`
+
+## Round 40 existing-report evidence audit
+
+No full source-layout timing report newer than the current round39/round40 code
+was found under `E:\ibcmd_lab\perf` during the 2026-07-01 audit. The newest
+successful full source-only report remains:
+
+```text
+E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after-report.json
+```
+
+It was written on 2026-06-30 23:30 and therefore proves the pre-round39
+performance state, not the post-round39 state. A fresh full-run is still needed
+before claiming a round39 performance regression or improvement.
+
+The existing reports were summarized without running export:
+
+```powershell
+cargo run --quiet -- mssql-dump-timing-summary `
+  E:\ibcmd_lab\perf\issue-19-performance-v5-selected-blobs-report.json `
+  E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source-report.json `
+  E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after-report.json `
+  E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after-report.json `
+  -o E:\ibcmd_lab\perf\issue-19-round40-existing-reports-summary.json
+```
+
+The summary helper now includes sorted `source_asset_cpu_breakdown` and
+`form_cpu_breakdown` fields. On the latest full source-only report, the dominant
+counters are:
+
+| Metric | Value |
+|---|---:|
+| `total_rows` | 40,576 |
+| `total_binary_bytes` | 927,826,268 |
+| `total_source_asset_rows` | 10,277 |
+| `prepare_indexes_ms` | 21,816 |
+| `fetch_rows_ms` / `fetch_rows_bcp_ms` | 7,278 / 7,278 |
+| `process_rows_wall_ms` | 16,055 |
+| `source_asset_cpu_ms` | 187,772 |
+| `source_asset_form_cpu_ms` | 106,971 |
+| `source_asset_form_xml_cpu_ms` | 102,296 |
+| `source_asset_form_child_items_cpu_ms` | 40,598 |
+| `source_asset_inflated_cpu_ms` | 40,128 |
+| `source_asset_moxel_cpu_ms` | 21,260 |
+| `source_asset_ext_picture_cpu_ms` | 11,296 |
+
+Interpretation: native BCP/direct row fetch is not the current proven
+bottleneck in the saved full source-only evidence. The actionable bottleneck
+remains CPU spent reconstructing source assets, first `Form.xml` extraction,
+with `form_xml` and especially remaining `child_items` work still the largest
+form sub-counters. Because there is no post-round39 full-run report, the next
+performance step should be a fresh full source-only timing run under
+`E:\ibcmd_lab\perf` before changing broader export behavior.

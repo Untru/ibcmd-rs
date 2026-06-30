@@ -5704,28 +5704,20 @@ fn parse_configuration_child_objects(
             if header.uuid == header_uuid {
                 return None;
             }
-            configuration_child_object_tag(text, marker_start)
+            configuration_child_object_tag(text, marker_start, &header.uuid)
                 .map(|tag| ConfigurationChildObject { tag, header })
         })
         .collect()
 }
 
-fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
-    if is_offset_inside_configuration_common_picture(text, marker_start) {
-        return Some("CommonPicture");
-    }
-    for (code, tag) in ROOT_CHILD_OBJECT_CODES {
-        if is_offset_inside_metadata_object_code(text, marker_start, *code) {
-            return Some(*tag);
-        }
-    }
-    None
-}
-
-fn is_offset_inside_configuration_common_picture(text: &str, marker_start: usize) -> bool {
-    let code_marker = "{4,";
+fn configuration_child_object_tag(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+) -> Option<&'static str> {
     let mut search_end = marker_start;
-    while let Some(start) = text[..search_end].rfind(code_marker) {
+    let mut tag = None;
+    while let Some(start) = text[..search_end].rfind('{') {
         search_end = start;
         let Some(end) = scan_1c_braced_value(text, start) else {
             continue;
@@ -5734,46 +5726,27 @@ fn is_offset_inside_configuration_common_picture(text: &str, marker_start: usize
             continue;
         }
         let object_text = &text[start..end];
+        if object_text.contains("{68,") {
+            continue;
+        }
         let Some(fields) = split_1c_braced_fields(object_text, 0) else {
             continue;
         };
-        let Some(uuid) = text.get(marker_start + "{1,0,".len()..marker_start + "{1,0,".len() + 36)
+        let Some(code) = fields
+            .first()
+            .and_then(|field| field.trim().parse::<u32>().ok())
         else {
             continue;
         };
-        if fields.first().map(|field| field.trim()) == Some("4")
-            && metadata_header_field_index(&fields, uuid) == Some(1)
-            && parse_1c_bool_field(fields.get(2).copied()).is_some()
-            && parse_1c_bool_field(fields.get(3).copied()).is_some()
-        {
-            return true;
+        if let Some((kind, _)) = metadata_source_for_object_text(code, object_text, child_uuid) {
+            if matches!(kind, "CommonForm" | "CommonTemplate") {
+                return None;
+            }
+            tag = Some(kind);
         }
     }
-    false
+    tag
 }
-
-const ROOT_CHILD_OBJECT_CODES: &[(u32, &str)] = &[
-    (12, "CommonModule"),
-    (5, "CommonAttribute"),
-    (6, "Role"),
-    (14, "FilterCriterion"),
-    (16, "Constant"),
-    (17, "DataProcessor"),
-    (19, "Report"),
-    (20, "Enum"),
-    (21, "CalculationRegister"),
-    (22, "Subsystem"),
-    (26, "DocumentJournal"),
-    (28, "AccumulationRegister"),
-    (30, "BusinessProcess"),
-    (32, "ChartOfAccounts"),
-    (33, "InformationRegister"),
-    (34, "ChartOfCharacteristicTypes"),
-    (35, "ChartOfCalculationTypes"),
-    (37, "ExchangePlan"),
-    (40, "Document"),
-    (57, "Catalog"),
-];
 
 #[allow(dead_code)]
 fn build_command_interface_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
@@ -11124,7 +11097,9 @@ fn parse_form_child_item_with_attrs(
             .then(|| parse_form_child_item_show_in_header(&fields))
             .flatten()
         },
-        read_only: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        read_only: if matches!(tag, "InputField" | "TextDocumentField")
+            && form_input_field_layout_is_extended(&fields)
+        {
             fields
                 .get(14)
                 .and_then(|field| parse_form_child_item_show_title(field))
@@ -16517,6 +16492,8 @@ struct CatalogProperties {
     check_unique: bool,
     autonumbering: bool,
     default_presentation: Option<&'static str>,
+    quick_choice: bool,
+    choice_mode: &'static str,
     input_by_string_fields: Vec<String>,
     default_object_form: Option<String>,
     default_folder_form: Option<String>,
@@ -17709,6 +17686,25 @@ fn metadata_source_for_text(
     uuid: &str,
 ) -> Option<(&'static str, &'static str)> {
     let fields = metadata_object_fields(text)?;
+    metadata_source_for_object_fields(code, text, uuid, &fields)
+}
+
+fn metadata_source_for_object_text(
+    code: u32,
+    object_text: &str,
+    uuid: &str,
+) -> Option<(&'static str, &'static str)> {
+    let wrapped_text = format!("{{1,{object_text}}}");
+    let fields = split_1c_braced_fields(object_text, 0)?;
+    metadata_source_for_object_fields(code, &wrapped_text, uuid, &fields)
+}
+
+fn metadata_source_for_object_fields(
+    code: u32,
+    text: &str,
+    uuid: &str,
+    fields: &[&str],
+) -> Option<(&'static str, &'static str)> {
     let header_index = metadata_header_field_index(&fields, uuid);
 
     match code {
@@ -17769,6 +17765,7 @@ fn metadata_source_for_text(
         6 if header_index == Some(1) => Some(("Role", "Roles")),
         6 => Some(("Sequence", "Sequences")),
         9 => Some(("CommonCommand", "CommonCommands")),
+        12 if header_index == Some(1) => Some(("CommonModule", "CommonModules")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
         16 => Some(("Constant", "Constants")),
         17 => Some(("DataProcessor", "DataProcessors")),
@@ -19021,6 +19018,8 @@ fn parse_catalog_properties_from_text(
         check_unique,
         autonumbering,
         default_presentation: Some("AsDescription"),
+        quick_choice: parse_1c_bool_field(fields.get(41).copied()).unwrap_or(true),
+        choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(40).copied()).unwrap_or(2)),
         input_by_string_fields: parse_catalog_input_by_string_fields(
             fields.get(42).copied(),
             &header.name,
@@ -23099,9 +23098,14 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         "\t\t\t<Characteristics/>\r\n\
 \t\t\t<PredefinedDataUpdate>Auto</PredefinedDataUpdate>\r\n\
 \t\t\t<EditType>InDialog</EditType>\r\n\
-\t\t\t<QuickChoice>true</QuickChoice>\r\n\
-\t\t\t<ChoiceMode>BothWays</ChoiceMode>\r\n",
+",
     );
+    xml.push_str(&format!(
+        "\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
+\t\t\t<ChoiceMode>{}</ChoiceMode>\r\n",
+        xml_bool(catalog.quick_choice),
+        catalog.choice_mode
+    ));
     push_catalog_input_by_string_xml(&mut xml, &catalog.input_by_string_fields);
     xml.push_str(
         "\t\t\t<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>\r\n\
@@ -27136,6 +27140,13 @@ mod tests {
                     fetch_row_batch_max_rows: 7,
                     fetch_row_batch_max_binary_bytes: 300 * 1024 * 1024,
                     process_rows_wall_ms: 2000,
+                    source_asset_cpu_ms: 123,
+                    source_asset_form_cpu_ms: 80,
+                    source_asset_inflated_cpu_ms: 30,
+                    source_asset_help_cpu_ms: 13,
+                    source_asset_form_xml_cpu_ms: 70,
+                    source_asset_form_child_items_cpu_ms: 50,
+                    source_asset_form_properties_cpu_ms: 10,
                     ..MssqlDumpTimingReport::default()
                 },
             }],
@@ -27158,6 +27169,13 @@ mod tests {
                 fetch_row_batch_max_rows: 7,
                 fetch_row_batch_max_binary_bytes: 300 * 1024 * 1024,
                 process_rows_wall_ms: 2000,
+                source_asset_cpu_ms: 123,
+                source_asset_form_cpu_ms: 80,
+                source_asset_inflated_cpu_ms: 30,
+                source_asset_help_cpu_ms: 13,
+                source_asset_form_xml_cpu_ms: 70,
+                source_asset_form_child_items_cpu_ms: 50,
+                source_asset_form_properties_cpu_ms: 10,
                 ..MssqlDumpTimingReport::default()
             },
         };
@@ -27173,8 +27191,16 @@ mod tests {
         assert_eq!(summary.fetch_row_batch_max_binary_mib, 300);
         assert_eq!(summary.fetch_rows_ms_per_gib, Some(2000));
         assert_eq!(summary.process_rows_wall_ms_per_gib, Some(4000));
+        assert_eq!(summary.source_asset_cpu_ms, 123);
+        assert_eq!(summary.source_asset_cpu_ms_per_row, Some(15));
+        assert_eq!(summary.source_asset_cpu_breakdown[0].metric, "form");
+        assert_eq!(summary.source_asset_cpu_breakdown[0].cpu_ms, 80);
+        assert_eq!(summary.source_asset_cpu_breakdown[1].metric, "inflated");
+        assert_eq!(summary.form_cpu_breakdown[0].metric, "form_xml");
+        assert_eq!(summary.form_cpu_breakdown[1].metric, "child_items");
         assert_eq!(summary.tables[0].table, "Config");
         assert_eq!(summary.tables[0].fetch_row_batch_max_binary_mib, 300);
+        assert_eq!(summary.tables[0].source_asset_cpu_ms_per_row, Some(15));
     }
 
     #[test]
@@ -27207,6 +27233,9 @@ mod tests {
         assert_eq!(summary.fetch_row_batches, 0);
         assert_eq!(summary.fetch_row_batch_max_binary_bytes, 0);
         assert_eq!(summary.fetch_rows_ms_per_gib, None);
+        assert_eq!(summary.source_asset_cpu_ms_per_row, None);
+        assert!(summary.source_asset_cpu_breakdown.is_empty());
+        assert!(summary.form_cpu_breakdown.is_empty());
     }
 
     #[test]
@@ -30073,6 +30102,27 @@ mod tests {
         assert_eq!(item.events[0].name, "OnChange");
         assert_eq!(item.events[0].handler, "ProcedureChanged");
         assert_eq!(item.child_items[0].tag, "ContextMenu");
+    }
+
+    #[test]
+    fn extracts_text_document_field_read_only() {
+        let item = parse_form_child_item(
+            r#"{48,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,2,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "TextDocumentField");
+        assert_eq!(item.read_only, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains(r#"<TextDocumentField name="ProcedureEditor" id="20">"#));
+        assert!(xml.contains("<ReadOnly>true</ReadOnly>"));
     }
 
     #[test]
@@ -39212,6 +39262,86 @@ mod tests {
     }
 
     #[test]
+    fn extracts_configuration_xml_with_generic_root_child_families() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let language_uuid = "11111111-1111-4111-8111-111111111111";
+        let package_uuid = "22222222-2222-4222-8222-222222222222";
+        let storage_uuid = "33333333-3333-4333-8333-333333333333";
+        let job_uuid = "44444444-4444-4444-8444-444444444444";
+        let group_uuid = "55555555-5555-4555-8555-555555555555";
+        let style_uuid = "66666666-6666-4666-8666-666666666666";
+        let numerator_uuid = "77777777-7777-4777-8777-777777777777";
+        let fields = vec![
+            "68".to_string(),
+            r#"{0,{3,{1,0,@HEADER_UUID@},"Root",{1,"en","Root"},"",0,0,@ZERO_UUID@,0}}"#
+                .replace("@HEADER_UUID@", header_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{0,{3,{1,0,@LANGUAGE_UUID@},"Lang",{1,"en","Lang"},"",0,0,@ZERO_UUID@,0},"en"}"#
+                .replace("@LANGUAGE_UUID@", language_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{1,{3,{1,0,@PACKAGE_UUID@},"Package",{1,"en","Package"},"",0,0,@ZERO_UUID@,0},"http://example.invalid/package"}"#
+                .replace("@PACKAGE_UUID@", package_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{2,{0,{3,{1,0,@STORAGE_UUID@},"UserSettings",{1,"en","User settings"},"",0,0,@ZERO_UUID@,0}},@ZERO_UUID@,@ZERO_UUID@,@ZERO_UUID@,@ZERO_UUID@,@ZERO_UUID@,@ZERO_UUID@},2,{0},{0}}"#
+                .replace("@STORAGE_UUID@", storage_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{2,{3,{1,0,@JOB_UUID@},"LoadRates",{1,"en","Load rates"},"",0,0,@ZERO_UUID@,0},"","Load rates",1,1,@ZERO_UUID@,"LoadRates",3,10}"#
+                .replace("@JOB_UUID@", job_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{3,{4,1,{0,@ZERO_UUID@},"",-1,-1,0,0,""},8,1,{0},{0},{3,{1,0,@GROUP_UUID@},"Admin",{1,"en","Admin"},"",0,0,@ZERO_UUID@,0}}"#
+                .replace("@GROUP_UUID@", group_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{3,{3,{1,0,@STYLE_UUID@},"Main",{1,"en","Main"},"",0,0,@ZERO_UUID@,0}}"#
+                .replace("@STYLE_UUID@", style_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+            r#"{3,{3,{1,0,@NUMERATOR_UUID@},"Numbers",{1,"en","Numbers"},"",0,0,@ZERO_UUID@,0},1,11,1,1,0}"#
+                .replace("@NUMERATOR_UUID@", numerator_uuid)
+                .replace("@ZERO_UUID@", zero_uuid),
+        ];
+        let plain = format!(
+            "{{2,{{{uuid}}},1,{{9cd510cd-abfc-11d4-9434-004095e12fc7,{{1,{{{}}}}}}}}}",
+            fields.join(",")
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(
+                xml.contains(&format!(r#"<Language uuid="{language_uuid}">"#)),
+                "{xml}"
+            );
+            assert!(xml.contains(&format!(r#"<XDTOPackage uuid="{package_uuid}">"#)));
+            assert!(xml.contains(&format!(r#"<SettingsStorage uuid="{storage_uuid}">"#)));
+            assert!(xml.contains(&format!(r#"<ScheduledJob uuid="{job_uuid}">"#)));
+            assert!(xml.contains(&format!(r#"<CommandGroup uuid="{group_uuid}">"#)));
+            assert!(xml.contains(&format!(r#"<Style uuid="{style_uuid}">"#)));
+            assert!(xml.contains(&format!(r#"<DocumentNumerator uuid="{numerator_uuid}">"#)));
+            assert!(!xml.contains(header_uuid));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
     fn extracts_constant_xml_from_metadata_blob() {
         let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
         let blob = deflate_for_test(
@@ -43632,6 +43762,51 @@ mod tests {
         assert_eq!(
             index.get(manager_type_id).map(String::as_str),
             Some("cfg:CatalogManager.Products")
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_choice_flags_from_root_fields() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"NoQuickChoice\",{{1,\"en\",\"No quick choice\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,0,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<QuickChoice>false</QuickChoice>"), "{xml}");
+        assert!(xml.contains("<ChoiceMode>FromList</ChoiceMode>"), "{xml}");
+        assert!(
+            xml.find("<EditType>InDialog</EditType>").unwrap()
+                < xml.find("<QuickChoice>false</QuickChoice>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<QuickChoice>false</QuickChoice>").unwrap()
+                < xml.find("<ChoiceMode>FromList</ChoiceMode>").unwrap(),
+            "{xml}"
         );
     }
 
