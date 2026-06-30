@@ -8499,7 +8499,7 @@ fn parse_form_attribute(
         .unwrap_or_default();
     let value_types = fields
         .get(5)
-        .and_then(|field| parse_metadata_type_pattern(field, object_refs))
+        .and_then(|field| parse_form_type_pattern(field, object_refs))
         .unwrap_or_default();
     let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
     let settings = fields
@@ -8839,7 +8839,7 @@ fn parse_form_parameter(
     }
     let value_types = fields
         .get(2)
-        .and_then(|field| parse_metadata_type_pattern(field, object_refs))?;
+        .and_then(|field| parse_form_type_pattern(field, object_refs))?;
     let key_parameter = match fields.get(3).map(|field| field.trim()) {
         Some("1") => true,
         Some("0") | None => false,
@@ -8926,6 +8926,33 @@ fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
         "3" => Some("DontUse"),
         _ => None,
     }
+}
+
+fn parse_form_type_pattern(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    parse_metadata_type_pattern(field, object_refs).map(normalize_form_type_pattern)
+}
+
+fn normalize_form_type_pattern(value_types: Vec<ConstantValueType>) -> Vec<ConstantValueType> {
+    value_types
+        .into_iter()
+        .map(|value_type| match value_type {
+            ConstantValueType::String {
+                length,
+                allowed_length_flag,
+            } => ConstantValueType::String {
+                length,
+                allowed_length_flag: match allowed_length_flag {
+                    0 => 1,
+                    1 => 0,
+                    other => other,
+                },
+            },
+            other => other,
+        })
+        .collect()
 }
 
 fn extract_form_child_items(
