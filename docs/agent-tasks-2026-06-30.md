@@ -9,7 +9,7 @@ inside the assigned scope.
 
 ## Task A - Issue #16, Forms
 
-Worktree: `D:\ibcmd-rs-wt\issue-16-forms`
+Worktree: `E:\ibcmd_lab\worktrees\issue-16-forms`
 
 Goal: move `Ext/Form.xml` closer to full export/import parity.
 
@@ -32,7 +32,7 @@ Verification:
 
 ## Task B - Issue #15, Object Metadata Families
 
-Worktree: `D:\ibcmd-rs-agent-15`
+Worktree: `E:\ibcmd_lab\worktrees\issue-15-object-metadata`
 
 Goal: improve metadata XML parity for object families still partial.
 
@@ -55,7 +55,7 @@ Verification:
 
 ## Task C - Issue #18, Registers/Subsystems/Exchange Plans
 
-Worktree: `D:\ibcmd-rs-agent-18`
+Worktree: `E:\ibcmd_lab\worktrees\issue-18-registers-subsystems`
 
 Goal: improve parity for register/subsystem/exchange-plan metadata and assets.
 
@@ -78,7 +78,7 @@ Verification:
 
 ## Task D - Issue #21, Bootstrap Import Architecture
 
-Worktree: `D:\ibcmd-rs-wt\issue-bootstrap-import`
+Worktree: `E:\ibcmd_lab\worktrees\issue-21-bootstrap-import`
 
 Goal: start the path from staging-over-existing-base toward import into an empty
 infobase.
@@ -104,7 +104,7 @@ Verification:
 
 ## Task E - Issue #22, CommonAttributes and Configuration.xml Export
 
-Worktree: `D:\ibcmd-rs-wt\issue-commonattrs-config`
+Worktree: `E:\ibcmd_lab\worktrees\issue-22-commonattrs-config`
 
 Goal: start the currently not-started export parity rows.
 
