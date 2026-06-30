@@ -9484,7 +9484,10 @@ fn format_form_layout_new_button_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    if item.location_in_command_bar.is_some() || item.show_title.is_some() {
+    if item.location_in_command_bar.is_some()
+        || item.show_title.is_some()
+        || item.default_button.is_some()
+    {
         return format_form_layout_new_extended_button_item(
             item,
             item_uuid,
@@ -24832,6 +24835,33 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(",2,{0,39bb0fe9-771d-4dd5-8a6e-2d16984523af},{0}")
         );
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_top_level_button_default_button() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Button name="Save" id="44">
+			<DefaultButton>true</DefaultButton>
+		</Button>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert!(button_fields.len() > 20, "{}", parsed.layout);
+        assert_eq!(&parsed.layout[button_fields[11].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
 
