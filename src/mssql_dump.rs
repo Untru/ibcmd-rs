@@ -14315,6 +14315,10 @@ struct SubsystemProperties {
     include_in_command_interface: bool,
 }
 
+struct ExchangePlanProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct CommonModuleFlags {
     global: bool,
     client_managed_application: bool,
@@ -15126,6 +15130,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Subsystem" {
         let subsystem = parse_subsystem_properties_from_text(text, uuid)?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
+    } else if kind == "ExchangePlan" {
+        let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid)?;
+        format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
         format_language_source_xml(&header, &language, source_version).into_bytes()
@@ -15427,6 +15434,45 @@ fn parse_subsystem_properties_from_text(text: &str, uuid: &str) -> Option<Subsys
     Some(SubsystemProperties {
         include_in_command_interface: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true),
     })
+}
+
+fn parse_exchange_plan_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<ExchangePlanProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("37") {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("ExchangePlanObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("ExchangePlanRef.{}", header.name),
+        "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        9,
+        10,
+        &format!("ExchangePlanManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(ExchangePlanProperties { generated_types })
 }
 
 fn parse_catalog_properties_from_text(
@@ -18041,6 +18087,19 @@ fn format_subsystem_source_xml(
                 xml_bool(subsystem.include_in_command_interface)
             ),
         );
+    }
+    xml
+}
+
+fn format_exchange_plan_source_xml(
+    header: &MetadataHeader,
+    exchange_plan: &ExchangePlanProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("ExchangePlan", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&exchange_plan.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
     }
     xml
 }
@@ -28927,6 +28986,64 @@ mod tests {
             PathBuf::from("Subsystems/Hidden.xml")
         );
         assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
+    }
+
+    #[test]
+    fn extracts_exchange_plan_generated_types_to_metadata_xml() {
+        let exchange_plan_uuid = "11111111-1111-4111-8111-111111111111";
+        let object_type_id = "22222222-2222-4222-8222-222222222221";
+        let object_value_id = "22222222-2222-4222-8222-222222222222";
+        let ref_type_id = "33333333-3333-4333-8333-333333333331";
+        let ref_value_id = "33333333-3333-4333-8333-333333333332";
+        let manager_type_id = "44444444-4444-4444-8444-444444444441";
+        let manager_value_id = "44444444-4444-4444-8444-444444444442";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{37,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+{manager_type_id},{manager_value_id},\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{exchange_plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"exchange comment\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            exchange_plan_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("ExchangePlans/Sync.xml")
+        );
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains(r#"<ExchangePlan uuid="11111111-1111-4111-8111-111111111111">"#));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="ExchangePlanObject.Sync" category="Object">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="ExchangePlanRef.Sync" category="Ref">"#));
+        assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
+        assert!(
+            xml.contains(
+                r#"<xr:GeneratedType name="ExchangePlanManager.Sync" category="Manager">"#
+            )
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+        assert!(xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap());
     }
 
     #[test]
