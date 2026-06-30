@@ -44,7 +44,7 @@ Verification:
 
 ## Task B - Issue #15, Object Metadata XML
 
-Worktree: `E:\ibcmd_lab\worktrees\issue-15-object-metadata-v8`
+Worktree: `E:\ibcmd_lab\worktrees\issue-15-object-metadata-v9`
 
 Goal: reduce remaining metadata XML debt for object families such as Catalogs,
 Documents, DataProcessors, and Reports.
