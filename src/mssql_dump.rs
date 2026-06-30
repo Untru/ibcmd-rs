@@ -4995,6 +4995,7 @@ fn parse_configuration_reference_text(text: &str) -> Option<String> {
 fn extract_configuration_source_xml(
     text: &str,
     uuid: &str,
+    object_refs: &BTreeMap<String, String>,
     source_version: InfobaseConfigSourceVersion,
 ) -> Option<String> {
     if !text.trim_start().starts_with("{2,") {
@@ -5018,7 +5019,8 @@ fn extract_configuration_source_xml(
     }
     let mut header = parse_metadata_header_from_text(text, header_uuid)?;
     header.uuid = uuid.to_string();
-    let properties = parse_configuration_properties_from_text(text).unwrap_or_default();
+    let properties =
+        parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
     let child_objects = parse_configuration_child_objects(text, uuid, header_uuid);
     let mut xml = format_configuration_source_xml(&header, &properties, source_version);
     if !child_objects.is_empty() {
@@ -5035,7 +5037,10 @@ fn extract_configuration_source_xml(
     Some(xml)
 }
 
-fn parse_configuration_properties_from_text(text: &str) -> Option<ConfigurationProperties> {
+fn parse_configuration_properties_from_text(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ConfigurationProperties> {
     let fields = configuration_root_fields(text)?;
     Some(ConfigurationProperties {
         name_prefix: fields
@@ -5047,6 +5052,8 @@ fn parse_configuration_properties_from_text(text: &str) -> Option<ConfigurationP
         default_run_mode: fields
             .get(3)
             .and_then(|field| configuration_default_run_mode_xml(field.trim())),
+        default_style: parse_configuration_root_reference(&fields, 9, object_refs, "Style."),
+        default_language: parse_configuration_root_reference(&fields, 10, object_refs, "Language."),
         script_variant: fields
             .get(13)
             .and_then(|field| configuration_script_variant_xml(field.trim())),
@@ -5068,6 +5075,21 @@ fn parse_configuration_properties_from_text(text: &str) -> Option<ConfigurationP
 fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
     let start = text.find("{68,")?;
     split_1c_braced_fields(text, start)
+}
+
+fn parse_configuration_root_reference(
+    fields: &[&str],
+    index: usize,
+    object_refs: &BTreeMap<String, String>,
+    expected_prefix: &str,
+) -> Option<String> {
+    let uuid = fields
+        .get(index)
+        .and_then(|field| parse_non_zero_uuid(field.trim()))?;
+    let reference = object_refs.get(&uuid)?;
+    reference
+        .starts_with(expected_prefix)
+        .then(|| reference.clone())
 }
 
 fn configuration_default_run_mode_xml(value: &str) -> Option<&'static str> {
@@ -15340,6 +15362,8 @@ struct ConfigurationProperties {
     name_prefix: Option<String>,
     configuration_extension_compatibility_mode: Option<String>,
     default_run_mode: Option<&'static str>,
+    default_style: Option<String>,
+    default_language: Option<String>,
     script_variant: Option<&'static str>,
     vendor: Option<String>,
     version: Option<String>,
@@ -15822,7 +15846,7 @@ fn extract_metadata_source_xml_from_text_row(
         return None;
     }
     let text = row.text.as_str();
-    if let Some(xml) = extract_configuration_source_xml(text, uuid, source_version) {
+    if let Some(xml) = extract_configuration_source_xml(text, uuid, object_refs, source_version) {
         return Some(ExtractedMetadataSourceXml {
             relative_path: PathBuf::from("Configuration.xml"),
             xml: xml.into_bytes(),
@@ -20000,6 +20024,16 @@ fn format_configuration_source_xml(
             .as_deref(),
     );
     push_optional_simple_property_xml(&mut insert, "DefaultRunMode", properties.default_run_mode);
+    push_optional_simple_property_xml(
+        &mut insert,
+        "DefaultStyle",
+        properties.default_style.as_deref(),
+    );
+    push_optional_simple_property_xml(
+        &mut insert,
+        "DefaultLanguage",
+        properties.default_language.as_deref(),
+    );
     push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
     push_optional_simple_property_xml(&mut insert, "Vendor", properties.vendor.as_deref());
     push_optional_simple_property_xml(&mut insert, "Version", properties.version.as_deref());
@@ -33373,6 +33407,71 @@ mod tests {
                 "<UpdateCatalogAddress>https://updates.example.invalid/</UpdateCatalogAddress>"
             ));
             assert!(xml.contains("<CompatibilityMode>Version8_3_20</CompatibilityMode>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_default_style_and_language_refs() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let style_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let language_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let plain = r#"{2,
+{@UUID@},1,
+{9cd510cd-abfc-11d4-9434-004095e12fc7,
+{1,
+{68,
+{0,
+{3,
+{1,0,@HEADER_UUID@},"DemoApp",{1,"en","Demo app"},"",0,0,00000000-0000-0000-0000-000000000000,0}
+},"",1,
+{0},{0},{0},{0},{0},@STYLE_UUID@,@LANGUAGE_UUID@,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,"Vendor","1.2.3","",0,
+{0,0},0,
+{0,0},0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,80327,
+{0,0},0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,
+{0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,00000000-0000-0000-0000-000000000000,0,
+{0,0},{0,0},0,"",80320}
+}
+}
+}"#
+        .replace("@UUID@", uuid)
+        .replace("@HEADER_UUID@", header_uuid)
+        .replace("@STYLE_UUID@", style_uuid)
+        .replace("@LANGUAGE_UUID@", language_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+        let mut object_refs = BTreeMap::new();
+        object_refs.insert(style_uuid.to_string(), "Style.Main".to_string());
+        object_refs.insert(language_uuid.to_string(), "Language.English".to_string());
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<DefaultStyle>Style.Main</DefaultStyle>"));
+            assert!(xml.contains("<DefaultLanguage>Language.English</DefaultLanguage>"));
+            assert!(
+                xml.find("<DefaultStyle>Style.Main</DefaultStyle>").unwrap()
+                    < xml
+                        .find("<DefaultLanguage>Language.English</DefaultLanguage>")
+                        .unwrap()
+            );
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
