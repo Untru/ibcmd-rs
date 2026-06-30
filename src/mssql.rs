@@ -78,6 +78,7 @@ pub struct MssqlSourceParityAuditReport {
     pub source_version: Option<String>,
     pub path_prefixes: Vec<String>,
     pub source_coverage: SourceLoadCoverageAuditReport,
+    pub bootstrap_readiness: MssqlSourceBootstrapReadinessReport,
     pub selected_metadata_xml_files: usize,
     pub selected_common_module_xml_files: usize,
     pub prepared_metadata_objects: usize,
@@ -92,6 +93,50 @@ pub struct MssqlSourceParityAuditReport {
     pub version_replacements: Vec<VersionReplacement>,
     pub config_digest_parity: MssqlSourceConfigDigestParityReport,
     pub batches: Vec<MssqlSourceParityBatchReport>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceBootstrapReadinessReport {
+    pub selected_objects: usize,
+    pub config_rows: usize,
+    pub rows_requiring_base_blob: usize,
+    pub rows_generatable_without_base_blob: usize,
+    pub current_staging_rows_fetching_base_blob: usize,
+    pub objects_requiring_base_blob: usize,
+    pub objects_fully_generatable_without_base_blob: usize,
+    pub generation_summary: Vec<MssqlSourceBootstrapGenerationSummary>,
+    pub objects: Vec<MssqlSourceBootstrapObjectReport>,
+    pub rows: Vec<MssqlSourceBootstrapRowReport>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceBootstrapGenerationSummary {
+    pub generation: String,
+    pub row_kind: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceBootstrapObjectReport {
+    pub kind: String,
+    pub path: String,
+    pub config_rows: usize,
+    pub rows_requiring_base_blob: usize,
+    pub rows_generatable_without_base_blob: usize,
+    pub current_staging_rows_fetching_base_blob: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlSourceBootstrapRowReport {
+    pub owner_kind: String,
+    pub object_kind: String,
+    pub object_path: String,
+    pub source_path: String,
+    pub config_file_name: String,
+    pub row_kind: String,
+    pub generation: String,
+    pub current_staging_fetches_base_blob: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -544,6 +589,8 @@ pub fn audit_source_parity(
         validate_selected_source_versions(&metadata_xmls, source_version)?;
         validate_selected_source_versions(&common_module_xmls, source_version)?;
     }
+    let bootstrap_readiness =
+        source_bootstrap_readiness_report(&args.source_root, &metadata_xmls, &common_module_xmls)?;
 
     let source = MetadataSourceContext::new(args.source_root.clone());
     let metadata_results = parallel::install(|| {
@@ -682,6 +729,7 @@ pub fn audit_source_parity(
             .map(|version| version.as_str().to_string()),
         path_prefixes: args.path_prefix.clone(),
         source_coverage,
+        bootstrap_readiness,
         selected_metadata_xml_files: metadata_xmls.len(),
         selected_common_module_xml_files: common_module_xmls.len(),
         prepared_metadata_objects: metadata_objects.len(),
@@ -735,6 +783,669 @@ fn source_parity_failure_summary(
         .into_iter()
         .map(|(category, count)| MssqlSourceParityFailureSummary { category, count })
         .collect()
+}
+
+fn source_bootstrap_readiness_report(
+    source_root: &Path,
+    metadata_xmls: &[PathBuf],
+    common_module_xmls: &[PathBuf],
+) -> Result<MssqlSourceBootstrapReadinessReport> {
+    let mut rows = Vec::new();
+    let mut objects = Vec::new();
+
+    for xml_path in metadata_xmls {
+        let xml = fs::read(xml_path)
+            .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)
+            .with_context(|| format!("failed to parse metadata XML {}", xml_path.display()))?;
+        let object_path = source_relative_path(source_root, xml_path);
+        let object_start = rows.len();
+
+        rows.push(bootstrap_row_report(
+            "metadata_object",
+            &properties.kind,
+            &object_path,
+            object_path.as_str(),
+            properties.uuid.clone(),
+            "metadata_xml",
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "metadata XML packer patches the selected XML into an existing metadata blob",
+        ));
+        rows.extend(metadata_body_bootstrap_rows(
+            source_root,
+            xml_path,
+            &xml,
+            &properties,
+            &object_path,
+        )?);
+
+        objects.push(bootstrap_object_report(
+            properties.kind,
+            object_path,
+            &rows[object_start..],
+        ));
+    }
+
+    for xml_path in common_module_xmls {
+        let xml = fs::read(xml_path)
+            .with_context(|| format!("failed to read common module XML {}", xml_path.display()))?;
+        let properties = parse_common_module_xml_properties(&xml)
+            .with_context(|| format!("failed to parse common module XML {}", xml_path.display()))?;
+        let object_path = source_relative_path(source_root, xml_path);
+        let object_start = rows.len();
+
+        rows.push(bootstrap_row_report(
+            "common_module",
+            "CommonModule",
+            &object_path,
+            object_path.as_str(),
+            properties.uuid.clone(),
+            "common_module_metadata",
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "common module metadata packer patches an existing metadata blob",
+        ));
+        let body_path = infer_common_module_text_path(xml_path);
+        if body_path.exists() {
+            rows.push(bootstrap_row_report(
+                "common_module",
+                "CommonModule",
+                &object_path,
+                source_relative_path(source_root, &body_path),
+                format!("{}.0", properties.uuid),
+                "common_module_body",
+                BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                true,
+                "module body packer can synthesize default module info without a base blob; current staging still fetches the active module blob to preserve existing info",
+            ));
+        }
+
+        objects.push(bootstrap_object_report(
+            "CommonModule".to_string(),
+            object_path,
+            &rows[object_start..],
+        ));
+    }
+
+    rows.push(bootstrap_row_report(
+        "source_set",
+        "Versions",
+        "",
+        "",
+        "versions".to_string(),
+        "versions",
+        BootstrapGeneration::RequiresBaseBlob,
+        true,
+        "current source staging patches an existing versions blob; a standalone bootstrap versions compiler is not implemented",
+    ));
+
+    rows.sort_by(|left, right| {
+        left.object_path
+            .cmp(&right.object_path)
+            .then_with(|| left.row_kind.cmp(&right.row_kind))
+            .then_with(|| left.config_file_name.cmp(&right.config_file_name))
+    });
+    objects.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+
+    let rows_requiring_base_blob = rows
+        .iter()
+        .filter(|row| row.generation == BootstrapGeneration::RequiresBaseBlob.as_str())
+        .count();
+    let rows_generatable_without_base_blob = rows
+        .iter()
+        .filter(|row| row.generation == BootstrapGeneration::CanGenerateWithoutBaseBlob.as_str())
+        .count();
+    let current_staging_rows_fetching_base_blob = rows
+        .iter()
+        .filter(|row| row.current_staging_fetches_base_blob)
+        .count();
+    let objects_requiring_base_blob = objects
+        .iter()
+        .filter(|object| object.rows_requiring_base_blob > 0)
+        .count();
+    let objects_fully_generatable_without_base_blob = objects
+        .iter()
+        .filter(|object| object.rows_requiring_base_blob == 0)
+        .count();
+    let generation_summary = source_bootstrap_generation_summary(&rows);
+
+    Ok(MssqlSourceBootstrapReadinessReport {
+        selected_objects: metadata_xmls.len() + common_module_xmls.len(),
+        config_rows: rows.len(),
+        rows_requiring_base_blob,
+        rows_generatable_without_base_blob,
+        current_staging_rows_fetching_base_blob,
+        objects_requiring_base_blob,
+        objects_fully_generatable_without_base_blob,
+        generation_summary,
+        objects,
+        rows,
+    })
+}
+
+fn metadata_body_bootstrap_rows(
+    source_root: &Path,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+) -> Result<Vec<MssqlSourceBootstrapRowReport>> {
+    let mut rows = Vec::new();
+    match properties.kind.as_str() {
+        "Style" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_style_body_path(xml_path),
+            "0",
+            "style_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "Style body packer can build a new body from Style.xml; current staging fetches the active body to patch matching style entries",
+        )),
+        "ScheduledJob" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_scheduled_job_schedule_path(xml_path),
+            "0",
+            "schedule_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "schedule packer builds the schedule body directly from Schedule.xml",
+        )),
+        "XDTOPackage" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_xdto_package_body_path(xml_path),
+            "0",
+            "raw_deflated_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "raw deflated body packer builds the Config blob directly from source bytes",
+        )),
+        "WSReference" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_ws_reference_definition_path(xml_path),
+            "0",
+            "raw_deflated_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "raw deflated body packer builds the Config blob directly from source bytes",
+        )),
+        "CommonTemplate" | "Template" => rows.extend(template_bootstrap_rows(
+            source_root,
+            xml_path,
+            xml,
+            properties,
+            object_path,
+        )?),
+        "CommonPicture" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_common_picture_body_path(xml_path),
+            "0",
+            "picture_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "picture packer can create a new ExtPicture wrapper from Picture.xml and referenced bytes; current staging fetches base to preserve wrapper fields",
+        )),
+        "Configuration" => rows.extend(configuration_asset_bootstrap_rows(
+            source_root,
+            xml_path,
+            properties,
+            object_path,
+        )),
+        "BusinessProcess" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_business_process_flowchart_body_path(xml_path),
+            "7",
+            "flowchart_body",
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "Flowchart.xml packer preserves existing flowchart item shape and identifiers from the base blob",
+        )),
+        "Catalog" | "ChartOfCharacteristicTypes" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_predefined_data_body_path(xml_path),
+            predefined_data_body_suffix(&properties.kind).unwrap_or(""),
+            "predefined_data_body",
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "Predefined.xml packer maps source items onto the existing predefined data table in the base blob",
+        )),
+        "ExchangePlan" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_exchange_plan_content_body_path(xml_path),
+            "1",
+            "exchange_plan_content_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "Content.xml packer can generate the content body after resolving metadata references from the source tree",
+        )),
+        "Form" | "CommonForm" => {
+            let form_path = infer_form_body_path(xml_path);
+            let module_path = infer_form_module_body_path(xml_path);
+            if form_path.exists() || module_path.exists() {
+                rows.push(bootstrap_row_report(
+                    "metadata_object",
+                    &properties.kind,
+                    object_path,
+                    source_relative_path(
+                        source_root,
+                        if form_path.exists() {
+                            &form_path
+                        } else {
+                            &module_path
+                        },
+                    ),
+                    format!("{}.0", properties.uuid),
+                    "form_body",
+                    BootstrapGeneration::RequiresBaseBlob,
+                    true,
+                    "Form body packer currently patches layout, tail sections and optional module text into an existing form body; full Form.xml compiler is not implemented",
+                ));
+            }
+        }
+        "Role" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_role_rights_body_path(xml_path),
+            "0",
+            "role_rights_body",
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "Rights.xml packer requires the base role rights table shape and object ordering",
+        )),
+        _ => {}
+    }
+
+    let help_suffix = if matches!(properties.kind.as_str(), "Form" | "CommonForm") {
+        "1"
+    } else {
+        "5"
+    };
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_object_help_body_path(xml_path),
+        help_suffix,
+        "help_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "Help packer builds the help blob from Help.xml, pages and files; current staging queries Config only to choose an existing help row id when present",
+    ));
+
+    for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
+        let body_path = if properties.kind == "Configuration" {
+            infer_configuration_module_body_path(xml_path, file_name)
+        } else {
+            infer_object_module_body_path(xml_path, file_name)
+        };
+        rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            body_path,
+            suffix,
+            "module_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "module body packer can synthesize default module info without a base blob; current staging fetches the active module blob to preserve existing info",
+        ));
+    }
+
+    for source in nested_command_module_sources(xml_path, xml, properties)? {
+        rows.push(bootstrap_row_report(
+            "metadata_object",
+            &properties.kind,
+            object_path,
+            source_relative_path(source_root, &source.body_path),
+            format!("{}.2", source.command_id),
+            "nested_command_module_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "nested command module packer can synthesize default module info without a base blob; current staging fetches the active command module blob to preserve existing info",
+        ));
+    }
+
+    if let Some(suffix) = command_interface_body_suffix(&properties.kind) {
+        rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_command_interface_body_path(xml_path),
+            suffix,
+            "command_interface_body",
+            BootstrapGeneration::RequiresBaseBlob,
+            true,
+            "CommandInterface.xml packer preserves command references and validates command count against the base blob",
+        ));
+    }
+
+    if let Some(suffix) = additional_indexes_body_suffix(&properties.kind) {
+        rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_additional_indexes_body_path(xml_path),
+            suffix,
+            "additional_indexes_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "AdditionalIndexes.xml is stored as a raw deflated body and can be generated from source bytes",
+        ));
+    }
+
+    Ok(rows)
+}
+
+fn template_bootstrap_rows(
+    source_root: &Path,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+) -> Result<Vec<MssqlSourceBootstrapRowReport>> {
+    let Some(template_type) = parse_template_type_from_xml(xml)? else {
+        return Ok(Vec::new());
+    };
+    let mut rows = Vec::new();
+    match template_type.as_str() {
+        "DataCompositionAppearanceTemplate"
+        | "DataCompositionSchema"
+        | "GraphicalSchema"
+        | "TextDocument" => {
+            if let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type)
+            {
+                rows.extend(optional_body_bootstrap_row(
+                    source_root,
+                    properties,
+                    object_path,
+                    body_path,
+                    "0",
+                    "template_raw_body",
+                    BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                    true,
+                    "raw template body packer builds the Config blob directly from source bytes",
+                ));
+            }
+        }
+        "HTMLDocument" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_html_template_body_path(xml_path),
+            "0",
+            "template_html_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            false,
+            "HTML template body uses the help-style packer and does not need an active base blob",
+        )),
+        "SpreadsheetDocument" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_spreadsheet_template_body_path(xml_path),
+            "0",
+            "template_spreadsheet_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "SpreadsheetDocument packer can build a MOXCEL blob from Template.xml; current staging fetches base only to preserve a semantically equal active blob",
+        )),
+        "AddIn" | "BinaryData" => rows.extend(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            infer_binary_template_body_path(xml_path),
+            "0",
+            "template_binary_body",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            true,
+            "binary template body packer builds the Config blob directly from Template.bin",
+        )),
+        _ => {}
+    }
+    Ok(rows)
+}
+
+fn configuration_asset_bootstrap_rows(
+    source_root: &Path,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+) -> Vec<MssqlSourceBootstrapRowReport> {
+    let mut rows = Vec::new();
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "Splash.xml"),
+        "2",
+        "configuration_picture_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration picture body can be generated from source bytes; current staging fetches base to preserve wrapper fields",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
+        "4",
+        "configuration_binary_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration binary asset is stored directly from source bytes",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
+        "8",
+        "configuration_raw_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration raw asset is stored as a raw deflated body generated from source bytes",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "MobileClientSignature.bin"),
+        "10",
+        "configuration_raw_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration raw asset is stored as a raw deflated body generated from source bytes",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
+        "a",
+        "configuration_command_interface_body",
+        BootstrapGeneration::RequiresBaseBlob,
+        true,
+        "Configuration CommandInterface.xml packer preserves command references and validates command count against the base blob",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
+        "9",
+        "configuration_command_interface_body",
+        BootstrapGeneration::RequiresBaseBlob,
+        true,
+        "Configuration MainSectionCommandInterface.xml packer preserves command references and validates command count against the base blob",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
+        "b",
+        "configuration_raw_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration raw asset is stored as a raw deflated body generated from source bytes",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
+        "c",
+        "configuration_picture_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration picture body can be generated from source bytes; current staging fetches base to preserve wrapper fields",
+    ));
+    rows.extend(optional_body_bootstrap_row(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
+        "f",
+        "configuration_raw_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        true,
+        "configuration raw asset is stored as a raw deflated body generated from source bytes",
+    ));
+    rows
+}
+
+fn optional_body_bootstrap_row(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    body_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+    generation: BootstrapGeneration,
+    current_staging_fetches_base_blob: bool,
+    reason: &str,
+) -> Option<MssqlSourceBootstrapRowReport> {
+    body_path.exists().then(|| {
+        bootstrap_row_report(
+            "metadata_object",
+            &properties.kind,
+            object_path,
+            source_relative_path(source_root, &body_path),
+            format!("{}.{}", properties.uuid, suffix),
+            row_kind,
+            generation,
+            current_staging_fetches_base_blob,
+            reason,
+        )
+    })
+}
+
+fn bootstrap_row_report(
+    owner_kind: &str,
+    object_kind: &str,
+    object_path: &str,
+    source_path: impl Into<String>,
+    config_file_name: String,
+    row_kind: &str,
+    generation: BootstrapGeneration,
+    current_staging_fetches_base_blob: bool,
+    reason: &str,
+) -> MssqlSourceBootstrapRowReport {
+    MssqlSourceBootstrapRowReport {
+        owner_kind: owner_kind.to_string(),
+        object_kind: object_kind.to_string(),
+        object_path: object_path.to_string(),
+        source_path: source_path.into(),
+        config_file_name,
+        row_kind: row_kind.to_string(),
+        generation: generation.as_str().to_string(),
+        current_staging_fetches_base_blob,
+        reason: reason.to_string(),
+    }
+}
+
+fn bootstrap_object_report(
+    kind: String,
+    path: String,
+    rows: &[MssqlSourceBootstrapRowReport],
+) -> MssqlSourceBootstrapObjectReport {
+    let rows_requiring_base_blob = rows
+        .iter()
+        .filter(|row| row.generation == BootstrapGeneration::RequiresBaseBlob.as_str())
+        .count();
+    let rows_generatable_without_base_blob = rows
+        .iter()
+        .filter(|row| row.generation == BootstrapGeneration::CanGenerateWithoutBaseBlob.as_str())
+        .count();
+    let current_staging_rows_fetching_base_blob = rows
+        .iter()
+        .filter(|row| row.current_staging_fetches_base_blob)
+        .count();
+    MssqlSourceBootstrapObjectReport {
+        kind,
+        path,
+        config_rows: rows.len(),
+        rows_requiring_base_blob,
+        rows_generatable_without_base_blob,
+        current_staging_rows_fetching_base_blob,
+    }
+}
+
+fn source_bootstrap_generation_summary(
+    rows: &[MssqlSourceBootstrapRowReport],
+) -> Vec<MssqlSourceBootstrapGenerationSummary> {
+    let mut counts = BTreeMap::<(String, String), usize>::new();
+    for row in rows {
+        *counts
+            .entry((row.generation.clone(), row.row_kind.clone()))
+            .or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(
+            |((generation, row_kind), count)| MssqlSourceBootstrapGenerationSummary {
+                generation,
+                row_kind,
+                count,
+            },
+        )
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapGeneration {
+    RequiresBaseBlob,
+    CanGenerateWithoutBaseBlob,
+}
+
+impl BootstrapGeneration {
+    fn as_str(self) -> &'static str {
+        match self {
+            BootstrapGeneration::RequiresBaseBlob => "requires_base_blob",
+            BootstrapGeneration::CanGenerateWithoutBaseBlob => "can_generate_without_base_blob",
+        }
+    }
 }
 
 fn classify_source_parity_error(message: &str) -> (String, Option<String>) {
@@ -6596,6 +7307,114 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn reports_bootstrap_readiness_for_selected_source_rows() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-bootstrap-readiness-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let catalog_xml = root.join("Catalogs").join("Products.xml");
+        let catalog_ext = root.join("Catalogs").join("Products").join("Ext");
+        let module_xml = root.join("CommonModules").join("Utils.xml");
+        let module_ext = root.join("CommonModules").join("Utils").join("Ext");
+        fs::create_dir_all(&catalog_ext).unwrap();
+        fs::create_dir_all(&module_ext).unwrap();
+        fs::write(
+            &catalog_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Products</Name></Properties>
+  </Catalog>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(catalog_ext.join("Predefined.xml"), b"<PredefinedData/>").unwrap();
+        fs::write(
+            catalog_ext.join("ObjectModule.bsl"),
+            b"Procedure A()\nEndProcedure",
+        )
+        .unwrap();
+        fs::write(catalog_ext.join("Help.xml"), b"<Help/>").unwrap();
+        fs::write(
+            &module_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonModule uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+    <Properties>
+      <Name>Utils</Name>
+      <Global>false</Global>
+      <ClientManagedApplication>false</ClientManagedApplication>
+      <Server>true</Server>
+      <ExternalConnection>false</ExternalConnection>
+      <ClientOrdinaryApplication>false</ClientOrdinaryApplication>
+      <ServerCall>false</ServerCall>
+      <Privileged>false</Privileged>
+      <ReturnValuesReuse>DontUse</ReturnValuesReuse>
+    </Properties>
+  </CommonModule>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            module_ext.join("Module.bsl"),
+            b"Procedure B()\nEndProcedure",
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&catalog_xml),
+            std::slice::from_ref(&module_xml),
+        )
+        .unwrap();
+
+        assert_eq!(report.selected_objects, 2);
+        assert_eq!(report.config_rows, 7);
+        assert_eq!(report.rows_requiring_base_blob, 4);
+        assert_eq!(report.rows_generatable_without_base_blob, 3);
+        assert_eq!(report.current_staging_rows_fetching_base_blob, 7);
+        assert_eq!(report.objects_requiring_base_blob, 2);
+        assert_eq!(report.objects_fully_generatable_without_base_blob, 0);
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "predefined_data_body")
+            .unwrap();
+        assert_eq!(
+            row.config_file_name,
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1c"
+        );
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| {
+                row.row_kind == "common_module_body"
+                    && row.config_file_name == "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0"
+            })
+            .unwrap();
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(row.source_path, "CommonModules/Utils/Ext/Module.bsl");
+        assert!(row.current_staging_fetches_base_blob);
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "versions")
+            .unwrap();
+        assert_eq!(row.config_file_name, "versions");
+        assert_eq!(row.generation, "requires_base_blob");
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

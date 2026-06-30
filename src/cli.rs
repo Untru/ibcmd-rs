@@ -47,7 +47,7 @@ pub enum Commands {
     StorageMap(TraceAnalyzeArgs),
     /// Compare two SQL Server 1C databases by table shape and row counts.
     MssqlCompare(MssqlCompareArgs),
-    /// Dry-run source load parity against SQL base blobs without writing ConfigSave.
+    /// Dry-run source load parity and bootstrap base-blob readiness without writing ConfigSave.
     MssqlAuditSourceParity(MssqlAuditSourceParityArgs),
     /// Clone a SQL Server database with backup/restore.
     MssqlClone(MssqlCloneArgs),
