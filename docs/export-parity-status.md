@@ -30,7 +30,7 @@ The full JSON report is retained at
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
-round 27 incremental verified fixes listed below.
+round 28 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -150,6 +150,13 @@ Verification history:
 | Round 27 source staging readiness slice | unit-level readiness audit verification | configuration `Ext/HomePageWorkArea.xml` has explicit base-free readiness classification |
 | Round 27 native dump performance slice | real selected-run timing plus unit-level summary verification | `mssql-dump-timing-summary` added; selected 663,776,134-byte blob run used 3 BCP batches with `fetch_rows_ms=3532` |
 | Round 28 standalone-content source asset slice | unit-level source-only extraction verification plus real selected repro | `Ext/StandaloneConfigurationContent.bin` now builds targeted metadata refs when metadata XML extraction is disabled; the previous `0014cc2a-b5ed-427d-8ac6-116e92aaa9a4` blocker resolves as a role ref |
+| Round 28 Role Rights.xml slice | unit-level extractor/packer verification | string-backed restriction fields export/import through `<restrictionByCondition><field>` while preserving base layout |
+| Round 28 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `UserSettingsGroup` extracts and packs existing numeric property-bag slots |
+| Round 28 object metadata slice | unit-level metadata XML verification | Catalog/DataProcessor child attribute type refs and Report auxiliary-variant placeholder behavior improved |
+| Round 28 register/exchange slice | unit-level metadata/asset verification | AccumulationRegister `RegisterType` and ExchangePlan `Content.xml` BOM/final-newline framing are covered |
+| Round 28 CommonAttribute slice | unit-level metadata XML verification | content item `xr:ConditionalSeparation` refs are resolved from native settings records |
+| Round 28 DCS template slice | unit-level selected-index verification | selected template owners build `type_index` so DCS TypeIds can normalize in selected/source-only flows |
+| Round 28 source staging readiness slice | unit-level readiness audit verification | metadata XML rows now report precise base-dependent blockers for incomplete native metadata compilation |
 
 Performance note for selected extraction:
 
@@ -331,5 +338,13 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #19 | `mssql-dump-timing-summary` and selected blob timing evidence | merged to `master` in round 27 |
 | #21 | explicit HomePageWorkArea base-free readiness classification | merged to `master` in round 27 |
 | #22 | root Configuration.xml default role refs | merged to `master` in round 27 |
+| #13 | Role Rights.xml string-backed restriction field export/import | merged to `master` in round 28 |
+| #15 | Catalog/DataProcessor child attribute type refs and Report auxiliary-variant placeholder behavior | merged to `master` in round 28 |
+| #16 | Form.xml wrapper `55` table `UserSettingsGroup` extraction and packing | merged to `master` in round 28 |
+| #17 | selected template-owner `type_index` readiness for DCS TypeId normalization | merged to `master` in round 28 |
+| #18 | AccumulationRegister `RegisterType` and ExchangePlan `Content.xml` file framing | merged to `master` in round 28 |
+| #19 | standalone-content reference resolution without metadata XML and new ExchangePlan content blocker evidence | merged to `master` in round 28 |
+| #21 | precise metadata XML row base-dependent readiness audit | merged to `master` in round 28 |
+| #22 | CommonAttribute conditional-separation refs | merged to `master` in round 28 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

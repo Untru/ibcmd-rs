@@ -61,6 +61,14 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 28 | Native dump performance | standalone-content refs resolve without `--extract-metadata-xml`; full timing now advances to an ExchangePlan `Content.xml` blocker |
+| 28 | Role Rights.xml | string-backed restriction fields export/import through `<restrictionByCondition><field>` while preserving base layout |
+| 28 | Form.xml | wrapper `55` table `UserSettingsGroup` extracts and packs existing numeric property-bag slots |
+| 28 | Object metadata XML | Catalog/DataProcessor child attribute type refs and Report auxiliary-variant placeholder behavior improved |
+| 28 | Register/ExchangePlan metadata/assets | AccumulationRegister `RegisterType` and ExchangePlan `Content.xml` BOM/final-newline framing covered |
+| 28 | CommonAttributes | content item `xr:ConditionalSeparation` refs are resolved from native settings records |
+| 28 | DCS templates | selected template owners build `type_index` so DCS TypeIds can normalize in selected/source-only flows |
+| 28 | Source staging readiness | metadata XML rows now report precise base-dependent blockers for incomplete native metadata compilation |
 | 27 | Role Rights.xml | nested subsystem and integration service channel refs resolve to fuller native-style child object names |
 | 27 | Form.xml | wrapper `55` table items extract and pack existing `AllowGettingCurrentRowURL` boolean slots |
 | 27 | Object metadata XML | Report command child headers and Catalog/DataProcessor Attribute/TabularSection child headers are emitted |
