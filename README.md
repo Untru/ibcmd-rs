@@ -22,6 +22,8 @@ Current parity tracking is maintained in
 the compact top-level view from the last full `ut_ibcmd` export comparison
 against native `ibcmd`; incremental verified fixes after that snapshot are
 listed in the status document until the next full diff is regenerated.
+Recommended parallel-agent ownership by object family is tracked in
+[docs/metadata-agent-slicing.md](docs/metadata-agent-slicing.md).
 
 EDT XML exporter/importer plugin findings are summarized in
 [docs/edt-xml-layer-analysis.md](docs/edt-xml-layer-analysis.md). The short
