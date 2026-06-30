@@ -15862,7 +15862,36 @@ struct MetadataChildObject {
     tag: &'static str,
     header: MetadataHeader,
     value_types: Vec<ConstantValueType>,
+    properties: Option<MetadataChildProperties>,
     child_objects: Vec<MetadataChildObject>,
+}
+
+#[derive(Clone)]
+struct MetadataChildProperties {
+    password_mode: bool,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
+    tooltip: Vec<(String, String)>,
+    mark_negatives: bool,
+    mask: String,
+    multi_line: bool,
+    extended_edit: bool,
+    min_value: Option<String>,
+    max_value: Option<String>,
+    fill_from_filling_value: bool,
+    fill_value: Option<MetadataChildFillValue>,
+    fill_checking: &'static str,
+    choice_parameter_links_empty: bool,
+    choice_parameters_empty: bool,
+    choice_history_on_input: Option<&'static str>,
+    data_history: Option<&'static str>,
+}
+
+#[derive(Clone)]
+enum MetadataChildFillValue {
+    Nil,
+    Boolean(bool),
+    String(String),
 }
 
 struct RegisterChildObject {
@@ -17646,13 +17675,20 @@ fn parse_attribute_tabular_section_child_objects(
         ) else {
             continue;
         };
+        let value_types = if tag == "Attribute" {
+            parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index)
+        } else {
+            Vec::new()
+        };
+        let properties = if tag == "Attribute" {
+            parse_metadata_child_properties(text, marker_start, &header.uuid, &value_types)
+        } else {
+            None
+        };
         let child = MetadataChildObject {
             tag,
-            value_types: if tag == "Attribute" {
-                parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index)
-            } else {
-                Vec::new()
-            },
+            value_types,
+            properties,
             header,
             child_objects: Vec::new(),
         };
@@ -17700,6 +17736,97 @@ fn parse_metadata_child_value_types(
         .filter_map(|field| parse_metadata_type_pattern_from_child_field(field, type_index))
         .find(|value_types| !value_types.is_empty())
         .unwrap_or_default()
+}
+
+fn parse_metadata_child_properties(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    value_types: &[ConstantValueType],
+) -> Option<MetadataChildProperties> {
+    let (_, _, fields) =
+        innermost_metadata_object_fields_around_header(text, marker_start, child_uuid)?;
+    let header_index = metadata_header_field_index(&fields, child_uuid)?;
+    if fields.len() <= header_index + 13 {
+        return None;
+    }
+    Some(MetadataChildProperties {
+        password_mode: parse_1c_bool_field(fields.get(header_index + 1).copied())?,
+        format: parse_1c_synonyms(fields.get(header_index + 2).copied().unwrap_or("{0}")),
+        edit_format: parse_1c_synonyms(fields.get(header_index + 3).copied().unwrap_or("{0}")),
+        tooltip: parse_1c_synonyms(fields.get(header_index + 4).copied().unwrap_or("{0}")),
+        mark_negatives: parse_1c_bool_field(fields.get(header_index + 5).copied())?,
+        mask: fields
+            .get(header_index + 6)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        multi_line: parse_1c_bool_field(fields.get(header_index + 7).copied())?,
+        extended_edit: parse_1c_bool_field(fields.get(header_index + 8).copied())?,
+        min_value: parse_constant_bound_value(fields.get(header_index + 9).copied()),
+        max_value: parse_constant_bound_value(fields.get(header_index + 10).copied()),
+        fill_from_filling_value: parse_1c_bool_field(fields.get(header_index + 11).copied())?,
+        fill_value: parse_metadata_child_fill_value(
+            fields.get(header_index + 12).copied(),
+            value_types,
+        ),
+        fill_checking: metadata_fill_checking_xml(fields.get(header_index + 13).copied()),
+        choice_parameter_links_empty: metadata_child_collection_is_empty(
+            fields.get(header_index + 15).copied(),
+        ),
+        choice_parameters_empty: metadata_child_collection_is_empty(
+            fields.get(header_index + 16).copied(),
+        ),
+        choice_history_on_input: fields
+            .get(header_index + 21)
+            .and_then(|field| metadata_choice_history_on_input_xml(field.trim())),
+        data_history: fields
+            .get(header_index + 25)
+            .and_then(|field| metadata_data_history_xml(field.trim())),
+    })
+}
+
+fn parse_metadata_child_fill_value(
+    field: Option<&str>,
+    value_types: &[ConstantValueType],
+) -> Option<MetadataChildFillValue> {
+    let value = field?.trim();
+    if matches!(value, "{0}" | "00000000-0000-0000-0000-000000000000") {
+        return Some(MetadataChildFillValue::Nil);
+    }
+    if value_types
+        .iter()
+        .any(|value_type| matches!(value_type, ConstantValueType::Boolean))
+    {
+        return parse_1c_bool_flag(value).map(MetadataChildFillValue::Boolean);
+    }
+    parse_constant_bound_value(Some(value)).map(MetadataChildFillValue::String)
+}
+
+fn metadata_fill_checking_xml(field: Option<&str>) -> &'static str {
+    match field.map(str::trim) {
+        Some("1") => "ShowError",
+        _ => "DontCheck",
+    }
+}
+
+fn metadata_child_collection_is_empty(field: Option<&str>) -> bool {
+    matches!(field.map(str::trim), Some("{0}") | Some("0"))
+}
+
+fn metadata_choice_history_on_input_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "1" => Some("DontUse"),
+        "0" => Some("Auto"),
+        _ => None,
+    }
+}
+
+fn metadata_data_history_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "1" => Some("Use"),
+        "0" => Some("DontUse"),
+        _ => None,
+    }
 }
 
 fn parse_metadata_type_pattern_from_child_field(
@@ -22756,6 +22883,7 @@ fn push_metadata_header_child_object_xml(
             tag,
             header: header.clone(),
             value_types: Vec::new(),
+            properties: None,
             child_objects: Vec::new(),
         },
     );
@@ -22784,6 +22912,9 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
             &child.value_types,
             "\t\t\t\t\t",
         ));
+    }
+    if let Some(properties) = &child.properties {
+        push_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
     }
     xml.push_str("\t\t\t\t</Properties>\r\n");
     if !child.child_objects.is_empty() {
@@ -22827,6 +22958,9 @@ fn push_nested_metadata_child_object_xml(
             &format!("{tab}\t\t"),
         ));
     }
+    if let Some(properties) = &child.properties {
+        push_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
+    }
     xml.push_str(&format!("{tab}\t</Properties>\r\n"));
     if !child.child_objects.is_empty() {
         xml.push_str(&format!("{tab}\t<ChildObjects>\r\n"));
@@ -22836,6 +22970,82 @@ fn push_nested_metadata_child_object_xml(
         xml.push_str(&format!("{tab}\t</ChildObjects>\r\n"));
     }
     xml.push_str(&format!("{tab}</{}>\r\n", child.tag));
+}
+
+fn push_metadata_child_properties_xml(
+    xml: &mut String,
+    indent: &str,
+    properties: &MetadataChildProperties,
+) {
+    xml.push_str(&format!(
+        "{indent}<PasswordMode>{}</PasswordMode>\r\n",
+        xml_bool(properties.password_mode)
+    ));
+    push_localized_property(xml, indent, "Format", &properties.format);
+    push_localized_property(xml, indent, "EditFormat", &properties.edit_format);
+    push_localized_property(xml, indent, "ToolTip", &properties.tooltip);
+    xml.push_str(&format!(
+        "{indent}<MarkNegatives>{}</MarkNegatives>\r\n\
+{indent}{}\r\n\
+{indent}<MultiLine>{}</MultiLine>\r\n\
+{indent}<ExtendedEdit>{}</ExtendedEdit>\r\n\
+{indent}{}\r\n\
+{indent}{}\r\n\
+{indent}<FillFromFillingValue>{}</FillFromFillingValue>\r\n\
+",
+        xml_bool(properties.mark_negatives),
+        format_simple_property_xml("Mask", &properties.mask),
+        xml_bool(properties.multi_line),
+        xml_bool(properties.extended_edit),
+        format_constant_bound_xml("MinValue", properties.min_value.as_deref()),
+        format_constant_bound_xml("MaxValue", properties.max_value.as_deref()),
+        xml_bool(properties.fill_from_filling_value),
+    ));
+    if let Some(fill_value) = &properties.fill_value {
+        xml.push_str(&format!(
+            "{indent}{}\r\n",
+            format_metadata_child_fill_value_xml(fill_value)
+        ));
+    }
+    xml.push_str(&format!(
+        "{indent}<FillChecking>{}</FillChecking>\r\n",
+        properties.fill_checking
+    ));
+    if properties.choice_parameter_links_empty {
+        xml.push_str(&format!("{indent}<ChoiceParameterLinks/>\r\n"));
+    }
+    if properties.choice_parameters_empty {
+        xml.push_str(&format!("{indent}<ChoiceParameters/>\r\n"));
+    }
+    if let Some(choice_history_on_input) = properties.choice_history_on_input {
+        xml.push_str(&format!(
+            "{indent}<ChoiceHistoryOnInput>{choice_history_on_input}</ChoiceHistoryOnInput>\r\n"
+        ));
+    }
+    if let Some(data_history) = properties.data_history {
+        xml.push_str(&format!(
+            "{indent}<DataHistory>{data_history}</DataHistory>\r\n"
+        ));
+    }
+}
+
+fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> String {
+    match value {
+        MetadataChildFillValue::Nil => "<FillValue xsi:nil=\"true\"/>".to_string(),
+        MetadataChildFillValue::Boolean(value) => {
+            format!(
+                "<FillValue xsi:type=\"xs:boolean\">{}</FillValue>",
+                xml_bool(*value)
+            )
+        }
+        MetadataChildFillValue::String(value) if value.is_empty() => {
+            "<FillValue xsi:type=\"xs:string\"/>".to_string()
+        }
+        MetadataChildFillValue::String(value) => format!(
+            "<FillValue xsi:type=\"xs:string\">{}</FillValue>",
+            escape_xml_element_text(value)
+        ),
+    }
 }
 
 fn format_common_command_source_xml_native(
@@ -39083,6 +39293,114 @@ mod tests {
         );
         assert!(
             tabular_xml.find("<Comment/>").unwrap() < tabular_xml.find("<Type>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_data_processor_child_attribute_property_tail() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{27,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"RequiredFlag\",{{1,\"en\",\"Required flag\"}},\"\"}},\
+0,{{0}},{{0}},{{1,\"en\",\"Flag tooltip\"}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},{{0}},0,0,0,0,0,0,0,0,0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(
+            attribute_xml.contains("<v8:Type>xs:boolean</v8:Type>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<PasswordMode>false</PasswordMode>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<Format/>"), "{xml}");
+        assert!(attribute_xml.contains("<EditFormat/>"), "{xml}");
+        assert!(attribute_xml.contains("<ToolTip>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<v8:content>Flag tooltip</v8:content>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<MarkNegatives>false</MarkNegatives>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<Mask/>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<MultiLine>false</MultiLine>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<ExtendedEdit>false</ExtendedEdit>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(r#"<MinValue xsi:nil="true"/>"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(r#"<MaxValue xsi:nil="true"/>"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<FillFromFillingValue>false</FillFromFillingValue>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(r#"<FillValue xsi:type="xs:boolean">false</FillValue>"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<FillChecking>ShowError</FillChecking>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<ChoiceParameterLinks/>"), "{xml}");
+        assert!(attribute_xml.contains("<ChoiceParameters/>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<DataHistory>DontUse</DataHistory>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<Type>").unwrap() < attribute_xml.find("<PasswordMode>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<FillValue").unwrap()
+                < attribute_xml.find("<FillChecking>").unwrap(),
             "{xml}"
         );
     }
