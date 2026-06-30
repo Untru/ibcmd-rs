@@ -16092,6 +16092,7 @@ struct MetadataChildObject {
     header: MetadataHeader,
     value_types: Vec<ConstantValueType>,
     properties: Option<MetadataChildProperties>,
+    tabular_section_properties: Option<MetadataTabularSectionProperties>,
     child_objects: Vec<MetadataChildObject>,
 }
 
@@ -16123,6 +16124,14 @@ struct MetadataChildProperties {
     data_history: Option<&'static str>,
     update_data_history_immediately_after_write: Option<bool>,
     execute_after_write_data_history_version_processing: Option<bool>,
+}
+
+#[derive(Clone)]
+struct MetadataTabularSectionProperties {
+    tooltip: Vec<(String, String)>,
+    fill_checking: &'static str,
+    use_mode: &'static str,
+    line_number_length: u32,
 }
 
 #[derive(Clone)]
@@ -18040,10 +18049,16 @@ fn parse_attribute_tabular_section_child_objects(
         } else {
             None
         };
+        let tabular_section_properties = if tag == "TabularSection" {
+            parse_metadata_tabular_section_properties(text, marker_start, &header.uuid)
+        } else {
+            None
+        };
         let child = MetadataChildObject {
             tag,
             value_types,
             properties,
+            tabular_section_properties,
             header,
             child_objects: Vec::new(),
         };
@@ -18189,6 +18204,31 @@ fn parse_metadata_child_properties(
         } else {
             None
         },
+    })
+}
+
+fn parse_metadata_tabular_section_properties(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+) -> Option<MetadataTabularSectionProperties> {
+    let (_, _, fields) =
+        innermost_metadata_object_fields_around_header(text, marker_start, child_uuid)?;
+    let header_index = metadata_header_field_index(&fields, child_uuid)?;
+    let tooltip = parse_1c_synonyms(fields.get(header_index + 1).copied().unwrap_or("{0}"));
+    let fill_checking = metadata_fill_checking_xml(fields.get(header_index + 2).copied());
+    let use_mode = fields
+        .get(header_index + 4)
+        .and_then(|field| metadata_attribute_use_mode_xml(field.trim()))?;
+    let line_number_length = fields
+        .get(header_index + 5)
+        .and_then(|field| parse_1c_u32_field(Some(*field)))?;
+
+    Some(MetadataTabularSectionProperties {
+        tooltip,
+        fill_checking,
+        use_mode,
+        line_number_length,
     })
 }
 
@@ -23489,6 +23529,7 @@ fn push_metadata_header_child_object_xml(
             header: header.clone(),
             value_types: Vec::new(),
             properties: None,
+            tabular_section_properties: None,
             child_objects: Vec::new(),
         },
     );
@@ -23581,6 +23622,9 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
     if let Some(properties) = &child.properties {
         push_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
     }
+    if let Some(properties) = &child.tabular_section_properties {
+        push_metadata_tabular_section_properties_xml(xml, "\t\t\t\t\t", properties);
+    }
     xml.push_str("\t\t\t\t</Properties>\r\n");
     if !child.child_objects.is_empty() {
         xml.push_str("\t\t\t\t<ChildObjects>\r\n");
@@ -23625,6 +23669,9 @@ fn push_nested_metadata_child_object_xml(
     }
     if let Some(properties) = &child.properties {
         push_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
+    }
+    if let Some(properties) = &child.tabular_section_properties {
+        push_metadata_tabular_section_properties_xml(xml, &format!("{tab}\t\t"), properties);
     }
     xml.push_str(&format!("{tab}\t</Properties>\r\n"));
     if !child.child_objects.is_empty() {
@@ -23735,6 +23782,62 @@ fn push_metadata_child_properties_xml(
             xml_bool(execute_after_write)
         ));
     }
+}
+
+fn push_metadata_tabular_section_properties_xml(
+    xml: &mut String,
+    indent: &str,
+    properties: &MetadataTabularSectionProperties,
+) {
+    push_localized_property(xml, indent, "ToolTip", &properties.tooltip);
+    xml.push_str(&format!(
+        "{indent}<FillChecking>{}</FillChecking>\r\n",
+        properties.fill_checking
+    ));
+    push_metadata_line_number_standard_attribute_xml(xml, indent, properties.fill_checking);
+    xml.push_str(&format!(
+        "{indent}<Use>{}</Use>\r\n\
+{indent}<LineNumberLength>{}</LineNumberLength>\r\n",
+        properties.use_mode, properties.line_number_length
+    ));
+}
+
+fn push_metadata_line_number_standard_attribute_xml(
+    xml: &mut String,
+    indent: &str,
+    fill_checking: &str,
+) {
+    xml.push_str(&format!(
+        "{indent}<StandardAttributes>\r\n\
+{indent}\t<xr:StandardAttribute name=\"LineNumber\">\r\n\
+{indent}\t\t<xr:LinkByType/>\r\n\
+{indent}\t\t<xr:FillChecking>{fill_checking}</xr:FillChecking>\r\n\
+{indent}\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+{indent}\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
+{indent}\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+{indent}\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+{indent}\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
+{indent}\t\t<xr:ToolTip/>\r\n\
+{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+{indent}\t\t<xr:Format/>\r\n\
+{indent}\t\t<xr:ChoiceForm/>\r\n\
+{indent}\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+{indent}\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+{indent}\t\t<xr:EditFormat/>\r\n\
+{indent}\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+{indent}\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+{indent}\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+{indent}\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
+{indent}\t\t<xr:Synonym/>\r\n\
+{indent}\t\t<xr:Comment/>\r\n\
+{indent}\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+{indent}\t\t<xr:ChoiceParameterLinks/>\r\n\
+{indent}\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
+{indent}\t\t<xr:Mask/>\r\n\
+{indent}\t\t<xr:ChoiceParameters/>\r\n\
+{indent}\t</xr:StandardAttribute>\r\n\
+{indent}</StandardAttributes>\r\n"
+    ));
 }
 
 fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> String {
@@ -41397,6 +41500,71 @@ mod tests {
         assert!(
             attribute_xml.find("<ChoiceForm/>").unwrap()
                 < attribute_xml.find("<ChoiceHistoryOnInput>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_tabular_section_property_tail() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
+22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
+2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
+{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
+{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
+{{1,\"en\",\"Price rows\"}},1,{{0}},2,7,\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,1}}}}}},\
+{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"PriceCode\",{{1,\"en\",\"Price code\"}},\"\"}}\r\n}}\
+}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let tabular_start = xml
+            .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+            .unwrap();
+        let tabular_end = tabular_start + xml[tabular_start..].find("</TabularSection>").unwrap();
+        let tabular_xml = &xml[tabular_start..tabular_end];
+
+        assert!(tabular_xml.contains("<ToolTip>"), "{xml}");
+        assert!(tabular_xml.contains("<v8:content>Price rows</v8:content>"));
+        assert!(tabular_xml.contains("<FillChecking>ShowError</FillChecking>"));
+        assert!(tabular_xml.contains("<StandardAttributes>"));
+        assert!(tabular_xml.contains(r#"<xr:StandardAttribute name="LineNumber">"#));
+        assert!(tabular_xml.contains("<xr:FillChecking>ShowError</xr:FillChecking>"));
+        assert!(tabular_xml.contains("<Use>ForFolderAndItem</Use>"));
+        assert!(tabular_xml.contains("<LineNumberLength>7</LineNumberLength>"));
+        assert!(
+            tabular_xml.find("<Comment/>").unwrap() < tabular_xml.find("<ToolTip>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            tabular_xml.find("<StandardAttributes>").unwrap() < tabular_xml.find("<Use>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            tabular_xml.find("<LineNumberLength>").unwrap()
+                < tabular_xml.find("<ChildObjects>").unwrap(),
             "{xml}"
         );
     }
