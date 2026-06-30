@@ -14521,6 +14521,28 @@ struct XdtoPackageProperties {
     namespace: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct HttpServiceProperties {
+    root_url: String,
+    reuse_sessions: &'static str,
+    session_max_age: u32,
+    url_templates: Vec<HttpServiceUrlTemplateProperties>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct HttpServiceUrlTemplateProperties {
+    header: MetadataHeader,
+    template: String,
+    methods: Vec<HttpServiceMethodProperties>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct HttpServiceMethodProperties {
+    header: MetadataHeader,
+    http_method: String,
+    handler: String,
+}
+
 struct StyleBodyItem {
     name: String,
     standard_order: Option<usize>,
@@ -15185,6 +15207,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "XDTOPackage" {
         let package = parse_xdto_package_properties_from_text(text, uuid)?;
         format_xdto_package_source_xml(&header, &package, source_version).into_bytes()
+    } else if kind == "HTTPService" {
+        let service = parse_http_service_properties_from_text(text, uuid)?;
+        format_http_service_source_xml(&header, &service, source_version).into_bytes()
     } else if kind == "CommonAttribute" {
         let common_attribute =
             parse_common_attribute_properties_from_text(text, uuid, type_index, object_refs)?;
@@ -16523,6 +16548,179 @@ fn parse_xdto_package_properties_from_text(
         .and_then(|field| parse_1c_quoted_string(field.trim()))
         .unwrap_or_default();
     Some(XdtoPackageProperties { namespace })
+}
+
+fn parse_http_service_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<HttpServiceProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("2")
+        || metadata_header_field_index(&fields, uuid) != Some(2)
+    {
+        return None;
+    }
+    let root_url = fields
+        .get(1)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
+        .unwrap_or_default();
+    let reuse_sessions = fields
+        .get(3)
+        .and_then(|field| http_service_reuse_sessions_from_code(field.trim()))
+        .unwrap_or("DontUse");
+    let session_max_age = fields
+        .get(4)
+        .and_then(|field| field.trim().parse::<u32>().ok())
+        .unwrap_or(20);
+    Some(HttpServiceProperties {
+        root_url,
+        reuse_sessions,
+        session_max_age,
+        url_templates: parse_http_service_url_templates_from_text(text, uuid),
+    })
+}
+
+fn http_service_reuse_sessions_from_code(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        "2" => Some("AutoUse"),
+        _ => None,
+    }
+}
+
+struct HttpServiceChildCandidate {
+    start: usize,
+    end: usize,
+    header: MetadataHeader,
+    strings: Vec<String>,
+}
+
+fn parse_http_service_url_templates_from_text(
+    text: &str,
+    owner_uuid: &str,
+) -> Vec<HttpServiceUrlTemplateProperties> {
+    let candidates = http_service_child_candidates_from_text(text, owner_uuid);
+    let method_candidates = candidates
+        .iter()
+        .filter_map(|candidate| {
+            let http_method = candidate.strings.first()?;
+            let handler = candidate.strings.get(1)?;
+            is_http_service_method_name(http_method).then(|| HttpServiceChildCandidate {
+                start: candidate.start,
+                end: candidate.end,
+                header: candidate.header.clone(),
+                strings: vec![http_method.clone(), handler.clone()],
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut seen = BTreeSet::new();
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let template = candidate.strings.first()?.clone();
+            if is_http_service_method_name(&template)
+                || !is_http_service_url_template_text(&template)
+                || !seen.insert(candidate.header.uuid.clone())
+            {
+                return None;
+            }
+            let methods = method_candidates
+                .iter()
+                .filter(|method| method.start > candidate.start && method.end < candidate.end)
+                .map(|method| HttpServiceMethodProperties {
+                    header: method.header.clone(),
+                    http_method: method.strings[0].clone(),
+                    handler: method.strings[1].clone(),
+                })
+                .collect::<Vec<_>>();
+            Some(HttpServiceUrlTemplateProperties {
+                header: candidate.header,
+                template,
+                methods,
+            })
+        })
+        .collect()
+}
+
+fn http_service_child_candidates_from_text(
+    text: &str,
+    owner_uuid: &str,
+) -> Vec<HttpServiceChildCandidate> {
+    let mut candidates = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (header, marker_start) in nested_headers_with_offsets_from_text(text, owner_uuid, |_| true)
+    {
+        let Some((start, end, fields)) =
+            innermost_metadata_object_fields_around_header(text, marker_start, &header.uuid)
+        else {
+            continue;
+        };
+        if !seen.insert(header.uuid.clone()) {
+            continue;
+        }
+        let Some(header_index) = metadata_header_field_index(&fields, &header.uuid) else {
+            continue;
+        };
+        let strings = fields
+            .iter()
+            .skip(header_index + 1)
+            .filter_map(|field| parse_1c_quoted_string(field.trim()))
+            .collect::<Vec<_>>();
+        if strings.is_empty() {
+            continue;
+        }
+        candidates.push(HttpServiceChildCandidate {
+            start,
+            end,
+            header,
+            strings,
+        });
+    }
+    candidates
+}
+
+fn innermost_metadata_object_fields_around_header<'a>(
+    text: &'a str,
+    marker_start: usize,
+    uuid: &str,
+) -> Option<(usize, usize, Vec<&'a str>)> {
+    let mut search_end = marker_start;
+    let mut best: Option<(usize, usize, Vec<&'a str>)> = None;
+    while let Some(start) = text[..search_end].rfind('{') {
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if marker_start >= end {
+            continue;
+        }
+        let Some(fields) = split_1c_braced_fields(text, start) else {
+            continue;
+        };
+        if matches!(fields.first().map(|field| field.trim()), Some("1" | "3")) {
+            continue;
+        }
+        if metadata_header_field_index(&fields, uuid).is_none() {
+            continue;
+        }
+        if best.as_ref().map(|(_, best_end, _)| end < *best_end) != Some(false) {
+            best = Some((start, end, fields));
+        }
+    }
+    best
+}
+
+fn is_http_service_method_name(value: &str) -> bool {
+    matches!(
+        value,
+        "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
+    )
+}
+
+fn is_http_service_url_template_text(value: &str) -> bool {
+    value.starts_with('/') || value.contains('{') || value == "*"
 }
 
 fn parse_integration_service_channels_from_text(
@@ -19756,6 +19954,100 @@ fn format_xdto_package_source_xml(
         xml.insert_str(index, &insert);
     }
     xml
+}
+
+fn format_http_service_source_xml(
+    header: &MetadataHeader,
+    service: &HttpServiceProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("HTTPService", header, source_version);
+    let insert = format!(
+        "\t\t\t<RootURL>{}</RootURL>\r\n\
+\t\t\t<ReuseSessions>{}</ReuseSessions>\r\n\
+\t\t\t<SessionMaxAge>{}</SessionMaxAge>\r\n",
+        escape_xml_element_text(&service.root_url),
+        escape_xml_text(service.reuse_sessions),
+        service.session_max_age
+    );
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    if !service.url_templates.is_empty() {
+        let mut child_xml = "\t\t<ChildObjects>\r\n".to_string();
+        for template in &service.url_templates {
+            push_http_service_url_template_xml(&mut child_xml, template);
+        }
+        child_xml.push_str("\t\t</ChildObjects>\r\n");
+        let owner_end = "\t</HTTPService>\r\n";
+        if let Some(index) = xml.find(owner_end) {
+            xml.insert_str(index, &child_xml);
+        }
+    }
+    xml
+}
+
+fn push_http_service_url_template_xml(
+    xml: &mut String,
+    template: &HttpServiceUrlTemplateProperties,
+) {
+    xml.push_str(&format!(
+        "\t\t\t<URLTemplate uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&template.header.uuid),
+        escape_xml_element_text(&template.header.name)
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &template.header.synonyms);
+    if template.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&template.header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Template>{}</Template>\r\n\
+\t\t\t\t</Properties>\r\n",
+        escape_xml_element_text(&template.template)
+    ));
+    if !template.methods.is_empty() {
+        xml.push_str("\t\t\t\t<ChildObjects>\r\n");
+        for method in &template.methods {
+            push_http_service_method_xml(xml, method);
+        }
+        xml.push_str("\t\t\t\t</ChildObjects>\r\n");
+    }
+    xml.push_str("\t\t\t</URLTemplate>\r\n");
+}
+
+fn push_http_service_method_xml(xml: &mut String, method: &HttpServiceMethodProperties) {
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Method uuid=\"{}\">\r\n\
+\t\t\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&method.header.uuid),
+        escape_xml_element_text(&method.header.name)
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t\t\t", &method.header.synonyms);
+    if method.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&method.header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t\t<HTTPMethod>{}</HTTPMethod>\r\n\
+\t\t\t\t\t\t\t<Handler>{}</Handler>\r\n\
+\t\t\t\t\t\t</Properties>\r\n\
+\t\t\t\t\t</Method>\r\n",
+        escape_xml_element_text(&method.http_method),
+        escape_xml_element_text(&method.handler)
+    ));
 }
 
 fn format_language_source_xml(
@@ -30398,9 +30690,11 @@ mod tests {
             .as_bytes(),
         );
         let http_uuid = "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let url_template_uuid = "33333333-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let method_uuid = "33333333-cccc-4ccc-8ccc-cccccccccccc";
         let http_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{2,\"api\",\r\n{{3,\r\n{{1,0,{http_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20}},0}}"
+                "{{1,\r\n{{2,\"api\",\r\n{{3,\r\n{{1,0,{http_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20,\r\n{{0,1,\r\n{{7,\r\n{{3,\r\n{{1,0,{url_template_uuid}}},\"Any\",{{1,\"en\",\"Any\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"/*\",\r\n{{0,1,\r\n{{8,\r\n{{3,\r\n{{1,0,{method_uuid}}},\"Post\",{{1,\"en\",\"Post\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"POST\",\"HandlePost\"}}\r\n}}\r\n}}\r\n}}\r\n}},0}}"
             )
             .as_bytes(),
         );
@@ -30483,6 +30777,34 @@ mod tests {
                 .unwrap();
                 let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
                 assert!(xml_v21.contains("<Namespace>http://example.com/exchange</Namespace>"));
+                assert!(xml_v21.contains(r#"version="2.21""#));
+                assert!(!xml_v21.contains(r#"version="2.20""#));
+            }
+            if expected_kind == "HTTPService" {
+                let xml = String::from_utf8(extracted.xml.clone()).unwrap();
+                assert!(xml.contains("<RootURL>api</RootURL>"));
+                assert!(xml.contains("<ReuseSessions>AutoUse</ReuseSessions>"));
+                assert!(xml.contains("<SessionMaxAge>20</SessionMaxAge>"));
+                assert!(xml.contains(&format!(r#"<URLTemplate uuid="{url_template_uuid}">"#)));
+                assert!(xml.contains("<Template>/*</Template>"));
+                assert!(xml.contains(&format!(r#"<Method uuid="{method_uuid}">"#)));
+                assert!(xml.contains("<HTTPMethod>POST</HTTPMethod>"));
+                assert!(xml.contains("<Handler>HandlePost</Handler>"));
+
+                let extracted_v21 = extract_metadata_source_xml_with_refs(
+                    blob,
+                    uuid,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    InfobaseConfigSourceVersion::V2_21,
+                )
+                .unwrap();
+                let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+                assert!(xml_v21.contains("<RootURL>api</RootURL>"));
                 assert!(xml_v21.contains(r#"version="2.21""#));
                 assert!(!xml_v21.contains(r#"version="2.20""#));
             }
