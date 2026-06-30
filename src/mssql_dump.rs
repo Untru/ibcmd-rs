@@ -21448,7 +21448,6 @@ fn format_report_source_xml(
         "DefaultVariantForm",
         report.default_variant_form.as_deref(),
     );
-    xml.push_str("\t\t\t<AuxiliaryVariantForm/>\r\n");
     push_optional_text_element(
         &mut xml,
         "\t\t\t",
@@ -37279,6 +37278,8 @@ mod tests {
         assert!(xml.contains(
             "<DefaultSettingsForm>Report.SalesReport.Form.SettingsForm</DefaultSettingsForm>"
         ));
+        assert!(xml.contains("<DefaultVariantForm/>"));
+        assert!(!xml.contains("<AuxiliaryVariantForm"));
         assert!(xml.contains("<VariantsStorage>SettingsStorage.ReportVariants</VariantsStorage>"));
         assert!(xml.contains("<SettingsStorage/>"));
         assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
@@ -37304,6 +37305,10 @@ mod tests {
         assert!(
             xml.find("<Template>MainSchema</Template>").unwrap() < xml.find("<Command").unwrap()
         );
+        assert!(
+            xml.find("<DefaultVariantForm/>").unwrap() < xml.find("<VariantsStorage>").unwrap(),
+            "{xml}"
+        );
         assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
         assert_eq!(xml.matches("<Command").count(), 1);
 
@@ -37322,6 +37327,7 @@ mod tests {
         let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
         assert!(xml_v21.contains(r#"version="2.21""#));
         assert!(!xml_v21.contains(r#"version="2.20""#));
+        assert!(!xml_v21.contains("<AuxiliaryVariantForm"));
         assert!(xml_v21.contains("<Form>SettingsForm</Form>"));
     }
 
