@@ -41,14 +41,15 @@ use crate::cli::{
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, business_process_flowchart_base_free_blockers,
-    command_interface_xml_can_pack_without_base, form_body_base_free_blockers, hex_sha256,
-    module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
-    pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
-    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
-    pack_help_blob_from_parts, pack_module_blob_bytes,
-    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
+    form_body_base_free_blockers, hex_sha256, module_blob_text_sha256,
+    pack_base64_payload_blob_from_bytes, pack_business_process_flowchart_blob_from_xml,
+    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
+    pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_bytes,
+    pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
+    pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source,
+    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
+    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1279,20 +1280,32 @@ fn command_interface_bootstrap_row(
     }
     let (generation, current_staging_fetches_base_blob, reason) = fs::read(&body_path)
         .ok()
-        .and_then(|xml| command_interface_xml_can_pack_without_base(&xml).ok())
-        .filter(|can_pack| *can_pack)
-        .map(|_| {
-            (
-                BootstrapGeneration::CanGenerateWithoutBaseBlob,
-                false,
-                "CommandInterface.xml contains raw command references and can be packed without reading the active Config row",
-            )
+        .and_then(|xml| {
+            if command_interface_xml_can_pack_without_base(&xml).ok()? {
+                Some((
+                    BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                    false,
+                    "CommandInterface.xml contains raw command references and can be packed without reading the active Config row".to_string(),
+                ))
+            } else {
+                let blockers = command_interface_base_free_blockers(&xml).ok()?;
+                Some((
+                    BootstrapGeneration::RequiresBaseBlob,
+                    true,
+                    format!(
+                        "CommandInterface.xml requires active base blob: {}",
+                        blockers.join("; ")
+                    ),
+                ))
+            }
         })
-        .unwrap_or((
-            BootstrapGeneration::RequiresBaseBlob,
-            true,
-            "CommandInterface.xml with readable command references preserves command references and validates command count against the base blob",
-        ));
+        .unwrap_or_else(|| {
+            (
+                BootstrapGeneration::RequiresBaseBlob,
+                true,
+                "CommandInterface.xml with readable command references preserves command references and validates command count against the base blob".to_string(),
+            )
+        });
 
     vec![bootstrap_row_report(
         "metadata_object",
@@ -1303,7 +1316,7 @@ fn command_interface_bootstrap_row(
         row_kind,
         generation,
         current_staging_fetches_base_blob,
-        reason,
+        &reason,
     )]
 }
 
@@ -8545,6 +8558,81 @@ mod tests {
         assert_eq!(row.source_path, "Documents/Order/Ext/AdditionalIndexes.xml");
         assert!(!row.current_staging_fetches_base_blob);
         assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_command_interface_readable_refs_with_precise_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-command-interface-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let subsystem_xml = root.join("Subsystems").join("Sales.xml");
+        let command_interface_path = root
+            .join("Subsystems")
+            .join("Sales")
+            .join("Ext")
+            .join("CommandInterface.xml");
+        fs::create_dir_all(command_interface_path.parent().unwrap()).unwrap();
+        fs::write(
+            &subsystem_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Subsystem uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Sales</Name></Properties>
+  </Subsystem>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &command_interface_path,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="Catalog.Products.StandardCommand.OpenList">
+			<Visibility><xr:Common>true</xr:Common></Visibility>
+		</Command>
+		<Command name="100:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+			<Visibility><xr:Common>false</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#,
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&subsystem_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "command_interface_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(
+            row.config_file_name,
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1"
+        );
+        assert_eq!(row.source_path, "Subsystems/Sales/Ext/CommandInterface.xml");
+        assert!(
+            row.reason
+                .contains("CommandInterface.xml requires active base blob")
+        );
+        assert!(row.reason.contains("2 command visibility entries"));
+        assert!(row.reason.contains("1 readable refs"));
+        assert!(row.reason.contains("1 raw kind:uuid refs"));
+        assert!(
+            row.reason
+                .contains("Catalog.Products.StandardCommand.OpenList")
+        );
+        assert!(row.reason.contains("serialized command order"));
 
         let _ = fs::remove_dir_all(root);
     }

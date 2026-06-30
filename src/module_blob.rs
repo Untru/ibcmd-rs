@@ -14816,6 +14816,42 @@ pub fn command_interface_xml_can_pack_without_base(xml: &[u8]) -> Result<bool> {
         .all(|entry| format_raw_command_interface_ref(&entry.name).is_ok()))
 }
 
+pub fn command_interface_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+    let entries = parse_command_interface_xml(xml)?;
+    let raw_count = entries
+        .iter()
+        .filter(|entry| format_raw_command_interface_ref(&entry.name).is_ok())
+        .count();
+    let readable = entries
+        .iter()
+        .filter(|entry| format_raw_command_interface_ref(&entry.name).is_err())
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+    if readable.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let readable_count = readable.len();
+    let sample = readable
+        .iter()
+        .take(3)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut blockers = Vec::new();
+    blockers.push(format!(
+        "source XML has {} command visibility entries ({readable_count} readable refs, {raw_count} raw kind:uuid refs), but base-free packing can only synthesize raw numeric kind:uuid command tuples",
+        entries.len()
+    ));
+    blockers.push(format!(
+        "readable CommandInterface refs such as {sample} require the active base row to preserve the platform command tuple kind, UUID and serialized command order"
+    ));
+    blockers.push(
+        "staging currently patches visibility flags into the existing CommandInterface row and validates the command count against the base blob".to_string(),
+    );
+    Ok(blockers)
+}
+
 fn pack_command_interface_entries_without_base(
     entries: &[CommandInterfaceXmlEntry],
 ) -> Result<PackedRawDeflatedBlob> {
@@ -29237,6 +29273,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .contains("base-free CommandInterface command"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn reports_command_interface_readable_ref_base_free_blockers() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<CommandsVisibility>
+		<Command name="Catalog.Products.StandardCommand.OpenList">
+			<Visibility><xr:Common>true</xr:Common></Visibility>
+		</Command>
+		<Command name="100:bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+			<Visibility><xr:Common>false</xr:Common></Visibility>
+		</Command>
+	</CommandsVisibility>
+</CommandInterface>
+"#;
+
+        let blockers = super::command_interface_base_free_blockers(xml)?;
+
+        assert_eq!(blockers.len(), 3);
+        assert!(blockers[0].contains("2 command visibility entries"));
+        assert!(blockers[0].contains("1 readable refs"));
+        assert!(blockers[0].contains("1 raw kind:uuid refs"));
+        assert!(blockers[1].contains("Catalog.Products.StandardCommand.OpenList"));
+        assert!(blockers[1].contains("platform command tuple kind"));
+        assert!(blockers[2].contains("validates the command count"));
+
+        Ok(())
     }
 
     #[test]
