@@ -147,6 +147,7 @@ Performance note for selected extraction:
 - Broader selected command-interface diagnostics can still need a targeted/cache reference index when command UUIDs only exist inside owner metadata blobs rather than as direct `FileName` rows.
 - Issue #19 bottleneck note: `docs/issue-19-selected-export-bottleneck.md` pinpoints selected command-interface `command_refs` as the next safe optimization target.
 - Round 23 #19 follow-up: streamed `mssql-dump-config` no longer uses `sqlcmd` for blob-bearing metadata/direct prepare reads; those paths now use the existing native `bcp` parser. `sqlcmd` still remains for lightweight row headers/control queries. The latest full-run evidence before this change had `fetch_rows_ms=11176` against `process_rows_wall_ms=85887` and `prepare_indexes_ms=33210`, so the primary remaining bottleneck is CPU/source generation and reference/index preparation, not SQL blob transfer.
+- Round 26 #19 memory/timing follow-up: native `bcp` row fetch batches are capped at 256 MiB instead of 1 GiB to reduce peak temp-file plus parsed-row memory pressure. The dump report now includes `timings.fetch_row_batches`, `timings.fetch_row_batch_max_rows`, and `timings.fetch_row_batch_max_binary_bytes` to isolate whether the next full-run bottleneck is batch memory pressure or row-processing wall time.
 - Scope decision: `ConfigDumpInfo.xml` is intentionally not generated. The native file is derived from the `versions` row, but it is not needed for our export/import target and should not be treated as remaining work.
 
 Diff by file kind:

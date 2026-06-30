@@ -76,6 +76,9 @@ pub struct MssqlDumpTimingReport {
     pub prepare_body_owners_ms: u64,
     pub fetch_rows_ms: u64,
     pub fetch_rows_bcp_ms: u64,
+    pub fetch_row_batches: u64,
+    pub fetch_row_batch_max_rows: u64,
+    pub fetch_row_batch_max_binary_bytes: u64,
     pub process_rows_wall_ms: u64,
     pub binary_write_cpu_ms: u64,
     pub inflate_cpu_ms: u64,
@@ -137,6 +140,13 @@ impl MssqlDumpTimingReport {
         self.prepare_body_owners_ms += other.prepare_body_owners_ms;
         self.fetch_rows_ms += other.fetch_rows_ms;
         self.fetch_rows_bcp_ms += other.fetch_rows_bcp_ms;
+        self.fetch_row_batches += other.fetch_row_batches;
+        self.fetch_row_batch_max_rows = self
+            .fetch_row_batch_max_rows
+            .max(other.fetch_row_batch_max_rows);
+        self.fetch_row_batch_max_binary_bytes = self
+            .fetch_row_batch_max_binary_bytes
+            .max(other.fetch_row_batch_max_binary_bytes);
         self.process_rows_wall_ms += other.process_rows_wall_ms;
         self.binary_write_cpu_ms += other.binary_write_cpu_ms;
         self.inflate_cpu_ms += other.inflate_cpu_ms;
@@ -1124,6 +1134,12 @@ fn dump_table_rows_streamed(
         let elapsed = elapsed_ms(fetch_started);
         timings.fetch_rows_ms += elapsed;
         timings.fetch_rows_bcp_ms += elapsed;
+        timings.fetch_row_batches += 1;
+        timings.fetch_row_batch_max_rows = timings.fetch_row_batch_max_rows.max(rows.len() as u64);
+        let batch_binary_bytes = rows.iter().map(|row| row.binary.len() as u64).sum::<u64>();
+        timings.fetch_row_batch_max_binary_bytes = timings
+            .fetch_row_batch_max_binary_bytes
+            .max(batch_binary_bytes);
         let process_started = Instant::now();
         let dumped_rows = parallel::install(|| {
             rows.par_iter()
@@ -23191,7 +23207,7 @@ fn read_i64_le(bytes: &[u8], offset: &mut usize) -> Result<i64> {
 
 const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
 const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 4096;
-const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 1024 * 1024 * 1024;
+const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 256 * 1024 * 1024;
 const SQLCMD_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
 
 fn selected_file_names_from_args(
@@ -23575,6 +23591,9 @@ mod tests {
             prepare_metadata_fetch_bcp_ms: 17,
             fetch_rows_ms: 30,
             fetch_rows_bcp_ms: 30,
+            fetch_row_batches: 2,
+            fetch_row_batch_max_rows: 5,
+            fetch_row_batch_max_binary_bytes: 100,
             ..MssqlDumpTimingReport::default()
         };
         let next = MssqlDumpTimingReport {
@@ -23585,6 +23604,9 @@ mod tests {
             prepare_metadata_fetch_bcp_ms: 2,
             fetch_rows_ms: 3,
             fetch_rows_bcp_ms: 3,
+            fetch_row_batches: 1,
+            fetch_row_batch_max_rows: 9,
+            fetch_row_batch_max_binary_bytes: 50,
             ..MssqlDumpTimingReport::default()
         };
 
@@ -23597,6 +23619,9 @@ mod tests {
         assert_eq!(total.prepare_metadata_fetch_bcp_ms, 19);
         assert_eq!(total.fetch_rows_ms, 33);
         assert_eq!(total.fetch_rows_bcp_ms, 33);
+        assert_eq!(total.fetch_row_batches, 3);
+        assert_eq!(total.fetch_row_batch_max_rows, 9);
+        assert_eq!(total.fetch_row_batch_max_binary_bytes, 100);
     }
 
     #[test]
@@ -23621,6 +23646,7 @@ mod tests {
     #[test]
     fn dump_file_name_batches_limit_large_blob_memory() {
         let big = SQLCMD_DUMP_BATCH_MAX_DATA_BYTES;
+        assert_eq!(big, 256 * 1024 * 1024);
         let headers = vec![
             ConfigRowHeader {
                 file_name: "small-1".to_string(),
