@@ -1203,6 +1203,21 @@ fn metadata_body_bootstrap_rows(
             false,
             "AdditionalIndexes.xml is stored as a raw deflated body and can be generated from source bytes without reading the active Config row",
         ));
+    } else {
+        let body_path = infer_additional_indexes_body_path(xml_path);
+        if body_path.exists() {
+            rows.push(bootstrap_row_report(
+                "metadata_object",
+                &properties.kind,
+                object_path,
+                source_relative_path(source_root, &body_path),
+                format!("{}.<unknown>", properties.uuid),
+                "additional_indexes_body_unmapped",
+                BootstrapGeneration::RequiresBaseBlob,
+                false,
+                &additional_indexes_body_base_free_blocker_reason(&properties.kind),
+            ));
+        }
     }
 
     Ok(rows)
@@ -1404,6 +1419,12 @@ fn versions_base_free_blocker_reason(selected_config_rows: usize) -> String {
     format!(
         "versions row requires active base blob: {}",
         versions_base_free_blockers(selected_config_rows).join("; ")
+    )
+}
+
+fn additional_indexes_body_base_free_blocker_reason(kind: &str) -> String {
+    format!(
+        "AdditionalIndexes.xml for {kind} requires a confirmed Config.FileName suffix before staging; source contains the raw-deflated body bytes, but not the native row suffix, and current staging skips unsupported AdditionalIndexes kinds rather than guessing or reading active Config blobs"
     )
 }
 
@@ -8885,6 +8906,60 @@ mod tests {
     }
 
     #[test]
+    fn reports_unmapped_additional_indexes_body_with_precise_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-additional-indexes-unmapped-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let register_xml = root.join("InformationRegisters").join("Prices.xml");
+        let register_ext = root.join("InformationRegisters").join("Prices").join("Ext");
+        fs::create_dir_all(&register_ext).unwrap();
+        fs::write(
+            &register_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <InformationRegister uuid="abababab-abab-4bab-abab-abababababab">
+    <Properties><Name>Prices</Name></Properties>
+  </InformationRegister>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            register_ext.join("AdditionalIndexes.xml"),
+            b"<AdditionalIndexes/>",
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&register_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "additional_indexes_body_unmapped")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "abababab-abab-4bab-abab-abababababab.<unknown>"
+        );
+        assert_eq!(
+            row.source_path,
+            "InformationRegisters/Prices/Ext/AdditionalIndexes.xml"
+        );
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("InformationRegister"));
+        assert!(row.reason.contains("confirmed Config.FileName suffix"));
+        assert!(row.reason.contains("current staging skips"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_command_interface_readable_refs_with_precise_base_blocker() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-command-interface-readiness-{}",
@@ -9121,6 +9196,41 @@ mod tests {
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(body)
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn skips_unmapped_additional_indexes_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-additional-indexes-unmapped-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let register_xml = root.join("InformationRegisters").join("Prices.xml");
+        let body_path = root
+            .join("InformationRegisters")
+            .join("Prices")
+            .join("Ext")
+            .join("AdditionalIndexes.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&register_xml, b"<InformationRegister/>").unwrap();
+        fs::write(&body_path, b"<AdditionalIndexes/>").unwrap();
+        let properties = test_simple_metadata_properties(
+            "InformationRegister",
+            "abababab-abab-4bab-abab-abababababab",
+            "Prices",
+        );
+
+        let rows = super::prepare_additional_indexes_body_row(
+            PathBuf::from("missing-sqlcmd-for-unmapped-additional-indexes-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &register_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert!(rows.is_empty());
 
         let _ = fs::remove_dir_all(root);
     }
