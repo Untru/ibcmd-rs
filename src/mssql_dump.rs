@@ -624,6 +624,7 @@ struct DumpRowContext<'a> {
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
     object_refs: &'a BTreeMap<String, String>,
+    metadata_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
     functional_option_refs: &'a BTreeMap<String, String>,
     help_refs: &'a BTreeMap<String, String>,
@@ -785,6 +786,11 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
+    let metadata_order = if extract_metadata_xml || needs_source_layout_refs {
+        build_metadata_order_index_from_texts(&metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
     let field_refs = if extract_metadata_xml {
         build_metadata_field_reference_index_from_texts(&metadata_texts)
     } else {
@@ -867,6 +873,7 @@ fn dump_table_rows_with_options(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        metadata_order: &metadata_order,
         field_refs: &field_refs,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
@@ -1265,6 +1272,13 @@ fn dump_table_rows_streamed(
         BTreeMap::new()
     };
     timings.prepare_object_refs_ms += elapsed_ms(index_part_started);
+    let metadata_order = if (extract_metadata_xml || needs_source_layout_refs)
+        && source_reference_needs.metadata_order
+    {
+        build_metadata_order_index_from_texts(&index_metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
     let index_part_started = Instant::now();
     let field_refs = if extract_metadata_xml && source_reference_needs.field_refs {
         build_metadata_field_reference_index_from_texts(&index_metadata_texts)
@@ -1368,6 +1382,7 @@ fn dump_table_rows_streamed(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        metadata_order: &metadata_order,
         field_refs: &field_refs,
         functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
@@ -1555,6 +1570,7 @@ struct SourceReferenceIndexNeeds {
     template_refs: bool,
     subsystem_refs: bool,
     object_refs: bool,
+    metadata_order: bool,
     field_refs: bool,
     functional_option_refs: bool,
     help_refs: bool,
@@ -1572,6 +1588,7 @@ impl SourceReferenceIndexNeeds {
             template_refs: true,
             subsystem_refs: true,
             object_refs: true,
+            metadata_order: true,
             field_refs: true,
             functional_option_refs: true,
             help_refs: true,
@@ -1589,6 +1606,7 @@ impl SourceReferenceIndexNeeds {
             template_refs: false,
             subsystem_refs: false,
             object_refs: false,
+            metadata_order: false,
             field_refs: false,
             functional_option_refs: false,
             help_refs: false,
@@ -1607,6 +1625,7 @@ impl SourceReferenceIndexNeeds {
             || self.template_refs
             || self.subsystem_refs
             || self.object_refs
+            || self.metadata_order
             || self.field_refs
             || self.functional_option_refs
             || self.help_refs
@@ -1666,6 +1685,7 @@ fn selected_metadata_source_reference_index_needs(
                 needs.type_index = true;
                 if kind == "ExchangePlan" {
                     needs.object_refs = true;
+                    needs.metadata_order = true;
                 }
             }
             _ => return None,
@@ -4026,14 +4046,18 @@ fn write_source_asset(
             )?;
         }
         SourceAssetKind::ExchangePlanContent => {
-            let items =
-                parse_exchange_plan_content_blob(bytes, context.object_refs, context.type_index)
-                    .with_context(|| {
-                        format!(
-                            "failed to extract exchange plan content from source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?;
+            let items = parse_exchange_plan_content_blob(
+                bytes,
+                context.object_refs,
+                context.type_index,
+                context.metadata_order,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract exchange plan content from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -4357,6 +4381,7 @@ enum ClientApplicationInterfaceNode {
 
 #[derive(Debug)]
 struct ExchangePlanContentItem {
+    metadata_id: String,
     metadata: String,
     auto_record: &'static str,
 }
@@ -4572,6 +4597,38 @@ fn build_metadata_object_reference_index_from_texts(
         }
     }
     index
+}
+
+fn build_metadata_order_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<String, usize> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        let Some(header_uuid) = parse_configuration_header_uuid(&row.text) else {
+            continue;
+        };
+        for (order, child) in
+            parse_configuration_child_objects(&row.text, &row.file_name, &header_uuid)
+                .into_iter()
+                .enumerate()
+        {
+            index.entry(child.header.uuid).or_insert(order);
+        }
+    }
+    index
+}
+
+fn parse_configuration_header_uuid(text: &str) -> Option<String> {
+    if !text.trim_start().starts_with("{2,") {
+        return None;
+    }
+    let marker = "{1,0,";
+    let marker_start = text.find(marker)?;
+    let header_uuid_start = marker_start + marker.len();
+    let header_uuid_end = header_uuid_start + 36;
+    let header_uuid = text.get(header_uuid_start..header_uuid_end)?;
+    if !is_uuid_text(header_uuid) || !is_metadata_header_marker(text, header_uuid_end) {
+        return None;
+    }
+    Some(header_uuid.to_string())
 }
 
 fn insert_http_service_child_role_refs(
@@ -6538,6 +6595,7 @@ fn parse_exchange_plan_content_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
+    metadata_order: &BTreeMap<String, usize>,
 ) -> Result<Vec<ExchangePlanContentItem>> {
     let inflated = inflate_raw_deflate(bytes).context("failed to inflate ExchangePlanContent")?;
     let text = String::from_utf8(inflated).context("ExchangePlanContent is not valid UTF-8")?;
@@ -6577,14 +6635,24 @@ fn parse_exchange_plan_content_blob(
             .or_else(|| type_index.get(&object_id))
             .cloned()
             .with_context(|| {
-                format!("ExchangePlanContent item {item_index} references unsupported metadata id {object_id}")
+                format!(
+                    "ExchangePlanContent item {item_index} references unsupported metadata id {object_id}"
+                )
             })?;
         items.push(ExchangePlanContentItem {
+            metadata_id: object_id,
             metadata,
             auto_record,
         });
         index += 2;
     }
+
+    items.sort_by_key(|item| {
+        metadata_order
+            .get(&item.metadata_id)
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
 
     Ok(items)
 }
@@ -35394,10 +35462,18 @@ mod tests {
             uuid::Uuid::new_v4().hyphenated()
         ));
         fs::create_dir_all(&root).unwrap();
+        let configuration_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+        let configuration_header_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff";
         let plan_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let register_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
         let document_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let configuration = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{configuration_uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{configuration_header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{40,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},\r\n{{57,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\"}}\r\n}},\r\n{{33,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},\r\n{{37,\r\n{{3,\r\n{{1,0,{plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
         let plan = deflate_for_test(
             format!(
                 "{{1,\r\n{{37,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{3,\r\n{{1,0,{plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}}"
@@ -35426,6 +35502,12 @@ mod tests {
             format!("{{2,3,{catalog_uuid},0,{register_uuid},1,{document_uuid},2}}").as_bytes(),
         );
         let rows = vec![
+            ConfigRow {
+                file_name: configuration_uuid.to_string(),
+                part_no: 0,
+                data_size: configuration.len() as i64,
+                binary_hex: encode_hex_for_test(&configuration),
+            },
             ConfigRow {
                 file_name: plan_uuid.to_string(),
                 part_no: 0,
@@ -35472,15 +35554,14 @@ mod tests {
         assert!(xml.contains("<Metadata>Document.Invoice</Metadata>"));
         assert!(xml.contains("<AutoRecord>Auto</AutoRecord>"));
         assert!(
+            xml.find("<Metadata>Document.Invoice</Metadata>").unwrap()
+                < xml.find("<Metadata>Catalog.Customers</Metadata>").unwrap()
+        );
+        assert!(
             xml.find("<Metadata>Catalog.Customers</Metadata>").unwrap()
                 < xml
                     .find("<Metadata>InformationRegister.Prices</Metadata>")
                     .unwrap()
-        );
-        assert!(
-            xml.find("<Metadata>InformationRegister.Prices</Metadata>")
-                .unwrap()
-                < xml.find("<Metadata>Document.Invoice</Metadata>").unwrap()
         );
         let content_row = dumped
             .rows
@@ -35568,8 +35649,13 @@ mod tests {
     fn exchange_plan_content_reports_unresolved_metadata_id() {
         let missing_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let content = deflate_for_test(format!("{{2,1,{missing_id},0}}").as_bytes());
-        let err = parse_exchange_plan_content_blob(&content, &BTreeMap::new(), &BTreeMap::new())
-            .unwrap_err();
+        let err = parse_exchange_plan_content_blob(
+            &content,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap_err();
 
         let message = format!("{err:#}");
         assert!(message.contains("ExchangePlanContent item 0"));
@@ -35590,8 +35676,13 @@ mod tests {
         let object_refs = build_metadata_object_reference_index_from_texts(&[constant]);
         let content = deflate_for_test(format!("{{2,1,{constant_uuid},0}}").as_bytes());
 
-        let items =
-            parse_exchange_plan_content_blob(&content, &object_refs, &BTreeMap::new()).unwrap();
+        let items = parse_exchange_plan_content_blob(
+            &content,
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
 
         assert_eq!(items[0].metadata, "Constant.UseInternalBarcodes");
     }
