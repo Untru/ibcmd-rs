@@ -8740,6 +8740,21 @@ fn format_1c_date(value: &str) -> Option<String> {
     ))
 }
 
+fn format_1c_date_time(value: &str) -> Option<String> {
+    if value.len() != 14 || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}T{}:{}:{}",
+        &value[0..4],
+        &value[4..6],
+        &value[6..8],
+        &value[8..10],
+        &value[10..12],
+        &value[12..14]
+    ))
+}
+
 fn format_1c_time(value: &str) -> Option<String> {
     if value.len() != 14 || !value.chars().all(|ch| ch.is_ascii_digit()) {
         return None;
@@ -8940,6 +8955,7 @@ struct FormBodyProperties {
 }
 
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
+const FORM_STANDARD_PERIOD_UUID: &str = "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88";
 const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str = "f26c3706-a6ca-45cb-869a-e6ad38cd5f78";
@@ -9068,6 +9084,7 @@ struct FormChildItem {
     file_drag_mode: Option<&'static str>,
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
+    period: Option<FormTablePeriod>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
     choice_folders_and_items: Option<&'static str>,
@@ -9123,6 +9140,13 @@ struct FormChildItem {
     data_path: Option<String>,
     command_name: Option<String>,
     child_items: Vec<FormChildItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormTablePeriod {
+    variant: &'static str,
+    start_date: String,
+    end_date: String,
 }
 
 fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
@@ -10928,6 +10952,11 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        period: if tag == "Table" {
+            parse_form_table_period(&fields)
+        } else {
+            None
+        },
         use_alternation_row_color: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, "9")
         } else {
@@ -11862,6 +11891,36 @@ fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -> Option<St
     fields.get(1).and_then(|field| parse_1c_string(field))
 }
 
+fn parse_form_table_period(fields: &[&str]) -> Option<FormTablePeriod> {
+    let value = form_table_property_bag_value(fields, "7")?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    let payload = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    match (
+        fields.first().and_then(|field| parse_1c_string(field)),
+        fields.get(1).map(|field| field.trim()),
+        payload.first().map(|field| field.trim()),
+        payload
+            .get(1)
+            .and_then(|field| format_1c_date_time(field.trim())),
+        payload
+            .get(2)
+            .and_then(|field| format_1c_date_time(field.trim())),
+    ) {
+        (
+            Some(marker),
+            Some(FORM_STANDARD_PERIOD_UUID),
+            Some("0"),
+            Some(start_date),
+            Some(end_date),
+        ) if marker == "#" => Some(FormTablePeriod {
+            variant: "Custom",
+            start_date,
+            end_date,
+        }),
+        _ => None,
+    }
+}
+
 fn apply_form_table_user_settings_groups(
     items: &mut [FormChildItem],
     group_names_by_table_id: &BTreeMap<String, String>,
@@ -12749,6 +12808,18 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n",
                 escape_xml_text(auto_refresh_period)
+            ));
+        }
+        if let Some(period) = &item.period {
+            xml.push_str(&format!(
+                "{tab}\t<Period>\r\n\
+{tab}\t\t<v8:variant xsi:type=\"v8:StandardPeriodVariant\">{}</v8:variant>\r\n\
+{tab}\t\t<v8:startDate>{}</v8:startDate>\r\n\
+{tab}\t\t<v8:endDate>{}</v8:endDate>\r\n\
+{tab}\t</Period>\r\n",
+                escape_xml_text(period.variant),
+                escape_xml_text(&period.start_date),
+                escape_xml_text(&period.end_date)
             ));
         }
         if let Some(use_alternation_row_color) = item.use_alternation_row_color {
@@ -29483,6 +29554,14 @@ mod tests {
         assert_eq!(item.skip_on_input, Some(false));
         assert_eq!(item.auto_refresh, Some(false));
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
+        assert_eq!(
+            item.period,
+            Some(FormTablePeriod {
+                variant: "Custom",
+                start_date: "0001-01-01T00:00:00".to_string(),
+                end_date: "0001-01-01T00:00:00".to_string(),
+            })
+        );
         assert_eq!(item.use_alternation_row_color, Some(false));
         assert_eq!(item.default_item, Some(true));
         assert_eq!(item.choice_folders_and_items, Some("Items"));
@@ -29494,6 +29573,11 @@ mod tests {
         assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
         assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
+        assert!(
+            xml.contains("<v8:variant xsi:type=\"v8:StandardPeriodVariant\">Custom</v8:variant>")
+        );
+        assert!(xml.contains("<v8:startDate>0001-01-01T00:00:00</v8:startDate>"));
+        assert!(xml.contains("<v8:endDate>0001-01-01T00:00:00</v8:endDate>"));
         assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
         assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
         assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
@@ -31090,6 +31174,7 @@ mod tests {
             file_drag_mode: None,
             auto_refresh: None,
             auto_refresh_period: None,
+            period: None,
             use_alternation_row_color: None,
             default_item: None,
             choice_folders_and_items: None,
@@ -31160,6 +31245,7 @@ mod tests {
                     file_drag_mode: None,
                     auto_refresh: None,
                     auto_refresh_period: None,
+                    period: None,
                     use_alternation_row_color: None,
                     default_item: None,
                     choice_folders_and_items: None,
@@ -31231,6 +31317,7 @@ mod tests {
                     file_drag_mode: None,
                     auto_refresh: None,
                     auto_refresh_period: None,
+                    period: None,
                     use_alternation_row_color: None,
                     default_item: None,
                     choice_folders_and_items: None,
