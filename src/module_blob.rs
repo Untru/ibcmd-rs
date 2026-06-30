@@ -10069,6 +10069,20 @@ fn format_form_layout_new_group_item(
             source,
         );
     }
+    if item.tag == "UsualGroup" && (item.behavior.is_some() || item.representation.is_some()) {
+        return format_form_layout_new_extended_group_with_child_span(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+            "0",
+            "0",
+        );
+    }
 
     let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
     let group = item.group.and_then(form_child_group_code).unwrap_or("0");
@@ -10221,7 +10235,7 @@ fn format_form_layout_new_extended_group_with_child_span(
         .filter(|child| is_form_layout_creatable_nested_item(child))
         .collect::<Vec<_>>();
     let mut text = format!(
-        "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{},{},0,{},2,2,{{4,4,{{0}},4}},{{8,3,0,1,100}},{{0,0,0}},1,{{4,0,{{0}},2,0,0}},{}",
+        "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{},{},0,{},2,2,{},{},{{0,0,0}},1,{},{}",
         item.id,
         item_uuid,
         group_type,
@@ -10232,6 +10246,9 @@ fn format_form_layout_new_extended_group_with_child_span(
         show_title,
         scroll_on_compress,
         height,
+        form_new_extended_group_style(item),
+        form_new_extended_group_size(item),
+        form_new_extended_group_options(item)?,
         creatable_children.len()
     );
     for child in creatable_children {
@@ -10254,6 +10271,32 @@ fn format_form_layout_new_extended_group_with_child_span(
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
     Ok(text)
+}
+
+fn form_new_extended_group_style(item: &FormXmlChildItem) -> &'static str {
+    if item.tag == "UsualGroup" && item.behavior == Some(FormXmlGroupBehavior::PopUp) {
+        "{4,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f},3}"
+    } else {
+        "{4,4,{0},4}"
+    }
+}
+
+fn form_new_extended_group_size(item: &FormXmlChildItem) -> &'static str {
+    if item.tag == "UsualGroup" && item.behavior == Some(FormXmlGroupBehavior::PopUp) {
+        "{8,2,0,{-31},1,100}"
+    } else {
+        "{8,3,0,1,100}"
+    }
+}
+
+fn form_new_extended_group_options(item: &FormXmlChildItem) -> Result<String> {
+    const DEFAULT_USUAL_GROUP_OPTIONS: &str = r#"{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,0,0,0,0,0,0,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0}"#;
+
+    if item.tag == "UsualGroup" && (item.behavior.is_some() || item.representation.is_some()) {
+        return patch_form_layout_usual_group_extended_options(DEFAULT_USUAL_GROUP_OPTIONS, item)?
+            .ok_or_else(|| anyhow!("failed to build Form UsualGroup extended options"));
+    }
+    Ok("{4,0,{0},2,0,0}".to_string())
 }
 
 fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
@@ -25586,6 +25629,65 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[options_fields[36].clone()], "2");
         assert!(parsed.layout.contains("{4,4,\n{0},4}"));
         assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_extended_usual_group_properties_and_children() -> anyhow::Result<()>
+    {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<UsualGroup name="MainGroup" id="22">
+			<Group>HorizontalIfPossible</Group>
+			<Behavior>Collapsible</Behavior>
+			<Representation>NormalSeparation</Representation>
+			<ShowTitle>false</ShowTitle>
+			<ChildItems>
+				<Button name="Run" id="44">
+					<Type>UsualButton</Type>
+				</Button>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let group_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, group_fields[20].start)?;
+        let button_fields = super::scan_braced_fields(&parsed.layout, group_fields[23].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[group_fields[5].clone()], "5");
+        assert_eq!(&parsed.layout[group_fields[6].clone()], r#""MainGroup""#);
+        assert_eq!(&parsed.layout[group_fields[9].clone()], "3");
+        assert_eq!(&parsed.layout[group_fields[10].clone()], "0");
+        assert_eq!(&parsed.layout[group_fields[21].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[group_fields[22].clone()]
+        ));
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""Run""#);
+        assert_eq!(&parsed.layout[options_fields[0].clone()], "38");
+        assert_eq!(&parsed.layout[options_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[3].clone()], "3");
+        assert_eq!(&parsed.layout[options_fields[4].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[11].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[22].clone()], "2");
+        assert_eq!(&parsed.layout[options_fields[24].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[27].clone()], "2");
+        assert_eq!(&parsed.layout[options_fields[28].clone()], "1");
+        assert_eq!(&parsed.layout[options_fields[35].clone()], "3");
+        assert_eq!(&parsed.layout[options_fields[36].clone()], "2");
+        assert_eq!(parsed.module_text, "Old module");
+        assert_eq!(parsed.trailing, vec!["{0}"]);
 
         Ok(())
     }
