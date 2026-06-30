@@ -14816,6 +14816,10 @@ struct BusinessProcessProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
 
+struct TaskProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct SettingsStorageProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
@@ -15628,6 +15632,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "BusinessProcess" {
         let business_process = parse_business_process_properties_from_text(text, uuid)?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
+    } else if kind == "Task" {
+        let task = parse_task_properties_from_text(text, uuid)?;
+        format_task_source_xml(&header, &task, source_version).into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid)?;
         format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
@@ -16447,6 +16454,36 @@ fn parse_business_process_properties_from_text(
     );
 
     Some(BusinessProcessProperties { generated_types })
+}
+
+fn parse_task_properties_from_text(text: &str, uuid: &str) -> Option<TaskProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("33")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("TaskObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        5,
+        6,
+        &format!("TaskRef.{}", header.name),
+        "Ref",
+    );
+
+    Some(TaskProperties { generated_types })
 }
 
 fn parse_settings_storage_properties_from_text(
@@ -19808,6 +19845,19 @@ fn format_business_process_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("BusinessProcess", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&business_process.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    xml
+}
+
+fn format_task_source_xml(
+    header: &MetadataHeader,
+    task: &TaskProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Task", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&task.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
@@ -34273,6 +34323,56 @@ mod tests {
         ));
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+    }
+
+    #[test]
+    fn extracts_task_generated_types_to_metadata_xml() {
+        let task_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let task_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"task comment\"}},0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &task_blob,
+            task_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Tasks").join("ExecutorTask.xml")
+        );
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains("<Comment>task comment</Comment>"));
+        assert_eq!(xml.matches("<xr:GeneratedType").count(), 2);
+        assert!(
+            xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="TaskObject.ExecutorTask" category="Object">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="TaskRef.ExecutorTask" category="Ref">"#));
+        assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
     }
 
     #[test]
