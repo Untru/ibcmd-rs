@@ -14499,6 +14499,11 @@ struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
 }
 
+struct CommonAttributeProperties {
+    value_types: Vec<ConstantValueType>,
+    use_refs: Vec<String>,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FunctionalOptionsParameterProperties {
     use_refs: Vec<String>,
@@ -15142,6 +15147,10 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "XDTOPackage" {
         let package = parse_xdto_package_properties_from_text(text, uuid)?;
         format_xdto_package_source_xml(&header, &package, source_version).into_bytes()
+    } else if kind == "CommonAttribute" {
+        let common_attribute =
+            parse_common_attribute_properties_from_text(text, uuid, type_index, object_refs)?;
+        format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
@@ -16213,6 +16222,47 @@ fn parse_typed_metadata_properties_from_text(
     }
 
     Some(TypedMetadataProperties { value_types })
+}
+
+fn parse_common_attribute_properties_from_text(
+    text: &str,
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<CommonAttributeProperties> {
+    let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("5") {
+        return None;
+    }
+    let use_refs = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .map(|fields| parse_common_attribute_use_refs(&fields, object_refs))
+        .unwrap_or_default();
+
+    Some(CommonAttributeProperties {
+        value_types: typed.value_types,
+        use_refs,
+    })
+}
+
+fn parse_common_attribute_use_refs(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .collect()
 }
 
 fn parse_functional_options_parameter_properties_from_text(
@@ -19507,6 +19557,33 @@ fn format_typed_metadata_source_xml(
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_common_attribute_source_xml(
+    header: &MetadataHeader,
+    common_attribute: &CommonAttributeProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let typed = TypedMetadataProperties {
+        value_types: common_attribute.value_types.clone(),
+    };
+    let mut xml =
+        format_typed_metadata_source_xml("CommonAttribute", header, &typed, source_version);
+    if !common_attribute.use_refs.is_empty() {
+        let mut insert = "\t\t\t<Use>\r\n".to_string();
+        for use_ref in &common_attribute.use_refs {
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                escape_xml_element_text(use_ref)
+            ));
+        }
+        insert.push_str("\t\t\t</Use>\r\n");
+        let marker = "\t\t</Properties>\r\n";
+        if let Some(index) = xml.find(marker) {
+            xml.insert_str(index, &insert);
+        }
     }
     xml
 }
@@ -29587,19 +29664,24 @@ mod tests {
     #[test]
     fn extracts_common_attribute_xml_with_type_from_metadata_blob() {
         let uuid = "33333333-3333-4333-8333-333333333333";
-        let blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"S\",50,1}}}}\r\n}}\r\n}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
+        let catalog_uuid = "44444444-4444-4444-8444-444444444444";
+        let plain = format!(
+            "{{1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"S\",50,1}}}}\r\n}}\r\n}},\r\n{{0,1,\r\n{{{catalog_uuid}}}\r\n}}\r\n}}\r\n}}"
         );
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs =
+            BTreeMap::from([(catalog_uuid.to_string(), "Catalog.Products".to_string())]);
 
-        let extracted = extract_metadata_source_xml(
+        let extracted = extract_metadata_source_xml_with_refs(
             &blob,
             uuid,
             &BTreeMap::new(),
+            &object_refs,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
@@ -29615,13 +29697,18 @@ mod tests {
         assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
         assert!(xml.contains("<v8:Length>50</v8:Length>"));
         assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
+        assert!(xml.contains("<Use>"));
+        assert!(xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Catalog.Products</xr:Item>"#));
         assert!(!repacked.blob.is_empty());
+        let repacked_plain =
+            String::from_utf8(inflate_raw_deflate(&repacked.blob).unwrap()).unwrap();
+        assert_eq!(repacked_plain, plain);
 
         let extracted_v21 = extract_metadata_source_xml_with_refs(
             &blob,
             uuid,
             &BTreeMap::new(),
-            &BTreeMap::new(),
+            &object_refs,
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
