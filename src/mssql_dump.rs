@@ -16757,6 +16757,7 @@ struct CommonAttributeProperties {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct CommonAttributePropertyDetails {
     fill_value: Option<CommonAttributeFillValue>,
+    fill_checking: &'static str,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -20361,8 +20362,11 @@ fn parse_common_attribute_property_details(
     let fill_value = typed_fields
         .get(19)
         .and_then(|field| parse_common_attribute_fill_value(field));
-    (fields.len() > 3 || fill_value.is_some())
-        .then_some(CommonAttributePropertyDetails { fill_value })
+    let fill_checking = metadata_fill_checking_xml(typed_fields.get(20).copied());
+    (fields.len() > 3 || fill_value.is_some()).then_some(CommonAttributePropertyDetails {
+        fill_value,
+        fill_checking,
+    })
 }
 
 fn parse_common_attribute_fill_value(field: &str) -> Option<CommonAttributeFillValue> {
@@ -25250,8 +25254,8 @@ fn format_common_attribute_property_details_xml(
         xml.push_str(&format_common_attribute_fill_value_xml(fill_value));
         xml.push_str("\r\n\t\t\t");
     }
-    xml.push_str(
-        "<FillChecking>DontCheck</FillChecking>\r\n\
+    xml.push_str(&format!(
+        "<FillChecking>{}</FillChecking>\r\n\
 \t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
 \t\t\t<ChoiceParameterLinks/>\r\n\
 \t\t\t<ChoiceParameters/>\r\n\
@@ -25260,7 +25264,8 @@ fn format_common_attribute_property_details_xml(
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
 \t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n",
-    );
+        details.fill_checking
+    ));
     xml
 }
 
@@ -39203,6 +39208,76 @@ mod tests {
             assert!(
                 xml.find("<FillValue").unwrap()
                     < xml.find("<FillChecking>DontCheck</FillChecking>").unwrap(),
+                "{xml}"
+            );
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_common_attribute_fill_checking_from_native_property_tail() {
+        let uuid = "33333333-3333-4333-8333-333333333334";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let plain = r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"RequiredScope",
+{1,"en","Required scope"},"",0,0,@ZERO_UUID@,0},
+{"Pattern",
+{"S",20,1}
+}
+},0,
+{0},
+{0},0,"",0,
+{"U"},
+{"U"},0,@ZERO_UUID@,2,0,
+{5006,0},
+{3,0,0},
+{0,0},0,
+{0},
+{"S",""},1,0,0},
+{0,0}},0}"#
+            .replace("@UUID@", uuid)
+            .replace("@ZERO_UUID@", zero_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("CommonAttributes").join("RequiredScope.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains(r#"<FillValue xsi:type="xs:string"/>"#));
+            assert!(xml.contains("<FillChecking>ShowError</FillChecking>"));
+            assert!(
+                xml.find("<FillValue").unwrap()
+                    < xml.find("<FillChecking>ShowError</FillChecking>").unwrap(),
+                "{xml}"
+            );
+            assert!(
+                xml.find("<FillChecking>ShowError</FillChecking>").unwrap()
+                    < xml
+                        .find("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>")
+                        .unwrap(),
                 "{xml}"
             );
             assert!(!xml.contains("ConfigDumpInfo"));
