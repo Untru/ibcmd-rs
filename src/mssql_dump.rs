@@ -14713,6 +14713,7 @@ struct FunctionalOptionProperties {
 
 struct SubsystemProperties {
     include_in_command_interface: bool,
+    use_standard_commands: bool,
     child_subsystems: Vec<String>,
 }
 
@@ -15979,6 +15980,7 @@ fn parse_subsystem_properties_from_text(
     }
     Some(SubsystemProperties {
         include_in_command_interface: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true),
+        use_standard_commands: parse_1c_bool_field(fields.get(3).copied()).unwrap_or(true),
         child_subsystems: parse_subsystem_child_references(&fields, uuid, subsystem_refs),
     })
 }
@@ -19377,8 +19379,10 @@ fn format_subsystem_source_xml(
         xml.insert_str(
             offset,
             &format!(
-                "\t\t\t<IncludeInCommandInterface>{}</IncludeInCommandInterface>\r\n",
-                xml_bool(subsystem.include_in_command_interface)
+                "\t\t\t<IncludeInCommandInterface>{}</IncludeInCommandInterface>\r\n\
+\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(subsystem.include_in_command_interface),
+                xml_bool(subsystem.use_standard_commands)
             ),
         );
     }
@@ -30774,6 +30778,41 @@ mod tests {
             PathBuf::from("Subsystems/Hidden.xml")
         );
         assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
+    }
+
+    #[test]
+    fn extracts_subsystem_use_standard_commands_to_metadata_xml() {
+        let subsystem_uuid = "11111111-1111-4111-8111-111111111111";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            subsystem_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Subsystems/Admin.xml")
+        );
+        assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(
+            xml.find("<IncludeInCommandInterface>true</IncludeInCommandInterface>")
+                .unwrap()
+                < xml
+                    .find("<UseStandardCommands>false</UseStandardCommands>")
+                    .unwrap()
+        );
     }
 
     #[test]
