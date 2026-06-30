@@ -4010,6 +4010,7 @@ fn build_metadata_object_reference_index_from_texts(
     let mut index = BTreeMap::new();
     let empty_form_refs = BTreeMap::new();
     let empty_template_refs = BTreeMap::new();
+    let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
     for row in rows {
         if let Some(name) = parse_configuration_reference_text(&row.text) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
@@ -4018,7 +4019,15 @@ fn build_metadata_object_reference_index_from_texts(
         let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
             continue;
         };
-        index.insert(row.file_name.clone(), format!("{kind}.{}", header.name));
+        let reference = if kind == "Subsystem" {
+            subsystem_refs
+                .get(&header.uuid)
+                .and_then(subsystem_source_reference_name)
+                .unwrap_or_else(|| format!("{kind}.{}", header.name))
+        } else {
+            format!("{kind}.{}", header.name)
+        };
+        index.insert(row.file_name.clone(), reference);
         if kind == "Enum" {
             for value in parse_enum_values_from_text(&row.text) {
                 index.insert(
@@ -4284,6 +4293,14 @@ fn standalone_child_reference(
     }
     if owner_kind == "WebService" && is_offset_inside_metadata_object_code(text, marker_start, 1) {
         return Some(format!("WebService.{owner_name}.Operation.{}", child.name));
+    }
+    if owner_kind == "IntegrationService"
+        && is_offset_inside_metadata_object_code(text, marker_start, 1)
+    {
+        return Some(format!(
+            "IntegrationService.{owner_name}.IntegrationServiceChannel.{}",
+            child.name
+        ));
     }
     if is_offset_inside_metadata_object_code(text, marker_start, 11) {
         if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
@@ -31954,6 +31971,92 @@ mod tests {
         assert!(xml.contains("<name>InformationRegister.Prices.StandardAttribute.Active</name>"));
         assert!(
             xml.contains("<name>InformationRegister.Prices.StandardAttribute.LineNumber</name>")
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_resolves_nested_subsystem_refs_from_index() {
+        let parent_uuid = "11111111-1111-4111-8111-111111111111";
+        let child_uuid = "22222222-2222-4222-8222-222222222222";
+        let rows = vec![
+            MetadataTextRow {
+                file_name: parent_uuid.to_string(),
+                text: format!(
+                    "{{1,{{22,{{3,{{1,0,{parent_uuid}}},\"Admin\",{{0}},\"\"}},{{1,{child_uuid}}}}}}}"
+                ),
+                object_code: Some(22),
+                header: Some(MetadataHeader {
+                    uuid: parent_uuid.to_string(),
+                    name: "Admin".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                    template_type_code: None,
+                }),
+                kind: Some("Subsystem".to_string()),
+                folder: Some("Subsystems"),
+            },
+            MetadataTextRow {
+                file_name: child_uuid.to_string(),
+                text: format!(
+                    "{{1,{{22,{{3,{{1,0,{child_uuid}}},\"SuppliedData\",{{0}},\"\"}},0}}}}"
+                ),
+                object_code: Some(22),
+                header: Some(MetadataHeader {
+                    uuid: child_uuid.to_string(),
+                    name: "SuppliedData".to_string(),
+                    synonyms: Vec::new(),
+                    comment: String::new(),
+                    template_type_code: None,
+                }),
+                kind: Some("Subsystem".to_string()),
+                folder: Some("Subsystems"),
+            },
+        ];
+        let object_refs = build_metadata_object_reference_index_from_texts(&rows);
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{child_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            rights.objects[0].name,
+            "Subsystem.Admin.Subsystem.SuppliedData"
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_resolves_integration_service_channel_refs_from_index() {
+        let service_uuid = "c512a1cd-1240-4e46-8bad-8b7b27c5c25a";
+        let channel_uuid = "1ef0581c-b1d8-4115-87f1-7856f6c06bb6";
+        let rows = vec![MetadataTextRow {
+            file_name: service_uuid.to_string(),
+            text: format!(
+                "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{service_uuid}}},\"MessageExchange\",{{1,\"en\",\"Message exchange\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},5362f1d1-1f56-4a61-a52e-6519a060293e,ad884943-3c3a-4073-ab34-ed12a0d67556,\"\"}},1,\r\n{{acb7e81f-0637-4ebd-88ff-954ba075ae51,1,\r\n{{\r\n{{1,\r\n{{3,\r\n{{1,0,{channel_uuid}}},\"input\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},71313d47-3c6e-464a-8776-f7eb0626fd6b,bb1ff475-725d-46cb-8cbc-9ff08970cccc,\"external.input\",\"HandleInput\",1,0}},0}}\r\n}}\r\n}}\r\n}}"
+            ),
+            object_code: Some(0),
+            header: Some(MetadataHeader {
+                uuid: service_uuid.to_string(),
+                name: "MessageExchange".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("IntegrationService".to_string()),
+            folder: Some("IntegrationServices"),
+        }];
+        let object_refs = build_metadata_object_reference_index_from_texts(&rows);
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{channel_uuid},0,0}},{{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}}}}}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            rights.objects[0].name,
+            "IntegrationService.MessageExchange.IntegrationServiceChannel.input"
         );
     }
 
