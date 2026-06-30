@@ -956,8 +956,8 @@ fn metadata_body_bootstrap_rows(
             "0",
             "schedule_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "schedule packer builds the schedule body directly from Schedule.xml",
+            false,
+            "schedule packer builds the schedule body directly from Schedule.xml without reading the active Config row",
         )),
         "XDTOPackage" => rows.extend(optional_body_bootstrap_row(
             source_root,
@@ -3170,9 +3170,9 @@ fn prepare_style_body_row(
 }
 
 fn prepare_scheduled_job_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -3181,7 +3181,6 @@ fn prepare_scheduled_job_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read JobSchedule XML {}", body_path.display()))?;
     let packed = pack_schedule_blob_from_xml(&xml)
@@ -6279,6 +6278,17 @@ mod tests {
         }
     }
 
+    fn sample_schedule_xml() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<JobSchedule xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" version="2.20">
+	<Schedule BeginDate="0001-01-01" EndDate="0001-01-01" BeginTime="08:00:00" EndTime="17:00:00" CompletionTime="00:00:00" CompletionInterval="0" RepeatPeriodInDay="60" RepeatPause="0" WeekDayInMonth="0" DayInMonth="1" WeeksPeriod="1" DaysRepeatPeriod="0">
+		<ent:WeekDays>6 7</ent:WeekDays>
+		<ent:Months>1 2 3 4 5 6 7 8 9 10 11 12</ent:Months>
+	</Schedule>
+</JobSchedule>
+"#
+    }
+
     #[test]
     fn quotes_sql_identifier_and_string() {
         assert_eq!(quote_ident("a]b"), "[a]]b]");
@@ -7564,6 +7574,48 @@ mod tests {
     }
 
     #[test]
+    fn reports_scheduled_job_schedule_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-scheduled-job-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let job_xml = root.join("ScheduledJobs").join("LoadRates.xml");
+        let job_ext = root.join("ScheduledJobs").join("LoadRates").join("Ext");
+        fs::create_dir_all(&job_ext).unwrap();
+        fs::write(
+            &job_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <ScheduledJob uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>LoadRates</Name></Properties>
+  </ScheduledJob>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(job_ext.join("Schedule.xml"), sample_schedule_xml()).unwrap();
+
+        let report =
+            super::source_bootstrap_readiness_report(&root, std::slice::from_ref(&job_xml), &[])
+                .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "schedule_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0"
+        );
+        assert_eq!(row.source_path, "ScheduledJobs/LoadRates/Ext/Schedule.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn prepares_raw_deflated_body_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-raw-body-no-fetch-{}",
@@ -7641,6 +7693,50 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(body)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_scheduled_job_schedule_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-scheduled-job-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let job_xml = root.join("ScheduledJobs").join("LoadRates.xml");
+        let body_path = root
+            .join("ScheduledJobs")
+            .join("LoadRates")
+            .join("Ext")
+            .join("Schedule.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&job_xml, b"<ScheduledJob/>").unwrap();
+        fs::write(&body_path, sample_schedule_xml()).unwrap();
+        let properties = test_simple_metadata_properties(
+            "ScheduledJob",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "LoadRates",
+        );
+
+        let rows = super::prepare_scheduled_job_body_row(
+            PathBuf::from("missing-sqlcmd-for-schedule-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &job_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(
+                "\u{feff}{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0,0}"
+                    .as_bytes(),
+            )
         );
 
         let _ = fs::remove_dir_all(root);
