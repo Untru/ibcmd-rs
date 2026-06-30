@@ -3673,6 +3673,7 @@ fn spreadsheet_vertical_alignment_code(value: &str) -> Option<usize> {
 fn spreadsheet_text_placement_code(value: &str) -> Option<usize> {
     match value {
         "Auto" => Some(0),
+        "Cut" => Some(1),
         "Block" => Some(2),
         "Wrap" => Some(3),
         _ => None,
@@ -23563,6 +23564,44 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains(r#"{2,{24576,900,3},{128,72}}"#));
+        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_cut_text_placement_format() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<textPlacement>Cut</textPlacement>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{16384,1},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
