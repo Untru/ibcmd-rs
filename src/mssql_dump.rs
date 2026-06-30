@@ -4923,11 +4923,16 @@ fn parse_configuration_child_objects(
 }
 
 fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
-    if is_offset_inside_metadata_object_code(text, marker_start, 12) {
-        return Some("CommonModule");
-    }
-    if is_offset_inside_metadata_object_code(text, marker_start, 5) {
-        return Some("CommonAttribute");
+    const ROOT_CHILD_OBJECT_CODES: &[(u32, &str)] = &[
+        (12, "CommonModule"),
+        (5, "CommonAttribute"),
+        (16, "Constant"),
+    ];
+
+    for (code, tag) in ROOT_CHILD_OBJECT_CODES {
+        if is_offset_inside_metadata_object_code(text, marker_start, *code) {
+            return Some(*tag);
+        }
     }
     None
 }
@@ -31504,6 +31509,41 @@ mod tests {
         assert!(xml.contains(&format!(r#"<CommonModule uuid="{common_module_uuid}">"#)));
         assert!(xml.contains("<Name>SalesModule</Name>"));
         assert!(xml.contains("<Comment>Module comment</Comment>"));
+        assert!(!xml.contains(header_uuid));
+        assert!(!xml.contains("ConfigDumpInfo"));
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_root_constant_child_object() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let constant_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+        let blob = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{16,\r\n{{3,\r\n{{1,0,{constant_uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Constant comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains(&format!(r#"<Constant uuid="{constant_uuid}">"#)));
+        assert!(xml.contains("<Name>UseFeature</Name>"));
+        assert!(xml.contains("<Comment>Constant comment</Comment>"));
         assert!(!xml.contains(header_uuid));
         assert!(!xml.contains("ConfigDumpInfo"));
     }
