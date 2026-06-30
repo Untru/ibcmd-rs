@@ -14806,6 +14806,7 @@ struct ReportProperties {
 
 struct DataProcessorProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
     default_form: Option<String>,
     auxiliary_form: Option<String>,
     child_forms: Vec<String>,
@@ -16552,6 +16553,7 @@ fn parse_data_processor_properties_from_text(
 
     Some(DataProcessorProperties {
         generated_types,
+        use_standard_commands: parse_1c_bool_field(fields.get(5).copied()).unwrap_or(true),
         default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
         auxiliary_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
@@ -19925,6 +19927,10 @@ fn format_data_processor_source_xml(
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
         let mut properties = String::new();
+        properties.push_str(&format!(
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+            xml_bool(data_processor.use_standard_commands)
+        ));
         push_optional_text_element(
             &mut properties,
             "\t\t\t",
@@ -34602,6 +34608,49 @@ mod tests {
             assert!(xml.contains(
                 "<AuxiliaryForm>DataProcessor.Loader.Form.AssistantForm</AuxiliaryForm>"
             ));
+        }
+    }
+
+    #[test]
+    fn extracts_data_processor_use_standard_commands_to_metadata_xml() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},00000000-0000-0000-0000-000000000000,0,0,{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,{{0}},{{0}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &data_processor_blob,
+                data_processor_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+            assert!(
+                xml.find("<Comment/>").unwrap() < xml.find("<UseStandardCommands>").unwrap(),
+                "{xml}"
+            );
+            assert!(
+                xml.find("<UseStandardCommands>").unwrap() < xml.find("</Properties>").unwrap(),
+                "{xml}"
+            );
         }
     }
 
