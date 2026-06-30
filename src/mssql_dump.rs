@@ -3147,7 +3147,7 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
             ))
         } else {
             type_index
-                .get(type_id)
+                .get(&type_id.to_ascii_lowercase())
                 .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
                 .map(|reference| {
                     format!(
@@ -16608,7 +16608,7 @@ fn build_metadata_type_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<St
             .or_else(|| parse_generated_type_entries_from_source_xml_text(&row.text));
         let Some(entries) = entries else { continue };
         for (type_id, reference) in entries {
-            index.insert(type_id, reference);
+            index.insert(type_id.to_ascii_lowercase(), reference);
         }
     }
     index
@@ -32788,6 +32788,45 @@ mod tests {
 \t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
 \t\t<field xsi:type=\"DataSetFieldField\">\r\n\
 \t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{type_id}</TypeId></valueType>\r\n\
+\t\t</field>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &index).unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(
+            r#"<v8:Type xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d5p1:CatalogRef.Номенклатура</v8:Type>"#
+        ));
+        assert!(!xml.contains("<v8:TypeId>"));
+    }
+
+    #[test]
+    fn normalizes_dcs_type_id_using_case_insensitive_generated_type_index() {
+        let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+        let upper_type_id = type_id.to_ascii_uppercase();
+        let row = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            text: format!(
+                r#"<MetaDataObject xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"><Catalog><InternalInfo><xr:GeneratedType name="CatalogRef.Номенклатура" category="Ref"><xr:TypeId>{}</xr:TypeId></xr:GeneratedType></InternalInfo></Catalog></MetaDataObject>"#,
+                upper_type_id
+            ),
+            object_code: None,
+            header: None,
+            kind: Some("Catalog".to_string()),
+            folder: Some("Catalogs"),
+        };
+        let index = build_metadata_type_index_from_texts(&[row]);
+        let raw = format!(
+            "\0\0\0\0\
+\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<field xsi:type=\"DataSetFieldField\">\r\n\
+\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{upper_type_id}</TypeId></valueType>\r\n\
 \t\t</field>\r\n\
 \t</dataCompositionSchema>\r\n\
 </SchemaFile>"
