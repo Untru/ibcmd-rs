@@ -14208,19 +14208,18 @@ fn role_object_right_value_replacements(
         let uuid = plain[fields[start + right_index * 2].clone()].trim();
         let name = role_right_name(uuid)
             .ok_or_else(|| anyhow!("unsupported base Role right UUID {uuid}"))?;
-        let right = rights_by_name.get(name).copied().ok_or_else(|| {
-            anyhow!(
-                "Role Rights.xml object {} has no right {}",
-                object.name,
-                name
-            )
-        })?;
+        let right = rights_by_name.get(name).copied();
         let value_range = fields[start + right_index * 2 + 1].clone();
         replacements.push((
             value_range,
-            if right.value { "1" } else { "-1" }.to_string(),
+            if right.is_some_and(|right| right.value) {
+                "1"
+            } else {
+                "-1"
+            }
+            .to_string(),
         ));
-        if let Some(condition) = &right.restriction_by_condition {
+        if let Some(condition) = right.and_then(|right| right.restriction_by_condition.as_ref()) {
             conditions_by_uuid.insert(uuid.to_string(), condition.clone());
         }
     }
@@ -27478,6 +27477,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!text.contains("WHERE OLD"));
         assert!(!text.contains("OldTemplate"));
         assert!(text.ends_with(",1,0,1,4294967295}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_xml_omitted_rights_as_false() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{10,{1,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1,b7bab52d-c1b1-4bd8-8276-02db08d42352,1}}},{0},0,1,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>false</setForNewObjects>
+	<setForAttributesByDefault>true</setForAttributesByDefault>
+	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
+	<object>
+		<name>Catalog.Products</name>
+		<right>
+			<name>View</name>
+			<value>true</value>
+		</right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1"));
+        assert!(text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,-1"));
+        assert!(!text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,1"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
