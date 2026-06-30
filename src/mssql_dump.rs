@@ -15257,6 +15257,8 @@ fn extract_metadata_source_xml_from_text_row(
         let common_attribute =
             parse_common_attribute_properties_from_text(text, uuid, type_index, object_refs)?;
         format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
+    } else if kind == "FilterCriterion" {
+        format_filter_criterion_source_xml(&header, source_version).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
@@ -20089,15 +20091,33 @@ fn format_xdto_package_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("XDTOPackage", header, source_version);
-    let insert = format!(
-        "\t\t\t<Namespace>{}</Namespace>\r\n",
-        escape_xml_element_text(&package.namespace)
+    insert_metadata_properties_xml(
+        &mut xml,
+        &format!(
+            "\t\t\t<Namespace>{}</Namespace>\r\n",
+            escape_xml_element_text(&package.namespace)
+        ),
     );
+    xml
+}
+
+fn format_filter_criterion_source_xml(
+    header: &MetadataHeader,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("FilterCriterion", header, source_version);
+    insert_metadata_properties_xml(
+        &mut xml,
+        "\t\t\t<UseStandardCommands>true</UseStandardCommands>\r\n",
+    );
+    xml
+}
+
+fn insert_metadata_properties_xml(xml: &mut String, insert: &str) {
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
-        xml.insert_str(index, &insert);
+        xml.insert_str(index, insert);
     }
-    xml
 }
 
 fn format_http_service_source_xml(
@@ -31118,6 +31138,56 @@ mod tests {
             }
             assert!(!repacked.blob.is_empty());
         }
+    }
+
+    #[test]
+    fn extracts_filter_criterion_xml_with_standard_commands() {
+        let uuid = "55555555-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let plain = format!(
+            "{{1,\r\n{{14,\r\n{{3,\r\n{{1,0,{uuid}}},\"ImportantFilters\",{{1,\"en\",\"Important filters\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0}},0}}"
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let repacked_plain =
+            String::from_utf8(inflate_raw_deflate(&repacked.blob).unwrap()).unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("FilterCriteria").join("ImportantFilters.xml")
+        );
+        assert_eq!(properties.kind, "FilterCriterion");
+        assert_eq!(properties.uuid, uuid);
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert_eq!(repacked_plain, plain);
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
+        assert!(xml_v21.contains("<UseStandardCommands>true</UseStandardCommands>"));
     }
 
     #[test]
