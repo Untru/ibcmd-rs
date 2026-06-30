@@ -14464,6 +14464,7 @@ struct DataProcessorProperties {
     default_form: Option<String>,
     auxiliary_form: Option<String>,
     child_forms: Vec<String>,
+    child_templates: Vec<String>,
 }
 
 struct DocumentProperties {
@@ -15237,7 +15238,8 @@ fn extract_metadata_source_xml_from_text_row(
             parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
     } else if kind == "DataProcessor" {
-        let data_processor = parse_data_processor_properties_from_text(text, uuid, form_refs)?;
+        let data_processor =
+            parse_data_processor_properties_from_text(text, uuid, form_refs, template_refs)?;
         format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(text, uuid)?;
@@ -15918,6 +15920,7 @@ fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DataProcessorProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -15940,6 +15943,11 @@ fn parse_data_processor_properties_from_text(
         default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
         auxiliary_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
+        child_templates: owned_data_processor_template_names_in_text_order(
+            text,
+            &header.name,
+            template_refs,
+        ),
     })
 }
 
@@ -16054,7 +16062,12 @@ fn owned_enum_form_names_in_text_order(
                 continue;
             };
             if form_ref.kind != "Form"
-                || !is_owned_enum_child_path(&form_ref.relative_path, enum_name, "Forms")
+                || !is_owned_metadata_child_path(
+                    &form_ref.relative_path,
+                    "Enums",
+                    enum_name,
+                    "Forms",
+                )
             {
                 continue;
             }
@@ -16071,7 +16084,12 @@ fn owned_enum_form_names_in_text_order(
         .values()
         .filter(|form_ref| {
             form_ref.kind == "Form"
-                && is_owned_enum_child_path(&form_ref.relative_path, enum_name, "Forms")
+                && is_owned_metadata_child_path(
+                    &form_ref.relative_path,
+                    "Enums",
+                    enum_name,
+                    "Forms",
+                )
         })
         .filter_map(|form_ref| {
             source_path_file_stem(&form_ref.relative_path)
@@ -16093,55 +16111,7 @@ fn owned_enum_template_names_in_text_order(
     enum_name: &str,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut seen = BTreeSet::new();
-    for uuid in uuid_like_values_in_text_order(text) {
-        let Some(template_ref) = template_refs.get(&uuid) else {
-            continue;
-        };
-        if template_ref.kind != "Template"
-            || !is_owned_enum_child_path(&template_ref.relative_path, enum_name, "Templates")
-        {
-            continue;
-        }
-        let Some(name) = source_path_file_stem(&template_ref.relative_path) else {
-            continue;
-        };
-        if seen.insert(name.clone()) {
-            names.push(name);
-        }
-    }
-
-    let mut path_names = template_refs
-        .values()
-        .filter(|template_ref| {
-            template_ref.kind == "Template"
-                && is_owned_enum_child_path(&template_ref.relative_path, enum_name, "Templates")
-        })
-        .filter_map(|template_ref| {
-            source_path_file_stem(&template_ref.relative_path)
-                .map(|name| (template_ref.relative_path.clone(), name))
-        })
-        .collect::<Vec<_>>();
-    path_names.sort_by(|(left_path, _), (right_path, _)| left_path.cmp(right_path));
-    for (_, name) in path_names {
-        if seen.insert(name.clone()) {
-            names.push(name);
-        }
-    }
-
-    names
-}
-
-fn is_owned_enum_child_path(path: &Path, enum_name: &str, child_folder: &str) -> bool {
-    let parts = path
-        .iter()
-        .filter_map(|part| part.to_str())
-        .collect::<Vec<_>>();
-    parts.len() == 4
-        && parts.first() == Some(&"Enums")
-        && parts.get(1) == Some(&enum_name)
-        && parts.get(2) == Some(&child_folder)
+    owned_metadata_template_names_in_text_order(text, "Enums", enum_name, template_refs)
 }
 
 fn is_owned_metadata_child_path(
@@ -16292,6 +16262,75 @@ fn owned_data_processor_form_names_in_text_order(
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Vec<String> {
     owned_metadata_form_names_in_text_order(text, "DataProcessors", data_processor_name, form_refs)
+}
+
+fn owned_data_processor_template_names_in_text_order(
+    text: &str,
+    data_processor_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Vec<String> {
+    owned_metadata_template_names_in_text_order(
+        text,
+        "DataProcessors",
+        data_processor_name,
+        template_refs,
+    )
+}
+
+fn owned_metadata_template_names_in_text_order(
+    text: &str,
+    owner_folder: &str,
+    owner_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = BTreeSet::new();
+    for uuid in uuid_like_values_in_text_order(text) {
+        let Some(template_ref) = template_refs.get(&uuid) else {
+            continue;
+        };
+        if template_ref.kind != "Template"
+            || !is_owned_metadata_child_path(
+                &template_ref.relative_path,
+                owner_folder,
+                owner_name,
+                "Templates",
+            )
+        {
+            continue;
+        }
+        let Some(name) = source_path_file_stem(&template_ref.relative_path) else {
+            continue;
+        };
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+
+    let mut path_names = template_refs
+        .values()
+        .filter(|template_ref| {
+            template_ref.kind == "Template"
+                && is_owned_metadata_child_path(
+                    &template_ref.relative_path,
+                    owner_folder,
+                    owner_name,
+                    "Templates",
+                )
+        })
+        .filter_map(|template_ref| {
+            source_path_file_stem(&template_ref.relative_path)
+                .map(|name| (template_ref.relative_path.clone(), name))
+        })
+        .collect::<Vec<_>>();
+    path_names.sort_by(|(left_path, _), (right_path, _)| left_path.cmp(right_path));
+    for (_, name) in path_names {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+
+    names
 }
 
 fn owned_metadata_form_names_in_text_order(
@@ -19160,12 +19199,18 @@ fn format_data_processor_source_xml(
         );
         xml.insert_str(index, &properties);
     }
-    if !data_processor.child_forms.is_empty() {
+    if !data_processor.child_forms.is_empty() || !data_processor.child_templates.is_empty() {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
         for form in &data_processor.child_forms {
             child_objects.push_str(&format!(
                 "\t\t\t<Form>{}</Form>\r\n",
                 escape_xml_element_text(form)
+            ));
+        }
+        for template in &data_processor.child_templates {
+            child_objects.push_str(&format!(
+                "\t\t\t<Template>{}</Template>\r\n",
+                escape_xml_element_text(template)
             ));
         }
         child_objects.push_str("\t\t</ChildObjects>\r\n");
@@ -32600,17 +32645,18 @@ mod tests {
     }
 
     #[test]
-    fn extracts_data_processor_child_forms_to_metadata_xml() {
+    fn extracts_data_processor_child_forms_and_templates_to_metadata_xml() {
         let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let default_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
         let auxiliary_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
         let extra_form_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let template_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
         let manager_type_id = "11111111-1111-4111-8111-111111111111";
         let manager_value_id = "22222222-2222-4222-8222-222222222222";
         let form_list_marker = FORM_LIST_MARKERS[0];
         let data_processor_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}},{{{form_list_marker},2,{extra_form_uuid},{default_form_uuid}}}\r\n}}"
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}},{{{form_list_marker},2,{extra_form_uuid},{default_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -32637,6 +32683,14 @@ mod tests {
                 },
             ),
         ]);
+        let template_refs = BTreeMap::from([(
+            template_uuid.to_string(),
+            TemplateSourceReference {
+                relative_path: PathBuf::from("DataProcessors/Loader/Templates/Settings.xml"),
+                kind: "Template",
+                template_type: "TextDocument",
+            },
+        )]);
 
         for source_version in [
             InfobaseConfigSourceVersion::V2_20,
@@ -32649,7 +32703,7 @@ mod tests {
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 &form_refs,
-                &BTreeMap::new(),
+                &template_refs,
                 &BTreeMap::new(),
                 source_version,
             )
@@ -32661,6 +32715,7 @@ mod tests {
             assert!(xml.contains("<Form>ExtraForm</Form>"));
             assert!(xml.contains("<Form>MainForm</Form>"));
             assert!(xml.contains("<Form>AssistantForm</Form>"));
+            assert!(xml.contains("<Template>Settings</Template>"));
             assert!(
                 xml.find("<Form>ExtraForm</Form>").unwrap()
                     < xml.find("<Form>MainForm</Form>").unwrap()
@@ -32669,7 +32724,12 @@ mod tests {
                 xml.find("<Form>MainForm</Form>").unwrap()
                     < xml.find("<Form>AssistantForm</Form>").unwrap()
             );
+            assert!(
+                xml.find("<Form>AssistantForm</Form>").unwrap()
+                    < xml.find("<Template>Settings</Template>").unwrap()
+            );
             assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
+            assert_eq!(xml.matches("<Template>Settings</Template>").count(), 1);
             assert!(
                 xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap(),
                 "{xml}"
