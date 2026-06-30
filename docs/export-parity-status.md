@@ -119,6 +119,13 @@ Verification history:
 | Round 23 MXL template slice | unit-level extractor/packer verification | SpreadsheetDocument MOXCEL merge region kind `2` is preserved as `verticalUnmerge` and packs back into the same region list |
 | Round 23 source staging readiness slice | unit-level readiness audit verification | `Role/Ext/Rights.xml` remains base-dependent, but readiness now reports exact blockers around role object order, right UUID slots, restrictions and template/trailing layout |
 | Round 23 native dump performance slice | unit-level fetch/timing verification | streamed `mssql-dump-config` routes blob-bearing metadata/direct prepare reads through the existing native `bcp` parser and reports `sqlcmd`/`bcp` timing split |
+| Round 24 Role Rights.xml slice | unit-level extractor/packer verification | role rights objects are sorted by object UUID for export, and packer maps XML objects back to base rights slots using the same UUID order |
+| Round 24 Form.xml slice | unit-level extractor/packer verification | table child items extract and pack `SkipOnInput`, including wrapper `55` layouts |
+| Round 24 object metadata slice | unit-level metadata XML verification | `Document` metadata emits `StandardAttributes`; the `Number` standard attribute fill value follows native number type |
+| Round 24 CommonAttribute metadata slice | unit-level metadata XML verification | native `Content` pairs of metadata UUID and `{2,use_flag,...}` settings are parsed, including `use_flag=2` as `DontUse`, while simplified shape remains supported |
+| Round 24 DCS template slice | unit-level template body verification | DataCompositionSchema template bodies rewrite known `v8:TypeId` values through the metadata type index to source-style current-config `v8:Type` references |
+| Round 24 ExchangePlan Content.xml slice | unit-level source asset verification | `AutoRecord` values now map as `0=Deny`, `1=Allow`, `2=Auto` |
+| Round 24 source staging readiness slice | unit-level readiness audit verification | `BusinessProcess/Ext/Flowchart.xml` remains base-dependent, but readiness now reports precise blockers for item table order, type-code slots, events, explanations and nested payload shape |
 
 Performance note for selected extraction:
 
@@ -267,5 +274,12 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | InformationRegister extended-tuple `UseStandardCommands` metadata XML | merged to `master` in round 23 |
 | #19 | `mssql-dump-config` blob-bearing prepare fetches routed through native `bcp` parser with timing split | merged to `master` in round 23 |
 | #21 | precise Role `Rights.xml` base-free staging blocker audit | merged to `master` in round 23 |
+| #13 | Role Rights.xml object UUID ordering for export and pack mapping | merged to `master` in round 24 |
+| #15 | Document `StandardAttributes` metadata XML | merged to `master` in round 24 |
+| #16 | Form.xml table `SkipOnInput` extraction and packing | merged to `master` in round 24 |
+| #17 | DataCompositionSchema template `TypeId` to `Type` reference normalization | merged to `master` in round 24 |
+| #18 | ExchangePlan `Content.xml` `AutoRecord` mapping | merged to `master` in round 24 |
+| #21 | precise BusinessProcess `Flowchart.xml` base-free staging blocker audit | merged to `master` in round 24 |
+| #22 | CommonAttribute native content pair parsing | merged to `master` in round 24 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

@@ -61,6 +61,13 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 24 | Role Rights.xml | role rights objects are exported and packed against base slots in object UUID order |
+| 24 | Form.xml | table child items extract and pack `SkipOnInput`, including wrapper `55` layouts |
+| 24 | Object metadata XML | `Document` metadata emits `StandardAttributes` with number-type-aware `Number` fill value |
+| 24 | CommonAttributes metadata XML | native `Content` metadata/use pairs are parsed, including `use_flag=2` as `DontUse` |
+| 24 | DCS templates | DataCompositionSchema template bodies rewrite known `v8:TypeId` values to source-style `v8:Type` references through the metadata type index |
+| 24 | ExchangePlan Content.xml | `AutoRecord` mapping is corrected to `0=Deny`, `1=Allow`, `2=Auto` |
+| 24 | Source staging readiness | `BusinessProcess/Ext/Flowchart.xml` readiness reports precise base-blob blockers for item order, type slots, events and nested payload shape |
 | 23 | Form.xml | wrapper `55` table items extract and pack `AutoRefresh` / `AutoRefreshPeriod` through existing property bag keys |
 | 23 | Object metadata XML | `Document` metadata emits owned `Form` and `Template` child refs from generic indexes |
 | 23 | Partial metadata XML | `InformationRegister` reads `UseStandardCommands` from the extended native owner tuple |
