@@ -61,6 +61,14 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 27 | Role Rights.xml | nested subsystem and integration service channel refs resolve to fuller native-style child object names |
+| 27 | Form.xml | wrapper `55` table items extract and pack existing `AllowGettingCurrentRowURL` boolean slots |
+| 27 | Object metadata XML | Report command child headers and Catalog/DataProcessor Attribute/TabularSection child headers are emitted |
+| 27 | Workflow/Register metadata XML | BusinessProcess/Task generated types and AccumulationRegister `IncludeHelpInContents=false` are emitted |
+| 27 | Configuration.xml | root `<DefaultRoles>` is emitted from resolved role refs in metadata field `39` |
+| 27 | DCS templates | TypeId normalization can use `xr:GeneratedType` entries from XML-shaped metadata text |
+| 27 | Source staging readiness | configuration `Ext/HomePageWorkArea.xml` has explicit base-free readiness classification |
+| 27 | Native dump performance | `mssql-dump-timing-summary` added; selected 664 MB blob timing run confirmed 3 BCP batches and `fetch_rows_ms=3532` |
 | 26 | Native dump performance | native `bcp` row batch cap reduced to 256 MiB and timing JSON reports batch count/max size diagnostics |
 | 26 | Role Rights.xml | role object refs use UUID plus serialized tail fields, preserving repeated owner refs and standard-attribute refs |
 | 26 | Form.xml | wrapper `55` table items extract and pack observed `UpdateOnDataChange=Auto` through property bag key `14` |

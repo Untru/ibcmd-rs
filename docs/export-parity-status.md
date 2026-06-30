@@ -30,7 +30,7 @@ The full JSON report is retained at
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
-round 26 incremental verified fixes listed below.
+round 27 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -141,6 +141,14 @@ Verification history:
 | Round 26 Configuration.xml slice | unit-level metadata XML verification | root `DefaultStyle` and `DefaultLanguage` refs are emitted from UUID-backed metadata fields |
 | Round 26 DCS template slice | unit-level template body verification | observed DCS body `AnyIBRef`/`TypeSet` and settings `xsi:type` values are canonicalized |
 | Round 26 source staging readiness slice | unit-level readiness audit verification | readable `CommandInterface.xml` refs now report precise base-free blockers while raw `kind:uuid` refs remain base-free |
+| Round 27 Role Rights.xml slice | unit-level extractor verification | nested subsystem and integration service channel refs resolve to fuller native-style child object names |
+| Round 27 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table items extract and pack existing `AllowGettingCurrentRowURL` boolean slots |
+| Round 27 object metadata slice | unit-level metadata XML verification | Report command child headers and Catalog/DataProcessor Attribute/TabularSection child headers are emitted |
+| Round 27 workflow/register metadata slice | unit-level metadata XML verification | BusinessProcess/Task generated types and AccumulationRegister `IncludeHelpInContents=false` are emitted |
+| Round 27 Configuration.xml slice | unit-level metadata XML verification | root `<DefaultRoles>` is emitted from resolved role refs in metadata field `39` |
+| Round 27 DCS template slice | unit-level template body verification | TypeId normalization can use `xr:GeneratedType` entries from XML-shaped metadata text |
+| Round 27 source staging readiness slice | unit-level readiness audit verification | configuration `Ext/HomePageWorkArea.xml` has explicit base-free readiness classification |
+| Round 27 native dump performance slice | real selected-run timing plus unit-level summary verification | `mssql-dump-timing-summary` added; selected 663,776,134-byte blob run used 3 BCP batches with `fetch_rows_ms=3532`; full source-layout timing remains blocked by standalone-content reference resolution |
 
 Performance note for selected extraction:
 
@@ -313,5 +321,13 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #19 | native dump `bcp` batch memory cap and batch diagnostics | merged to `master` in round 26 |
 | #21 | precise readable `CommandInterface.xml` base-free blocker audit | merged to `master` in round 26 |
 | #22 | root Configuration.xml default style/language refs | merged to `master` in round 26 |
+| #13 | Role Rights.xml nested subsystem/integration-service child refs | merged to `master` in round 27 |
+| #15 | Report command child headers and Catalog/DataProcessor Attribute/TabularSection child headers | merged to `master` in round 27 |
+| #16 | Form.xml wrapper `55` table `AllowGettingCurrentRowURL` extraction and packing | merged to `master` in round 27 |
+| #17 | DCS TypeId readiness from XML-shaped `xr:GeneratedType` metadata | merged to `master` in round 27 |
+| #18 | BusinessProcess/Task generated types and AccumulationRegister include-help scalar | merged to `master` in round 27 |
+| #19 | `mssql-dump-timing-summary` and selected blob timing evidence | merged to `master` in round 27 |
+| #21 | explicit HomePageWorkArea base-free readiness classification | merged to `master` in round 27 |
+| #22 | root Configuration.xml default role refs | merged to `master` in round 27 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
