@@ -28,7 +28,7 @@ pub(crate) fn parse_v8_container(bytes: &[u8]) -> Result<Vec<V8Element>> {
     if read_u32(bytes, 0)? != V8_MAGIC_NUMBER {
         return Err(anyhow!("unexpected file header next page marker"));
     }
-    if read_u32(bytes, 8)? != 1 {
+    if !matches!(read_u32(bytes, 8)?, 1 | 2) {
         return Err(anyhow!("unsupported module container storage version"));
     }
 
@@ -345,6 +345,23 @@ mod tests {
         assert_eq!(parsed.len(), source.len());
         assert_eq!(parsed[0].data, source[0].data);
         assert_eq!(parsed[1].data, source[1].data);
+    }
+
+    #[test]
+    fn parses_storage_version_two_container() {
+        let mut inner = build_v8_container(&[V8Element {
+            name: "image".to_string(),
+            header: make_v8_element_header("image"),
+            data: b"compiled-image".to_vec(),
+        }])
+        .unwrap();
+        inner[8..12].copy_from_slice(&2_u32.to_le_bytes());
+
+        let elements = parse_v8_container(&inner).unwrap();
+
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].name, "image");
+        assert_eq!(elements[0].data, b"compiled-image");
     }
 
     #[test]

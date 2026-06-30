@@ -952,6 +952,30 @@ pub fn pack_module_blob_bytes(
     })
 }
 
+pub fn pack_module_blob_container_bytes(container: &[u8]) -> Result<PackedModuleBlob> {
+    let elements = parse_v8_container(container).context("failed to parse module V8 container")?;
+    let info_bytes = elements
+        .iter()
+        .find(|element| element.name == "info")
+        .map(|element| element.data.len())
+        .unwrap_or_default();
+    let text_bytes = elements
+        .iter()
+        .find(|element| element.name == "text")
+        .map(|element| element.data.len())
+        .unwrap_or_default();
+    let blob = deflate_raw(container)?;
+    let output_sha256 = hex_sha256(&blob);
+
+    Ok(PackedModuleBlob {
+        blob,
+        info_bytes,
+        text_bytes,
+        inner_bytes: container.len(),
+        output_sha256,
+    })
+}
+
 pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
     read_element_from_blob(blob, "text")
         .context("failed to read module blob text element")?
