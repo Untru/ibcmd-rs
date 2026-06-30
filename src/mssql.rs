@@ -1218,8 +1218,8 @@ fn template_bootstrap_rows(
             "0",
             "template_binary_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "binary template body packer builds the Config blob directly from Template.bin",
+            false,
+            "binary template body packer builds the Config blob directly from Template.bin without reading the active Config row",
         )),
         _ => {}
     }
@@ -3351,9 +3351,9 @@ fn prepare_html_template_body_row(
 }
 
 fn prepare_binary_template_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -3362,7 +3362,6 @@ fn prepare_binary_template_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let bytes = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read binary Template body {}",
@@ -7525,6 +7524,54 @@ mod tests {
     }
 
     #[test]
+    fn reports_binary_template_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-binary-template-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Archive.xml");
+        let template_ext = root.join("CommonTemplates").join("Archive").join("Ext");
+        fs::create_dir_all(&template_ext).unwrap();
+        fs::write(
+            &template_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>Archive</Name>
+      <TemplateType>BinaryData</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(template_ext.join("Template.bin"), b"PK\x03\x04").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&template_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "template_binary_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd.0"
+        );
+        assert_eq!(row.source_path, "CommonTemplates/Archive/Ext/Template.bin");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_additional_indexes_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-additional-indexes-readiness-{}",
@@ -7693,6 +7740,47 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(body)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_binary_template_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-binary-template-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Archive.xml");
+        let body_path = root
+            .join("CommonTemplates")
+            .join("Archive")
+            .join("Ext")
+            .join("Template.bin");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&template_xml, b"<CommonTemplate/>").unwrap();
+        fs::write(&body_path, b"PK\x03\x04").unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonTemplate",
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+            "Archive",
+        );
+
+        let rows = super::prepare_binary_template_body_row(
+            PathBuf::from("missing-sqlcmd-for-binary-template-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &template_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "dddddddd-dddd-4ddd-dddd-dddddddddddd.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(b"{#base64:UEsDBA==}")
         );
 
         let _ = fs::remove_dir_all(root);
