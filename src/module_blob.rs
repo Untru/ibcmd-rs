@@ -9461,6 +9461,18 @@ fn format_form_layout_new_button_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    if item.location_in_command_bar.is_some() {
+        return format_form_layout_new_extended_button_item(
+            item,
+            item_uuid,
+            commands,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+        );
+    }
+
     let item_type = item
         .item_type
         .as_deref()
@@ -9493,6 +9505,122 @@ fn format_form_layout_new_button_item(
         command_ref,
         data_path_ref
     );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    Ok(text)
+}
+
+fn format_form_layout_new_extended_button_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    commands: &[FormXmlCommand],
+    table_ids_by_name: &BTreeMap<String, String>,
+    table_column_ids_by_name: &BTreeMap<(String, String), String>,
+    command_uuids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let item_type = item
+        .item_type
+        .as_deref()
+        .and_then(form_extended_button_type_code)
+        .unwrap_or("1");
+    let command_ref = item
+        .command_name
+        .as_deref()
+        .map(|command_name| {
+            format_form_new_button_command_reference(command_name, commands, command_uuids, source)
+        })
+        .transpose()?
+        .flatten()
+        .unwrap_or_else(|| "{0}".to_string());
+    let data_path_ref = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| {
+            format_form_button_data_path(data_path, table_ids_by_name, table_column_ids_by_name)
+        })
+        .unwrap_or_else(|| "{0}".to_string());
+    let representation = item
+        .button_representation
+        .map(form_button_representation_code)
+        .unwrap_or("3");
+    let default_button = if item.default_button.unwrap_or(false) {
+        "1"
+    } else {
+        "0"
+    };
+    let skip_on_input = if item.skip_on_input.unwrap_or(false) {
+        "1"
+    } else {
+        "0"
+    };
+    let location_in_command_bar = item
+        .location_in_command_bar
+        .map(form_button_location_in_command_bar_code)
+        .unwrap_or("0");
+    let fields = [
+        "34".to_string(),
+        format!("{{{},{}}}", item.id, item_uuid),
+        "0".to_string(),
+        "0".to_string(),
+        item_type.to_string(),
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        "1".to_string(),
+        command_ref,
+        data_path_ref,
+        representation.to_string(),
+        default_button.to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "2".to_string(),
+        "2".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "{4,4,{0},4}".to_string(),
+        "{4,4,{0},4}".to_string(),
+        "{4,4,{0},4}".to_string(),
+        "{8,3,0,1,100}".to_string(),
+        "{0,0,0}".to_string(),
+        "0".to_string(),
+        "{4,0,{0},\"\",-1,-1,1,0,\"\"}".to_string(),
+        "1".to_string(),
+        "{\"Pattern\"}".to_string(),
+        "\"\"".to_string(),
+        skip_on_input.to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        "{\"U\"}".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "3".to_string(),
+        "3".to_string(),
+        "3".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        location_in_command_bar.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "{4,0,{0},\"\",-1,-1,1,0,\"\"}".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "\"\"".to_string(),
+    ];
+    let mut text = format!("{{{}}}", fields.join(","));
+    text.pop();
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
     Ok(text)
@@ -24541,6 +24669,42 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_command_bar_button_location() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<CommandBar name="Actions" id="64">
+			<ChildItems>
+				<Button name="RunButton" id="44">
+					<Type>CommandBarButton</Type>
+					<LocationInCommandBar>InCommandBarAndInAdditionalSubmenu</LocationInCommandBar>
+				</Button>
+			</ChildItems>
+		</CommandBar>
+	</ChildItems>
+</Form>
+"#
+        .as_bytes();
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let command_bar_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let button_fields =
+            super::scan_braced_fields(&parsed.layout, command_bar_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[command_bar_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
+        assert_eq!(&parsed.layout[button_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[button_fields[5].clone()], r#""RunButton""#);
+        assert_eq!(&parsed.layout[button_fields[49].clone()], "3");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
