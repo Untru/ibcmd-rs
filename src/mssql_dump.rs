@@ -14770,6 +14770,8 @@ struct CatalogProperties {
     list_presentation: Vec<(String, String)>,
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
+    child_forms: Vec<String>,
+    child_templates: Vec<String>,
 }
 
 struct ReportProperties {
@@ -15560,7 +15562,7 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Role" {
         format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     } else if kind == "Catalog" {
-        let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
+        let catalog = parse_catalog_properties_from_text(text, uuid, form_refs, template_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if kind == "Report" {
         let report =
@@ -16142,6 +16144,7 @@ fn parse_catalog_properties_from_text(
     text: &str,
     uuid: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<CatalogProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -16243,6 +16246,12 @@ fn parse_catalog_properties_from_text(
         list_presentation: parse_1c_synonyms(fields.get(48).copied().unwrap_or("{0}")),
         extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
+        child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
+        child_templates: owned_catalog_template_names_in_text_order(
+            text,
+            &header.name,
+            template_refs,
+        ),
     })
 }
 
@@ -16697,6 +16706,22 @@ fn owned_report_form_names_in_text_order(
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Vec<String> {
     owned_metadata_form_names_in_text_order(text, "Reports", report_name, form_refs)
+}
+
+fn owned_catalog_form_names_in_text_order(
+    text: &str,
+    catalog_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Vec<String> {
+    owned_metadata_form_names_in_text_order(text, "Catalogs", catalog_name, form_refs)
+}
+
+fn owned_catalog_template_names_in_text_order(
+    text: &str,
+    catalog_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Vec<String> {
+    owned_metadata_template_names_in_text_order(text, "Catalogs", catalog_name, template_refs)
 }
 
 fn owned_data_processor_form_names_in_text_order(
@@ -19476,7 +19501,24 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
 \t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
 \t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
     );
-    xml.push_str("\t\t</Properties>\r\n\t</Catalog>\r\n</MetaDataObject>");
+    xml.push_str("\t\t</Properties>\r\n");
+    if !catalog.child_forms.is_empty() || !catalog.child_templates.is_empty() {
+        xml.push_str("\t\t<ChildObjects>\r\n");
+        for form in &catalog.child_forms {
+            xml.push_str(&format!(
+                "\t\t\t<Form>{}</Form>\r\n",
+                escape_xml_element_text(form)
+            ));
+        }
+        for template in &catalog.child_templates {
+            xml.push_str(&format!(
+                "\t\t\t<Template>{}</Template>\r\n",
+                escape_xml_element_text(template)
+            ));
+        }
+        xml.push_str("\t\t</ChildObjects>\r\n");
+    }
+    xml.push_str("\t</Catalog>\r\n</MetaDataObject>");
     xml
 }
 
@@ -33779,6 +33821,84 @@ mod tests {
         assert!(xml.contains(
             "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
         ));
+    }
+
+    #[test]
+    fn extracts_catalog_child_forms_and_templates_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let list_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let item_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let print_template_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let form_list_marker = FORM_LIST_MARKERS[0];
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id}}},{{{form_list_marker},2,{list_form_uuid},{item_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{print_template_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_refs = BTreeMap::from([
+            (
+                list_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Catalogs/Products/Forms/ListForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                item_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Catalogs/Products/Forms/ItemForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+        let template_refs = BTreeMap::from([(
+            print_template_uuid.to_string(),
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Catalogs/Products/Templates/Print.xml"),
+                kind: "Template",
+                template_type: "SpreadsheetDocument",
+            },
+        )]);
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &form_refs,
+            &template_refs,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Form>ListForm</Form>"));
+        assert!(xml.contains("<Form>ItemForm</Form>"));
+        assert!(xml.contains("<Template>Print</Template>"));
+        assert!(
+            xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<Form>ListForm</Form>").unwrap() < xml.find("<Form>ItemForm</Form>").unwrap()
+        );
+        assert!(
+            xml.find("<Form>ItemForm</Form>").unwrap()
+                < xml.find("<Template>Print</Template>").unwrap()
+        );
+        assert_eq!(xml.matches("<Form>ListForm</Form>").count(), 1);
+        assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
     }
 
     #[test]
