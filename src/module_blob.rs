@@ -9340,6 +9340,7 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
             | "LabelField"
             | "CheckBoxField"
             | "TextDocumentField"
+            | "PictureDecoration"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -9392,6 +9393,7 @@ fn format_form_layout_new_top_level_item(
         | "LabelField"
         | "CheckBoxField"
         | "TextDocumentField"
+        | "PictureDecoration"
         | "SearchStringAddition"
         | "ViewStatusAddition"
         | "SearchControlAddition" => format_form_layout_new_child_item(
@@ -9456,6 +9458,9 @@ fn format_form_layout_new_child_item(
             item,
             item_uuid,
             attribute_ids_by_name,
+        )),
+        "PictureDecoration" => Ok(format_form_layout_new_picture_decoration_item(
+            item, item_uuid,
         )),
         "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition" => Ok(
             format_form_layout_new_search_addition_item(item, item_uuid, table_ids_by_name),
@@ -9713,6 +9718,22 @@ fn format_form_layout_new_text_document_field_item(
         data_path,
         width,
         height
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_picture_decoration_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+) -> String {
+    let mut text = format!(
+        "{{12,{{{},{}}},0,0,0,1,{},{},{{1,0}},{{0}}",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title)
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
@@ -10035,6 +10056,7 @@ fn is_form_layout_creatable_nested_item(item: &FormXmlChildItem) -> bool {
             | "LabelField"
             | "CheckBoxField"
             | "TextDocumentField"
+            | "PictureDecoration"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -24329,6 +24351,50 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!parsed.layout.contains("OldPicture"));
         assert!(!parsed.layout.contains("Old picture"));
         assert!(!parsed.layout.contains("OldClick"));
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_picture_decoration() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<PictureDecoration name="Logo" id="165">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Logo</v8:content>
+				</v8:item>
+			</Title>
+			<Events>
+				<Event name="OnClick">LogoClick</Event>
+			</Events>
+		</PictureDecoration>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let picture_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert!(super::is_uuid_text(
+            &parsed.layout[layout_fields[2].clone()]
+        ));
+        assert_eq!(&parsed.layout[picture_fields[0].clone()], "12");
+        assert_eq!(&parsed.layout[picture_fields[5].clone()], "1");
+        assert_eq!(&parsed.layout[picture_fields[6].clone()], r#""Logo""#);
+        assert_eq!(
+            &parsed.layout[picture_fields[7].clone()],
+            r#"{1,"en","Logo"}"#
+        );
+        assert_eq!(&parsed.layout[picture_fields[9].clone()], "{0}");
+        assert!(parsed.layout.contains(r#""OnClick","LogoClick""#));
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
