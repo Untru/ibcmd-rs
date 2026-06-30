@@ -1451,7 +1451,7 @@ fn configuration_asset_bootstrap_rows(
         "configuration_binary_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
         false,
-        "configuration binary asset is stored directly from source bytes without reading the active Config row",
+        "ParentConfigurations.bin is exported as inflated raw-deflated source bytes and staging re-deflates it without reading the active Config row",
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -3614,13 +3614,14 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "Splash.xml"),
         "2",
     )?);
-    rows.extend(prepare_configuration_binary_body_row(
+    rows.extend(prepare_configuration_raw_deflated_body_row(
         sqlcmd,
         server,
         database,
         properties,
         infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
         "4",
+        "ParentConfigurations",
     )?);
     rows.extend(prepare_configuration_raw_deflated_body_row(
         sqlcmd,
@@ -3807,33 +3808,6 @@ fn prepare_configuration_raw_deflated_body_row(
         path: body_path,
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
-    }])
-}
-
-fn prepare_configuration_binary_body_row(
-    _sqlcmd: &Path,
-    _server: &str,
-    _database: &str,
-    properties: &SimpleMetadataXmlProperties,
-    body_path: PathBuf,
-    suffix: &str,
-) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !body_path.exists() {
-        return Ok(Vec::new());
-    }
-    let body_id = format!("{}.{}", properties.uuid, suffix);
-    let blob = fs::read(&body_path).with_context(|| {
-        format!(
-            "failed to read Configuration binary {}",
-            body_path.display()
-        )
-    })?;
-    let blob_sha256 = hex_sha256(&blob);
-    Ok(vec![PreparedMetadataBodyStage {
-        body_id,
-        path: body_path,
-        blob,
-        blob_sha256,
     }])
 }
 
@@ -9850,17 +9824,19 @@ mod tests {
         );
         assert_eq!(row.source_path, "Ext/ParentConfigurations.bin");
         assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("inflated raw-deflated source bytes"));
         assert!(row.reason.contains("without reading the active Config row"));
 
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn prepares_configuration_binary_without_fetching_base_blob() {
+    fn prepares_parent_configurations_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-configuration-binary-no-fetch-{}",
+            "ibcmd-rs-parent-configurations-no-fetch-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
+        let configuration_xml = root.join("Configuration.xml");
         let body_path = root.join("Ext").join("ParentConfigurations.bin");
         fs::create_dir_all(body_path.parent().unwrap()).unwrap();
         let body = b"parent-configs";
@@ -9871,21 +9847,23 @@ mod tests {
             "Main",
         );
 
-        let rows = super::prepare_configuration_binary_body_row(
+        let rows = super::prepare_configuration_asset_body_rows(
             PathBuf::from("missing-sqlcmd-for-configuration-binary-test").as_path(),
             "missing-server",
             "missing-database",
+            &configuration_xml,
             &properties,
-            body_path.clone(),
-            "4",
         )
         .unwrap();
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "ffffffff-ffff-4fff-ffff-ffffffffffff.4");
         assert_eq!(rows[0].path, body_path);
-        assert_eq!(rows[0].blob, body);
-        assert_eq!(rows[0].blob_sha256, hex_sha256(body));
+        assert_ne!(rows[0].blob, body);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(body)
+        );
 
         let _ = fs::remove_dir_all(root);
     }
