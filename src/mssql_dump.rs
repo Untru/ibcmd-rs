@@ -9257,7 +9257,14 @@ struct FormDynamicListSettings {
     dynamic_data_read: bool,
     query_text: Option<String>,
     main_table: Option<String>,
+    fields: Vec<FormDynamicListField>,
     list_settings: FormListSettings,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormDynamicListField {
+    data_path: String,
+    field: String,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -10321,6 +10328,7 @@ fn parse_form_dynamic_list_settings(
     let mut dynamic_data_read = false;
     let mut query_text = None;
     let mut main_table = None;
+    let mut fields = Vec::new();
     let mut list_settings = FormListSettings::default();
     for window in settings_fields.windows(2) {
         let key = parse_1c_quoted_string_with_len(window[0].trim())
@@ -10329,6 +10337,7 @@ fn parse_form_dynamic_list_settings(
         match key.as_str() {
             "QueryText" => query_text = parse_form_setting_string(window[1]),
             "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
+            "Field" => fields.extend(parse_form_dynamic_list_fields(window[1])),
             "ManualQuery" => manual_query = parse_form_setting_bool(window[1]).unwrap_or(false),
             "DynamicalDataSelection" => {
                 dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
@@ -10351,6 +10360,7 @@ fn parse_form_dynamic_list_settings(
     }
     if query_text.is_none()
         && main_table.is_none()
+        && fields.is_empty()
         && !manual_query
         && !dynamic_data_read
         && list_settings.filter.is_none()
@@ -10366,6 +10376,7 @@ fn parse_form_dynamic_list_settings(
         dynamic_data_read,
         query_text,
         main_table,
+        fields,
         list_settings,
     })
 }
@@ -10383,6 +10394,58 @@ fn form_dynamic_list_use_always(
         }
     }
     fields
+}
+
+fn parse_form_dynamic_list_fields(field: &str) -> Vec<FormDynamicListField> {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return Vec::new();
+    };
+    let mut parsed = Vec::new();
+    if fields.first().map(|value| value.trim()) == Some("0")
+        && fields
+            .get(1)
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .is_some()
+    {
+        for item in fields.iter().skip(2) {
+            if let Some(parsed_item) = parse_form_dynamic_list_field_item(item) {
+                parsed.push(parsed_item);
+            }
+        }
+        return parsed;
+    }
+    for pair in fields.chunks_exact(2) {
+        if let Some(parsed_item) = parse_form_dynamic_list_field_pair(pair[0], pair[1]) {
+            parsed.push(parsed_item);
+        }
+    }
+    parsed
+}
+
+fn parse_form_dynamic_list_field_item(field: &str) -> Option<FormDynamicListField> {
+    let item_fields = split_1c_braced_fields(field.trim(), 0)?;
+    if item_fields.len() < 2 {
+        return None;
+    }
+    parse_form_dynamic_list_field_pair(item_fields[0], item_fields[1])
+}
+
+fn parse_form_dynamic_list_field_pair(
+    data_path_field: &str,
+    field_field: &str,
+) -> Option<FormDynamicListField> {
+    let data_path = parse_form_setting_scalar_string(data_path_field)?;
+    let field = parse_form_setting_scalar_string(field_field)?;
+    if data_path.is_empty() || field.is_empty() {
+        return None;
+    }
+    Some(FormDynamicListField { data_path, field })
+}
+
+fn parse_form_setting_scalar_string(field: &str) -> Option<String> {
+    parse_1c_quoted_string_with_len(field.trim())
+        .map(|(value, _)| value)
+        .or_else(|| parse_form_setting_string(field))
 }
 
 fn parse_form_setting_string(field: &str) -> Option<String> {
@@ -13493,6 +13556,18 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
                     "\t\t\t\t<MainTable>{}</MainTable>\r\n",
                     escape_xml_text(main_table)
                 ));
+            }
+            for field in &settings.fields {
+                xml.push_str("\t\t\t\t<Field>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<dataPath>{}</dataPath>\r\n",
+                    escape_xml_text(&field.data_path)
+                ));
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<field>{}</field>\r\n",
+                    escape_xml_text(&field.field)
+                ));
+                xml.push_str("\t\t\t\t</Field>\r\n");
             }
             xml.push_str(&format_form_list_settings_xml(&settings.list_settings));
             xml.push_str("\t\t\t</Settings>\r\n");
@@ -29791,6 +29866,31 @@ mod tests {
         assert!(form_xml.contains("<Action>Выполнить</Action>"));
         assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
         assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+    }
+
+    #[test]
+    fn extracts_dynamic_list_settings_fields_from_body_tail() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1},"",{4,1,{9,{1},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},1,0,0,0,{0,1,"Field",{0,2,{"Список.Период","Период"},{"Список.Сумма","Сумма"}}},{0,0}}},{0,0},{0,0},{0}}"##
+                .as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains(r#"<Attribute name="Список" id="1">"#));
+        assert!(form_xml.contains("<Settings xsi:type=\"DynamicList\">"));
+        assert!(form_xml.contains("<dataPath>Список.Период</dataPath>"));
+        assert!(form_xml.contains("<field>Период</field>"));
+        assert!(form_xml.contains("<dataPath>Список.Сумма</dataPath>"));
+        assert!(form_xml.contains("<field>Сумма</field>"));
+        assert!(
+            form_xml
+                .find("<MainAttribute>true</MainAttribute>")
+                .unwrap()
+                < form_xml
+                    .find("<Settings xsi:type=\"DynamicList\">")
+                    .unwrap()
+        );
     }
 
     #[test]
