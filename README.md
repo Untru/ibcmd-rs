@@ -59,6 +59,10 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 16 | Form.xml | new `LabelField` items preserve explicit `ShowInHeader` values |
+| 16 | Partial metadata XML | `AccountingRegister` and `CalculationRegister` generated type `InternalInfo` entries are emitted |
+| 16 | Configuration.xml | root `Constant` child object headers are emitted |
+| 16 | Source staging readiness | raw-id `CommandInterface.xml` rows can be prepared without active `Config` blobs |
 | 15 | Form.xml | `InputField` `DataPath` is packed for existing and new layout entries |
 | 15 | Partial metadata XML | `ExchangePlan` and related partial families emit owned `Form`/`Template` child refs |
 | 15 | Simple metadata XML | `DocumentJournal` emits owned `Form`/`Template` child refs |

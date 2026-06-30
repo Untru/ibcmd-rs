@@ -64,6 +64,10 @@ Incremental selected verification after this snapshot:
 | Round 15 partial metadata slice | unit-level metadata XML verification | `ExchangePlan` and related partial families emit owned `Form` and `Template` child object refs |
 | Round 15 simple metadata slice | unit-level metadata XML verification | `DocumentJournal` emits owned `Form` and `Template` child object refs |
 | Round 15 source staging readiness slice | unit-level staging verification | HTMLDocument template rows are covered as base-free help-style blobs |
+| Round 16 Form.xml slice | unit-level packer verification | new `LabelField` items preserve explicit `ShowInHeader` values |
+| Round 16 partial metadata slice | unit-level metadata XML verification | `AccountingRegister` and `CalculationRegister` emit generated type `InternalInfo` entries |
+| Round 16 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits `Constant` child object headers |
+| Round 16 source staging readiness slice | unit-level staging verification | raw-id `CommandInterface.xml` rows can be prepared without active Config blobs |
 
 Performance note for selected extraction:
 
@@ -180,5 +184,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #18 | partial metadata owned Form/Template child refs | merged to `master` in round 15 |
 | #14 | DocumentJournal owned Form/Template child refs | merged to `master` in round 15 |
 | #21 | HTMLDocument template staging coverage without base blob fetch | merged to `master` in round 15 |
+| #16 | Form.xml new `LabelField/ShowInHeader` generation | merged to `master` in round 16 |
+| #18 | AccountingRegister/CalculationRegister generated type InternalInfo | merged to `master` in round 16 |
+| #22 | Configuration.xml root Constant child headers | merged to `master` in round 16 |
+| #21 | raw-id CommandInterface.xml staging without active Config query | merged to `master` in round 16 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
