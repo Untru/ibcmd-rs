@@ -14969,8 +14969,13 @@ struct DataProcessorProperties {
 
 struct DocumentProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    standard_attributes: Option<DocumentStandardAttributes>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+}
+
+struct DocumentStandardAttributes {
+    number_type: &'static str,
 }
 
 struct BusinessProcessProperties {
@@ -16613,6 +16618,7 @@ fn parse_document_properties_from_text(
 
     Some(DocumentProperties {
         generated_types,
+        standard_attributes: parse_document_standard_attributes(&fields, uuid),
         child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_document_template_names_in_text_order(
             text,
@@ -17366,6 +17372,23 @@ fn enum_choice_mode_xml(value: u32) -> &'static str {
         1 => "QuickChoice",
         2 => "BothWays",
         _ => "BothWays",
+    }
+}
+
+fn parse_document_standard_attributes(
+    fields: &[&str],
+    uuid: &str,
+) -> Option<DocumentStandardAttributes> {
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    let number_type =
+        document_number_type_xml(parse_1c_u32_field(fields.get(header_index + 3).copied())?);
+    Some(DocumentStandardAttributes { number_type })
+}
+
+fn document_number_type_xml(value: u32) -> &'static str {
+    match value {
+        0 => "Number",
+        _ => "String",
     }
 }
 
@@ -20106,6 +20129,13 @@ fn format_document_source_xml(
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
+    if let Some(standard_attributes) = &document.standard_attributes
+        && let Some(index) = xml.find("\t\t</Properties>")
+    {
+        let mut properties = String::new();
+        push_document_standard_attributes_xml(&mut properties, standard_attributes);
+        xml.insert_str(index, &properties);
+    }
     if !document.child_forms.is_empty() || !document.child_templates.is_empty() {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
         for form in &document.child_forms {
@@ -20431,6 +20461,165 @@ fn push_enum_standard_attributes_xml(xml: &mut String) {
         ));
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn push_document_standard_attributes_xml(
+    xml: &mut String,
+    standard_attributes: &DocumentStandardAttributes,
+) {
+    xml.push_str("\t\t\t<StandardAttributes>\r\n");
+    for attribute in document_standard_attributes() {
+        push_document_standard_attribute_xml(xml, attribute, standard_attributes);
+    }
+    xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+struct DocumentStandardAttribute {
+    name: &'static str,
+    fill_checking: &'static str,
+    synonym: Option<&'static str>,
+    tooltip: Option<&'static str>,
+    fill_value: DocumentStandardAttributeFillValue,
+}
+
+enum DocumentStandardAttributeFillValue {
+    Nil,
+    BooleanFalse,
+    DateTimeZero,
+    Number,
+}
+
+fn document_standard_attributes() -> &'static [DocumentStandardAttribute] {
+    &[
+        DocumentStandardAttribute {
+            name: "Posted",
+            fill_checking: "DontCheck",
+            synonym: None,
+            tooltip: None,
+            fill_value: DocumentStandardAttributeFillValue::Nil,
+        },
+        DocumentStandardAttribute {
+            name: "Ref",
+            fill_checking: "DontCheck",
+            synonym: None,
+            tooltip: None,
+            fill_value: DocumentStandardAttributeFillValue::Nil,
+        },
+        DocumentStandardAttribute {
+            name: "DeletionMark",
+            fill_checking: "DontCheck",
+            synonym: None,
+            tooltip: None,
+            fill_value: DocumentStandardAttributeFillValue::BooleanFalse,
+        },
+        DocumentStandardAttribute {
+            name: "Date",
+            fill_checking: "ShowError",
+            synonym: Some("Дата"),
+            tooltip: Some("Дата документа"),
+            fill_value: DocumentStandardAttributeFillValue::DateTimeZero,
+        },
+        DocumentStandardAttribute {
+            name: "Number",
+            fill_checking: "DontCheck",
+            synonym: Some("Номер"),
+            tooltip: Some("Номер документа"),
+            fill_value: DocumentStandardAttributeFillValue::Number,
+        },
+    ]
+}
+
+fn push_document_standard_attribute_xml(
+    xml: &mut String,
+    attribute: &DocumentStandardAttribute,
+    standard_attributes: &DocumentStandardAttributes,
+) {
+    xml.push_str(&format!(
+        "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
+\t\t\t\t\t<xr:LinkByType/>\r\n\
+\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
+        escape_xml_text(attribute.name),
+        attribute.fill_checking,
+    ));
+    push_document_standard_attribute_localized_xml(xml, "ToolTip", attribute.tooltip);
+    xml.push_str(
+        "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:Format/>\r\n\
+\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+\t\t\t\t\t<xr:EditFormat/>\r\n\
+\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
+    );
+    push_document_standard_attribute_localized_xml(xml, "Synonym", attribute.synonym);
+    xml.push_str(
+        "\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n",
+    );
+    push_document_standard_attribute_fill_value(xml, attribute, standard_attributes);
+    xml.push_str(
+        "\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n",
+    );
+}
+
+fn push_document_standard_attribute_localized_xml(
+    xml: &mut String,
+    name: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<xr:{name}>\r\n\
+\t\t\t\t\t\t<v8:item>\r\n\
+\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n\
+\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n\
+\t\t\t\t\t\t</v8:item>\r\n\
+\t\t\t\t\t</xr:{name}>\r\n",
+            escape_xml_element_text(value)
+        ));
+    } else {
+        xml.push_str(&format!("\t\t\t\t\t<xr:{name}/>\r\n"));
+    }
+}
+
+fn push_document_standard_attribute_fill_value(
+    xml: &mut String,
+    attribute: &DocumentStandardAttribute,
+    standard_attributes: &DocumentStandardAttributes,
+) {
+    match attribute.fill_value {
+        DocumentStandardAttributeFillValue::Nil => {
+            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+        }
+        DocumentStandardAttributeFillValue::BooleanFalse => {
+            xml.push_str(
+                "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:boolean\">false</xr:FillValue>\r\n",
+            );
+        }
+        DocumentStandardAttributeFillValue::DateTimeZero => {
+            xml.push_str(
+                "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</xr:FillValue>\r\n",
+            );
+        }
+        DocumentStandardAttributeFillValue::Number => {
+            if standard_attributes.number_type == "String" {
+                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\"/>\r\n");
+            } else {
+                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+            }
+        }
+    }
 }
 
 fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
@@ -35018,6 +35207,98 @@ mod tests {
         );
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+    }
+
+    #[test]
+    fn extracts_document_standard_attributes_to_metadata_xml() {
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let document_blob = |number_type: &str| {
+            let mut owner_fields = vec![
+                "0".to_string(),
+                zero_uuid.to_string(),
+                number_type.to_string(),
+                "11".to_string(),
+                "0".to_string(),
+                "0".to_string(),
+                "1".to_string(),
+                "1".to_string(),
+            ];
+            owner_fields.extend(std::iter::repeat("0".to_string()).take(12));
+            let owner_fields = owner_fields.join(",");
+            deflate_for_test(
+                format!(
+                    "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"document comment\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
+                )
+                .as_bytes(),
+            )
+        };
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &document_blob("1"),
+            document_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Documents").join("Invoice.xml")
+        );
+        assert!(xml.contains("<Comment>document comment</Comment>"));
+        assert!(xml.contains("<StandardAttributes>"));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Posted">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Ref">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="DeletionMark">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Date">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Number">"#));
+        assert!(xml.contains("<v8:content>Дата документа</v8:content>"));
+        assert!(xml.contains("<v8:content>Номер документа</v8:content>"));
+        assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:boolean">false</xr:FillValue>"#));
+        assert!(xml.contains(
+            r#"<xr:FillValue xsi:type="xs:dateTime">0001-01-01T00:00:00</xr:FillValue>"#
+        ));
+        assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:string"/>"#));
+        assert!(
+            xml.find("<Comment>document comment</Comment>").unwrap()
+                < xml.find("<StandardAttributes>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="Posted">"#)
+                < xml.find(r#"<xr:StandardAttribute name="Number">"#),
+            "{xml}"
+        );
+
+        let numeric = extract_metadata_source_xml_with_refs(
+            &document_blob("0"),
+            document_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let numeric_xml = String::from_utf8(numeric.xml).unwrap();
+
+        assert!(!numeric_xml.contains(r#"<xr:FillValue xsi:type="xs:string"/>"#));
+        assert!(numeric_xml.contains(r#"<xr:StandardAttribute name="Number">"#));
     }
 
     #[test]
