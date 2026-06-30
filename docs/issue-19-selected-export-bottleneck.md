@@ -118,6 +118,12 @@ Fields to compare in the JSON report:
 
 ## Next safe optimization step
 
+Implemented first low-risk step in this area: the broad
+`build_command_interface_reference_index_from_texts` scan now parses metadata
+rows in parallel and then applies entries in the original row order. This keeps
+the previous overwrite semantics for duplicate keys, while reducing the CPU wall
+time reported in `prepare_command_refs_ms` on large selected `.9` exports.
+
 Add a command-owner reference index instead of scanning every metadata blob for
 each selected `.9` run.
 
