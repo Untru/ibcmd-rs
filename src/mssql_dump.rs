@@ -54,8 +54,11 @@ pub struct MssqlDumpedTableReport {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct MssqlDumpTimingReport {
     pub fetch_headers_ms: u64,
+    pub fetch_headers_sqlcmd_ms: u64,
     pub prepare_indexes_ms: u64,
     pub prepare_metadata_fetch_ms: u64,
+    pub prepare_metadata_fetch_sqlcmd_ms: u64,
+    pub prepare_metadata_fetch_bcp_ms: u64,
     pub prepare_metadata_texts_ms: u64,
     pub prepare_reference_indexes_ms: u64,
     pub prepare_command_refs_ms: u64,
@@ -72,6 +75,7 @@ pub struct MssqlDumpTimingReport {
     pub prepare_standalone_refs_ms: u64,
     pub prepare_body_owners_ms: u64,
     pub fetch_rows_ms: u64,
+    pub fetch_rows_bcp_ms: u64,
     pub process_rows_wall_ms: u64,
     pub binary_write_cpu_ms: u64,
     pub inflate_cpu_ms: u64,
@@ -111,8 +115,11 @@ pub struct MssqlDumpTimingReport {
 impl MssqlDumpTimingReport {
     fn add_assign(&mut self, other: &Self) {
         self.fetch_headers_ms += other.fetch_headers_ms;
+        self.fetch_headers_sqlcmd_ms += other.fetch_headers_sqlcmd_ms;
         self.prepare_indexes_ms += other.prepare_indexes_ms;
         self.prepare_metadata_fetch_ms += other.prepare_metadata_fetch_ms;
+        self.prepare_metadata_fetch_sqlcmd_ms += other.prepare_metadata_fetch_sqlcmd_ms;
+        self.prepare_metadata_fetch_bcp_ms += other.prepare_metadata_fetch_bcp_ms;
         self.prepare_metadata_texts_ms += other.prepare_metadata_texts_ms;
         self.prepare_reference_indexes_ms += other.prepare_reference_indexes_ms;
         self.prepare_command_refs_ms += other.prepare_command_refs_ms;
@@ -129,6 +136,7 @@ impl MssqlDumpTimingReport {
         self.prepare_standalone_refs_ms += other.prepare_standalone_refs_ms;
         self.prepare_body_owners_ms += other.prepare_body_owners_ms;
         self.fetch_rows_ms += other.fetch_rows_ms;
+        self.fetch_rows_bcp_ms += other.fetch_rows_bcp_ms;
         self.process_rows_wall_ms += other.process_rows_wall_ms;
         self.binary_write_cpu_ms += other.binary_write_cpu_ms;
         self.inflate_cpu_ms += other.inflate_cpu_ms;
@@ -736,8 +744,10 @@ fn dump_table_rows_streamed(
         table,
         selected_file_names,
     )?;
+    let fetch_headers_ms = elapsed_ms(headers_started);
     let mut timings = MssqlDumpTimingReport {
-        fetch_headers_ms: elapsed_ms(headers_started),
+        fetch_headers_ms,
+        fetch_headers_sqlcmd_ms: fetch_headers_ms,
         ..MssqlDumpTimingReport::default()
     };
     let prepare_started = Instant::now();
@@ -751,13 +761,16 @@ fn dump_table_rows_streamed(
         .cloned()
         .collect::<BTreeSet<_>>();
     let metadata_fetch_started = Instant::now();
+    let mut metadata_fetch_used_bcp = false;
     let mut metadata_rows = if extract_metadata_xml || extract_module_text {
         if selected_file_names.is_empty() {
-            fetch_metadata_rows(sqlcmd, server, user, password, database, table)?
+            metadata_fetch_used_bcp = true;
+            fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?
         } else if metadata_file_names.is_empty() {
             Vec::new()
         } else {
-            fetch_rows(
+            metadata_fetch_used_bcp = true;
+            fetch_config_rows_bcp(
                 sqlcmd,
                 server,
                 user,
@@ -770,7 +783,11 @@ fn dump_table_rows_streamed(
     } else {
         Vec::new()
     };
-    timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+    let elapsed = elapsed_ms(metadata_fetch_started);
+    timings.prepare_metadata_fetch_ms += elapsed;
+    if metadata_fetch_used_bcp {
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
+    }
     let selected_metadata_rows = if extract_metadata_xml || extract_module_text {
         metadata_rows
             .iter()
@@ -814,8 +831,10 @@ fn dump_table_rows_streamed(
     {
         let metadata_fetch_started = Instant::now();
         selected_configuration_body_rows =
-            fetch_rows_direct_hex(sqlcmd, server, user, password, database, table, &file_names)?;
-        timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+            fetch_config_rows_bcp(sqlcmd, server, user, password, database, table, &file_names)?;
+        let elapsed = elapsed_ms(metadata_fetch_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
     }
     let selected_command_interface_refs =
         if selected_configuration_index_needs.is_some_and(|needs| needs.command_refs) {
@@ -830,7 +849,9 @@ fn dump_table_rows_streamed(
     if broad_metadata_indexes && !selected_file_names.is_empty() {
         let metadata_fetch_started = Instant::now();
         metadata_rows = fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
-        timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+        let elapsed = elapsed_ms(metadata_fetch_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
     } else if extract_metadata_xml
         && selected_configuration_index_needs
             .is_some_and(|needs| needs.command_refs || needs.metadata_refs)
@@ -840,8 +861,10 @@ fn dump_table_rows_streamed(
             selected_configuration_direct_metadata_reference_file_names(
                 &selected_configuration_body_rows,
             );
+        let mut metadata_fetch_used_bcp = false;
         if !targeted_metadata_file_names.is_empty() {
-            metadata_rows = fetch_rows_direct_hex(
+            metadata_fetch_used_bcp = true;
+            metadata_rows = fetch_config_rows_bcp(
                 sqlcmd,
                 server,
                 user,
@@ -851,7 +874,11 @@ fn dump_table_rows_streamed(
                 &targeted_metadata_file_names,
             )?;
         }
-        timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+        let elapsed = elapsed_ms(metadata_fetch_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        if metadata_fetch_used_bcp {
+            timings.prepare_metadata_fetch_bcp_ms += elapsed;
+        }
         if selected_configuration_index_needs.is_some_and(|needs| needs.command_refs) {
             let metadata_texts_started = Instant::now();
             let direct_metadata_texts = build_metadata_text_rows(&metadata_rows);
@@ -871,7 +898,9 @@ fn dump_table_rows_streamed(
                 let metadata_fetch_started = Instant::now();
                 let broad_metadata_rows =
                     fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
-                timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+                let elapsed = elapsed_ms(metadata_fetch_started);
+                timings.prepare_metadata_fetch_ms += elapsed;
+                timings.prepare_metadata_fetch_bcp_ms += elapsed;
                 let metadata_texts_started = Instant::now();
                 if let Some(owner_rows) = selected_command_owner_metadata_rows(
                     &broad_metadata_rows,
@@ -1092,7 +1121,9 @@ fn dump_table_rows_streamed(
             let last = chunk.last().map(String::as_str).unwrap_or("<empty>");
             format!("failed to fetch {table} rows batch {first}..{last}")
         })?;
-        timings.fetch_rows_ms += elapsed_ms(fetch_started);
+        let elapsed = elapsed_ms(fetch_started);
+        timings.fetch_rows_ms += elapsed;
+        timings.fetch_rows_bcp_ms += elapsed;
         let process_started = Instant::now();
         let dumped_rows = parallel::install(|| {
             rows.par_iter()
@@ -21777,6 +21808,7 @@ fn fetch_rows(
         .with_context(|| format!("failed to assemble {table} row chunks for {database}"))
 }
 
+#[allow(dead_code)]
 fn fetch_rows_direct_hex(
     sqlcmd: &Path,
     server: &str,
@@ -21879,6 +21911,7 @@ fn bcp_executable_for_sqlcmd(sqlcmd: &Path) -> PathBuf {
     PathBuf::from("bcp")
 }
 
+#[allow(dead_code)]
 fn fetch_metadata_rows(
     sqlcmd: &Path,
     server: &str,
@@ -21906,7 +21939,33 @@ fn fetch_metadata_rows_bcp(
     let query = build_fetch_metadata_rows_bcp_query(database, table);
     let rows =
         fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)?;
-    Ok(rows.into_iter().map(config_row_from_binary).collect())
+    Ok(config_rows_from_binary(rows))
+}
+
+fn fetch_config_rows_bcp(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<Vec<ConfigRow>> {
+    let rows = fetch_binary_rows_bcp(
+        sqlcmd,
+        server,
+        user,
+        password,
+        database,
+        table,
+        selected_file_names,
+        false,
+    )?;
+    Ok(config_rows_from_binary(rows))
+}
+
+fn config_rows_from_binary(rows: Vec<BinaryConfigRow>) -> Vec<ConfigRow> {
+    rows.into_iter().map(config_row_from_binary).collect()
 }
 
 fn config_row_from_binary(row: BinaryConfigRow) -> ConfigRow {
@@ -21967,6 +22026,7 @@ fn build_fetch_metadata_rows_bcp_query(database: &str, table: &str) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn build_fetch_metadata_rows_sql(database: &str, table: &str) -> String {
     format!(
         "SET NOCOUNT ON;\n\
@@ -22735,6 +22795,23 @@ mod tests {
     }
 
     #[test]
+    fn fetch_binary_rows_query_selected_exact_filter_uses_in() {
+        let selected = BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+        ]);
+
+        let sql = build_fetch_binary_rows_query("TestDb", "Config", &selected, false);
+
+        assert!(sql.contains("FROM [TestDb].dbo.[Config]"));
+        assert!(sql.contains(
+            "WHERE FileName IN (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa', N'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb')"
+        ));
+        assert!(!sql.contains("FileName >="));
+        assert!(sql.contains("ORDER BY FileName, PartNo"));
+    }
+
+    #[test]
     fn fetch_metadata_rows_bcp_query_filters_body_rows() {
         let sql = build_fetch_metadata_rows_bcp_query("TestDb", "Config");
 
@@ -22753,6 +22830,64 @@ mod tests {
         });
 
         assert_eq!(row.binary_hex, "efbbbf");
+    }
+
+    #[test]
+    fn converts_binary_rows_to_config_rows_with_lowercase_hex() {
+        let rows = config_rows_from_binary(vec![
+            BinaryConfigRow {
+                file_name: "first".to_string(),
+                part_no: 0,
+                data_size: 2,
+                binary: vec![0xaa, 0xbb],
+            },
+            BinaryConfigRow {
+                file_name: "second".to_string(),
+                part_no: 0,
+                data_size: 1,
+                binary: vec![0xcc],
+            },
+        ]);
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].file_name, "first");
+        assert_eq!(rows[0].binary_hex, "aabb");
+        assert_eq!(rows[1].file_name, "second");
+        assert_eq!(rows[1].binary_hex, "cc");
+    }
+
+    #[test]
+    fn timing_report_add_assign_keeps_sqlcmd_bcp_breakdown() {
+        let mut total = MssqlDumpTimingReport {
+            fetch_headers_ms: 10,
+            fetch_headers_sqlcmd_ms: 10,
+            prepare_metadata_fetch_ms: 20,
+            prepare_metadata_fetch_sqlcmd_ms: 3,
+            prepare_metadata_fetch_bcp_ms: 17,
+            fetch_rows_ms: 30,
+            fetch_rows_bcp_ms: 30,
+            ..MssqlDumpTimingReport::default()
+        };
+        let next = MssqlDumpTimingReport {
+            fetch_headers_ms: 1,
+            fetch_headers_sqlcmd_ms: 1,
+            prepare_metadata_fetch_ms: 2,
+            prepare_metadata_fetch_sqlcmd_ms: 0,
+            prepare_metadata_fetch_bcp_ms: 2,
+            fetch_rows_ms: 3,
+            fetch_rows_bcp_ms: 3,
+            ..MssqlDumpTimingReport::default()
+        };
+
+        total.add_assign(&next);
+
+        assert_eq!(total.fetch_headers_ms, 11);
+        assert_eq!(total.fetch_headers_sqlcmd_ms, 11);
+        assert_eq!(total.prepare_metadata_fetch_ms, 22);
+        assert_eq!(total.prepare_metadata_fetch_sqlcmd_ms, 3);
+        assert_eq!(total.prepare_metadata_fetch_bcp_ms, 19);
+        assert_eq!(total.fetch_rows_ms, 33);
+        assert_eq!(total.fetch_rows_bcp_ms, 33);
     }
 
     #[test]
