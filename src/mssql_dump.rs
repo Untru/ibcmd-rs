@@ -14433,6 +14433,7 @@ struct ReportProperties {
     include_help_in_contents: bool,
     extended_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
+    child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
 
@@ -15767,6 +15768,7 @@ fn parse_report_properties_from_text(
         include_help_in_contents: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
         extended_presentation: parse_1c_synonyms(fields.get(15).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
+        child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: parse_report_child_templates_from_text(text, template_refs),
     })
 }
@@ -16062,6 +16064,17 @@ fn is_owned_enum_child_path(path: &Path, enum_name: &str, child_folder: &str) ->
         && parts.get(2) == Some(&child_folder)
 }
 
+fn is_owned_report_child_path(path: &Path, report_name: &str, child_folder: &str) -> bool {
+    let parts = path
+        .iter()
+        .filter_map(|part| part.to_str())
+        .collect::<Vec<_>>();
+    parts.len() == 4
+        && parts.first() == Some(&"Reports")
+        && parts.get(1) == Some(&report_name)
+        && parts.get(2) == Some(&child_folder)
+}
+
 fn source_path_file_stem(path: &Path) -> Option<String> {
     path.file_stem()?.to_str().map(ToString::to_string)
 }
@@ -16178,6 +16191,53 @@ fn parse_report_child_templates_from_text(
         }
     }
     templates
+}
+
+fn owned_report_form_names_in_text_order(
+    text: &str,
+    report_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = BTreeSet::new();
+    if let Some(form_uuids) = owned_form_uuid_values_in_text_order(text) {
+        for uuid in form_uuids {
+            let Some(form_ref) = form_refs.get(&uuid) else {
+                continue;
+            };
+            if form_ref.kind != "Form"
+                || !is_owned_report_child_path(&form_ref.relative_path, report_name, "Forms")
+            {
+                continue;
+            }
+            let Some(name) = source_path_file_stem(&form_ref.relative_path) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                names.push(name);
+            }
+        }
+    }
+
+    let mut path_names = form_refs
+        .values()
+        .filter(|form_ref| {
+            form_ref.kind == "Form"
+                && is_owned_report_child_path(&form_ref.relative_path, report_name, "Forms")
+        })
+        .filter_map(|form_ref| {
+            source_path_file_stem(&form_ref.relative_path)
+                .map(|name| (form_ref.relative_path.clone(), name))
+        })
+        .collect::<Vec<_>>();
+    path_names.sort_by(|(left_path, _), (right_path, _)| left_path.cmp(right_path));
+    for (_, name) in path_names {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+
+    names
 }
 
 fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
@@ -18884,8 +18944,14 @@ fn format_report_source_xml(
     push_localized_property(&mut xml, "\t\t\t", "Explanation", &report.explanation);
     xml.push_str("\t\t</Properties>\r\n");
 
-    if !report.child_templates.is_empty() {
+    if !report.child_forms.is_empty() || !report.child_templates.is_empty() {
         xml.push_str("\t\t<ChildObjects>\r\n");
+        for form in &report.child_forms {
+            xml.push_str(&format!(
+                "\t\t\t<Form>{}</Form>\r\n",
+                escape_xml_element_text(form)
+            ));
+        }
         for template in &report.child_templates {
             xml.push_str(&format!(
                 "\t\t\t<Template>{}</Template>\r\n",
@@ -31492,15 +31558,34 @@ mod tests {
         let object_value_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
         let manager_type_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
         let manager_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+        let main_form_uuid = "dddddddd-1111-4ddd-8ddd-dddddddddd11";
+        let settings_form_uuid = "dddddddd-2222-4ddd-8ddd-dddddddddd22";
         let template_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
         let storage_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
         let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let form_list_marker = FORM_LIST_MARKERS[0];
         let report_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{zero_uuid},{template_uuid},{zero_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}}\r\n}}"
+                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}}\r\n}}"
             )
             .as_bytes(),
         );
+        let form_refs = BTreeMap::from([
+            (
+                main_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Reports/SalesReport/Forms/MainForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                settings_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Reports/SalesReport/Forms/SettingsForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
         let template_refs = BTreeMap::from([(
             template_uuid.to_string(),
             TemplateSourceReference {
@@ -31520,7 +31605,7 @@ mod tests {
             &BTreeMap::new(),
             &object_refs,
             &BTreeMap::new(),
-            &BTreeMap::new(),
+            &form_refs,
             &template_refs,
             &BTreeMap::new(),
             InfobaseConfigSourceVersion::V2_20,
@@ -31545,8 +31630,12 @@ mod tests {
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains("<Comment/>"));
         assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert!(xml.contains("<DefaultForm>Report.SalesReport.Form.MainForm</DefaultForm>"));
         assert!(xml.contains(
             "<MainDataCompositionSchema>Report.SalesReport.Template.MainSchema</MainDataCompositionSchema>"
+        ));
+        assert!(xml.contains(
+            "<DefaultSettingsForm>Report.SalesReport.Form.SettingsForm</DefaultSettingsForm>"
         ));
         assert!(xml.contains("<VariantsStorage>SettingsStorage.ReportVariants</VariantsStorage>"));
         assert!(xml.contains("<SettingsStorage/>"));
@@ -31556,7 +31645,35 @@ mod tests {
         assert!(xml.contains("<Explanation>"));
         assert!(xml.contains("<v8:content>Builds sales summary</v8:content>"));
         assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Form>SettingsForm</Form>"));
+        assert!(xml.contains("<Form>MainForm</Form>"));
         assert!(xml.contains("<Template>MainSchema</Template>"));
+        assert!(
+            xml.find("<Form>SettingsForm</Form>").unwrap()
+                < xml.find("<Form>MainForm</Form>").unwrap()
+        );
+        assert!(
+            xml.find("<Form>MainForm</Form>").unwrap()
+                < xml.find("<Template>MainSchema</Template>").unwrap()
+        );
+        assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &report_blob,
+            report_uuid,
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &form_refs,
+            &template_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
+        assert!(xml_v21.contains("<Form>SettingsForm</Form>"));
     }
 
     #[test]
