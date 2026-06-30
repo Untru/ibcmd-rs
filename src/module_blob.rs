@@ -201,8 +201,14 @@ struct FormXmlListSettings {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlListSettingsStandardSection {
+    items: Vec<FormXmlListSettingsFieldItem>,
     view_mode: Option<String>,
     user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlListSettingsFieldItem {
+    field: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -4101,6 +4107,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_parameter = None::<FormXmlParameter>;
+    let mut current_list_settings_field_item = None::<FormXmlListSettingsFieldItem>;
     let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
@@ -4278,6 +4285,31 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if let Some(attribute) = current_attribute.as_mut() {
                         attribute.settings = Some(FormXmlDynamicListSettings::default());
                     }
+                } else if local == "item"
+                    && (path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "filter",
+                        ],
+                    ) || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "ListSettings",
+                            "conditionalAppearance",
+                        ],
+                    ))
+                {
+                    current_list_settings_field_item =
+                        Some(FormXmlListSettingsFieldItem::default());
                 } else if local == "item"
                     && path_ends_with(
                         &path,
@@ -4505,6 +4537,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "userSettingID",
                         ],
                     )
+                    || path_ends_with_form_list_settings_standard_item_field(&path)
                     || path_ends_with(
                         &path,
                         &[
@@ -4555,6 +4588,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "userSettingID",
                         ],
                     )
+                    || path_ends_with_form_list_settings_standard_item_field(&path)
                     || path_ends_with(
                         &path,
                         &[
@@ -5871,6 +5905,67 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 .user_setting_id = Some(text_value.trim().to_string());
                         }
                     }
+                    "field" if path_ends_with_form_list_settings_standard_item_field(&path) => {
+                        if let Some(item) = current_list_settings_field_item.as_mut() {
+                            item.field = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "filter",
+                                "item",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_field_item.take()
+                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .filter
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .items
+                                .push(item);
+                        }
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "ListSettings",
+                                "conditionalAppearance",
+                                "item",
+                            ],
+                        ) =>
+                    {
+                        if let Some(item) = current_list_settings_field_item.take()
+                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings
+                                .list_settings
+                                .conditional_appearance
+                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
+                                .items
+                                .push(item);
+                        }
+                    }
                     "field"
                         if path_ends_with(
                             &path,
@@ -6851,6 +6946,34 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     }
 
     Ok(properties)
+}
+
+fn path_ends_with_form_list_settings_standard_item_field(path: &[String]) -> bool {
+    path_ends_with(
+        path,
+        &[
+            "Form",
+            "Attributes",
+            "Attribute",
+            "Settings",
+            "ListSettings",
+            "filter",
+            "item",
+            "field",
+        ],
+    ) || path_ends_with(
+        path,
+        &[
+            "Form",
+            "Attributes",
+            "Attribute",
+            "Settings",
+            "ListSettings",
+            "conditionalAppearance",
+            "item",
+            "field",
+        ],
+    )
 }
 
 fn parse_form_auto_command_bar_xml(
@@ -12438,7 +12561,22 @@ fn form_existing_dcs_standard_section_matches(
         .user_setting_id
         .as_deref()
         .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
-    Ok(view_mode_matches && user_setting_matches)
+    let items_match = if section.items.is_empty() {
+        true
+    } else {
+        parsed.items.len() == section.items.len()
+            && section
+                .items
+                .iter()
+                .zip(parsed.items.iter())
+                .all(|(expected, actual)| {
+                    expected
+                        .field
+                        .as_deref()
+                        .is_none_or(|field| actual.field.as_deref() == Some(field))
+                })
+    };
+    Ok(items_match && view_mode_matches && user_setting_matches)
 }
 
 fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
@@ -12462,6 +12600,7 @@ fn form_setting_base64_xml(existing: &str) -> Result<Option<String>> {
 
 #[derive(Default)]
 struct ParsedFormDcsStandardSection {
+    items: Vec<ParsedFormDcsFieldItem>,
     view_mode: Option<String>,
     user_setting_id: Option<String>,
 }
@@ -12477,6 +12616,11 @@ struct ParsedFormDcsOrder {
 struct ParsedFormDcsOrderItem {
     field: Option<String>,
     order_type: Option<String>,
+}
+
+#[derive(Default)]
+struct ParsedFormDcsFieldItem {
+    field: Option<String>,
 }
 
 fn parse_form_dcs_order_xml(xml: &str) -> Result<ParsedFormDcsOrder> {
@@ -12565,11 +12709,14 @@ fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandar
     let mut current = None::<String>;
     let mut text = String::new();
     let mut parsed = ParsedFormDcsStandardSection::default();
+    let mut current_item = None::<ParsedFormDcsFieldItem>;
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if matches!(local.as_str(), "viewMode" | "userSettingID") {
+                if local == "item" {
+                    current_item = Some(ParsedFormDcsFieldItem::default());
+                } else if matches!(local.as_str(), "field" | "viewMode" | "userSettingID") {
                     current = Some(local);
                     text.clear();
                 }
@@ -12601,12 +12748,23 @@ fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandar
                 let local = xml_local_name(event.local_name().as_ref());
                 if current.as_deref() == Some(local.as_str()) {
                     match local.as_str() {
+                        "field" => {
+                            if let Some(item) = current_item.as_mut() {
+                                item.field = Some(text.trim().to_string());
+                            }
+                        }
                         "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
                         "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
                         _ => {}
                     }
                     current = None;
                     text.clear();
+                }
+                if local == "item"
+                    && let Some(item) = current_item.take()
+                    && item.field.as_deref().is_some_and(|field| !field.is_empty())
+                {
+                    parsed.items.push(item);
                 }
             }
             Ok(Event::Eof) => break,
@@ -12747,7 +12905,12 @@ fn format_form_setting_dcs_standard_section(
 ) -> Result<String> {
     let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
         .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
-    let xml = format_form_dcs_standard_section_xml(section, root_name);
+    let existing_xml = find_form_setting_value_range(settings_text, key).and_then(|range| {
+        form_setting_base64_xml(&settings_text[range])
+            .ok()
+            .flatten()
+    });
+    let xml = format_form_dcs_standard_section_xml(section, root_name, existing_xml.as_deref())?;
     let mut bytes = b"\xEF\xBB\xBF".to_vec();
     bytes.extend_from_slice(xml.as_bytes());
     Ok(format!(
@@ -12834,11 +12997,42 @@ fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
 fn format_form_dcs_standard_section_xml(
     section: &FormXmlListSettingsStandardSection,
     root_name: &str,
-) -> String {
+    existing_xml: Option<&str>,
+) -> Result<String> {
     let mut xml = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <{root_name} xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
     );
+    for item in &section.items {
+        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
+            continue;
+        };
+        xml.push_str("\t<item xsi:type=\"FieldItem\">\r\n");
+        xml.push_str(&format!(
+            "\t\t<field>{}</field>\r\n",
+            escape_xml_text(field)
+        ));
+        xml.push_str("\t</item>\r\n");
+    }
+    if let Some(existing_xml) = existing_xml {
+        let replacement_fields = section
+            .items
+            .iter()
+            .filter_map(|item| item.field.as_deref())
+            .collect::<BTreeSet<_>>();
+        for block in form_dcs_direct_item_blocks(existing_xml)? {
+            if block
+                .field
+                .as_deref()
+                .is_some_and(|field| replacement_fields.contains(field))
+            {
+                continue;
+            }
+            xml.push('\t');
+            xml.push_str(block.xml.trim());
+            xml.push_str("\r\n");
+        }
+    }
     if let Some(view_mode) = section
         .view_mode
         .as_deref()
@@ -12860,7 +13054,77 @@ fn format_form_dcs_standard_section_xml(
         ));
     }
     xml.push_str(&format!("</{root_name}>"));
-    xml
+    Ok(xml)
+}
+
+struct FormDcsDirectItemBlock {
+    xml: String,
+    field: Option<String>,
+}
+
+fn form_dcs_direct_item_blocks(xml: &str) -> Result<Vec<FormDcsDirectItemBlock>> {
+    let mut blocks = Vec::new();
+    let mut depth = 0usize;
+    let mut offset = 0usize;
+    let mut current_start = None::<usize>;
+    while let Some(relative_start) = xml[offset..].find('<') {
+        let start = offset + relative_start;
+        let Some(relative_end) = xml[start..].find('>') else {
+            break;
+        };
+        let end = start + relative_end + 1;
+        let tag = &xml[start + 1..end - 1];
+        let tag = tag.trim();
+        if tag.starts_with('?') || tag.starts_with('!') {
+            offset = end;
+            continue;
+        }
+        let closing = tag.starts_with('/');
+        let empty = tag.ends_with('/');
+        let name = tag
+            .trim_start_matches('/')
+            .trim_end_matches('/')
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or_default();
+        let local = name.rsplit(':').next().unwrap_or(name);
+        if closing {
+            if local == "item"
+                && depth == 2
+                && let Some(block_start) = current_start.take()
+            {
+                let block_xml = xml[block_start..end].to_string();
+                blocks.push(FormDcsDirectItemBlock {
+                    field: parse_form_dcs_direct_item_field(&block_xml)?,
+                    xml: block_xml,
+                });
+            }
+            depth = depth.saturating_sub(1);
+        } else {
+            if local == "item" && depth == 1 {
+                current_start = Some(start);
+            }
+            if !empty {
+                depth += 1;
+            } else if local == "item" && depth == 1 {
+                current_start = None;
+                blocks.push(FormDcsDirectItemBlock {
+                    field: None,
+                    xml: xml[start..end].to_string(),
+                });
+            }
+        }
+        offset = end;
+    }
+    Ok(blocks)
+}
+
+fn parse_form_dcs_direct_item_field(xml: &str) -> Result<Option<String>> {
+    let wrapper = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Items>{xml}</Items>");
+    Ok(parse_form_dcs_standard_section_xml(&wrapper)?
+        .items
+        .into_iter()
+        .find_map(|item| item.field))
 }
 
 fn escape_xml_text(value: &str) -> String {
@@ -22327,6 +22591,82 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             filter_after
                 .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_filter_field_items_preserve_unspecified_items()
+    -> anyhow::Result<()> {
+        let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<item xsi:type=\"FilterItemComparison\">\r\n\
+\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<comparisonType>Equal</comparisonType>\r\n\
+\t\t<right>false</right>\r\n\
+\t</item>\r\n\
+\t<viewMode>Normal</viewMode>\r\n\
+\t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
+</Filter>";
+        let mut filter_bytes = b"\xEF\xBB\xBF".to_vec();
+        filter_bytes.extend_from_slice(filter_xml.as_bytes());
+        let filter_payload = super::encode_base64(&filter_bytes);
+        let base_text = format!(
+            r##"{{4,{{7,{{"layout"}}}},"Old module",{{4,1,{{9,{{1}},0,"List",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,1,"Filter",{{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:{filter_payload}}}}}}},{{0,0}}}}}},{{0,0}},{{0,0}},{{0}}}}"##
+        );
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<ListSettings>
+					<dcsset:filter>
+						<dcsset:item xsi:type="dcsset:FieldItem">
+							<dcsset:field>Code</dcsset:field>
+						</dcsset:item>
+						<dcsset:viewMode>Quick</dcsset:viewMode>
+						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+					</dcsset:filter>
+				</ListSettings>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#
+        .as_bytes();
+
+        let parsed_xml = super::parse_form_xml_body_properties(xml)?;
+        let parsed_filter = parsed_xml.attributes[0]
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.list_settings.filter.as_ref())
+            .ok_or_else(|| anyhow::anyhow!("filter was not parsed from form XML"))?;
+        assert_eq!(parsed_filter.items[0].field.as_deref(), Some("Code"));
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
+
+        assert!(
+            filter_after.contains("<field>Code</field>"),
+            "{filter_after}"
+        );
+        assert!(
+            filter_after.contains("FilterItemComparison"),
+            "{filter_after}"
+        );
+        assert!(
+            filter_after.contains("<left>ЭтоГруппа</left>"),
+            "{filter_after}"
+        );
+        assert!(filter_after.contains("<viewMode>Quick</viewMode>"));
+        assert!(
+            filter_after
+                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
         );
         Ok(())
     }
