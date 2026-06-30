@@ -4559,8 +4559,32 @@ fn build_metadata_object_reference_index_from_texts(
                 );
             }
         }
+        if kind == "HTTPService" {
+            insert_http_service_child_role_refs(&mut index, &row.text, &header.uuid, &header.name);
+        }
     }
     index
+}
+
+fn insert_http_service_child_role_refs(
+    index: &mut BTreeMap<String, String>,
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+) {
+    for template in parse_http_service_url_templates_from_text(text, owner_uuid) {
+        let template_ref = format!(
+            "HTTPService.{owner_name}.URLTemplate.{}",
+            template.header.name
+        );
+        index.insert(template.header.uuid.clone(), template_ref.clone());
+        for method in template.methods {
+            index.insert(
+                method.header.uuid,
+                format!("{template_ref}.Method.{}", method.header.name),
+            );
+        }
+    }
 }
 
 fn build_standalone_content_references(
@@ -4674,6 +4698,15 @@ fn build_standalone_object_reference_index_from_texts(
                 }
             }
         }
+        if kind == "HTTPService" {
+            insert_required_http_service_child_role_refs(
+                &mut index,
+                &row.text,
+                &header.uuid,
+                &header.name,
+                required_refs,
+            );
+        }
         for (child, marker_start) in
             nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, required_refs)
         {
@@ -4696,6 +4729,32 @@ fn build_standalone_object_reference_index_from_texts(
     }
 
     index
+}
+
+fn insert_required_http_service_child_role_refs(
+    index: &mut BTreeMap<String, String>,
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+    required_refs: &BTreeSet<String>,
+) {
+    for template in parse_http_service_url_templates_from_text(text, owner_uuid) {
+        let template_ref = format!(
+            "HTTPService.{owner_name}.URLTemplate.{}",
+            template.header.name
+        );
+        if required_refs.contains(&template.header.uuid) {
+            index.insert(template.header.uuid.clone(), template_ref.clone());
+        }
+        for method in template.methods {
+            if required_refs.contains(&method.header.uuid) {
+                index.insert(
+                    method.header.uuid,
+                    format!("{template_ref}.Method.{}", method.header.name),
+                );
+            }
+        }
+    }
 }
 
 fn build_standalone_content_references_for_uuids(
@@ -34743,6 +34802,41 @@ mod tests {
         assert_eq!(
             rights.objects[0].name,
             "IntegrationService.MessageExchange.IntegrationServiceChannel.input"
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_resolves_http_service_method_refs_from_index() {
+        let service_uuid = "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let url_template_uuid = "33333333-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let method_uuid = "33333333-cccc-4ccc-8ccc-cccccccccccc";
+        let rows = vec![MetadataTextRow {
+            file_name: service_uuid.to_string(),
+            text: format!(
+                "{{1,\r\n{{2,\"api\",\r\n{{3,\r\n{{1,0,{service_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20,\r\n{{0,1,\r\n{{7,\r\n{{3,\r\n{{1,0,{url_template_uuid}}},\"Any\",{{1,\"en\",\"Any\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"/*\",\r\n{{0,1,\r\n{{8,\r\n{{3,\r\n{{1,0,{method_uuid}}},\"POST\",{{1,\"en\",\"POST\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"POST\",\"HandlePost\"}}\r\n}}\r\n}}\r\n}}\r\n}},0}}"
+            ),
+            object_code: Some(2),
+            header: Some(MetadataHeader {
+                uuid: service_uuid.to_string(),
+                name: "Api".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("HTTPService".to_string()),
+            folder: Some("HTTPServices"),
+        }];
+        let object_refs = build_metadata_object_reference_index_from_texts(&rows);
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{method_uuid},0,0}},{{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}}}}}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            rights.objects[0].name,
+            "HTTPService.Api.URLTemplate.Any.Method.POST"
         );
     }
 
