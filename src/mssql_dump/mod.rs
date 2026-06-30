@@ -6913,6 +6913,15 @@ fn parse_role_rights_blob(
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
 ) -> Option<RoleRights> {
+    parse_role_rights_blob_with_metadata_order(bytes, object_refs, field_refs, &BTreeMap::new())
+}
+
+fn parse_role_rights_blob_with_metadata_order(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    metadata_order: &BTreeMap<String, usize>,
+) -> Option<RoleRights> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
@@ -6925,8 +6934,15 @@ fn parse_role_rights_blob(
         return None;
     }
 
+    let mut object_refs_by_name = BTreeMap::<&str, &str>::new();
+    if !metadata_order.is_empty() {
+        for (uuid, name) in object_refs {
+            object_refs_by_name.insert(name.as_str(), uuid.as_str());
+        }
+    }
+
     let mut objects = Vec::with_capacity(count);
-    for object_field in object_fields.iter().skip(1) {
+    for (serialized_index, object_field) in object_fields.iter().skip(1).enumerate() {
         let entry = split_1c_braced_fields(object_field, 0)?;
         if entry.len() != 2 {
             return None;
@@ -6940,11 +6956,24 @@ fn parse_role_rights_blob(
         let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
-        objects.push(RoleObjectRights {
-            name: object_name,
-            rights,
-        });
+        let object_order = role_rights_object_metadata_order(
+            object_uuid,
+            &object_name,
+            metadata_order,
+            &object_refs_by_name,
+        );
+        objects.push((
+            object_order,
+            serialized_index,
+            RoleObjectRights {
+                name: object_name,
+                rights,
+            },
+        ));
     }
+    objects.sort_by_key(|(object_order, serialized_index, _)| {
+        (object_order.unwrap_or(usize::MAX), *serialized_index)
+    });
 
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
@@ -6954,9 +6983,38 @@ fn parse_role_rights_blob(
         set_for_new_objects,
         set_for_attributes_by_default,
         independent_rights_of_child_objects,
-        objects,
+        objects: objects.into_iter().map(|(_, _, object)| object).collect(),
         restriction_templates,
     })
+}
+
+fn role_rights_object_metadata_order(
+    object_uuid: &str,
+    object_name: &str,
+    metadata_order: &BTreeMap<String, usize>,
+    object_refs_by_name: &BTreeMap<&str, &str>,
+) -> Option<usize> {
+    metadata_order.get(object_uuid).copied().or_else(|| {
+        let owner = role_rights_object_owner_reference(object_name)?;
+        let owner_uuid = object_refs_by_name.get(owner)?;
+        metadata_order.get(*owner_uuid).copied()
+    })
+}
+
+fn role_rights_object_owner_reference(object_name: &str) -> Option<&str> {
+    if let Some((owner, _)) = object_name.split_once(".StandardAttribute.") {
+        return Some(owner);
+    }
+    if let Some((owner, _)) = object_name.split_once(".Command.") {
+        return Some(owner);
+    }
+    if let Some((owner, _, _)) = role_http_service_method_reference(object_name) {
+        return Some(owner);
+    }
+    if let Some((owner, _, _)) = role_child_object_reference(object_name) {
+        return Some(owner);
+    }
+    Some(object_name)
 }
 
 fn role_object_ref_name(fields: &[&str], object_refs: &BTreeMap<String, String>) -> Option<String> {
@@ -12943,7 +13001,9 @@ fn format_form_child_item_xml(
     if item.read_only == Some(true) {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
-    if let Some(skip_on_input) = item.skip_on_input {
+    if let Some(skip_on_input) = item.skip_on_input
+        && (item.tag != "Table" || skip_on_input)
+    {
         xml.push_str(&format!(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
             if skip_on_input { "true" } else { "false" }
@@ -14866,7 +14926,15 @@ fn parse_moxel_style_ref_slot(
             "-21" => Some(Some("style:FieldSelectionBackColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
             "-15" => Some(Some("style:ButtonTextColor".to_string())),
+            "-25" => Some(Some("style:ReportHeaderBackColor".to_string())),
+            "-26" => Some(Some("style:ReportGroup1BackColor".to_string())),
+            "-27" => Some(Some("style:ReportGroup2BackColor".to_string())),
             "-28" => Some(Some("style:ReportLineColor".to_string())),
+            "-34" => Some(Some("style:ButtonBorderColor".to_string())),
+            "-35" => Some(Some("style:TableHeaderBackColor".to_string())),
+            "-36" => Some(Some("style:TableHeaderTextColor".to_string())),
+            "-37" => Some(Some("style:TableFooterBackColor".to_string())),
+            "-38" => Some(Some("style:TableFooterTextColor".to_string())),
             "0" => {
                 let uuid = parse_uuid_field(payload.get(1)?.trim())?;
                 Some(moxel_style_ref_for_uuid(&uuid, object_refs))
@@ -18256,11 +18324,15 @@ fn parse_register_data_lock_control_mode(
     fields: &[&str],
     uuid: &str,
 ) -> Option<&'static str> {
-    if kind != "AccumulationRegister" {
-        return None;
-    }
     let header_index = metadata_header_field_index(fields, uuid)?;
-    match fields.get(header_index + 5).map(|field| field.trim()) {
+    let field_offset = match kind {
+        "AccumulationRegister" | "InformationRegister" => 5,
+        _ => return None,
+    };
+    match fields
+        .get(header_index + field_offset)
+        .map(|field| field.trim())
+    {
         Some("0") => Some("Automatic"),
         Some("1") => Some("Managed"),
         _ => None,
@@ -30060,7 +30132,7 @@ mod tests {
         assert_eq!(item.allow_getting_current_row_url, Some(true));
 
         let xml = format_form_child_items_xml(&[item], 1);
-        assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
+        assert!(!xml.contains("<SkipOnInput>false</SkipOnInput>"));
         assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
         assert!(
@@ -30075,6 +30147,33 @@ mod tests {
         assert!(xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
         assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
+    }
+
+    #[test]
+    fn omits_table_default_skip_on_input_but_keeps_true() {
+        let mut attribute_names_by_id = BTreeMap::new();
+        attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+
+        let mut item = parse_form_child_item_with_attrs(
+            r#"{73,{25,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},0,{1,{6}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(item.skip_on_input, Some(false));
+        let xml = format_form_child_items_xml(&[item.clone()], 1);
+        assert!(!xml.contains("<SkipOnInput>false</SkipOnInput>"));
+
+        item.skip_on_input = Some(true);
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<SkipOnInput>true</SkipOnInput>"));
     }
 
     #[test]
@@ -35061,6 +35160,69 @@ mod tests {
     }
 
     #[test]
+    fn formats_moxel_report_back_color_styles() {
+        let style_refs = parse_moxel_style_refs(
+            &[
+                "{3,3,{-25}}",
+                "{3,3,{-26}}",
+                "{3,3,{-27}}",
+                "{3,3,{-34}}",
+                "{3,3,{-35}}",
+                "{3,3,{-36}}",
+                "{3,3,{-37}}",
+                "{3,3,{-38}}",
+            ],
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(
+            style_refs[0].as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
+        assert_eq!(
+            style_refs[1].as_deref(),
+            Some("style:ReportGroup1BackColor")
+        );
+        assert_eq!(
+            style_refs[2].as_deref(),
+            Some("style:ReportGroup2BackColor")
+        );
+        assert_eq!(style_refs[3].as_deref(), Some("style:ButtonBorderColor"));
+        assert_eq!(style_refs[4].as_deref(), Some("style:TableHeaderBackColor"));
+        assert_eq!(style_refs[5].as_deref(), Some("style:TableHeaderTextColor"));
+        assert_eq!(style_refs[6].as_deref(), Some("style:TableFooterBackColor"));
+        assert_eq!(style_refs[7].as_deref(), Some("style:TableFooterTextColor"));
+
+        let format = parse_moxel_format("{2048,0}", &style_refs).unwrap();
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: Vec::new(),
+            column_formats: Vec::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![format],
+            rows: Vec::new(),
+            merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            default_format_index: None,
+            height: 0,
+        };
+        let mut xml = String::new();
+
+        push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+
+        assert!(xml.contains("<backColor>style:ReportHeaderBackColor</backColor>"));
+    }
+
+    #[test]
     fn formats_moxel_cell_zero_format_stays_zero() {
         let cell = parse_moxel_cell("{16,0,{0},0}", 0).unwrap();
 
@@ -37187,6 +37349,54 @@ mod tests {
         );
         assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
         assert!(!xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    }
+
+    #[test]
+    fn extracts_information_register_data_lock_control_mode_from_extended_owner_fields() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
+88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},\
+{zero_uuid},{zero_uuid},0,0,1,1,0,0,1,0,\
+{{0}},{zero_uuid},{zero_uuid},{{0}},{{0}},{{0}},{{0}},{{0}},0,0,0,0,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("InformationRegisters/Prices.xml")
+        );
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert!(xml.contains("<DataLockControlMode>Managed</DataLockControlMode>"));
+        assert!(
+            xml.find("<StandardAttributes>").unwrap()
+                < xml
+                    .find("<DataLockControlMode>Managed</DataLockControlMode>")
+                    .unwrap()
+        );
     }
 
     #[test]

@@ -4058,7 +4058,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
 pub fn form_body_base_free_blockers(
     form_xml: &[u8],
     has_module_text: bool,
-    has_item_assets: bool,
+    form_item_asset_files: usize,
 ) -> Result<Vec<String>> {
     let mut blockers = Vec::new();
     if form_xml.is_empty() {
@@ -4071,33 +4071,36 @@ pub fn form_body_base_free_blockers(
     } else {
         let properties = parse_form_xml_body_properties(form_xml)?;
         if form_xml_requires_existing_layout(&properties) {
-            blockers.push(
-                "Form.xml layout/root/child-item data is currently applied by patching an existing layout section"
-                    .to_string(),
-            );
+            let root_signals = form_xml_root_layout_signal_count(&properties);
+            blockers.push(format!(
+                "Form.xml layout/root/child-item data is currently applied by patching an existing layout section ({root_signals} root/layout scalar(s), {} form event handler(s), {} child item(s))",
+                properties.events.len(),
+                properties.child_items.len()
+            ));
         }
         if properties.attributes_present {
-            blockers.push(
-                "Form attributes require the existing trailing attributes section shape"
-                    .to_string(),
-            );
+            blockers.push(format!(
+                "Form attributes require the existing trailing attributes section shape ({} attribute definition(s))",
+                properties.attributes.len()
+            ));
         }
         if properties.parameters_present {
-            blockers.push(
-                "Form parameters require the existing trailing parameters section shape"
-                    .to_string(),
-            );
+            blockers.push(format!(
+                "Form parameters require the existing trailing parameters section shape ({} parameter definition(s))",
+                properties.parameters.len()
+            ));
         }
         if properties.commands_present {
-            blockers.push(
-                "Form commands require the existing trailing commands section shape".to_string(),
-            );
+            blockers.push(format!(
+                "Form commands require the existing trailing commands section shape ({} command definition(s))",
+                properties.commands.len()
+            ));
         }
         if properties.command_interface_present {
-            blockers.push(
-                "Form command interface requires the existing trailing command-interface section shape"
-                    .to_string(),
-            );
+            blockers.push(format!(
+                "Form command interface requires the existing trailing command-interface section shape ({} navigation item(s))",
+                properties.command_interface_items.len()
+            ));
         }
         if has_module_text {
             blockers.push(
@@ -4105,9 +4108,10 @@ pub fn form_body_base_free_blockers(
             );
         }
     }
-    if has_item_assets {
-        blockers
-            .push("form item assets replace existing embedded picture payload slots".to_string());
+    if form_item_asset_files > 0 {
+        blockers.push(format!(
+            "form item assets replace existing embedded picture payload slots ({form_item_asset_files} source asset file(s))"
+        ));
     }
     if blockers.is_empty() {
         blockers.push(
@@ -4116,6 +4120,46 @@ pub fn form_body_base_free_blockers(
         );
     }
     Ok(blockers)
+}
+
+fn form_xml_root_layout_signal_count(properties: &FormXmlBodyProperties) -> usize {
+    usize::from(!properties.title.is_empty())
+        + usize::from(properties.width.is_some())
+        + usize::from(properties.height.is_some())
+        + usize::from(properties.window_opening_mode.is_some())
+        + usize::from(properties.enter_key_behavior.is_some())
+        + usize::from(properties.save_window_settings.is_some())
+        + usize::from(properties.auto_title.is_some())
+        + usize::from(properties.auto_url.is_some())
+        + usize::from(properties.save_data_in_settings.is_some())
+        + usize::from(properties.auto_save_data_in_settings.is_some())
+        + usize::from(properties.group.is_some())
+        + usize::from(properties.scaling_mode.is_some())
+        + usize::from(properties.auto_time.is_some())
+        + usize::from(properties.use_posting_mode.is_some())
+        + usize::from(properties.repost_on_write.is_some())
+        + usize::from(properties.auto_fill_check.is_some())
+        + properties.command_set_excluded_commands.len()
+        + usize::from(properties.use_for_folders_and_items.is_some())
+        + usize::from(properties.customizable.is_some())
+        + usize::from(properties.command_bar_location.is_some())
+        + usize::from(properties.vertical_scroll.is_some())
+        + usize::from(properties.horizontal_align.is_some())
+        + usize::from(properties.conversations_representation.is_some())
+        + usize::from(properties.show_title.is_some())
+        + usize::from(properties.show_command_bar.is_some())
+        + usize::from(properties.show_close_button.is_some())
+        + usize::from(properties.report_result.is_some())
+        + usize::from(properties.details_data.is_some())
+        + usize::from(properties.report_form_type.is_some())
+        + usize::from(properties.auto_show_state.is_some())
+        + usize::from(properties.report_result_view_mode.is_some())
+        + usize::from(
+            properties
+                .view_mode_application_on_set_report_result
+                .is_some(),
+        )
+        + usize::from(properties.auto_command_bar.is_some())
 }
 
 fn form_xml_requires_existing_layout(properties: &FormXmlBodyProperties) -> bool {
@@ -4700,6 +4744,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                } else if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
+                    if let Some(command) = parse_form_command_xml(&event)? {
+                        properties.commands.push(command);
+                    }
+                } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
+                    if let Some(attribute) = parse_form_attribute_xml(&event)? {
+                        properties.attributes.push(attribute);
+                    }
+                } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
+                    if let Some(parameter) = parse_form_parameter_xml(&event)? {
+                        properties.parameters.push(parameter);
+                    }
                 } else if local == "ExtendedTooltip"
                     && path_ends_with_for_current_child_item(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -30904,7 +30960,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
     #[test]
     fn audits_module_only_form_body_as_base_dependent() -> anyhow::Result<()> {
-        let blockers = super::form_body_base_free_blockers(&[], true, false)?;
+        let blockers = super::form_body_base_free_blockers(&[], true, 0)?;
 
         assert_eq!(blockers.len(), 1);
         assert!(blockers[0].contains("same Form body row as layout"));
@@ -30934,37 +30990,44 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	</ChildItems>
 </Form>"#;
 
-        let blockers = super::form_body_base_free_blockers(xml, true, true)?;
+        let blockers = super::form_body_base_free_blockers(xml, true, 2)?;
 
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("layout/root/child-item"))
+                .any(|blocker| blocker.contains("layout/root/child-item")
+                    && blocker.contains("1 root/layout scalar")
+                    && blocker.contains("1 child item"))
         );
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("trailing attributes"))
+                .any(|blocker| blocker.contains("trailing attributes")
+                    && blocker.contains("1 attribute definition"))
         );
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("trailing parameters"))
+                .any(|blocker| blocker.contains("trailing parameters")
+                    && blocker.contains("1 parameter definition"))
         );
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("trailing commands"))
+                .any(|blocker| blocker.contains("trailing commands")
+                    && blocker.contains("1 command definition"))
         );
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("command-interface"))
+                .any(|blocker| blocker.contains("command-interface")
+                    && blocker.contains("0 navigation item"))
         );
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("embedded picture payload"))
+                .any(|blocker| blocker.contains("embedded picture payload")
+                    && blocker.contains("2 source asset file"))
         );
         Ok(())
     }

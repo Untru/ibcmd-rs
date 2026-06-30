@@ -1361,12 +1361,38 @@ fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> R
         Vec::new()
     };
     let has_module_text = module_path.exists();
-    let has_item_assets = form_path.with_extension("").join("Items").is_dir();
-    let blockers = form_body_base_free_blockers(&form_xml, has_module_text, has_item_assets)?;
+    let form_item_asset_files =
+        count_form_item_asset_files(&form_path.with_extension("").join("Items"))?;
+    let blockers = form_body_base_free_blockers(&form_xml, has_module_text, form_item_asset_files)?;
     Ok(format!(
         "Form body requires active base blob: {}",
         blockers.join("; ")
     ))
+}
+
+fn count_form_item_asset_files(path: &Path) -> Result<usize> {
+    if !path.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0usize;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in
+            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
+        {
+            let entry =
+                entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("failed to stat {}", entry.path().display()))?;
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if file_type.is_file() {
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
 }
 
 fn metadata_xml_base_free_blocker_reason(xml: &[u8]) -> Result<String> {
@@ -8018,8 +8044,11 @@ mod tests {
         assert_eq!(row.generation, "requires_base_blob");
         assert_eq!(row.source_path, "CommonForms/Item/Ext/Form.xml");
         assert!(row.reason.contains("layout/root/child-item"));
-        assert!(row.reason.contains("trailing attributes"));
-        assert!(row.reason.contains("trailing commands"));
+        assert!(row.reason.contains("1 root/layout scalar"));
+        assert!(row.reason.contains("1 child item"));
+        assert!(row.reason.contains("1 attribute definition"));
+        assert!(row.reason.contains("1 command definition"));
+        assert!(row.reason.contains("1 source asset file"));
         assert!(row.reason.contains("embedded picture payload"));
 
         let _ = fs::remove_dir_all(root);
