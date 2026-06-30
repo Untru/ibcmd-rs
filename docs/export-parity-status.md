@@ -48,6 +48,12 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 34 source staging readiness slice | unit-level row-generation verification | `Ext/ParentConfigurations.bin` source bytes are treated as inflated raw-deflated payload and re-deflated for the `ConfigSave` row without fetching an active base blob |
+| Round 34 Catalog metadata slice | unit-level metadata XML verification | `Catalog` owner refs are parsed from native metadata and emitted as ordered `xr:MDObjectRef` items in `<Owners>` |
+| Round 34 DCS template slice | unit-level template body verification | DCS `calculatedField` `TypeId` values normalize to `d4p1` current-config refs instead of falling back to `d5p1` |
+| Round 34 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `RowFilter xsi:nil="true"` extracts and packs through property-bag key `10` with the native `{"U"}` marker |
+| Round 34 ExchangePlan Content.xml slice | unit-level source asset verification | ExchangePlan content items are ordered by configuration metadata tree order, preserving blob order as fallback for unresolved items |
+| Round 34 CommonAttribute metadata slice | unit-level metadata XML verification | CommonAttribute native property-tail `FillValue` emits string, nil, decimal and boolean XML values in native property order |
 | CommandGroups | selected export of all 34 `CommandGroups` UUIDs from `ut_ibcmd` | `0 different / 34 unchanged` |
 | Languages | selected export of `Languages/Русский.xml` from `ut_ibcmd` | `0 different / 1 unchanged` |
 | FunctionalOptionsParameters | selected export of all 9 `FunctionalOptionsParameters` UUIDs from `ut_ibcmd` after selected write-set fix | `0 different / 9 unchanged` |
@@ -193,6 +199,12 @@ Verification history:
 | Round 33 object metadata slice | unit-level metadata XML verification | DataProcessor child metadata emits non-empty `ChoiceParameters`, resolving design-time UUIDs to stable refs and fixed arrays |
 | Round 33 ExchangePlan metadata slice | unit-level metadata XML verification | optional `xr:ThisNode` is emitted in `InternalInfo`, and `UseStandardCommands` is read relative to the detected header slot |
 | Round 33 source staging readiness slice | unit-level row-generation verification | module `.bin` source assets containing inflated V8 containers can stage base-free for common/object/nested module bodies |
+| Round 34 source staging readiness slice | unit-level row-generation verification | `Ext/ParentConfigurations.bin` source bytes are re-deflated into the staged `ConfigSave` body instead of being written directly |
+| Round 34 Catalog metadata slice | unit-level metadata XML verification | Catalog `<Owners>` now emits resolved owner refs before `<SubordinationUse>` |
+| Round 34 DCS template slice | unit-level template body verification | DCS `calculatedField` current-config type refs use the native `d4p1` namespace context |
+| Round 34 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `RowFilter xsi:nil="true"` maps to property-bag key `10` / `{"U"}` |
+| Round 34 ExchangePlan Content.xml slice | unit-level source asset verification | `ExchangePlan/Ext/Content.xml` ordering follows configuration metadata child order when that index is available |
+| Round 34 CommonAttribute metadata slice | unit-level metadata XML verification | CommonAttribute property-tail `FillValue` supports string, nil, decimal and boolean encodings |
 
 Performance note for selected extraction:
 
@@ -425,5 +437,11 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #17 | DCS core/data-core `xsi:type` normalization | merged to `master` in round 33 |
 | #18 | ExchangePlan `xr:ThisNode` and header-relative `UseStandardCommands` | merged to `master` in round 33 |
 | #21 | base-free module `.bin` V8 container body staging | merged to `master` in round 33 |
+| #15 | Catalog `<Owners>` metadata XML refs | merged to `master` in round 34 |
+| #16 | Form.xml wrapper `55` table `RowFilter xsi:nil` extraction and packing | merged to `master` in round 34 |
+| #17 | DCS calculated-field current-config namespace normalization | merged to `master` in round 34 |
+| #18 | ExchangePlan `Content.xml` metadata-tree ordering | merged to `master` in round 34 |
+| #21 | base-free `Ext/ParentConfigurations.bin` raw-deflated staging | merged to `master` in round 34 |
+| #22 | CommonAttribute property-tail `FillValue` metadata XML | merged to `master` in round 34 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

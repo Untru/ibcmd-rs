@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 34 | Source staging readiness | `Ext/ParentConfigurations.bin` now stages base-free by re-deflating inflated raw-deflated source bytes into the `ConfigSave` row |
+| 34 | Object metadata XML | Catalog owner refs are emitted as ordered `xr:MDObjectRef` items in `<Owners>` |
+| 34 | DCS templates | calculated-field `TypeId` normalization uses the native `d4p1` current-config namespace context |
+| 34 | Form.xml | wrapper `55` table `RowFilter xsi:nil="true"` extracts and packs through property-bag key `10` |
+| 34 | ExchangePlan Content.xml | content items are ordered by configuration metadata tree order with blob order as fallback |
+| 34 | CommonAttributes | property-tail `FillValue` emits string, nil, decimal and boolean XML values between fill-from and fill-checking fields |
 | 33 | Role Rights.xml | HTTPService URL template method refs resolve as `HTTPService.<service>.URLTemplate.<template>.Method.<method>` and pack back from source XML |
 | 33 | DCS templates | unqualified DCS core `xsi:type` values normalize to `dcscor:*`; data-core `StandardPeriod` / `StandardPeriodVariant` normalize to `v8:*` |
 | 33 | Form.xml | wrapper `55` table `Period` extracts and packs through property-bag key `7` as `v8:StandardPeriodVariant=Custom` |
