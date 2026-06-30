@@ -116,34 +116,38 @@ Fields to compare in the JSON report:
 - `timings.prepare_command_refs_ms`
 - per-table `tables[].timings.prepare_command_refs_ms`
 
-## Next safe optimization step
+## Implemented optimization
 
-Implemented first low-risk step in this area: the broad
+Previously implemented first low-risk step in this area: the broad
 `build_command_interface_reference_index_from_texts` scan now parses metadata
 rows in parallel and then applies entries in the original row order. This keeps
 the previous overwrite semantics for duplicate keys, while reducing the CPU wall
 time reported in `prepare_command_refs_ms` on large selected `.9` exports.
 
-Add a command-owner reference index instead of scanning every metadata blob for
-each selected `.9` run.
+Round 9 implemented the next step: selected configuration `.9`
+command-interface exports no longer force broad metadata text indexing just
+because `command_refs` are needed.
 
-The safe shape is:
+The current shape is:
 
 1. Inflate selected `.9` command-interface body early and collect command UUIDs
    that actually appear in command fields.
-2. Resolve those UUIDs through a persisted or SQL-side owner index that maps
-   nested command UUID -> owner metadata `FileName`.
-3. Fetch only owner metadata rows plus direct metadata UUIDs needed for standard
-   commands and groups.
-4. Build `command_refs` from that small owner set and compare generated
-   `Ext/MainSectionCommandInterface.xml` against the current broad-index output.
+2. Resolve direct metadata refs first.
+3. Resolve missing nested command refs through owner metadata rows.
+4. Fetch only owner metadata rows plus direct metadata UUIDs when resolution is
+   complete.
+5. Fall back to the previous broad metadata path when owner resolution is
+   incomplete, preserving readable names instead of emitting raw UUID fallbacks.
 
-Acceptance criteria for the optimization:
+Covered by focused tests:
 
-- selected `.9` export remains byte-identical to the broad-index output on the
-  known `ut_ibcmd` command-interface sample;
-- missing owner rows still fall back to the current broad path, not to raw UUID
-  output;
-- the report shows lower `prepare_metadata_texts_ms` and
-  `prepare_command_refs_ms` for selected `.9` without increasing
-  `process_rows_wall_ms`.
+- `targeted_command_owner_rows_match_broad_command_interface_output`
+- `selected_command_interface_refs_collect_command_fields_only`
+
+Remaining performance follow-up:
+
+- run the selected `.9` export command against the lab database and record fresh
+  `prepare_metadata_texts_ms` and `prepare_command_refs_ms` timings under
+  `E:\ibcmd_lab\perf`;
+- keep issue #19 open until the measured selected export confirms the expected
+  wall-time improvement on the real `ut_ibcmd` sample.
