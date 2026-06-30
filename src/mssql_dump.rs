@@ -9594,13 +9594,13 @@ fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
 
 fn extract_form_show_command_bar(fields: &[&str]) -> Option<bool> {
     match fields.get(18).map(|field| field.trim())? {
-        "0" => return Some(true),
+        "0" => return None,
         "1" => return Some(false),
         _ => {}
     }
     if form_root_uses_property_bag(fields) {
         match fields.get(6).map(|field| field.trim())? {
-            "0" => Some(true),
+            "0" => None,
             "1" => Some(false),
             _ => None,
         }
@@ -29145,7 +29145,7 @@ mod tests {
         assert!(form_xml.contains("<AutoTitle>false</AutoTitle>"));
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
         assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
-        assert!(form_xml.contains("<ShowCommandBar>true</ShowCommandBar>"));
+        assert!(!form_xml.contains("<ShowCommandBar>"));
     }
 
     #[test]
