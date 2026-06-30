@@ -15418,6 +15418,13 @@ struct RegisterProperties {
     child_objects: Vec<RegisterChildObject>,
 }
 
+#[derive(Clone)]
+struct MetadataChildObject {
+    tag: &'static str,
+    header: MetadataHeader,
+    child_objects: Vec<MetadataChildObject>,
+}
+
 struct RegisterChildObject {
     tag: &'static str,
     header: MetadataHeader,
@@ -15475,6 +15482,7 @@ struct CatalogProperties {
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
     standard_attribute_details: BTreeMap<&'static str, CatalogStandardAttributeDetails>,
+    child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
@@ -15510,6 +15518,7 @@ struct DataProcessorProperties {
     include_help_in_contents: bool,
     extended_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
+    child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
@@ -17148,6 +17157,111 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
     None
 }
 
+fn parse_attribute_tabular_section_child_objects(
+    owner_kind: &str,
+    owner_name: &str,
+    text: &str,
+    owner_uuid: &str,
+) -> Vec<MetadataChildObject> {
+    let mut roots = Vec::<MetadataChildObject>::new();
+    let mut tabular_section_indexes = BTreeMap::<String, usize>::new();
+    let mut pending_by_tabular_section = BTreeMap::<String, Vec<MetadataChildObject>>::new();
+
+    for (header, marker_start) in nested_headers_with_offsets_from_text(text, owner_uuid, |_| true)
+    {
+        let Some((tag, parent_tabular_section)) = attribute_tabular_section_child_object_tag(
+            owner_kind,
+            owner_name,
+            owner_uuid,
+            text,
+            marker_start,
+            &header,
+        ) else {
+            continue;
+        };
+        let child = MetadataChildObject {
+            tag,
+            header,
+            child_objects: Vec::new(),
+        };
+        if tag == "TabularSection" {
+            let tabular_section_uuid = child.header.uuid.clone();
+            let root_index = roots.len();
+            roots.push(child);
+            tabular_section_indexes.insert(tabular_section_uuid.clone(), root_index);
+            if let Some(pending) = pending_by_tabular_section.remove(&tabular_section_uuid) {
+                roots[root_index].child_objects.extend(pending);
+            }
+            continue;
+        }
+        if let Some(tabular_section) = parent_tabular_section {
+            if let Some(root_index) = tabular_section_indexes.get(&tabular_section.uuid).copied() {
+                roots[root_index].child_objects.push(child);
+            } else {
+                pending_by_tabular_section
+                    .entry(tabular_section.uuid)
+                    .or_default()
+                    .push(child);
+            }
+            continue;
+        }
+        roots.push(child);
+    }
+
+    roots
+}
+
+fn attribute_tabular_section_child_object_tag(
+    owner_kind: &str,
+    owner_name: &str,
+    owner_uuid: &str,
+    text: &str,
+    marker_start: usize,
+    child: &MetadataHeader,
+) -> Option<(&'static str, Option<MetadataHeader>)> {
+    if is_offset_inside_metadata_object_code(text, marker_start, 11) {
+        if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(("Attribute", Some(tabular_section)));
+        }
+        return Some(("TabularSection", None));
+    }
+    if owner_kind == "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+        && is_offset_inside_tabular_section_attribute_list(text, marker_start)
+        && let Some((tabular_section, tabular_end)) =
+            preceding_metadata_header_for_code_with_bounds(text, marker_start, 11)
+        && tabular_section.uuid != child.uuid
+        && !contains_metadata_header_uuid_between(text, tabular_end, marker_start, owner_uuid)
+        && !contains_metadata_header_name_between(text, tabular_end, marker_start, owner_name)
+    {
+        return Some(("Attribute", Some(tabular_section)));
+    }
+    if owner_kind == "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(("Attribute", None));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 5) {
+        return Some(("Attribute", None));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 6) {
+        if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(("Attribute", Some(tabular_section)));
+        }
+        return Some(("Attribute", None));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 8)
+        && let Some(tabular_section) = preceding_metadata_header_for_code(text, marker_start, 11)
+    {
+        return Some(("Attribute", Some(tabular_section)));
+    }
+    None
+}
+
 fn parse_catalog_properties_from_text(
     text: &str,
     uuid: &str,
@@ -17256,6 +17370,12 @@ fn parse_catalog_properties_from_text(
         explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
         standard_attribute_details: parse_catalog_standard_attribute_details(
             fields.get(45).copied(),
+        ),
+        child_metadata_objects: parse_attribute_tabular_section_child_objects(
+            "Catalog",
+            &header.name,
+            text,
+            uuid,
         ),
         child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_catalog_template_names_in_text_order(
@@ -17578,6 +17698,12 @@ fn parse_data_processor_properties_from_text(
         include_help_in_contents: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(false),
         extended_presentation: parse_1c_synonyms(fields.get(10).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(11).copied().unwrap_or("{0}")),
+        child_metadata_objects: parse_attribute_tabular_section_child_objects(
+            "DataProcessor",
+            &header.name,
+            text,
+            uuid,
+        ),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_data_processor_template_names_in_text_order(
             text,
@@ -21040,8 +21166,14 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
 \t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
     );
     xml.push_str("\t\t</Properties>\r\n");
-    if !catalog.child_forms.is_empty() || !catalog.child_templates.is_empty() {
+    if !catalog.child_metadata_objects.is_empty()
+        || !catalog.child_forms.is_empty()
+        || !catalog.child_templates.is_empty()
+    {
         xml.push_str("\t\t<ChildObjects>\r\n");
+        for child in &catalog.child_metadata_objects {
+            push_metadata_child_object_xml(&mut xml, child);
+        }
         for form in &catalog.child_forms {
             xml.push_str(&format!(
                 "\t\t\t<Form>{}</Form>\r\n",
@@ -21354,8 +21486,14 @@ fn format_data_processor_source_xml(
         );
         xml.insert_str(index, &properties);
     }
-    if !data_processor.child_forms.is_empty() || !data_processor.child_templates.is_empty() {
+    if !data_processor.child_metadata_objects.is_empty()
+        || !data_processor.child_forms.is_empty()
+        || !data_processor.child_templates.is_empty()
+    {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+        for child in &data_processor.child_metadata_objects {
+            push_metadata_child_object_xml(&mut child_objects, child);
+        }
         for form in &data_processor.child_forms {
             child_objects.push_str(&format!(
                 "\t\t\t<Form>{}</Form>\r\n",
@@ -22076,24 +22214,84 @@ fn insert_metadata_child_objects_xml(xml: &mut String, owner_kind: &str, child_o
     );
 }
 
-fn push_metadata_header_child_object_xml(xml: &mut String, tag: &str, header: &MetadataHeader) {
+fn push_metadata_header_child_object_xml(
+    xml: &mut String,
+    tag: &'static str,
+    header: &MetadataHeader,
+) {
+    push_metadata_child_object_xml(
+        xml,
+        &MetadataChildObject {
+            tag,
+            header: header.clone(),
+            child_objects: Vec::new(),
+        },
+    );
+}
+
+fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
     xml.push_str(&format!(
         "\t\t\t<{tag} uuid=\"{}\">\r\n\
 \t\t\t\t<Properties>\r\n\
 \t\t\t\t\t<Name>{}</Name>\r\n",
-        escape_xml_text(&header.uuid),
-        escape_xml_element_text(&header.name),
+        escape_xml_text(&child.header.uuid),
+        escape_xml_element_text(&child.header.name),
+        tag = child.tag,
     ));
-    push_header_synonym_xml(xml, "\t\t\t\t\t", &header.synonyms);
-    if header.comment.is_empty() {
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &child.header.synonyms);
+    if child.header.comment.is_empty() {
         xml.push_str("\t\t\t\t\t<Comment/>\r\n");
     } else {
         xml.push_str(&format!(
             "\t\t\t\t\t<Comment>{}</Comment>\r\n",
-            escape_xml_element_text(&header.comment)
+            escape_xml_element_text(&child.header.comment)
         ));
     }
-    xml.push_str(&format!("\t\t\t\t</Properties>\r\n\t\t\t</{tag}>\r\n"));
+    xml.push_str("\t\t\t\t</Properties>\r\n");
+    if !child.child_objects.is_empty() {
+        xml.push_str("\t\t\t\t<ChildObjects>\r\n");
+        for nested_child in &child.child_objects {
+            push_nested_metadata_child_object_xml(xml, nested_child, 5);
+        }
+        xml.push_str("\t\t\t\t</ChildObjects>\r\n");
+    }
+    xml.push_str(&format!("\t\t\t</{}>\r\n", child.tag));
+}
+
+fn push_nested_metadata_child_object_xml(
+    xml: &mut String,
+    child: &MetadataChildObject,
+    indent: usize,
+) {
+    let tab = "\t".repeat(indent);
+    xml.push_str(&format!(
+        "{tab}<{} uuid=\"{}\">\r\n",
+        child.tag,
+        escape_xml_text(&child.header.uuid)
+    ));
+    xml.push_str(&format!("{tab}\t<Properties>\r\n"));
+    xml.push_str(&format!(
+        "{tab}\t\t<Name>{}</Name>\r\n",
+        escape_xml_element_text(&child.header.name)
+    ));
+    push_header_synonym_xml(xml, &format!("{tab}\t\t"), &child.header.synonyms);
+    if child.header.comment.is_empty() {
+        xml.push_str(&format!("{tab}\t\t<Comment/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{tab}\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&child.header.comment)
+        ));
+    }
+    xml.push_str(&format!("{tab}\t</Properties>\r\n"));
+    if !child.child_objects.is_empty() {
+        xml.push_str(&format!("{tab}\t<ChildObjects>\r\n"));
+        for nested_child in &child.child_objects {
+            push_nested_metadata_child_object_xml(xml, nested_child, indent + 2);
+        }
+        xml.push_str(&format!("{tab}\t</ChildObjects>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</{}>\r\n", child.tag));
 }
 
 fn format_common_command_source_xml_native(
@@ -37944,6 +38142,70 @@ mod tests {
     }
 
     #[test]
+    fn extracts_data_processor_attribute_and_tabular_section_child_headers() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{27,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"FileName\",{{1,\"en\",\"File name\"}},\"file comment\"}}\r\n}},\
+{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Rows\",{{1,\"en\",\"Rows\"}},\"\"}},\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{27,\r\n{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Value\",{{1,\"en\",\"Value\"}},\"\"}}\r\n}}\
+}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("DataProcessors").join("Loader.xml")
+        );
+        assert!(xml.contains("<ChildObjects>"), "{xml}");
+        assert!(xml.contains(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#));
+        assert!(xml.contains(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#));
+        assert!(xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
+        assert!(xml.contains("<Name>FileName</Name>"));
+        assert!(xml.contains("<Comment>file comment</Comment>"));
+        assert!(
+            xml.find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+                .unwrap()
+                < xml
+                    .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+                    .unwrap(),
+            "{xml}"
+        );
+        let tabular_start = xml
+            .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+            .unwrap();
+        let tabular_end = xml[tabular_start..].find("</TabularSection>").unwrap() + tabular_start;
+        let tabular_xml = &xml[tabular_start..tabular_end];
+        assert!(tabular_xml.contains("<ChildObjects>"), "{xml}");
+        assert!(tabular_xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
+    }
+
+    #[test]
     fn extracts_catalog_generated_types_to_metadata_xml() {
         let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let object_type_id = "11111111-1111-4111-8111-111111111111";
@@ -38279,6 +38541,68 @@ mod tests {
         );
         assert_eq!(xml.matches("<Form>ListForm</Form>").count(), 1);
         assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
+    }
+
+    #[test]
+    fn extracts_catalog_attribute_and_tabular_section_child_headers() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
+22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
+2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
+{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
+{{5,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\"}}\r\n}},\
+{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{5,\r\n{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Price\",{{1,\"en\",\"Price\"}},\"\"}}\r\n}}\
+}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Catalogs").join("Products.xml")
+        );
+        assert!(xml.contains("<ChildObjects>"), "{xml}");
+        assert!(xml.contains(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#));
+        assert!(xml.contains(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#));
+        assert!(xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
+        assert!(
+            xml.find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+                .unwrap()
+                < xml
+                    .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+                    .unwrap(),
+            "{xml}"
+        );
+        let tabular_start = xml
+            .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+            .unwrap();
+        let tabular_end = xml[tabular_start..].find("</TabularSection>").unwrap() + tabular_start;
+        let tabular_xml = &xml[tabular_start..tabular_end];
+        assert!(tabular_xml.contains("<ChildObjects>"), "{xml}");
+        assert!(tabular_xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
     }
 
     #[test]
