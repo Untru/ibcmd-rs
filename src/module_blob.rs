@@ -18491,6 +18491,16 @@ pub fn patch_versions_blob_bytes_allowing_additions(
     patch_versions_blob_bytes_inner(input, changes, include_standard_entries, true)
 }
 
+pub fn versions_base_free_blockers(selected_config_rows: usize) -> Vec<String> {
+    vec![
+        format!(
+            "source tree does not contain a ConfigSave versions asset; staging currently fetches the active versions row and patches generation UUIDs for {selected_config_rows} selected Config row(s) plus the standard root/version/versions entries"
+        ),
+        "the versions blob is a deflated native FileName-to-generation-UUID map; source XML and body assets provide row names and payloads, but not the active generation UUID map, entry order, unchanged row set, or platform-owned standard entries".to_string(),
+        "base-free versions row generation is blocked until a validated versions compiler can synthesize the complete native row for the target compatible infobase without dropping stable Config entries or relying on database-specific GUIDs".to_string(),
+    ]
+}
+
 fn patch_versions_blob_bytes_inner(
     input: &[u8],
     changes: &[String],
@@ -32331,5 +32341,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(output.contains(&format!("\"file.5\",{}", addition.new_uuid)));
 
         Ok(())
+    }
+
+    #[test]
+    fn reports_versions_base_free_blockers() {
+        let blockers = super::versions_base_free_blockers(6);
+
+        assert_eq!(blockers.len(), 3);
+        assert!(blockers[0].contains("6 selected Config row(s)"));
+        assert!(blockers[0].contains("standard root/version/versions entries"));
+        assert!(blockers[1].contains("FileName-to-generation-UUID map"));
+        assert!(blockers[1].contains("unchanged row set"));
+        assert!(blockers[2].contains("without dropping stable Config entries"));
+        assert!(blockers[2].contains("database-specific GUIDs"));
     }
 }
