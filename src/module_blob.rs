@@ -15725,6 +15725,17 @@ fn resolve_role_object_ref_key(
             source.resolve_command_reference_uuid(reference)?,
         ));
     }
+    if let Some((service_reference, template_name, method_name)) =
+        role_http_service_method_reference(reference)
+    {
+        return Ok(RoleObjectRefKey::direct(
+            source.resolve_http_service_method_uuid(
+                service_reference,
+                template_name,
+                method_name,
+            )?,
+        ));
+    }
     if let Some((owner_reference, child_kind, child_name)) = role_child_object_reference(reference)
     {
         return Ok(RoleObjectRefKey::direct(
@@ -15783,6 +15794,22 @@ fn role_standard_attribute_slot(owner_reference: &str, attribute: &str) -> Optio
     attributes.iter().position(|name| *name == attribute)
 }
 
+fn role_http_service_method_reference(reference: &str) -> Option<(&str, &str, &str)> {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    if parts.len() == 6
+        && parts[0] == "HTTPService"
+        && parts[2] == "URLTemplate"
+        && parts[4] == "Method"
+    {
+        return Some((
+            &reference[..parts[0].len() + 1 + parts[1].len()],
+            parts[3],
+            parts[5],
+        ));
+    }
+    None
+}
+
 fn role_child_object_reference(reference: &str) -> Option<(&str, &str, &str)> {
     let parts = reference.split('.').collect::<Vec<_>>();
     if parts.len() == 4 && role_child_object_tag(parts[2]).is_some() {
@@ -15812,6 +15839,7 @@ fn role_child_object_tag(tag: &str) -> Option<&'static str> {
         "Attribute" => Some("Attribute"),
         "Dimension" => Some("Dimension"),
         "Resource" => Some("Resource"),
+        "URLTemplate" => Some("URLTemplate"),
         _ => None,
     }
 }
@@ -15862,6 +15890,111 @@ impl MetadataSourceContext {
             format!("failed to resolve child {owner_reference}.{child_kind}.{child_name}")
         })
     }
+
+    fn resolve_http_service_method_uuid(
+        &self,
+        service_reference: &str,
+        template_name: &str,
+        method_name: &str,
+    ) -> Result<String> {
+        let (_, folder) = metadata_reference_source_folder(service_reference).ok_or_else(|| {
+            anyhow!("unsupported HTTPService reference for source resolution: {service_reference}")
+        })?;
+        let service_name = service_reference
+            .strip_prefix("HTTPService.")
+            .ok_or_else(|| anyhow!("invalid HTTPService reference: {service_reference}"))?;
+        let path = self
+            .source_root
+            .join(folder)
+            .join(format!("{service_name}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read HTTPService XML {}", path.display()))?;
+        parse_http_service_method_uuid_from_xml(&xml, template_name, method_name).with_context(
+            || {
+                format!(
+                    "failed to resolve HTTPService method {service_reference}.URLTemplate.{template_name}.Method.{method_name}"
+                )
+            },
+        )
+    }
+}
+
+fn parse_http_service_method_uuid_from_xml(
+    xml: &[u8],
+    template_name: &str,
+    method_name: &str,
+) -> Result<String> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_template_name = None::<String>;
+    let mut current_method_uuid = None::<String>;
+    let mut current_method_name = None::<String>;
+    let mut collecting_template_name = false;
+    let mut collecting_method_name = false;
+    let mut text_value = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "URLTemplate" {
+                    current_template_name = None;
+                } else if local == "Method" {
+                    current_method_uuid = xml_attr_value(&event, "uuid")
+                        .map(|value| normalize_uuid_text(&value))
+                        .transpose()?;
+                    current_method_name = None;
+                } else if local == "Name" && path_ends_with(&path, &["URLTemplate", "Properties"]) {
+                    text_value.clear();
+                    collecting_template_name = true;
+                } else if local == "Name" && path_ends_with(&path, &["Method", "Properties"]) {
+                    text_value.clear();
+                    collecting_method_name = true;
+                }
+                path.push(local);
+            }
+            Ok(Event::Text(text)) if collecting_template_name || collecting_method_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) if collecting_template_name || collecting_method_name => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::End(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if collecting_template_name && local == "Name" {
+                    current_template_name = Some(text_value.trim().to_string());
+                    collecting_template_name = false;
+                    text_value.clear();
+                } else if collecting_method_name && local == "Name" {
+                    current_method_name = Some(text_value.trim().to_string());
+                    collecting_method_name = false;
+                    text_value.clear();
+                }
+                if local == "Method" {
+                    if current_template_name.as_deref() == Some(template_name)
+                        && current_method_name.as_deref() == Some(method_name)
+                        && let Some(uuid) = current_method_uuid.take()
+                    {
+                        return Ok(uuid);
+                    }
+                    current_method_uuid = None;
+                    current_method_name = None;
+                } else if local == "URLTemplate" {
+                    current_template_name = None;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Err(anyhow!(
+        "HTTPService URLTemplate {template_name} Method {method_name} not found in XML"
+    ))
 }
 
 fn parse_nested_metadata_child_uuid_from_xml(
@@ -30409,6 +30542,44 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(text.contains(
             "{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}"
+        ));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_http_service_method_by_source_ref() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-role-rights-http-method-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("HTTPServices"))?;
+        std::fs::write(
+            root.join("HTTPServices/Api.xml"),
+            br#"<MetaDataObject><HTTPService uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"><Properties><Name>Api</Name></Properties><ChildObjects><URLTemplate uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"><Properties><Name>Any</Name><Template>/*</Template></Properties><ChildObjects><Method uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc"><Properties><Name>POST</Name><HTTPMethod>POST</HTTPMethod><Handler>HandlePost</Handler></Properties></Method></ChildObjects></URLTemplate></ChildObjects></HTTPService></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            b"{10,{1,{{1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,0,0},{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,-1}}},{0},0,1,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>false</setForNewObjects>
+	<setForAttributesByDefault>true</setForAttributesByDefault>
+	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
+	<object>
+		<name>HTTPService.Api.URLTemplate.Any.Method.POST</name>
+		<right><name>Use</name><value>true</value></right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml_with_source(&base, xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            "{1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,0,0},{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}"
         ));
 
         let _ = std::fs::remove_dir_all(root);
