@@ -14383,6 +14383,10 @@ struct ReportProperties {
     child_templates: Vec<String>,
 }
 
+struct DataProcessorProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct DocumentProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
@@ -15112,6 +15116,9 @@ fn extract_metadata_source_xml_from_text_row(
         let report =
             parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
+    } else if kind == "DataProcessor" {
+        let data_processor = parse_data_processor_properties_from_text(text, uuid)?;
+        format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(text, uuid)?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
@@ -15621,6 +15628,29 @@ fn parse_document_properties_from_text(text: &str, uuid: &str) -> Option<Documen
     );
 
     Some(DocumentProperties { generated_types })
+}
+
+fn parse_data_processor_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<DataProcessorProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("17") {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        7,
+        8,
+        &format!("DataProcessorManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(DataProcessorProperties { generated_types })
 }
 
 fn parse_enum_properties_from_text(
@@ -18428,6 +18458,19 @@ fn format_document_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("Document", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&document.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    xml
+}
+
+fn format_data_processor_source_xml(
+    header: &MetadataHeader,
+    data_processor: &DataProcessorProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("DataProcessor", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&data_processor.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
@@ -31043,6 +31086,56 @@ mod tests {
         );
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+    }
+
+    #[test]
+    fn extracts_data_processor_manager_generated_type_to_metadata_xml() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,{{0}},{{0}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &data_processor_blob,
+                data_processor_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("DataProcessors").join("Loader.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(
+                xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
+                "{xml}"
+            );
+            assert!(
+                xml.contains(
+                    r#"<xr:GeneratedType name="DataProcessorManager.Loader" category="Manager">"#
+                ),
+                "{xml}"
+            );
+            assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+            assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+        }
     }
 
     #[test]
