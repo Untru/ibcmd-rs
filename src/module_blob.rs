@@ -1622,8 +1622,11 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
         &spreadsheet,
     ));
     fields.extend(format_spreadsheet_column_sets_for_moxel(&spreadsheet));
-    if !spreadsheet.merges.is_empty() {
-        fields.push(format_spreadsheet_merges_for_moxel(&spreadsheet.merges));
+    if !spreadsheet.merges.is_empty() || !spreadsheet.vertical_unmerges.is_empty() {
+        fields.push(format_spreadsheet_merge_regions_for_moxel(
+            &spreadsheet.merges,
+            &spreadsheet.vertical_unmerges,
+        ));
     }
     if !spreadsheet.areas.is_empty() {
         fields.push(format_spreadsheet_named_areas_for_moxel(&spreadsheet.areas));
@@ -1667,6 +1670,7 @@ struct SpreadsheetDocumentXml {
     column_sets: Vec<SpreadsheetDocumentXmlColumnSet>,
     rows: Vec<SpreadsheetDocumentXmlRow>,
     merges: Vec<SpreadsheetDocumentXmlMerge>,
+    vertical_unmerges: Vec<SpreadsheetDocumentXmlMerge>,
     areas: Vec<SpreadsheetDocumentXmlArea>,
     print_area: Option<SpreadsheetDocumentXmlArea>,
     print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
@@ -1884,7 +1888,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                 } else if local == "rowsItem" {
                     current_row = Some(SpreadsheetDocumentXmlRow::default());
                     next_column_index = 0;
-                } else if local == "merge" {
+                } else if local == "merge" || local == "verticalUnmerge" {
                     current_merge = Some(SpreadsheetDocumentXmlMerge::default());
                 } else if local == "namedItem" {
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
@@ -2038,10 +2042,14 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                 {
                     document.column_count = document.column_count.max(column_set.size);
                     document.column_sets.push(column_set);
-                } else if local == "merge"
+                } else if (local == "merge" || local == "verticalUnmerge")
                     && let Some(merge) = current_merge.take()
                 {
-                    document.merges.push(merge);
+                    if local == "verticalUnmerge" {
+                        document.vertical_unmerges.push(merge);
+                    } else {
+                        document.merges.push(merge);
+                    }
                 } else if local == "namedItem"
                     && let Some(area) = current_area.take()
                 {
@@ -2402,28 +2410,28 @@ fn apply_spreadsheet_text_value(
                 cell.detail_parameter = Some(text.to_string());
             }
         }
-        "r" if path_ends_with(path, &["merge", "r"]) => {
+        "r" if spreadsheet_merge_property_path(path, "r") => {
             if let Some(merge) = merge
                 && let Ok(row) = value.parse::<i32>()
             {
                 merge.row = row;
             }
         }
-        "c" if path_ends_with(path, &["merge", "c"]) => {
+        "c" if spreadsheet_merge_property_path(path, "c") => {
             if let Some(merge) = merge
                 && let Ok(column) = value.parse::<i32>()
             {
                 merge.column = column;
             }
         }
-        "h" if path_ends_with(path, &["merge", "h"]) => {
+        "h" if spreadsheet_merge_property_path(path, "h") => {
             if let Some(merge) = merge
                 && let Ok(height) = value.parse::<i32>()
             {
                 merge.height = height.max(0);
             }
         }
-        "w" if path_ends_with(path, &["merge", "w"]) => {
+        "w" if spreadsheet_merge_property_path(path, "w") => {
             if let Some(merge) = merge
                 && let Ok(width) = value.parse::<i32>()
             {
@@ -2857,6 +2865,11 @@ fn spreadsheet_area_property_path(path: &[String], property: &str) -> bool {
         || path_ends_with(path, &["printArea", property])
 }
 
+fn spreadsheet_merge_property_path(path: &[String], property: &str) -> bool {
+    path_ends_with(path, &["merge", property])
+        || path_ends_with(path, &["verticalUnmerge", property])
+}
+
 fn normalize_spreadsheet_cell(cell: &mut SpreadsheetDocumentXmlCell) {
     if cell.parameter.is_some() {
         cell.text = None;
@@ -3074,19 +3087,38 @@ fn synthesize_spreadsheet_columns(size: usize) -> Vec<SpreadsheetDocumentXmlColu
         .collect()
 }
 
-fn format_spreadsheet_merges_for_moxel(merges: &[SpreadsheetDocumentXmlMerge]) -> String {
-    let mut fields = Vec::with_capacity(merges.len() + 1);
-    fields.push(merges.len().to_string());
+fn format_spreadsheet_merge_regions_for_moxel(
+    merges: &[SpreadsheetDocumentXmlMerge],
+    vertical_unmerges: &[SpreadsheetDocumentXmlMerge],
+) -> String {
+    let include_kind = !vertical_unmerges.is_empty();
+    let mut fields = Vec::with_capacity(merges.len() + vertical_unmerges.len() + 1);
+    fields.push((merges.len() + vertical_unmerges.len()).to_string());
     for merge in merges {
-        let begin_column = merge.column.max(0);
-        let begin_row = merge.row.max(0);
-        let end_column = begin_column + merge.width.max(0);
-        let end_row = begin_row + merge.height.max(0);
-        fields.push(format!(
-            "{{{begin_column},{begin_row},{end_column},{end_row}}}"
+        fields.push(format_spreadsheet_merge_region_for_moxel(
+            merge,
+            if include_kind { Some(0) } else { None },
         ));
     }
+    for merge in vertical_unmerges {
+        fields.push(format_spreadsheet_merge_region_for_moxel(merge, Some(2)));
+    }
     format!("{{{}}}", fields.join(","))
+}
+
+fn format_spreadsheet_merge_region_for_moxel(
+    merge: &SpreadsheetDocumentXmlMerge,
+    kind: Option<usize>,
+) -> String {
+    let begin_column = merge.column.max(0);
+    let begin_row = merge.row.max(0);
+    let end_column = begin_column + merge.width.max(0);
+    let end_row = begin_row + merge.height.max(0);
+    if let Some(kind) = kind {
+        format!("{{{begin_column},{begin_row},{end_column},{end_row},{kind}}}")
+    } else {
+        format!("{{{begin_column},{begin_row},{end_column},{end_row}}}")
+    }
 }
 
 fn format_spreadsheet_named_areas_for_moxel(areas: &[SpreadsheetDocumentXmlArea]) -> String {
@@ -21965,6 +21997,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{1,{30,0,0,0,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_vertical_unmerge_regions() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<merge>
+		<r>2</r>
+		<c>1</c>
+		<w>3</w>
+	</merge>
+	<verticalUnmerge>
+		<r>3</r>
+		<c>1</c>
+		<w>3</w>
+	</verticalUnmerge>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{2,{1,2,4,2,0},{1,3,4,3,2}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

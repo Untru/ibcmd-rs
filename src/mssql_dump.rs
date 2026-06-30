@@ -3486,6 +3486,7 @@ struct MoxelSpreadsheet {
     formats: Vec<MoxelFormat>,
     rows: Vec<MoxelRow>,
     merges: Vec<MoxelMerge>,
+    vertical_unmerges: Vec<MoxelMerge>,
     areas: Vec<MoxelArea>,
     print_area: Option<MoxelArea>,
     print_settings: Option<MoxelPrintSettings>,
@@ -12036,10 +12037,10 @@ fn parse_moxel_spreadsheet_text(
     if rows.is_empty() {
         return None;
     }
-    let merges = parse_moxel_merges(&fields);
+    let (merges, vertical_unmerges) = parse_moxel_merge_regions(&fields);
     let areas = parse_moxel_areas(&fields);
     let print_area = parse_moxel_print_area(&fields);
-    trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges);
+    trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges, &vertical_unmerges);
     compact_moxel_empty_row_ranges(&mut rows);
     let (column_sets, row_column_ids) = parse_moxel_column_sets(&fields);
     let fonts = parse_moxel_fonts(&fields);
@@ -12087,7 +12088,7 @@ fn parse_moxel_spreadsheet_text(
             max_index.max(row_max)
         });
     let default_format_width = parse_moxel_default_format_width(&fields, column_format_slots);
-    let height = moxel_spreadsheet_height(&rows, &merges, &areas);
+    let height = moxel_spreadsheet_height(&rows, &merges, &vertical_unmerges, &areas);
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
         .iter()
@@ -12129,6 +12130,7 @@ fn parse_moxel_spreadsheet_text(
         formats,
         rows,
         merges,
+        vertical_unmerges,
         areas,
         print_area,
         print_settings,
@@ -12351,6 +12353,7 @@ fn parse_moxel_row_column_set_ids(
 fn moxel_spreadsheet_height(
     rows: &[MoxelRow],
     merges: &[MoxelMerge],
+    vertical_unmerges: &[MoxelMerge],
     areas: &[MoxelArea],
 ) -> usize {
     let row_max = rows
@@ -12361,6 +12364,7 @@ fn moxel_spreadsheet_height(
         .unwrap_or(0);
     let merge_max = merges
         .iter()
+        .chain(vertical_unmerges.iter())
         .map(|merge| merge.row + merge.height)
         .max()
         .unwrap_or(0);
@@ -12372,12 +12376,18 @@ fn trim_moxel_trailing_empty_rows(
     rows: &mut Vec<MoxelRow>,
     areas: &[MoxelArea],
     merges: &[MoxelMerge],
+    vertical_unmerges: &[MoxelMerge],
 ) {
     let Some(material_limit) = areas
         .iter()
         .map(|area| area.end_row.max(0) as usize + 1)
         .chain(
             merges
+                .iter()
+                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
+        )
+        .chain(
+            vertical_unmerges
                 .iter()
                 .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
         )
@@ -13642,29 +13652,34 @@ fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
     })
 }
 
-fn parse_moxel_merges(fields: &[&str]) -> Vec<MoxelMerge> {
+fn parse_moxel_merge_regions(fields: &[&str]) -> (Vec<MoxelMerge>, Vec<MoxelMerge>) {
     fields
         .iter()
-        .filter_map(|field| parse_moxel_merge_list(field))
+        .filter_map(|field| parse_moxel_merge_region_list(field))
         .next()
         .unwrap_or_default()
 }
 
-fn parse_moxel_merge_list(text: &str) -> Option<Vec<MoxelMerge>> {
+fn parse_moxel_merge_region_list(text: &str) -> Option<(Vec<MoxelMerge>, Vec<MoxelMerge>)> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
     if count == 0 || count > 4096 || fields.len() != count + 1 {
         return None;
     }
     let mut merges = Vec::with_capacity(count);
+    let mut vertical_unmerges = Vec::new();
     for field in fields.iter().skip(1) {
-        let merge = parse_moxel_merge(field)?;
-        merges.push(merge);
+        let (merge, kind) = parse_moxel_merge_region(field)?;
+        match kind {
+            0 => merges.push(merge),
+            2 => vertical_unmerges.push(merge),
+            _ => return None,
+        }
     }
-    Some(merges)
+    Some((merges, vertical_unmerges))
 }
 
-fn parse_moxel_merge(text: &str) -> Option<MoxelMerge> {
+fn parse_moxel_merge_region(text: &str) -> Option<(MoxelMerge, usize)> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.len() < 4 {
         return None;
@@ -13676,12 +13691,19 @@ fn parse_moxel_merge(text: &str) -> Option<MoxelMerge> {
     if begin_row < 0 || begin_column < 0 || end_row < begin_row || end_column < begin_column {
         return None;
     }
-    Some(MoxelMerge {
-        row: begin_row,
-        column: begin_column,
-        height: end_row - begin_row,
-        width: end_column - begin_column,
-    })
+    let kind = fields
+        .get(4)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    Some((
+        MoxelMerge {
+            row: begin_row,
+            column: begin_column,
+            height: end_row - begin_row,
+            width: end_column - begin_column,
+        },
+        kind,
+    ))
 }
 
 fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
@@ -13764,6 +13786,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     xml.push_str(&format!("\t<vgRows>{}</vgRows>\r\n", spreadsheet.height));
     for merge in &spreadsheet.merges {
         push_moxel_merge_xml(&mut xml, merge);
+    }
+    for vertical_unmerge in &spreadsheet.vertical_unmerges {
+        push_moxel_vertical_unmerge_xml(&mut xml, vertical_unmerge);
     }
     for area in &spreadsheet.areas {
         push_moxel_area_xml(&mut xml, area);
@@ -14039,6 +14064,17 @@ fn push_moxel_drawing_xml(xml: &mut String, drawing: &MoxelDrawing) {
 
 fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
     xml.push_str("\t<merge>\r\n");
+    push_moxel_merge_body_xml(xml, merge);
+    xml.push_str("\t</merge>\r\n");
+}
+
+fn push_moxel_vertical_unmerge_xml(xml: &mut String, merge: &MoxelMerge) {
+    xml.push_str("\t<verticalUnmerge>\r\n");
+    push_moxel_merge_body_xml(xml, merge);
+    xml.push_str("\t</verticalUnmerge>\r\n");
+}
+
+fn push_moxel_merge_body_xml(xml: &mut String, merge: &MoxelMerge) {
     xml.push_str(&format!("\t\t<r>{}</r>\r\n", merge.row));
     xml.push_str(&format!("\t\t<c>{}</c>\r\n", merge.column));
     if merge.height > 0 {
@@ -14047,7 +14083,6 @@ fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
     if merge.width > 0 {
         xml.push_str(&format!("\t\t<w>{}</w>\r\n", merge.width));
     }
-    xml.push_str("\t</merge>\r\n");
 }
 
 fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
@@ -29090,6 +29125,47 @@ mod tests {
     }
 
     #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_vertical_unmerge() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<merge>
+		<r>2</r>
+		<c>1</c>
+		<w>3</w>
+	</merge>
+	<verticalUnmerge>
+		<r>3</r>
+		<c>1</c>
+		<w>3</w>
+	</verticalUnmerge>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert_eq!(extracted.matches("<merge>").count(), 1);
+        assert_eq!(extracted.matches("<verticalUnmerge>").count(), 1);
+        assert!(extracted.contains(
+            "<verticalUnmerge>\r\n\t\t<r>3</r>\r\n\t\t<c>1</c>\r\n\t\t<w>3</w>\r\n\t</verticalUnmerge>"
+        ));
+    }
+
+    #[test]
     fn spreadsheet_pack_extract_roundtrip_preserves_text_entity_spacing() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
@@ -29737,6 +29813,7 @@ mod tests {
             formats: vec![format],
             rows: Vec::new(),
             merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -29768,6 +29845,7 @@ mod tests {
             formats: vec![format],
             rows: Vec::new(),
             merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -29799,6 +29877,7 @@ mod tests {
             formats: vec![format],
             rows: Vec::new(),
             merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
