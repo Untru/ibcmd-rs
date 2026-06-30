@@ -16157,9 +16157,13 @@ struct ConfigurationProperties {
 
 struct CommonAttributeProperties {
     value_types: Vec<ConstantValueType>,
+    property_details: Option<CommonAttributePropertyDetails>,
     auto_use: &'static str,
     content: Vec<CommonAttributeContentItem>,
 }
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CommonAttributePropertyDetails;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct CommonAttributeContentItem {
@@ -19211,9 +19215,16 @@ fn parse_common_attribute_properties_from_text(
 
     Some(CommonAttributeProperties {
         value_types: typed.value_types,
+        property_details: parse_common_attribute_property_details(&fields),
         auto_use,
         content,
     })
+}
+
+fn parse_common_attribute_property_details(
+    fields: &[&str],
+) -> Option<CommonAttributePropertyDetails> {
+    (fields.len() > 3).then_some(CommonAttributePropertyDetails)
 }
 
 fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<&'static str> {
@@ -23449,6 +23460,9 @@ fn format_common_attribute_source_xml(
     };
     let mut xml =
         format_typed_metadata_source_xml("CommonAttribute", header, &typed, source_version);
+    if common_attribute.property_details.is_some() {
+        insert_metadata_properties_xml(&mut xml, format_common_attribute_property_details_xml());
+    }
     let mut insert = String::new();
     if common_attribute.content.is_empty() {
         insert.push_str("\t\t\t<Content/>\r\n");
@@ -23483,6 +23497,29 @@ fn format_common_attribute_source_xml(
         ),
     );
     xml
+}
+
+fn format_common_attribute_property_details_xml() -> &'static str {
+    "\t\t\t<PasswordMode>false</PasswordMode>\r\n\
+\t\t\t<Format/>\r\n\
+\t\t\t<EditFormat/>\r\n\
+\t\t\t<ToolTip/>\r\n\
+\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
+\t\t\t<Mask/>\r\n\
+\t\t\t<MultiLine>false</MultiLine>\r\n\
+\t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
+\t\t\t<MinValue xsi:nil=\"true\"/>\r\n\
+\t\t\t<MaxValue xsi:nil=\"true\"/>\r\n\
+\t\t\t<FillFromFillingValue>false</FillFromFillingValue>\r\n\
+\t\t\t<FillChecking>DontCheck</FillChecking>\r\n\
+\t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
+\t\t\t<ChoiceParameterLinks/>\r\n\
+\t\t\t<ChoiceParameters/>\r\n\
+\t\t\t<QuickChoice>Auto</QuickChoice>\r\n\
+\t\t\t<CreateOnInput>Auto</CreateOnInput>\r\n\
+\t\t\t<ChoiceForm/>\r\n\
+\t\t\t<LinkByType/>\r\n\
+\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n"
 }
 
 fn format_functional_options_parameter_source_xml(
@@ -36173,6 +36210,79 @@ mod tests {
         assert!(xml.contains("<AutoUse>Use</AutoUse>"));
         assert!(!xml.contains("<Use>"));
         assert!(!xml.contains("ConfigDumpInfo"));
+    }
+
+    #[test]
+    fn extracts_common_attribute_xml_with_native_property_details() {
+        let uuid = "33333333-3333-4333-8333-333333333333";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let plain = r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"DetailedScope",
+{1,"en","Detailed scope"},"",0,0,@ZERO_UUID@,0},
+{"Pattern",
+{"S",20,1}
+}
+}
+},
+{1,0},0,1,1,1,
+{1,@ZERO_UUID@},
+{1,@ZERO_UUID@},
+{1,@ZERO_UUID@},0,0,0,0,1},0}"#
+            .replace("@UUID@", uuid)
+            .replace("@ZERO_UUID@", zero_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("CommonAttributes").join("DetailedScope.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<PasswordMode>false</PasswordMode>"));
+            assert!(xml.contains("<Format/>"));
+            assert!(xml.contains("<EditFormat/>"));
+            assert!(xml.contains("<ToolTip/>"));
+            assert!(xml.contains("<MarkNegatives>false</MarkNegatives>"));
+            assert!(xml.contains("<Mask/>"));
+            assert!(xml.contains("<MultiLine>false</MultiLine>"));
+            assert!(xml.contains("<ExtendedEdit>false</ExtendedEdit>"));
+            assert!(xml.contains("<MinValue xsi:nil=\"true\"/>"));
+            assert!(xml.contains("<MaxValue xsi:nil=\"true\"/>"));
+            assert!(xml.contains("<FillFromFillingValue>false</FillFromFillingValue>"));
+            assert!(xml.contains("<FillChecking>DontCheck</FillChecking>"));
+            assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
+            assert!(xml.contains("<ChoiceParameterLinks/>"));
+            assert!(xml.contains("<ChoiceParameters/>"));
+            assert!(xml.contains("<QuickChoice>Auto</QuickChoice>"));
+            assert!(xml.contains("<CreateOnInput>Auto</CreateOnInput>"));
+            assert!(xml.contains("<ChoiceForm/>"));
+            assert!(xml.contains("<LinkByType/>"));
+            assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+            assert!(xml.contains("<Content/>"));
+            assert!(xml.contains("<AutoUse>Use</AutoUse>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
     }
 
     #[test]
