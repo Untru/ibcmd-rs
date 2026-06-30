@@ -4884,37 +4884,52 @@ fn extract_configuration_source_xml(
     }
     let mut header = parse_metadata_header_from_text(text, header_uuid)?;
     header.uuid = uuid.to_string();
-    let common_attributes =
-        parse_configuration_common_attribute_child_headers(text, uuid, header_uuid);
+    let child_objects = parse_configuration_child_objects(text, uuid, header_uuid);
     let mut xml = format_metadata_source_xml("Configuration", &header, source_version);
-    if !common_attributes.is_empty() {
-        let mut child_objects = String::new();
-        for common_attribute in &common_attributes {
+    if !child_objects.is_empty() {
+        let mut child_xml = String::new();
+        for child_object in &child_objects {
             push_metadata_header_child_object_xml(
-                &mut child_objects,
-                "CommonAttribute",
-                common_attribute,
+                &mut child_xml,
+                child_object.tag,
+                &child_object.header,
             );
         }
-        insert_metadata_child_objects_xml(&mut xml, "Configuration", &child_objects);
+        insert_metadata_child_objects_xml(&mut xml, "Configuration", &child_xml);
     }
     Some(xml)
 }
 
-fn parse_configuration_common_attribute_child_headers(
+struct ConfigurationChildObject {
+    tag: &'static str,
+    header: MetadataHeader,
+}
+
+fn parse_configuration_child_objects(
     text: &str,
     uuid: &str,
     header_uuid: &str,
-) -> Vec<MetadataHeader> {
+) -> Vec<ConfigurationChildObject> {
     nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
             if header.uuid == header_uuid {
                 return None;
             }
-            is_offset_inside_metadata_object_code(text, marker_start, 5).then_some(header)
+            configuration_child_object_tag(text, marker_start)
+                .map(|tag| ConfigurationChildObject { tag, header })
         })
         .collect()
+}
+
+fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
+    if is_offset_inside_metadata_object_code(text, marker_start, 12) {
+        return Some("CommonModule");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 5) {
+        return Some("CommonAttribute");
+    }
+    None
 }
 
 #[allow(dead_code)]
@@ -31133,13 +31148,14 @@ mod tests {
     }
 
     #[test]
-    fn extracts_configuration_xml_with_common_attribute_child_object() {
+    fn extracts_configuration_xml_with_root_child_objects() {
         let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let common_attribute_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let common_module_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
         let blob = deflate_for_test(
             format!(
-                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}},\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{common_attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"Common attribute comment\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"S\",20,1}}}}\r\n}}\r\n}},\r\n{{0,0}}\r\n}}\r\n}}"
+                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}},\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{common_attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"Common attribute comment\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"S\",20,1}}}}\r\n}}\r\n}},\r\n{{0,0}}\r\n}},\r\n{{12,\r\n{{3,\r\n{{1,0,{common_module_uuid}}},\"SalesModule\",{{1,\"en\",\"Sales module\"}},\"Module comment\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,0,1,1,1,2,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -31167,6 +31183,9 @@ mod tests {
         )));
         assert!(xml.contains("<Name>ExternalCode</Name>"));
         assert!(xml.contains("<Comment>Common attribute comment</Comment>"));
+        assert!(xml.contains(&format!(r#"<CommonModule uuid="{common_module_uuid}">"#)));
+        assert!(xml.contains("<Name>SalesModule</Name>"));
+        assert!(xml.contains("<Comment>Module comment</Comment>"));
         assert!(!xml.contains(header_uuid));
         assert!(!xml.contains("ConfigDumpInfo"));
     }
