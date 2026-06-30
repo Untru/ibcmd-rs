@@ -794,9 +794,9 @@ fn dump_table_rows_streamed(
     } else {
         None
     };
-    let broad_metadata_indexes = selected_file_names.is_empty()
+    let broad_metadata_indexes_without_command_refs = selected_file_names.is_empty()
         || selected_configuration_index_needs
-            .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata)
+            .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata_without_command_refs)
         || selected_metadata_index_needs
             .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata)
         || (selected_configuration_index_needs.is_none()
@@ -806,18 +806,40 @@ fn dump_table_rows_streamed(
                 &file_names,
                 &selected_metadata_texts,
             ));
+    let mut selected_configuration_body_rows = Vec::new();
+    if !broad_metadata_indexes_without_command_refs
+        && extract_metadata_xml
+        && selected_configuration_index_needs
+            .is_some_and(|needs| needs.command_refs || needs.metadata_refs)
+    {
+        let metadata_fetch_started = Instant::now();
+        selected_configuration_body_rows =
+            fetch_rows_direct_hex(sqlcmd, server, user, password, database, table, &file_names)?;
+        timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+    }
+    let selected_command_interface_refs =
+        if selected_configuration_index_needs.is_some_and(|needs| needs.command_refs) {
+            selected_configuration_command_interface_command_refs(&selected_configuration_body_rows)
+        } else {
+            Some(BTreeSet::new())
+        };
+    let mut broad_metadata_indexes = broad_metadata_indexes_without_command_refs;
+    if selected_command_interface_refs.is_none() {
+        broad_metadata_indexes = true;
+    }
     if broad_metadata_indexes && !selected_file_names.is_empty() {
         let metadata_fetch_started = Instant::now();
         metadata_rows = fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
         timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
     } else if extract_metadata_xml
-        && selected_configuration_index_needs.is_some_and(|needs| needs.metadata_refs)
+        && selected_configuration_index_needs
+            .is_some_and(|needs| needs.command_refs || needs.metadata_refs)
     {
         let metadata_fetch_started = Instant::now();
-        let selected_body_rows =
-            fetch_rows_direct_hex(sqlcmd, server, user, password, database, table, &file_names)?;
         let targeted_metadata_file_names =
-            selected_configuration_direct_metadata_reference_file_names(&selected_body_rows);
+            selected_configuration_direct_metadata_reference_file_names(
+                &selected_configuration_body_rows,
+            );
         if !targeted_metadata_file_names.is_empty() {
             metadata_rows = fetch_rows_direct_hex(
                 sqlcmd,
@@ -830,6 +852,39 @@ fn dump_table_rows_streamed(
             )?;
         }
         timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+        if selected_configuration_index_needs.is_some_and(|needs| needs.command_refs) {
+            let metadata_texts_started = Instant::now();
+            let direct_metadata_texts = build_metadata_text_rows(&metadata_rows);
+            let direct_command_refs =
+                build_command_interface_reference_index_from_texts(&direct_metadata_texts);
+            let direct_metadata_refs =
+                build_metadata_command_reference_index_from_texts(&direct_metadata_texts);
+            let unresolved_command_refs = unresolved_command_interface_reference_uuids(
+                selected_command_interface_refs
+                    .as_ref()
+                    .expect("checked selected command interface refs"),
+                &direct_command_refs,
+                &direct_metadata_refs,
+            );
+            timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+            if !unresolved_command_refs.is_empty() {
+                let metadata_fetch_started = Instant::now();
+                let broad_metadata_rows =
+                    fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+                let metadata_texts_started = Instant::now();
+                if let Some(owner_rows) = selected_command_owner_metadata_rows(
+                    &broad_metadata_rows,
+                    &unresolved_command_refs,
+                ) {
+                    metadata_rows = merge_config_rows_by_file_name(metadata_rows, owner_rows);
+                } else {
+                    metadata_rows = broad_metadata_rows;
+                    broad_metadata_indexes = true;
+                }
+                timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+            }
+        }
     }
     let write_index_rows = rows_for_source_indexes(&headers, &selected_metadata_rows);
     let metadata_texts_started = Instant::now();
@@ -1222,8 +1277,11 @@ impl SourceReferenceIndexNeeds {
     }
 
     fn needs_broad_metadata(self) -> bool {
-        self.command_refs
-            || self.type_index
+        self.command_refs || self.needs_broad_metadata_without_command_refs()
+    }
+
+    fn needs_broad_metadata_without_command_refs(self) -> bool {
+        self.type_index
             || self.form_refs
             || self.template_refs
             || self.subsystem_refs
@@ -1300,7 +1358,7 @@ fn selected_configuration_direct_metadata_reference_file_names(
         let Some((_, suffix)) = row.file_name.rsplit_once('.') else {
             continue;
         };
-        if !matches!(suffix, "a") {
+        if !matches!(suffix, "9" | "a") {
             continue;
         }
         let Ok(bytes) = decode_hex(&row.binary_hex) else {
@@ -1315,6 +1373,230 @@ fn selected_configuration_direct_metadata_reference_file_names(
         file_names.extend(uuid_like_values(&text));
     }
     file_names
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct CommandInterfaceCommandReference {
+    code: String,
+    uuid: String,
+}
+
+fn selected_configuration_command_interface_command_refs(
+    rows: &[ConfigRow],
+) -> Option<BTreeSet<CommandInterfaceCommandReference>> {
+    let mut refs = BTreeSet::new();
+    for row in rows {
+        let Some((_, suffix)) = row.file_name.rsplit_once('.') else {
+            continue;
+        };
+        if suffix != "9" {
+            continue;
+        }
+        let bytes = decode_hex(&row.binary_hex).ok()?;
+        refs.extend(command_interface_command_refs_from_blob(&bytes)?);
+    }
+    Some(refs)
+}
+
+fn command_interface_command_refs_from_blob(
+    bytes: &[u8],
+) -> Option<BTreeSet<CommandInterfaceCommandReference>> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    if fields.first()?.trim() != "7" {
+        return None;
+    }
+
+    command_interface_order_command_refs(&fields)
+        .or_else(|| command_interface_visibility_command_refs(&fields))
+}
+
+fn command_interface_order_command_refs(
+    fields: &[&str],
+) -> Option<BTreeSet<CommandInterfaceCommandReference>> {
+    if fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(4)?.trim().parse::<usize>().ok()?;
+    let default_group_uuid = fields.get(5)?.trim();
+    if !is_uuid_text(default_group_uuid) {
+        return None;
+    }
+    let mut refs = BTreeSet::new();
+    let mut index = 6usize;
+    for _ in 0..count {
+        insert_command_interface_command_ref(fields.get(index)?, &mut refs)?;
+        index += 1;
+        if !is_uuid_text(fields.get(index)?.trim()) {
+            return None;
+        }
+        index += 1;
+    }
+    Some(refs)
+}
+
+fn command_interface_visibility_command_refs(
+    fields: &[&str],
+) -> Option<BTreeSet<CommandInterfaceCommandReference>> {
+    let count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    let mut refs = BTreeSet::new();
+    let mut index = 3usize;
+    for _ in 0..count {
+        insert_command_interface_command_ref(fields.get(index)?, &mut refs)?;
+        index += 1;
+        parse_command_interface_common_flag(fields.get(index)?)?;
+        index += 1;
+    }
+    collect_command_interface_placement_tail_refs(fields, &mut index, &mut refs);
+    collect_command_interface_order_tail_refs(fields, &mut index, &mut refs);
+    Some(refs)
+}
+
+fn collect_command_interface_placement_tail_refs(
+    fields: &[&str],
+    index: &mut usize,
+    refs: &mut BTreeSet<CommandInterfaceCommandReference>,
+) -> Option<()> {
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    for _ in 0..count {
+        insert_command_interface_command_ref(fields.get(*index)?, refs)?;
+        *index += 1;
+        if !is_uuid_text(fields.get(*index)?.trim()) {
+            return None;
+        }
+        *index += 1;
+        command_interface_placement_name(fields.get(*index)?.trim())?;
+        *index += 1;
+    }
+    Some(())
+}
+
+fn collect_command_interface_order_tail_refs(
+    fields: &[&str],
+    index: &mut usize,
+    refs: &mut BTreeSet<CommandInterfaceCommandReference>,
+) -> Option<()> {
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    for _ in 0..count {
+        if !is_uuid_text(fields.get(*index)?.trim()) {
+            return None;
+        }
+        *index += 1;
+        insert_command_interface_command_ref(fields.get(*index)?, refs)?;
+        *index += 1;
+    }
+    Some(())
+}
+
+fn insert_command_interface_command_ref(
+    field: &str,
+    refs: &mut BTreeSet<CommandInterfaceCommandReference>,
+) -> Option<()> {
+    let command_ref = split_1c_braced_fields(field, 0)?;
+    let code = command_ref.first()?.trim();
+    let uuid = command_ref.get(1).map(|value| value.trim())?;
+    if !code.chars().all(|ch| ch.is_ascii_digit()) || !is_uuid_text(uuid) {
+        return None;
+    }
+    refs.insert(CommandInterfaceCommandReference {
+        code: code.to_string(),
+        uuid: uuid.to_string(),
+    });
+    Some(())
+}
+
+fn unresolved_command_interface_reference_uuids(
+    refs: &BTreeSet<CommandInterfaceCommandReference>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> BTreeSet<String> {
+    refs.iter()
+        .filter(|reference| {
+            !command_interface_reference_is_resolved(reference, command_refs, metadata_refs)
+        })
+        .map(|reference| reference.uuid.clone())
+        .collect()
+}
+
+fn command_interface_reference_is_resolved(
+    reference: &CommandInterfaceCommandReference,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> bool {
+    if command_refs.contains_key(&reference.uuid) {
+        return true;
+    }
+    let Some(metadata) = metadata_refs.get(&reference.uuid) else {
+        return false;
+    };
+    (matches!(reference.code.as_str(), "0" | "100")
+        && command_interface_standard_command(&metadata.kind).is_some())
+        || reference.code == "1"
+}
+
+fn selected_command_owner_metadata_rows(
+    rows: &[ConfigRow],
+    unresolved_command_refs: &BTreeSet<String>,
+) -> Option<Vec<ConfigRow>> {
+    let mut found = BTreeSet::new();
+    let mut owner_rows = Vec::new();
+    for row in rows {
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        let text = text.trim_start_matches('\u{feff}').to_string();
+        if !unresolved_command_refs
+            .iter()
+            .any(|uuid| text.contains(uuid))
+        {
+            continue;
+        }
+        let Some(text_row) = metadata_text_row_from_text(&row.file_name, text) else {
+            continue;
+        };
+        let matching_refs = command_interface_reference_entries_from_text(&text_row)
+            .into_iter()
+            .filter_map(|(uuid, _)| unresolved_command_refs.contains(&uuid).then_some(uuid))
+            .collect::<BTreeSet<_>>();
+        if matching_refs.is_empty() {
+            continue;
+        }
+        found.extend(matching_refs);
+        owner_rows.push(row.clone());
+    }
+    if unresolved_command_refs.is_subset(&found) {
+        Some(owner_rows)
+    } else {
+        None
+    }
+}
+
+fn merge_config_rows_by_file_name(
+    mut left: Vec<ConfigRow>,
+    right: Vec<ConfigRow>,
+) -> Vec<ConfigRow> {
+    let mut rows = BTreeMap::<String, ConfigRow>::new();
+    for row in left.drain(..).chain(right) {
+        rows.insert(row.file_name.clone(), row);
+    }
+    rows.into_values().collect()
 }
 
 fn selected_body_suffix_is_self_contained(
@@ -1344,6 +1626,10 @@ fn metadata_text_row_from_blob(file_name: &str, blob: &[u8]) -> Option<MetadataT
     let inflated = inflate_raw_deflate(blob).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}').to_string();
+    metadata_text_row_from_text(file_name, text)
+}
+
+fn metadata_text_row_from_text(file_name: &str, text: String) -> Option<MetadataTextRow> {
     let object_code = parse_metadata_object_code(&text);
     let header = parse_metadata_header_from_text(&text, file_name);
     let (kind, folder) = match object_code {
@@ -31890,6 +32176,168 @@ mod tests {
             index.get(uuid).map(String::as_str),
             Some("CommonCommand.OpenNew")
         );
+    }
+
+    #[test]
+    fn selected_command_interface_refs_collect_command_fields_only() {
+        let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let group_uuid = "1af6d528-0b86-4fba-ab95-bd7475db03ba";
+        let body = deflate_for_test(
+            format!(
+                "{{7,1,1,{{0,{command_uuid}}},{{0,{{0,{{\"B\",1}},0}}}},1,1,{{0,{command_uuid}}},{group_uuid},1,1,1,{group_uuid},{{0,{command_uuid}}},0,1,1,{group_uuid},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let refs = command_interface_command_refs_from_blob(&body).unwrap();
+
+        assert_eq!(refs.len(), 1);
+        assert!(refs.contains(&CommandInterfaceCommandReference {
+            code: "0".to_string(),
+            uuid: command_uuid.to_string(),
+        }));
+        assert!(!refs.iter().any(|reference| reference.uuid == group_uuid));
+    }
+
+    #[test]
+    fn command_owner_lookup_returns_only_resolved_owner_rows() {
+        let owner_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let unrelated_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let owner_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,835478cc-434a-480c-ad61-99801cd685ed,92b15a50-2234-40c9-af13-3d746d4b870f,\r\n{{0,\r\n{{3,\r\n{{1,0,{owner_uuid}}},\"Scanning\",{{1,\"en\",\"Scanning\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,86df3c66-2c45-49c1-9e7d-5d1892acb646,6ae2f4ed-a57a-49ed-a854-8795bf1e1519,00000000-0000-0000-0000-000000000000,\r\n{{0}},\r\n{{0}}\r\n}},5,\r\n{{45556acb-826a-4f73-898a-6025fc9536e1,1,\r\n{{\r\n{{0,\r\n{{1,\r\n{{2,{command_uuid},078a6af8-d22c-4248-9c33-7e90075a3d2c}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Scan sheet\"}},1,\r\n{{0,0,0}},0,\r\n{{1,bc80566a-86a5-4e87-acd4-872239385a2e}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"ScanSheet\",{{1,\"en\",\"Scan sheet\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0}}\r\n}}\r\n}},0}}\r\n}}\r\n}},\r\n{{d5b0e5ed-256d-401c-9c36-f630cafd8a62,3,0f193c89-b664-448e-bed3-2147430367f7,4c9b2506-75a8-47d3-a5d5-d946088ba14a,36eacaa1-2efd-49c0-82de-2f8972535bf2}},\r\n{{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let unrelated_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{unrelated_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: unrelated_uuid.to_string(),
+                part_no: 0,
+                data_size: unrelated_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&unrelated_metadata),
+            },
+            ConfigRow {
+                file_name: owner_uuid.to_string(),
+                part_no: 0,
+                data_size: owner_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&owner_metadata),
+            },
+        ];
+
+        let owners = selected_command_owner_metadata_rows(
+            &rows,
+            &BTreeSet::from([command_uuid.to_string()]),
+        )
+        .unwrap();
+
+        assert_eq!(owners.len(), 1);
+        assert_eq!(owners[0].file_name, owner_uuid);
+        assert!(
+            selected_command_owner_metadata_rows(
+                &rows,
+                &BTreeSet::from(["dddddddd-dddd-4ddd-dddd-dddddddddddd".to_string()])
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn targeted_command_owner_rows_match_broad_command_interface_output() {
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let process_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let processor_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let command_uuid = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let process_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{30,\r\n{{3,\r\n{{1,0,{process_uuid}}},\"TaskFlow\",{{1,\"en\",\"Task flow\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let processor_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,835478cc-434a-480c-ad61-99801cd685ed,92b15a50-2234-40c9-af13-3d746d4b870f,\r\n{{0,\r\n{{3,\r\n{{1,0,{processor_uuid}}},\"Scanning\",{{1,\"en\",\"Scanning\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,86df3c66-2c45-49c1-9e7d-5d1892acb646,6ae2f4ed-a57a-49ed-a854-8795bf1e1519,00000000-0000-0000-0000-000000000000,\r\n{{0}},\r\n{{0}}\r\n}},5,\r\n{{45556acb-826a-4f73-898a-6025fc9536e1,1,\r\n{{\r\n{{0,\r\n{{1,\r\n{{2,{command_uuid},078a6af8-d22c-4248-9c33-7e90075a3d2c}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Scan sheet\"}},1,\r\n{{0,0,0}},0,\r\n{{1,bc80566a-86a5-4e87-acd4-872239385a2e}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"ScanSheet\",{{1,\"en\",\"Scan sheet\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0}}\r\n}}\r\n}},0}}\r\n}}\r\n}},\r\n{{d5b0e5ed-256d-401c-9c36-f630cafd8a62,3,0f193c89-b664-448e-bed3-2147430367f7,4c9b2506-75a8-47d3-a5d5-d946088ba14a,36eacaa1-2efd-49c0-82de-2f8972535bf2}},\r\n{{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,0}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let command_interface = deflate_for_test(
+            format!(
+                "{{7,1,3,{{0,{catalog_uuid}}},{{0,{{0,{{\"B\",0}},0}}}},{{1,{process_uuid}}},{{0,{{0,{{\"B\",1}},0}}}},{{0,{command_uuid}}},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}}"
+            )
+            .as_bytes(),
+        );
+        let catalog_row = ConfigRow {
+            file_name: catalog_uuid.to_string(),
+            part_no: 0,
+            data_size: catalog_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&catalog_metadata),
+        };
+        let process_row = ConfigRow {
+            file_name: process_uuid.to_string(),
+            part_no: 0,
+            data_size: process_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&process_metadata),
+        };
+        let processor_row = ConfigRow {
+            file_name: processor_uuid.to_string(),
+            part_no: 0,
+            data_size: processor_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&processor_metadata),
+        };
+        let broad_rows = vec![
+            catalog_row.clone(),
+            process_row.clone(),
+            processor_row.clone(),
+        ];
+        let direct_rows = vec![catalog_row, process_row];
+        let direct_texts = build_metadata_text_rows(&direct_rows);
+        let unresolved = unresolved_command_interface_reference_uuids(
+            &command_interface_command_refs_from_blob(&command_interface).unwrap(),
+            &build_command_interface_reference_index_from_texts(&direct_texts),
+            &build_metadata_command_reference_index_from_texts(&direct_texts),
+        );
+        let owner_rows = selected_command_owner_metadata_rows(&broad_rows, &unresolved).unwrap();
+        let targeted_rows = merge_config_rows_by_file_name(direct_rows, owner_rows);
+        let broad_texts = build_metadata_text_rows(&broad_rows);
+        let targeted_texts = build_metadata_text_rows(&targeted_rows);
+
+        let broad = format_command_interface_xml(
+            &parse_command_interface_blob(
+                &command_interface,
+                &build_command_interface_reference_index_from_texts(&broad_texts),
+                &build_metadata_command_reference_index_from_texts(&broad_texts),
+            )
+            .unwrap(),
+        );
+        let targeted = format_command_interface_xml(
+            &parse_command_interface_blob(
+                &command_interface,
+                &build_command_interface_reference_index_from_texts(&targeted_texts),
+                &build_metadata_command_reference_index_from_texts(&targeted_texts),
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(unresolved, BTreeSet::from([command_uuid.to_string()]));
+        assert_eq!(targeted, broad);
+        assert!(targeted.contains(r#"<Command name="Catalog.Products.StandardCommand.OpenList">"#));
+        assert!(
+            targeted
+                .contains(r#"<Command name="BusinessProcess.TaskFlow.StandardCommand.Create">"#)
+        );
+        assert!(targeted.contains(r#"<Command name="DataProcessor.Scanning.Command.ScanSheet">"#));
     }
 
     #[test]
