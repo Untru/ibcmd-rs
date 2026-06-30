@@ -9662,7 +9662,7 @@ fn format_form_layout_new_input_field_item(
     item_uuid: &str,
     attribute_ids_by_name: &BTreeMap<String, String>,
 ) -> String {
-    if item.read_only.is_some() || item.skip_on_input.is_some() || item.data_path.is_some() {
+    if form_input_field_needs_extended_layout(item) {
         return format_form_layout_new_extended_input_field_item(
             item,
             item_uuid,
@@ -9685,6 +9685,42 @@ fn format_form_layout_new_input_field_item(
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
     text
+}
+
+fn form_input_field_needs_extended_layout(item: &FormXmlChildItem) -> bool {
+    item.read_only.is_some()
+        || item.skip_on_input.is_some()
+        || item.data_path.is_some()
+        || form_input_field_has_extended_options(item)
+}
+
+fn form_input_field_has_extended_options(item: &FormXmlChildItem) -> bool {
+    item.auto_max_width == Some(false)
+        || item.width.is_some()
+        || item.height.is_some()
+        || item.max_width.is_some()
+        || item.auto_max_height == Some(false)
+        || item.max_height.is_some()
+        || item.horizontal_stretch.is_some()
+        || item.vertical_stretch.is_some()
+        || item.password_mode.is_some()
+        || item.multi_line.is_some()
+        || item.wrap.is_some()
+        || item.text_edit.is_some()
+        || item.auto_cell_height.is_some()
+        || item.drop_list_button.is_some()
+        || item.clear_button.is_some()
+        || item.open_button.is_some()
+        || item.create_button.is_some()
+        || item.choice_button.is_some()
+        || item.choice_list_button.is_some()
+        || item.spin_button.is_some()
+        || item.list_choice_mode.is_some()
+        || item.quick_choice.is_some()
+        || item.choose_type.is_some()
+        || item.mark_required_complete.is_some()
+        || item.auto_mark_incomplete.is_some()
+        || item.choice_button_representation.is_some()
 }
 
 fn format_form_layout_new_extended_input_field_item(
@@ -9722,9 +9758,104 @@ fn format_form_layout_new_extended_input_field_item(
         read_only,
         skip_on_input
     );
+    if form_input_field_has_extended_options(item) {
+        for _ in 25..39 {
+            text.push_str(",0");
+        }
+        text.push(',');
+        text.push_str(&format_form_layout_new_input_field_extended_options(item));
+    }
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
     text
+}
+
+fn format_form_layout_new_input_field_extended_options(item: &FormXmlChildItem) -> String {
+    let mut fields = vec!["2".to_string(); 54];
+    fields[0] = "38".to_string();
+    if let Some(width) = &item.width {
+        fields[2] = width.clone();
+    }
+    if let Some(height) = &item.height {
+        fields[3] = height.clone();
+    }
+    if let Some(horizontal_stretch) = item.horizontal_stretch {
+        fields[4] = if horizontal_stretch { "1" } else { "0" }.to_string();
+    }
+    if let Some(vertical_stretch) = item.vertical_stretch {
+        fields[5] = if vertical_stretch { "1" } else { "0" }.to_string();
+    }
+    if let Some(wrap) = item.wrap {
+        fields[6] = if wrap { "1" } else { "0" }.to_string();
+    }
+    if let Some(password_mode) = item.password_mode {
+        fields[7] = if password_mode { "1" } else { "0" }.to_string();
+    }
+    if let Some(multi_line) = item.multi_line {
+        fields[8] = if multi_line { "1" } else { "0" }.to_string();
+    }
+    if let Some(choice_list_button) = item.choice_list_button {
+        fields[11] = if choice_list_button { "1" } else { "0" }.to_string();
+    }
+    if let Some(choice_button) = item.choice_button {
+        fields[12] = if choice_button { "1" } else { "0" }.to_string();
+    }
+    if let Some(clear_button) = item.clear_button {
+        fields[13] = if clear_button { "1" } else { "0" }.to_string();
+    }
+    if let Some(spin_button) = item.spin_button {
+        fields[14] = if spin_button { "1" } else { "0" }.to_string();
+    }
+    if let Some(open_button) = item.open_button {
+        fields[15] = if open_button { "1" } else { "0" }.to_string();
+    }
+    if let Some(list_choice_mode) = item.list_choice_mode {
+        fields[19] = if list_choice_mode { "1" } else { "0" }.to_string();
+    }
+    if let Some(quick_choice) = item.quick_choice {
+        fields[23] = if quick_choice { "1" } else { "0" }.to_string();
+    }
+    if let Some(auto_cell_height) = item.auto_cell_height {
+        fields[28] = if auto_cell_height { "1" } else { "0" }.to_string();
+    }
+    if let Some(mark_required_complete) = item.mark_required_complete {
+        fields[31] = if mark_required_complete { "1" } else { "0" }.to_string();
+    }
+    if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
+        fields[31] = if auto_mark_incomplete { "1" } else { "0" }.to_string();
+    }
+    if let Some(choose_type) = item.choose_type {
+        fields[32] = if choose_type { "1" } else { "0" }.to_string();
+    }
+    if let Some(text_edit) = item.text_edit {
+        fields[41] = if text_edit { "1" } else { "0" }.to_string();
+    }
+    if let Some(create_button) = item.create_button {
+        fields[45] = if create_button { "1" } else { "0" }.to_string();
+    }
+    if let Some(choice_button_representation) = item.choice_button_representation {
+        fields[46] =
+            form_choice_button_representation_code(choice_button_representation).to_string();
+    }
+    if let Some(drop_list_button) = item.drop_list_button {
+        fields[47] = if drop_list_button { "1" } else { "0" }.to_string();
+    }
+    if item.auto_max_width == Some(false) {
+        fields[49] = "0".to_string();
+        if item.max_width.is_none() {
+            fields[50] = "0".to_string();
+        }
+    }
+    if let Some(max_width) = &item.max_width {
+        fields[50] = max_width.clone();
+    }
+    if item.auto_max_height == Some(false) {
+        fields[52] = "0".to_string();
+    }
+    if let Some(max_height) = &item.max_height {
+        fields[53] = max_height.clone();
+    }
+    format!("{{{}}}", fields.join(","))
 }
 
 fn format_form_layout_new_label_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
@@ -25925,6 +26056,41 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             assert_eq!(&parsed.layout[input_fields[15].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_input_field_extended_options() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<InputField name="Author" id="78">
+			<Width>22</Width>
+			<HorizontalStretch>false</HorizontalStretch>
+			<AutoMaxWidth>false</AutoMaxWidth>
+			<MaxWidth>54</MaxWidth>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let options_fields = super::scan_braced_fields(&parsed.layout, input_fields[39].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[5].clone()], "2");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""Author""#);
+        assert_eq!(&parsed.layout[options_fields[0].clone()], "38");
+        assert_eq!(&parsed.layout[options_fields[2].clone()], "22");
+        assert_eq!(&parsed.layout[options_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[options_fields[49].clone()], "0");
+        assert_eq!(&parsed.layout[options_fields[50].clone()], "54");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
