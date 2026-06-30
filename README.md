@@ -62,6 +62,9 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 21 | Form.xml | nested `AutoCommandBar` items preserve `HorizontalAlign` and `Autofill` settings |
+| 21 | Object metadata XML | `DataProcessor` emits `UseStandardCommands` from the metadata blob |
+| 21 | Source staging readiness | configuration `Ext/MobileClientSignature.bin` rows are covered as base-free raw-deflated bodies |
 | 20 | Form.xml | new `UsualGroup` items preserve extended `Behavior`, `Representation`, `ShowTitle=false`, and nested children |
 | 20 | Partial metadata XML | register-family metadata emits `UseStandardCommands` from the metadata blob |
 | 20 | Source staging readiness | configuration `Ext/StandaloneConfigurationContent.bin` rows are covered as base-free raw-deflated bodies |

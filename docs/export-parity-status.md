@@ -85,6 +85,9 @@ Incremental selected verification after this snapshot:
 | Round 20 Form.xml slice | unit-level packer verification | new `UsualGroup` items preserve extended `Behavior`, `Representation`, `ShowTitle=false`, and nested children |
 | Round 20 partial metadata slice | unit-level metadata XML verification | register-family metadata emits `UseStandardCommands` from the metadata blob |
 | Round 20 source staging readiness slice | unit-level staging verification | configuration `Ext/StandaloneConfigurationContent.bin` rows are covered as base-free raw-deflated bodies |
+| Round 21 Form.xml slice | unit-level packer verification | nested `AutoCommandBar` items preserve `HorizontalAlign` and `Autofill` settings |
+| Round 21 object metadata slice | unit-level metadata XML verification | `DataProcessor` emits `UseStandardCommands` from the metadata blob |
+| Round 21 source staging readiness slice | unit-level staging verification | configuration `Ext/MobileClientSignature.bin` rows are covered as base-free raw-deflated bodies |
 
 Performance note for selected extraction:
 
@@ -221,5 +224,8 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #16 | Form.xml new `UsualGroup` extended properties generation | merged to `master` in round 20 |
 | #18 | register-family `UseStandardCommands` metadata XML | merged to `master` in round 20 |
 | #21 | configuration StandaloneConfigurationContent raw-deflated base-free coverage | merged to `master` in round 20 |
+| #16 | Form.xml nested `AutoCommandBar` settings | merged to `master` in round 21 |
+| #15 | DataProcessor `UseStandardCommands` metadata XML | merged to `master` in round 21 |
+| #21 | configuration MobileClientSignature raw-deflated base-free coverage | merged to `master` in round 21 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
