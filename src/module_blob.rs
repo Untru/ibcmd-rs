@@ -7095,6 +7095,7 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "LabelField"
             | "CheckBoxField"
             | "TextDocumentField"
+            | "PictureDecoration"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -11201,6 +11202,10 @@ fn form_layout_child_item_tag<'a>(
             "5" => Some("UsualGroup"),
             "6" => Some("ButtonGroup"),
             "8" => Some("ContextMenu"),
+            _ => None,
+        },
+        "12" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "1" => Some("PictureDecoration"),
             _ => None,
         },
         "34" => Some("Button"),
@@ -23130,6 +23135,58 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_picture_decoration() -> anyhow::Result<()> {
+        let item_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+        let layout = format!(
+            r#"{{59,1,{item_uuid},{{12,{{165,{item_uuid}}},0,0,0,1,"OldPicture",{{1,"en","Old picture"}},{{1,0}},{{#base64:R0lGODlh}},"OnClick","OldClick"}}}}"#
+        );
+        let base_text = format!(r#"{{4,{layout},"Old module",{{0}}}}"#);
+        let base = super::deflate_raw(base_text.as_bytes())?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<ChildItems>
+		<PictureDecoration name="NewPicture" id="165">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>New picture</v8:content>
+				</v8:item>
+			</Title>
+			<Picture>
+				<xr:Abs>Picture.gif</xr:Abs>
+				<xr:LoadTransparent>false</xr:LoadTransparent>
+			</Picture>
+			<Events>
+				<Event name="OnClick">NewClick</Event>
+			</Events>
+		</PictureDecoration>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#""NewPicture""#),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed.layout.contains(r#"{1,"en","New picture"}"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(parsed.layout.contains(r#""OnClick","NewClick""#));
+        assert!(!parsed.layout.contains("OldPicture"));
+        assert!(!parsed.layout.contains("Old picture"));
+        assert!(!parsed.layout.contains("OldClick"));
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
