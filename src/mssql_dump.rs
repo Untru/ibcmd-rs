@@ -8795,6 +8795,7 @@ struct FormChildItem {
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
+    default_item: Option<bool>,
     update_on_data_change: Option<&'static str>,
     user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
@@ -10580,6 +10581,11 @@ fn parse_form_child_item_with_attrs(
         },
         use_alternation_row_color: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, "9")
+        } else {
+            None
+        },
+        default_item: if tag == "Table" {
+            parse_form_table_property_bag_bool(&fields, "11").filter(|value| *value)
         } else {
             None
         },
@@ -12517,6 +12523,9 @@ fn format_form_child_item_xml(
                     "false"
                 }
             ));
+        }
+        if item.default_item == Some(true) {
+            xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
         }
         if let Some(update_on_data_change) = item.update_on_data_change {
             xml.push_str(&format!(
@@ -28331,7 +28340,7 @@ mod tests {
         attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
 
         let item = parse_form_child_item_with_attrs(
-            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,3,{-22}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",0},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",141},19,{"S",""},20,{"B",1},{0}}"##,
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,3,{-22}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",141},19,{"S",""},20,{"B",1},{0}}"##,
             None,
             None,
             &attribute_names_by_id,
@@ -28349,6 +28358,7 @@ mod tests {
         assert_eq!(item.auto_refresh, Some(false));
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
         assert_eq!(item.use_alternation_row_color, Some(false));
+        assert_eq!(item.default_item, Some(true));
         assert_eq!(item.update_on_data_change, Some("Auto"));
         assert_eq!(item.allow_getting_current_row_url, Some(true));
 
@@ -28357,6 +28367,7 @@ mod tests {
         assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
         assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
+        assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
         assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
     }
@@ -29924,6 +29935,7 @@ mod tests {
             auto_refresh: None,
             auto_refresh_period: None,
             use_alternation_row_color: None,
+            default_item: None,
             update_on_data_change: None,
             user_settings_group: None,
             allow_getting_current_row_url: None,
@@ -29990,6 +30002,7 @@ mod tests {
                     auto_refresh: None,
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
+                    default_item: None,
                     update_on_data_change: None,
                     user_settings_group: None,
                     allow_getting_current_row_url: None,
@@ -30057,6 +30070,7 @@ mod tests {
                     auto_refresh: None,
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
+                    default_item: None,
                     update_on_data_change: None,
                     user_settings_group: None,
                     allow_getting_current_row_url: None,
