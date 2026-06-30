@@ -32,15 +32,14 @@ import hierarchy, not as a production runtime dependency.
 
 | Object / group | Status | Ready | Remaining |
 |---|---|---:|---:|
-| CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, EventSubscriptions, FunctionalOptions, ScheduledJobs, StyleItems, CommandGroups, FunctionalOptionsParameters, Languages, SessionParameters, DocumentNumerators, WSReferences, IntegrationServices, Ext | done / byte-identical | 100.0% | 0 |
+| CommandGroups, CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, DocumentNumerators, EventSubscriptions, Ext, FunctionalOptions, FunctionalOptionsParameters, IntegrationServices, Languages, ScheduledJobs, SessionParameters, StyleItems, WSReferences, XDTOPackages | done / byte-identical | 100.0% | 0 |
 | Enums | partial | 93.9% | 73 |
 | CommonTemplates | partial | 82.0% | 89 |
-| Roles | partial | 78.6% | 476 |
+| Roles | partial | 78.9% | 468 |
 | AccumulationRegisters | partial | 59.5% | 182 |
 | Reports | partial | 55.0% | 1063 |
-| XDTOPackages | partial | 50.0% | 407 |
-| WebServices | partial | 50.0% | 18 |
 | HTTPServices | partial | 50.0% | 5 |
+| WebServices | partial | 50.0% | 18 |
 | ExchangePlans | partial | 49.7% | 184 |
 | DocumentJournals | partial | 49.6% | 61 |
 | Tasks | partial | 46.9% | 26 |
@@ -52,13 +51,13 @@ import hierarchy, not as a production runtime dependency.
 | BusinessProcesses | partial | 41.4% | 89 |
 | SettingsStorages | partial | 39.0% | 50 |
 | CommonForms | partial | 36.8% | 705 |
+| Subsystems | partial | 19.2% | 619 |
 | FilterCriteria | partial | 14.3% | 6 |
-| Subsystems | partial | 9.9% | 690 |
-| CommonAttributes | partial | 14.3% | 6 |
-| Configuration.xml | partial | 100.0% | 0 |
-| **Overall full snapshot** | **partial** | **64.5%** | **17623** |
+| CommonAttributes | partial | 0.0% | 7 |
+| Configuration.xml | partial | 0.0% | 1 |
+| **Overall full snapshot** | **partial** | **65.8%** | **16984** |
 
-Latest verified incremental slices after the full snapshot:
+Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|

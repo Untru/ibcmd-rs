@@ -2223,6 +2223,9 @@ fn source_asset_paths_with_indexes(
         }
         let is_configuration_group = is_configuration_module_group(&suffixes);
         for (suffix, path, kind) in CONFIGURATION_SOURCE_ASSET_SUFFIXES {
+            if !is_configuration_group && matches!(kind, SourceAssetKind::ExtPicture) {
+                continue;
+            }
             if !is_configuration_group && !suffixes.contains(suffix) {
                 continue;
             }
@@ -23675,6 +23678,32 @@ mod tests {
                 .as_deref(),
             Some("Ext/ClientApplicationInterface.xml")
         );
+    }
+
+    #[test]
+    fn does_not_treat_orphan_picture_suffix_as_configuration_splash() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let rows = [ConfigRow {
+            file_name: format!("{uuid}.2"),
+            part_no: 0,
+            data_size: 1,
+            binary_hex: String::new(),
+        }];
+
+        let paths = source_asset_paths_with_indexes(
+            &rows,
+            &[],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+
+        assert!(!paths.contains_key(&format!("{uuid}.2")));
     }
 
     #[test]

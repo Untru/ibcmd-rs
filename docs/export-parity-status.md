@@ -3,27 +3,48 @@
 Generated from:
 
 ```powershell
+target\release\ibcmd-rs.exe mssql-dump-config `
+  --database ut_ibcmd `
+  -o E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_dump `
+  --overwrite `
+  --inflate `
+  --extract-module-text `
+  --extract-metadata-xml `
+  --source-version 2.20 `
+  --no-binary-rows
+
+robocopy `
+  E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_dump `
+  E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_source_only `
+  /E /XD Config_inflated Config_raw ConfigSave_inflated ConfigSave_raw `
+  /XF manifest.json *.json
+
 target\release\ibcmd-rs.exe source-diff `
-  -o lab\ut_ibcmd_20260629_164647\diff_full_after_constants5_065800.json `
-  lab\ut_ibcmd_20260629_164647\ibcmd `
-  lab\ut_ibcmd_20260629_164647\infobase_export_constants4_063257
+  -o E:\ibcmd_lab\full_diff_20260630_184120\diff_full_source_only.json `
+  D:\ibcmd-rs\lab\ut_ibcmd_20260629_164647\ibcmd `
+  E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_source_only
 ```
 
-The full JSON report was temporary and may be regenerated with the command above. It was removed after summarizing because the lab disk is nearly full.
+The full JSON report is retained at
+`E:\ibcmd_lab\full_diff_20260630_184120\diff_full_source_only.json`.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
-Candidate: latest `ibcmd-rs` export after closing `Constants`.
+Candidate: latest `ibcmd-rs` export after round 21 plus the orphan `.2`
+source asset mapping fix.
 
-Overall summary:
+Raw source-only summary:
 
 | left_only | right_only | different | unchanged |
 |---:|---:|---:|---:|
-| 0 | 0 | 17623 | 32000 |
+| 1 | 0 | 16984 | 32638 |
 
-Overall full-snapshot readiness: **64.5%** (`32000 / 49623`
-byte-identical files), with **17623** files still different.
+The only `left_only` file is `ConfigDumpInfo.xml`; it remains a deliberate
+scope exclusion and is not counted as parity debt.
 
-Incremental selected verification after this snapshot:
+Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **65.8%**
+(`32638 / 49622` byte-identical files), with **16984** files still different.
+
+Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
@@ -108,58 +129,56 @@ Diff by file kind:
 | kind | different |
 |---|---:|
 | form | 10690 |
-| metadata_xml | 4494 |
+| metadata_xml | 3856 |
 | template | 1267 |
 | other | 1170 |
 | configuration_root | 1 |
-| other_xml | 1 |
 
 ## Top-Level Objects
 
 | Object | State | Total | Unchanged | Different | Ready % |
 |---|---|---:|---:|---:|---:|
+| CommandGroups | done | 34 | 34 | 0 | 100.0 |
 | CommonCommands | done | 612 | 612 | 0 | 100.0 |
 | CommonModules | done | 5594 | 5594 | 0 | 100.0 |
 | CommonPictures | done | 5505 | 5505 | 0 | 100.0 |
 | Constants | done | 1235 | 1235 | 0 | 100.0 |
 | DefinedTypes | done | 456 | 456 | 0 | 100.0 |
-| EventSubscriptions | done | 312 | 312 | 0 | 100.0 |
-| FunctionalOptions | done | 567 | 567 | 0 | 100.0 |
-| ScheduledJobs | done | 402 | 402 | 0 | 100.0 |
-| StyleItems | done | 400 | 400 | 0 | 100.0 |
-| CommandGroups | done | 34 | 34 | 0 | 100.0 |
-| FunctionalOptionsParameters | done | 9 | 9 | 0 | 100.0 |
-| Languages | done | 1 | 1 | 0 | 100.0 |
-| SessionParameters | done | 98 | 98 | 0 | 100.0 |
 | DocumentNumerators | done | 3 | 3 | 0 | 100.0 |
-| WSReferences | done | 2 | 2 | 0 | 100.0 |
+| EventSubscriptions | done | 312 | 312 | 0 | 100.0 |
+| Ext | done | 15 | 15 | 0 | 100.0 |
+| FunctionalOptions | done | 567 | 567 | 0 | 100.0 |
+| FunctionalOptionsParameters | done | 9 | 9 | 0 | 100.0 |
 | IntegrationServices | done | 2 | 2 | 0 | 100.0 |
+| Languages | done | 1 | 1 | 0 | 100.0 |
+| ScheduledJobs | done | 402 | 402 | 0 | 100.0 |
+| SessionParameters | done | 98 | 98 | 0 | 100.0 |
+| StyleItems | done | 400 | 400 | 0 | 100.0 |
+| WSReferences | done | 2 | 2 | 0 | 100.0 |
+| XDTOPackages | done | 814 | 814 | 0 | 100.0 |
+| Enums | partial | 1195 | 1122 | 73 | 93.9 |
+| CommonTemplates | partial | 495 | 406 | 89 | 82.0 |
+| Roles | partial | 2220 | 1752 | 468 | 78.9 |
+| AccumulationRegisters | partial | 449 | 267 | 182 | 59.5 |
+| Reports | partial | 2362 | 1299 | 1063 | 55.0 |
+| HTTPServices | partial | 10 | 5 | 5 | 50.0 |
+| WebServices | partial | 36 | 18 | 18 | 50.0 |
+| ExchangePlans | partial | 366 | 182 | 184 | 49.7 |
+| DocumentJournals | partial | 121 | 60 | 61 | 49.6 |
+| Tasks | partial | 49 | 23 | 26 | 46.9 |
 | DataProcessors | partial | 7058 | 3214 | 3844 | 45.5 |
 | Catalogs | partial | 6705 | 3033 | 3672 | 45.2 |
-| Documents | partial | 6219 | 2721 | 3498 | 43.8 |
 | InformationRegisters | partial | 3978 | 1751 | 2227 | 44.0 |
-| Reports | partial | 2362 | 1299 | 1063 | 55.0 |
-| CommonForms | partial | 1116 | 411 | 705 | 36.8 |
-| Subsystems | partial | 766 | 76 | 690 | 9.9 |
-| Roles | partial | 2220 | 1744 | 476 | 78.6 |
-| XDTOPackages | partial | 814 | 407 | 407 | 50.0 |
-| ExchangePlans | partial | 366 | 182 | 184 | 49.7 |
-| AccumulationRegisters | partial | 449 | 267 | 182 | 59.5 |
+| Documents | partial | 6219 | 2721 | 3498 | 43.8 |
 | ChartsOfCharacteristicTypes | partial | 167 | 70 | 97 | 41.9 |
 | BusinessProcesses | partial | 152 | 63 | 89 | 41.4 |
-| CommonTemplates | partial | 495 | 406 | 89 | 82.0 |
-| Enums | partial | 1195 | 1122 | 73 | 93.9 |
-| DocumentJournals | partial | 121 | 60 | 61 | 49.6 |
 | SettingsStorages | partial | 82 | 32 | 50 | 39.0 |
-| Tasks | partial | 49 | 23 | 26 | 46.9 |
-| WebServices | partial | 36 | 18 | 18 | 50.0 |
+| CommonForms | partial | 1116 | 411 | 705 | 36.8 |
+| Subsystems | partial | 766 | 147 | 619 | 19.2 |
 | FilterCriteria | partial | 7 | 1 | 6 | 14.3 |
-| HTTPServices | partial | 10 | 5 | 5 | 50.0 |
-| Ext | done | 15 | 15 | 0 | 100.0 |
-| CommonAttributes | partial | 7 | 1 | 6 | 14.3 |
-| ConfigDumpInfo.xml | excluded | 1 | 0 | 0 | n/a |
-| Configuration.xml | partial | 1 | 1 | 0 | 100.0 |
-| **Overall full snapshot** | **partial** | **49623** | **32000** | **17623** | **64.5** |
+| CommonAttributes | partial | 7 | 0 | 7 | 0.0 |
+| Configuration.xml | partial | 1 | 0 | 1 | 0.0 |
+| **Overall full snapshot** | **partial** | **49622** | **32638** | **16984** | **65.8** |
 
 ## Scope Exclusions
 
