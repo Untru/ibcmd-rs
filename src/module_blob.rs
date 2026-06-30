@@ -246,6 +246,8 @@ struct FormXmlChildItem {
     enable_start_drag: Option<bool>,
     enable_drag: Option<bool>,
     file_drag_mode: Option<String>,
+    auto_refresh: Option<bool>,
+    auto_refresh_period: Option<String>,
     horizontal_align: Option<FormXmlHorizontalAlign>,
     autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
@@ -4310,6 +4312,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "EnableStartDrag"
                         | "EnableDrag"
                         | "FileDragMode"
+                        | "AutoRefresh"
+                        | "AutoRefreshPeriod"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -4858,6 +4862,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_refresh(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_refresh_period(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
@@ -4903,6 +4909,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_refresh(&path, &current_child_items)
+                    || path_ends_with_for_child_auto_refresh_period(&path, &current_child_items)
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
                     || path_ends_with(
                         &path,
@@ -6595,6 +6603,29 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.file_drag_mode = Some(text_value.trim().to_string());
                         }
                     }
+                    "AutoRefresh"
+                        if path_ends_with_for_child_auto_refresh(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_refresh = Some(parse_form_xml_bool(
+                                "ChildItem/AutoRefresh",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "AutoRefreshPeriod"
+                        if path_ends_with_for_child_auto_refresh_period(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.auto_refresh_period = Some(parse_form_dimension_xml(
+                                "ChildItem/AutoRefreshPeriod",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "HorizontalAlign"
                         if path_ends_with_for_child_horizontal_align(
                             &path,
@@ -7078,6 +7109,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Type"
                         | "CommandName"
                         | "DataPath"
+                        | "AutoRefresh"
+                        | "AutoRefreshPeriod"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -7254,6 +7287,8 @@ fn parse_form_child_item_xml(
         enable_start_drag: None,
         enable_drag: None,
         file_drag_mode: None,
+        auto_refresh: None,
+        auto_refresh_period: None,
         horizontal_align: None,
         autofill: None,
         button_representation: None,
@@ -7950,6 +7985,23 @@ fn path_ends_with_for_child_file_drag_mode(path: &[String], items: &[FormXmlChil
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "FileDragMode"])
+}
+
+fn path_ends_with_for_child_auto_refresh(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "AutoRefresh"])
+}
+
+fn path_ends_with_for_child_auto_refresh_period(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "AutoRefreshPeriod"])
 }
 
 fn path_ends_with_for_child_horizontal_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -10757,6 +10809,31 @@ fn patch_form_layout_child_item_entry(
         {
             replacements.push((file_drag_range.clone(), code.to_string()));
         }
+        if let Some(auto_refresh) = item.auto_refresh
+            && let Some(auto_refresh_range) =
+                form_layout_table_property_bag_value_range(text, fields, "5")
+            && is_form_property_bag_bool_value(&text[auto_refresh_range.clone()])
+        {
+            replacements.push((
+                auto_refresh_range.clone(),
+                if auto_refresh {
+                    r#"{"B",1}"#
+                } else {
+                    r#"{"B",0}"#
+                }
+                .to_string(),
+            ));
+        }
+        if let Some(auto_refresh_period) = &item.auto_refresh_period
+            && let Some(period_range) =
+                form_layout_table_property_bag_value_range(text, fields, "6")
+            && is_form_property_bag_number_value(&text[period_range.clone()])
+        {
+            replacements.push((
+                period_range.clone(),
+                format!(r#"{{"N",{auto_refresh_period}}}"#),
+            ));
+        }
     }
     if item.tag == "Button"
         && let Some(item_type) = &item.item_type
@@ -12061,13 +12138,15 @@ fn collect_form_layout_table_ids_by_name(
     tables: &mut BTreeMap<String, String>,
 ) -> Result<()> {
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
+    let wrapper = fields.first().map(|range| text[range.clone()].trim());
+    if matches!(wrapper, Some("73" | "55"))
         && let Some(identity_range) = fields.get(1)
         && let Ok(identity) = scan_braced_fields(text, identity_range.start)
         && let Some(id) = identity
             .first()
             .map(|range| text[range.clone()].trim().to_string())
-        && let Some(name) = form_layout_child_item_name(text, "73", &fields)
+        && let Some(name) =
+            wrapper.and_then(|wrapper| form_layout_child_item_name(text, wrapper, &fields))
     {
         tables.insert(name, id);
     }
@@ -12086,8 +12165,10 @@ fn collect_form_layout_table_column_ids_by_name(
     columns: &mut BTreeMap<(String, String), String>,
 ) -> Result<()> {
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) == Some("73")
-        && let Some(table_name) = form_layout_child_item_name(text, "73", &fields)
+    let wrapper = fields.first().map(|range| text[range.clone()].trim());
+    if matches!(wrapper, Some("73" | "55"))
+        && let Some(table_name) =
+            wrapper.and_then(|wrapper| form_layout_child_item_name(text, wrapper, &fields))
     {
         collect_form_layout_table_column_ids_for_table(text, &table_name, columns)?;
     }
@@ -12195,6 +12276,32 @@ fn form_data_path_ref_points_to_attribute(existing: &str, attribute_id: &str) ->
         .is_some_and(|range| path_text[range.clone()].trim() == attribute_id)
 }
 
+fn form_layout_table_property_bag_value_range(
+    text: &str,
+    fields: &[Range<usize>],
+    key: &str,
+) -> Option<Range<usize>> {
+    fields.windows(2).find_map(|window| {
+        let key_range = &window[0];
+        let value_range = &window[1];
+        (text[key_range.clone()].trim() == key
+            && text[value_range.clone()].trim_start().starts_with('{'))
+        .then(|| value_range.clone())
+    })
+}
+
+fn is_form_property_bag_number_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.first().is_some_and(|range| {
+        parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "N")
+    }) && fields
+        .get(1)
+        .is_some_and(|range| value[range.clone()].trim().parse::<u32>().is_ok())
+}
+
 fn format_form_button_command_reference(
     existing: &str,
     command_name: &str,
@@ -12269,6 +12376,7 @@ fn form_layout_child_item_tag<'a>(
             _ => None,
         },
         "73" => Some("Table"),
+        "55" => Some("Table"),
         _ => None,
     }
 }
@@ -12288,7 +12396,7 @@ fn form_layout_child_item_name_range(
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
     let indexes: &[usize] = match wrapper {
-        "73" | "34" => &[5],
+        "73" | "55" | "34" => &[5],
         "48" => &[6, 7],
         _ => &[6],
     };
@@ -12307,7 +12415,7 @@ fn form_layout_child_item_title_range(
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
     let indexes: &[usize] = match wrapper {
-        "73" => &[9],
+        "73" | "55" => &[9],
         "34" => &[6],
         "48" => &[9, 10],
         _ => &[7],
@@ -27982,6 +28090,31 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[table_fields[29].clone()], "1");
         assert_eq!(&parsed.layout[table_fields[30].clone()], "2");
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_auto_refresh_properties() -> anyhow::Result<()>
+    {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,2,5,{"B",1},6,{"N",30}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<AutoRefresh>false</AutoRefresh>
+			<AutoRefreshPeriod>60</AutoRefreshPeriod>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"5,{"B",0},6,{"N",60}"#));
+        assert!(!parsed.layout.contains(r#"5,{"B",1},6,{"N",30}"#));
         Ok(())
     }
 
