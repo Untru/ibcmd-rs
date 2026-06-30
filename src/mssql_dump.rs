@@ -14695,6 +14695,7 @@ struct ExchangePlanProperties {
 }
 
 struct RegisterProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
     child_objects: Vec<RegisterChildObject>,
 }
 
@@ -15964,6 +15965,67 @@ fn parse_register_properties_from_text(
     if !metadata_kind_uses_register_resources(kind) {
         return None;
     }
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    let mut generated_types = Vec::new();
+    if kind == "InformationRegister" {
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            1,
+            2,
+            &format!("InformationRegisterRecord.{}", header.name),
+            "Record",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            3,
+            4,
+            &format!("InformationRegisterManager.{}", header.name),
+            "Manager",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            5,
+            6,
+            &format!("InformationRegisterSelection.{}", header.name),
+            "Selection",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            7,
+            8,
+            &format!("InformationRegisterList.{}", header.name),
+            "List",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            9,
+            10,
+            &format!("InformationRegisterRecordSet.{}", header.name),
+            "RecordSet",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            11,
+            12,
+            &format!("InformationRegisterRecordKey.{}", header.name),
+            "RecordKey",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            13,
+            14,
+            &format!("InformationRegisterRecordManager.{}", header.name),
+            "RecordManager",
+        );
+    }
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
@@ -15971,7 +16033,10 @@ fn parse_register_properties_from_text(
                 .map(|tag| RegisterChildObject { tag, header })
         })
         .collect();
-    Some(RegisterProperties { child_objects })
+    Some(RegisterProperties {
+        generated_types,
+        child_objects,
+    })
 }
 
 fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Option<&'static str> {
@@ -19067,6 +19132,10 @@ fn format_register_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml(kind, header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&register.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
     if register.child_objects.is_empty() {
         return xml;
     }
@@ -30435,6 +30504,91 @@ mod tests {
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
         assert!(xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap());
+    }
+
+    #[test]
+    fn extracts_information_register_generated_types_internal_info() {
+        let info_register_uuid = "11111111-1111-4111-8111-111111111111";
+        let record_type_id = "22222222-2222-4222-8222-222222222221";
+        let record_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let selection_type_id = "44444444-4444-4444-8444-444444444441";
+        let selection_value_id = "44444444-4444-4444-8444-444444444442";
+        let list_type_id = "55555555-5555-4555-8555-555555555551";
+        let list_value_id = "55555555-5555-4555-8555-555555555552";
+        let record_set_type_id = "66666666-6666-4666-8666-666666666661";
+        let record_set_value_id = "66666666-6666-4666-8666-666666666662";
+        let key_type_id = "77777777-7777-4777-8777-777777777771";
+        let key_value_id = "77777777-7777-4777-8777-777777777772";
+        let record_manager_type_id = "88888888-8888-4888-8888-888888888881";
+        let record_manager_value_id = "88888888-8888-4888-8888-888888888882";
+        let info_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,{record_type_id},{record_value_id},{manager_type_id},{manager_value_id},\
+{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\
+{record_set_type_id},{record_set_value_id},{key_type_id},{key_value_id},\
+{record_manager_type_id},{record_manager_value_id},\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{info_register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &info_blob,
+                info_register_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("InformationRegisters/Prices.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert_eq!(xml.matches("<xr:GeneratedType").count(), 7);
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterRecord.Prices" category="Record">"#
+            ));
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterManager.Prices" category="Manager">"#
+            ));
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterSelection.Prices" category="Selection">"#
+            ));
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterList.Prices" category="List">"#
+            ));
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterRecordSet.Prices" category="RecordSet">"#
+            ));
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterRecordKey.Prices" category="RecordKey">"#
+            ));
+            assert!(xml.contains(
+                r#"<xr:GeneratedType name="InformationRegisterRecordManager.Prices" category="RecordManager">"#
+            ));
+            assert!(xml.contains(&format!("<xr:TypeId>{record_type_id}</xr:TypeId>")));
+            assert!(xml.contains(&format!("<xr:ValueId>{record_value_id}</xr:ValueId>")));
+            assert!(xml.contains(&format!("<xr:TypeId>{record_manager_type_id}</xr:TypeId>")));
+            assert!(xml.contains(&format!(
+                "<xr:ValueId>{record_manager_value_id}</xr:ValueId>"
+            )));
+            assert!(
+                xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap()
+            );
+        }
     }
 
     #[test]
