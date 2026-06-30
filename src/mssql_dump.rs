@@ -6034,12 +6034,45 @@ fn parse_configuration_child_objects(
 }
 
 fn configuration_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
+    if is_offset_inside_configuration_common_picture(text, marker_start) {
+        return Some("CommonPicture");
+    }
     for (code, tag) in ROOT_CHILD_OBJECT_CODES {
         if is_offset_inside_metadata_object_code(text, marker_start, *code) {
             return Some(*tag);
         }
     }
     None
+}
+
+fn is_offset_inside_configuration_common_picture(text: &str, marker_start: usize) -> bool {
+    let code_marker = "{4,";
+    let mut search_end = marker_start;
+    while let Some(start) = text[..search_end].rfind(code_marker) {
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if marker_start >= end {
+            continue;
+        }
+        let object_text = &text[start..end];
+        let Some(fields) = split_1c_braced_fields(object_text, 0) else {
+            continue;
+        };
+        let Some(uuid) = text.get(marker_start + "{1,0,".len()..marker_start + "{1,0,".len() + 36)
+        else {
+            continue;
+        };
+        if fields.first().map(|field| field.trim()) == Some("4")
+            && metadata_header_field_index(&fields, uuid) == Some(1)
+            && parse_1c_bool_field(fields.get(2).copied()).is_some()
+            && parse_1c_bool_field(fields.get(3).copied()).is_some()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 const ROOT_CHILD_OBJECT_CODES: &[(u32, &str)] = &[
@@ -38760,6 +38793,49 @@ mod tests {
         assert!(xml.contains("<Comment>Catalog comment</Comment>"));
         assert!(!xml.contains(header_uuid));
         assert!(!xml.contains("ConfigDumpInfo"));
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_root_common_picture_child_object() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let picture_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let template_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let blob = deflate_for_test(
+            format!(
+                "{{2,\r\n{{{uuid}}},1,\r\n{{9cd510cd-abfc-11d4-9434-004095e12fc7,\r\n{{1,\r\n{{68,\r\n{{0,\r\n{{3,\r\n{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"Configuration comment\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},\r\n{{4,\r\n{{3,\r\n{{1,0,{picture_uuid}}},\"Logo\",{{1,\"en\",\"Logo\"}},\"Picture comment\",0,0,00000000-0000-0000-0000-000000000000,0}},1,0}}\r\n}},\r\n{{4,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"PrintTemplate\",{{1,\"en\",\"Print template\"}},\"Template comment\",0,0,00000000-0000-0000-0000-000000000000,0}},2}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains(&format!(r#"<CommonPicture uuid="{picture_uuid}">"#)));
+            assert!(xml.contains("<Name>Logo</Name>"));
+            assert!(xml.contains("<Comment>Picture comment</Comment>"));
+            assert!(!xml.contains(&format!(r#"<CommonPicture uuid="{template_uuid}">"#)));
+            assert!(!xml.contains("<Name>PrintTemplate</Name>"));
+            assert!(!xml.contains(header_uuid));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
     }
 
     #[test]
