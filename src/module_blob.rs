@@ -9718,12 +9718,38 @@ fn format_form_layout_new_extended_input_field_item(
 }
 
 fn format_form_layout_new_label_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    if item.show_in_header.is_some() {
+        return format_form_layout_new_extended_label_field_item(item, item_uuid);
+    }
+
     let mut text = format!(
         "{{48,{{{},{}}},0,0,1,2,{},1,0,{}",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
         format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_extended_label_field_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+) -> String {
+    let show_in_header = if item.show_in_header.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,1,{},1,0,{},{{1,0}},{{0}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},{},1,0,3,0",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        show_in_header
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
@@ -27527,6 +27553,51 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             &parsed.layout[label_fields[9].clone()],
             r#"{1,"en","Description"}"#
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_label_field_show_in_header() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<LabelField name="DescriptionLabel" id="41">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Description</v8:content>
+				</v8:item>
+			</Title>
+			<ShowInHeader>{value}</ShowInHeader>
+		</LabelField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let label_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+            assert_eq!(&parsed.layout[label_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[label_fields[5].clone()], "1");
+            assert_eq!(
+                &parsed.layout[label_fields[6].clone()],
+                r#""DescriptionLabel""#
+            );
+            assert_eq!(
+                &parsed.layout[label_fields[9].clone()],
+                r#"{1,"en","Description"}"#
+            );
+            assert_eq!(&parsed.layout[label_fields[20].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
 
         Ok(())
     }
