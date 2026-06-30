@@ -15925,6 +15925,7 @@ struct RegisterProperties {
     default_list_form: Option<String>,
     auxiliary_record_form: Option<String>,
     auxiliary_list_form: Option<String>,
+    standard_attributes: Vec<RegisterStandardAttribute>,
     child_objects: Vec<RegisterChildObject>,
 }
 
@@ -15977,6 +15978,11 @@ enum MetadataChildFillValue {
 struct RegisterChildObject {
     tag: &'static str,
     header: MetadataHeader,
+}
+
+struct RegisterStandardAttribute {
+    name: &'static str,
+    fill_checking: &'static str,
 }
 
 struct CommonModuleFlags {
@@ -17581,6 +17587,7 @@ fn parse_register_properties_from_text(
     let data_lock_control_mode = parse_register_data_lock_control_mode(kind, &fields, uuid);
     let full_text_search = parse_register_full_text_search(kind, &fields, uuid);
     let form_refs = parse_register_form_refs(kind, &fields, uuid, form_refs);
+    let standard_attributes = register_standard_attributes(kind, register_type);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
@@ -17599,6 +17606,7 @@ fn parse_register_properties_from_text(
         default_list_form: form_refs.1,
         auxiliary_record_form: form_refs.2,
         auxiliary_list_form: form_refs.3,
+        standard_attributes,
         child_objects,
     })
 }
@@ -17640,9 +17648,43 @@ fn parse_register_type(kind: &str, fields: &[&str], uuid: &str) -> Option<&'stat
 fn accumulation_register_type_xml(value: u32) -> Option<&'static str> {
     match value {
         0 => Some("Balance"),
-        1 => Some("Turnover"),
+        1 => Some("Turnovers"),
         _ => None,
     }
+}
+
+fn register_standard_attributes(
+    kind: &str,
+    register_type: Option<&'static str>,
+) -> Vec<RegisterStandardAttribute> {
+    let mut attributes = Vec::new();
+    if kind == "AccumulationRegister" && register_type == Some("Balance") {
+        attributes.push(RegisterStandardAttribute {
+            name: "RecordType",
+            fill_checking: "DontCheck",
+        });
+    }
+    if matches!(kind, "AccumulationRegister" | "InformationRegister") {
+        attributes.extend([
+            RegisterStandardAttribute {
+                name: "Active",
+                fill_checking: "DontCheck",
+            },
+            RegisterStandardAttribute {
+                name: "LineNumber",
+                fill_checking: "DontCheck",
+            },
+            RegisterStandardAttribute {
+                name: "Recorder",
+                fill_checking: "DontCheck",
+            },
+            RegisterStandardAttribute {
+                name: "Period",
+                fill_checking: "ShowError",
+            },
+        ]);
+    }
+    attributes
 }
 
 fn parse_register_data_lock_control_mode(
@@ -21847,6 +21889,7 @@ fn format_register_source_xml(
                 xml_bool(include_help_in_contents)
             ));
         }
+        push_register_standard_attributes_xml(&mut properties, &register.standard_attributes);
         push_optional_simple_property_xml(
             &mut properties,
             "DataLockControlMode",
@@ -22721,6 +22764,50 @@ fn push_enum_standard_attributes_xml(xml: &mut String) {
 \t\t\t\t\t<xr:ChoiceParameters/>\r\n\
 \t\t\t\t</xr:StandardAttribute>\r\n",
             escape_xml_text(name)
+        ));
+    }
+    xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn push_register_standard_attributes_xml(
+    xml: &mut String,
+    attributes: &[RegisterStandardAttribute],
+) {
+    if attributes.is_empty() {
+        return;
+    }
+    xml.push_str("\t\t\t<StandardAttributes>\r\n");
+    for attribute in attributes {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
+\t\t\t\t\t<xr:LinkByType/>\r\n\
+\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:ToolTip/>\r\n\
+\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:Format/>\r\n\
+\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+\t\t\t\t\t<xr:EditFormat/>\r\n\
+\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Synonym/>\r\n\
+\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
+\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n",
+            escape_xml_text(attribute.name),
+            attribute.fill_checking,
         ));
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
@@ -35032,6 +35119,66 @@ mod tests {
     }
 
     #[test]
+    fn extracts_information_register_standard_attributes() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
+88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("InformationRegisters/Prices.xml")
+        );
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 4);
+        assert!(!xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Active">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="LineNumber">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Recorder">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Period">"#));
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="Active">"#).unwrap()
+                < xml
+                    .find(r#"<xr:StandardAttribute name="LineNumber">"#)
+                    .unwrap()
+        );
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="Period">"#).unwrap()
+                < xml
+                    .find("<xr:FillChecking>ShowError</xr:FillChecking>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<UseStandardCommands>true</UseStandardCommands>")
+                .unwrap()
+                < xml.find("<StandardAttributes>").unwrap()
+        );
+    }
+
+    #[test]
     fn extracts_information_register_use_standard_commands_to_metadata_xml() {
         let register_uuid = "11111111-1111-4111-8111-111111111111";
         let blob = deflate_for_test(
@@ -35321,11 +35468,76 @@ mod tests {
     }
 
     #[test]
+    fn extracts_accumulation_register_standard_attributes() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{28,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\r\n\
+{{3,\r\n{{1,0,{register_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1,{zero_uuid},{zero_uuid},0,1,1,0\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("AccumulationRegisters/Sales.xml")
+        );
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 5);
+        assert!(xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Active">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="LineNumber">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Recorder">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Period">"#));
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="RecordType">"#)
+                .unwrap()
+                < xml.find(r#"<xr:StandardAttribute name="Active">"#).unwrap()
+        );
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="Period">"#).unwrap()
+                < xml
+                    .find("<xr:FillChecking>ShowError</xr:FillChecking>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                .unwrap()
+                < xml.find("<StandardAttributes>").unwrap()
+        );
+        assert!(
+            xml.find("<StandardAttributes>").unwrap()
+                < xml
+                    .find("<DataLockControlMode>Managed</DataLockControlMode>")
+                    .unwrap()
+        );
+    }
+
+    #[test]
     fn extracts_accumulation_register_type_from_metadata_body() {
         let register_uuid = "11111111-1111-4111-8111-111111111111";
         let zero_uuid = "00000000-0000-0000-0000-000000000000";
 
-        for (type_value, expected_type) in [(0, "Balance"), (1, "Turnover")] {
+        for (type_value, expected_type) in [(0, "Balance"), (1, "Turnovers")] {
             let blob = deflate_for_test(
                 format!(
                     "{{1,\r\n{{28,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
@@ -35370,6 +35582,10 @@ mod tests {
                         .unwrap()
             );
             assert!(!xml.contains("ConfigDumpInfo"));
+            if expected_type == "Turnovers" {
+                assert!(!xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
+                assert_eq!(xml.matches("<xr:StandardAttribute").count(), 4);
+            }
         }
     }
 
