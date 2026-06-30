@@ -1339,7 +1339,7 @@ fn selected_metadata_source_reference_index_needs(
     let mut needs = SourceReferenceIndexNeeds::none();
     for row in selected_metadata_texts {
         match row.kind.as_deref() {
-            Some("Enum") => {
+            Some("Enum" | "Task") => {
                 needs.form_refs = true;
                 needs.template_refs = true;
             }
@@ -15634,8 +15634,17 @@ fn extract_metadata_source_xml_from_text_row(
     } else {
         format_metadata_source_xml(kind, &header, source_version).into_bytes()
     };
-    if !nested_commands.is_empty() {
+    let owned_form_template_child_objects = simple_metadata_form_template_child_objects_xml(
+        kind,
+        folder,
+        &header.name,
+        text,
+        form_refs,
+        template_refs,
+    );
+    if !nested_commands.is_empty() || !owned_form_template_child_objects.is_empty() {
         let mut xml_text = String::from_utf8(xml).ok()?;
+        insert_metadata_child_objects_xml(&mut xml_text, kind, &owned_form_template_child_objects);
         insert_metadata_child_commands_xml(&mut xml_text, kind, &nested_commands);
         xml = xml_text.into_bytes();
     }
@@ -16790,6 +16799,36 @@ fn owned_data_processor_template_names_in_text_order(
         data_processor_name,
         template_refs,
     )
+}
+
+fn simple_metadata_form_template_child_objects_xml(
+    kind: &str,
+    owner_folder: &str,
+    owner_name: &str,
+    text: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> String {
+    if kind != "Task" {
+        return String::new();
+    }
+
+    let mut xml = String::new();
+    for form in owned_metadata_form_names_in_text_order(text, owner_folder, owner_name, form_refs) {
+        xml.push_str(&format!(
+            "\t\t\t<Form>{}</Form>\r\n",
+            escape_xml_element_text(&form)
+        ));
+    }
+    for template in
+        owned_metadata_template_names_in_text_order(text, owner_folder, owner_name, template_refs)
+    {
+        xml.push_str(&format!(
+            "\t\t\t<Template>{}</Template>\r\n",
+            escape_xml_element_text(&template)
+        ));
+    }
+    xml
 }
 
 fn owned_metadata_template_names_in_text_order(
@@ -32898,6 +32937,122 @@ mod tests {
         assert!(!needs.functional_option_refs);
         assert!(!needs.command_refs);
         assert!(!needs.type_index);
+    }
+
+    #[test]
+    fn selected_task_metadata_requests_child_reference_indexes() {
+        let task_metadata = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            text: String::new(),
+            object_code: Some(33),
+            header: Some(MetadataHeader {
+                uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                name: "ExecutorTask".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("Task".to_string()),
+            folder: Some("Tasks"),
+        };
+
+        let needs = selected_metadata_source_reference_index_needs(&[task_metadata])
+            .expect("task selected metadata needs");
+
+        assert!(needs.needs_broad_metadata());
+        assert!(needs.form_refs);
+        assert!(needs.template_refs);
+        assert!(!needs.object_refs);
+        assert!(!needs.field_refs);
+        assert!(!needs.functional_option_refs);
+        assert!(!needs.command_refs);
+        assert!(!needs.type_index);
+    }
+
+    #[test]
+    fn extracts_task_child_form_and_template_refs_from_current_indexes() {
+        let task_uuid = "11111111-1111-4111-8111-111111111111";
+        let task_object_type_id = "22222222-2222-4222-8222-222222222221";
+        let task_object_value_id = "22222222-2222-4222-8222-222222222222";
+        let task_ref_type_id = "33333333-3333-4333-8333-333333333331";
+        let task_ref_value_id = "33333333-3333-4333-8333-333333333332";
+        let form_uuid = "44444444-4444-4444-8444-444444444441";
+        let template_uuid = "55555555-5555-4555-8555-555555555551";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let form_list_marker = FORM_LIST_MARKERS[0];
+        let task_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,{zero_uuid},0}},0,{task_object_type_id},{task_object_value_id},{task_ref_type_id},{task_ref_value_id}}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"MainForm\",{{1,\"en\",\"Main form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let template_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,4,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Print\",{{1,\"en\",\"Print\"}},\"\"}}\r\n,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let row = |file_name: &str, data: &[u8]| ConfigRow {
+            file_name: file_name.to_string(),
+            part_no: 0,
+            data_size: data.len() as i64,
+            binary_hex: encode_hex_for_test(data),
+        };
+        let rows = vec![
+            row(task_uuid, &task_blob),
+            row(form_uuid, &form_blob),
+            row(template_uuid, &template_blob),
+        ];
+        let form_refs = build_form_source_reference_index(&rows);
+        let template_refs = build_template_source_reference_index(&rows);
+
+        assert_eq!(
+            form_refs
+                .get(form_uuid)
+                .map(|form_ref| form_ref.relative_path.as_path()),
+            Some(Path::new("Tasks/ExecutorTask/Forms/MainForm.xml"))
+        );
+        assert_eq!(
+            template_refs
+                .get(template_uuid)
+                .map(|template_ref| template_ref.relative_path.as_path()),
+            Some(Path::new("Tasks/ExecutorTask/Templates/Print.xml"))
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &task_blob,
+            task_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &template_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Tasks").join("ExecutorTask.xml")
+        );
+        assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Form>MainForm</Form>"));
+        assert!(xml.contains("<Template>Print</Template>"));
+        assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
+        assert!(
+            xml.find("<Form>MainForm</Form>").unwrap()
+                < xml.find("<Template>Print</Template>").unwrap()
+        );
+        assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
+        assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
     }
 
     #[test]
