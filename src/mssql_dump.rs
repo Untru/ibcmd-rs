@@ -15607,9 +15607,9 @@ fn build_metadata_type_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
 fn build_metadata_type_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<String, String> {
     let mut index = BTreeMap::new();
     for row in rows {
-        let Some(entries) = parse_generated_type_entries_from_text(row) else {
-            continue;
-        };
+        let entries = parse_generated_type_entries_from_text(row)
+            .or_else(|| parse_generated_type_entries_from_source_xml_text(&row.text));
+        let Some(entries) = entries else { continue };
         for (type_id, reference) in entries {
             index.insert(type_id, reference);
         }
@@ -15879,6 +15879,94 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
     }
 
     Some(entries)
+}
+
+fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(String, String)>> {
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    if !text.starts_with('<') || !text.contains("GeneratedType") {
+        return None;
+    }
+
+    let mut reader = NsReader::from_str(text);
+    reader.config_mut().trim_text(true);
+    let mut entries = Vec::new();
+    let mut current_name = None::<String>;
+    let mut in_generated_type = false;
+    let mut in_type_id = false;
+
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(event) => {
+                let (_, local) = reader.resolve_element(event.name());
+                let local = local.as_ref();
+                if local == b"GeneratedType" {
+                    current_name = xml_attribute_value_ns(&reader, &event, "name")?;
+                    in_generated_type = current_name.is_some();
+                } else if in_generated_type && local == b"TypeId" {
+                    in_type_id = true;
+                }
+            }
+            Event::Empty(event) => {
+                let (_, local) = reader.resolve_element(event.name());
+                if local.as_ref() == b"GeneratedType" {
+                    current_name = None;
+                    in_generated_type = false;
+                    in_type_id = false;
+                }
+            }
+            Event::Text(event) => {
+                if in_generated_type
+                    && in_type_id
+                    && let Some(name) = current_name.as_ref()
+                    && let Ok(type_id) = event.decode()
+                {
+                    let type_id = type_id.trim();
+                    if is_uuid_text(type_id) {
+                        entries.push((type_id.to_string(), format!("cfg:{name}")));
+                    }
+                }
+            }
+            Event::End(event) => {
+                let (_, local) = reader.resolve_element(event.name());
+                let local = local.as_ref();
+                if local == b"TypeId" {
+                    in_type_id = false;
+                } else if local == b"GeneratedType" {
+                    current_name = None;
+                    in_generated_type = false;
+                    in_type_id = false;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+fn xml_attribute_value_ns(
+    reader: &NsReader<&[u8]>,
+    event: &quick_xml::events::BytesStart<'_>,
+    name: &str,
+) -> Option<Option<String>> {
+    for attribute in event.attributes().with_checks(false) {
+        let attribute = attribute.ok()?;
+        let (_, local) = reader.resolve_attribute(attribute.key);
+        if local.as_ref() == name.as_bytes() {
+            return Some(Some(
+                attribute
+                    .decode_and_unescape_value(reader.decoder())
+                    .ok()?
+                    .into_owned(),
+            ));
+        }
+    }
+    Some(None)
 }
 
 fn push_indexed_generated_type(
@@ -30248,6 +30336,75 @@ mod tests {
         let (path, kind) = template_body_source_asset("DataCompositionSchema").unwrap();
         assert_eq!(path, "Template.xml");
         assert!(matches!(kind, SourceAssetKind::DataCompositionSchema));
+    }
+
+    #[test]
+    fn builds_type_index_from_source_xml_generated_types_for_dcs_templates() {
+        let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+        let row = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            text: format!(
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\">\r\n\
+\t<Catalog>\r\n\
+\t\t<InternalInfo>\r\n\
+\t\t\t<xr:GeneratedType name=\"CatalogRef.Номенклатура\" category=\"Ref\">\r\n\
+\t\t\t\t<xr:TypeId>{type_id}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>ecddcc80-b6f1-41da-a03d-229e0b5e6a61</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n\
+\t\t</InternalInfo>\r\n\
+\t</Catalog>\r\n\
+</MetaDataObject>"
+            ),
+            object_code: None,
+            header: None,
+            kind: Some("Catalog".to_string()),
+            folder: Some("Catalogs"),
+        };
+
+        let index = build_metadata_type_index_from_texts(&[row]);
+
+        assert_eq!(
+            index.get(type_id).map(String::as_str),
+            Some("cfg:CatalogRef.Номенклатура")
+        );
+    }
+
+    #[test]
+    fn normalizes_dcs_type_id_using_source_xml_generated_type_index() {
+        let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+        let row = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            text: format!(
+                r#"<MetaDataObject xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"><Catalog><InternalInfo><xr:GeneratedType name="CatalogRef.Номенклатура" category="Ref"><xr:TypeId>{type_id}</xr:TypeId></xr:GeneratedType></InternalInfo></Catalog></MetaDataObject>"#
+            ),
+            object_code: None,
+            header: None,
+            kind: Some("Catalog".to_string()),
+            folder: Some("Catalogs"),
+        };
+        let index = build_metadata_type_index_from_texts(&[row]);
+        let raw = format!(
+            "\0\0\0\0\0\0\0\0\
+\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<field xsi:type=\"DataSetFieldField\">\r\n\
+\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{type_id}</TypeId></valueType>\r\n\
+\t\t</field>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &index).unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(
+            r#"<v8:Type xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d5p1:CatalogRef.Номенклатура</v8:Type>"#
+        ));
+        assert!(!xml.contains("<v8:TypeId>"));
     }
 
     #[test]
