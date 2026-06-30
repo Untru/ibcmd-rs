@@ -187,7 +187,14 @@ struct FormXmlDynamicListSettings {
     dynamic_data_read: Option<bool>,
     query_text: Option<String>,
     main_table: Option<String>,
+    fields: Vec<FormXmlDynamicListField>,
     list_settings: FormXmlListSettings,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlDynamicListField {
+    data_path: Option<String>,
+    field: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -4348,6 +4355,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_parameter = None::<FormXmlParameter>;
+    let mut current_dynamic_list_field = None::<FormXmlDynamicListField>;
     let mut current_list_settings_field_item = None::<FormXmlListSettingsFieldItem>;
     let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
@@ -4404,6 +4412,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "DynamicDataRead"
                         | "QueryText"
                         | "MainTable"
+                        | "dataPath"
                         | "field"
                         | "orderType"
                         | "viewMode"
@@ -4540,6 +4549,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if let Some(attribute) = current_attribute.as_mut() {
                         attribute.settings = Some(FormXmlDynamicListSettings::default());
                     }
+                } else if local == "Field"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Settings"])
+                {
+                    current_dynamic_list_field = Some(FormXmlDynamicListField::default());
                 } else if local == "item"
                     && (path_ends_with(
                         &path,
@@ -4784,6 +4797,28 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "Field",
+                            "dataPath",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "Field",
+                            "field",
+                        ],
                     )
                     || path_ends_with(
                         &path,
@@ -5250,6 +5285,28 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "MainTable"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "Field",
+                            "dataPath",
+                        ],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Form",
+                            "Attributes",
+                            "Attribute",
+                            "Settings",
+                            "Field",
+                            "field",
+                        ],
                     )
                     || path_ends_with(
                         &path,
@@ -6183,6 +6240,62 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.main_table = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "dataPath"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "Field",
+                                "dataPath",
+                            ],
+                        ) =>
+                    {
+                        if let Some(field) = current_dynamic_list_field.as_mut() {
+                            field.data_path = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "field"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Form",
+                                "Attributes",
+                                "Attribute",
+                                "Settings",
+                                "Field",
+                                "field",
+                            ],
+                        ) =>
+                    {
+                        if let Some(field) = current_dynamic_list_field.as_mut() {
+                            field.field = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Field"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Settings", "Field"],
+                        ) =>
+                    {
+                        if let Some(field) = current_dynamic_list_field.take()
+                            && field
+                                .data_path
+                                .as_deref()
+                                .is_some_and(|value| !value.is_empty())
+                            && field
+                                .field
+                                .as_deref()
+                                .is_some_and(|value| !value.is_empty())
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
+                        {
+                            settings.fields.push(field);
                         }
                     }
                     "viewMode"
@@ -14000,6 +14113,12 @@ fn format_form_dynamic_list_settings_new(
             format_form_setting_metadata_ref(source, main_table)?,
         ));
     }
+    if !settings.fields.is_empty() {
+        pairs.push((
+            "Field",
+            format_form_setting_dynamic_list_fields(&settings.fields),
+        ));
+    }
     if let Some(dynamic_data_read) = settings.dynamic_data_read {
         pairs.push((
             "DynamicalDataSelection",
@@ -14087,6 +14206,13 @@ fn patch_form_dynamic_list_settings(
         if !current_matches {
             let _ = patch_form_setting_value(text, "MainTable", &format!("{{\"#\",{uuid}}}"))?;
         }
+    }
+    if !settings.fields.is_empty() {
+        let _ = patch_form_setting_value(
+            text,
+            "Field",
+            &format_form_setting_dynamic_list_fields(&settings.fields),
+        )?;
     }
     let mut list_replacements = Vec::new();
     let list_settings_text = text.clone();
@@ -14625,6 +14751,31 @@ fn format_form_setting_metadata_ref(
 ) -> Result<String> {
     let uuid = source.resolve_metadata_reference_uuid(reference)?;
     Ok(format!("{{\"#\",{uuid}}}"))
+}
+
+fn format_form_setting_dynamic_list_fields(fields: &[FormXmlDynamicListField]) -> String {
+    let values = fields
+        .iter()
+        .filter_map(|field| {
+            Some((
+                field
+                    .data_path
+                    .as_deref()
+                    .filter(|value| !value.is_empty())?,
+                field.field.as_deref().filter(|value| !value.is_empty())?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut text = format!("{{0,{}", values.len());
+    for (data_path, field) in values {
+        text.push_str(",{");
+        text.push_str(&format_1c_string(data_path));
+        text.push(',');
+        text.push_str(&format_1c_string(field));
+        text.push('}');
+    }
+    text.push('}');
+    text
 }
 
 fn format_form_setting_dcs_order(
@@ -25336,6 +25487,57 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
 
         let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_dynamic_list_fields() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"List",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,1,"Field",{0,1,{"Old.Path","OldField"}}},{0,0}}},{0,0},{0,0},{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Attributes>
+		<Attribute name="List" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<Settings xsi:type="DynamicList">
+				<Field>
+					<dataPath>List.Period</dataPath>
+					<field>Period</field>
+				</Field>
+				<Field>
+					<dataPath>List.Amount</dataPath>
+					<field>Amount</field>
+				</Field>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>
+"#;
+
+        let parsed_xml = super::parse_form_xml_body_properties(xml)?;
+        let fields = &parsed_xml.attributes[0]
+            .settings
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("settings were not parsed from form XML"))?
+            .fields;
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].data_path.as_deref(), Some("List.Period"));
+        assert_eq!(fields[0].field.as_deref(), Some("Period"));
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.trailing[0]
+                .contains(r#""Field",{0,2,{"List.Period","Period"},{"List.Amount","Amount"}}"#)
+        );
+        assert!(!parsed.trailing[0].contains("Old.Path"));
+        assert!(!parsed.trailing[0].contains("OldField"));
+        assert_eq!(parsed.module_text, "Old module");
+
         Ok(())
     }
 
