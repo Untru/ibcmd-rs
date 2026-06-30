@@ -491,10 +491,13 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || is_supported_additional_indexes_file(&lower)
         || lower.ends_with("/ext/style.xml")
         || lower == "ext/commandinterface.xml"
+        || lower == "ext/splash.xml"
+        || lower == "ext/parentconfigurations.bin"
         || lower == "ext/homepageworkarea.xml"
         || lower == "ext/mobileclientsignature.bin"
         || lower == "ext/mainsectioncommandinterface.xml"
         || lower == "ext/clientapplicationinterface.xml"
+        || lower == "ext/mainsectionpicture.xml"
         || lower == "ext/standaloneconfigurationcontent.bin"
         || is_supported_form_item_asset_file(&lower)
 }
@@ -1586,6 +1589,8 @@ mod tests {
             root.join("Ext/CommandInterface.xml"),
             b"<CommandInterface/>",
         )?;
+        fs::write(root.join("Ext/Splash.xml"), b"<Picture/>")?;
+        fs::write(root.join("Ext/ParentConfigurations.bin"), b"parent-configs")?;
         fs::write(
             root.join("Ext/MobileClientSignature.bin"),
             b"{2,\"\",\"\",{0},0}",
@@ -1602,6 +1607,7 @@ mod tests {
             root.join("Ext/ClientApplicationInterface.xml"),
             b"<ClientApplicationInterface/>",
         )?;
+        fs::write(root.join("Ext/MainSectionPicture.xml"), b"<Picture/>")?;
         fs::write(
             root.join("Ext/StandaloneConfigurationContent.bin"),
             b"<StandaloneContent/>",
@@ -1609,14 +1615,14 @@ mod tests {
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 20);
+        assert_eq!(report.total_files, 23);
         assert_eq!(report.stage_metadata_xml_files, 3);
         assert_eq!(report.stage_common_module_xml_files, 1);
         assert_eq!(report.stage_entry_files, 4);
         assert_eq!(report.module_files, 6);
         assert_eq!(report.supported_module_files, 6);
-        assert_eq!(report.supported_ext_body_files, 9);
-        assert_eq!(report.potentially_stageable_body_files, 16);
+        assert_eq!(report.supported_ext_body_files, 12);
+        assert_eq!(report.potentially_stageable_body_files, 19);
         assert_eq!(report.partially_supported_form_xml_files, 1);
         assert_eq!(report.partially_supported_form_xml_bytes, 26);
         assert_eq!(report.unsupported_form_xml_files, 1);

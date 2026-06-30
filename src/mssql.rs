@@ -9932,6 +9932,89 @@ mod tests {
     }
 
     #[test]
+    fn reports_main_section_picture_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-main-section-picture-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let configuration_xml = root.join("Configuration.xml");
+        let body_path = root.join("Ext").join("MainSectionPicture.xml");
+        let picture_file = body_path.with_extension("").join("main.png");
+        fs::create_dir_all(picture_file.parent().unwrap()).unwrap();
+        fs::write(
+            &configuration_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Configuration uuid="ffffffff-ffff-4fff-ffff-ffffffffffff">
+    <Properties><Name>Main</Name></Properties>
+  </Configuration>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(&body_path, sample_ext_picture_xml("main.png")).unwrap();
+        fs::write(&picture_file, b"MAIN-SECTION").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&configuration_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| {
+                row.row_kind == "configuration_picture_body"
+                    && row.config_file_name == "ffffffff-ffff-4fff-ffff-ffffffffffff.c"
+            })
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(row.source_path, "Ext/MainSectionPicture.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_main_section_picture_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-main-section-picture-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let body_path = root.join("Ext").join("MainSectionPicture.xml");
+        let picture_file = body_path.with_extension("").join("main.png");
+        fs::create_dir_all(picture_file.parent().unwrap()).unwrap();
+        fs::write(&body_path, sample_ext_picture_xml("main.png")).unwrap();
+        fs::write(&picture_file, b"MAIN-SECTION").unwrap();
+        let properties = test_simple_metadata_properties(
+            "Configuration",
+            "ffffffff-ffff-4fff-ffff-ffffffffffff",
+            "Main",
+        );
+
+        let rows = super::prepare_configuration_asset_body_rows(
+            PathBuf::from("missing-sqlcmd-for-main-section-picture-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &root.join("Configuration.xml"),
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "ffffffff-ffff-4fff-ffff-ffffffffffff.c");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_first_base64_payload_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(b"MAIN-SECTION")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_configuration_binary_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-configuration-binary-readiness-{}",
