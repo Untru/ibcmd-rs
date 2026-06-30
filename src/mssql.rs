@@ -53,7 +53,7 @@ use crate::module_blob::{
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
     raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
-    raw_deflated_plain_sha256,
+    raw_deflated_plain_sha256, role_rights_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -1066,17 +1066,28 @@ fn metadata_body_bootstrap_rows(
                 ));
             }
         }
-        "Role" => rows.extend(optional_body_bootstrap_row(
-            source_root,
-            properties,
-            object_path,
-            infer_role_rights_body_path(xml_path),
-            "0",
-            "role_rights_body",
-            BootstrapGeneration::RequiresBaseBlob,
-            true,
-            "Rights.xml packer requires the base role rights table shape and object ordering",
-        )),
+        "Role" => {
+            let body_path = infer_role_rights_body_path(xml_path);
+            if body_path.exists() {
+                let reason = role_rights_base_free_blocker_reason(&body_path).with_context(|| {
+                    format!(
+                        "failed to audit Role rights base-free blockers for {}",
+                        body_path.display()
+                    )
+                })?;
+                rows.push(bootstrap_row_report(
+                    "metadata_object",
+                    &properties.kind,
+                    object_path,
+                    source_relative_path(source_root, &body_path),
+                    format!("{}.0", properties.uuid),
+                    "role_rights_body",
+                    BootstrapGeneration::RequiresBaseBlob,
+                    true,
+                    &reason,
+                ));
+            }
+        }
         _ => {}
     }
 
@@ -1280,6 +1291,16 @@ fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> R
     let blockers = form_body_base_free_blockers(&form_xml, has_module_text, has_item_assets)?;
     Ok(format!(
         "Form body requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn role_rights_base_free_blocker_reason(body_path: &Path) -> Result<String> {
+    let xml = fs::read(body_path)
+        .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
+    let blockers = role_rights_base_free_blockers(&xml)?;
+    Ok(format!(
+        "Role Rights.xml requires active base blob: {}",
         blockers.join("; ")
     ))
 }
@@ -7655,6 +7676,76 @@ mod tests {
         assert!(row.reason.contains("trailing attributes"));
         assert!(row.reason.contains("trailing commands"));
         assert!(row.reason.contains("embedded picture payload"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_role_rights_body_with_precise_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-role-rights-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let role_xml = root.join("Roles").join("Editor.xml");
+        let rights_path = root
+            .join("Roles")
+            .join("Editor")
+            .join("Ext")
+            .join("Rights.xml");
+        fs::create_dir_all(rights_path.parent().unwrap()).unwrap();
+        fs::write(
+            &role_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Role uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Editor</Name></Properties>
+  </Role>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &rights_path,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>true</setForNewObjects>
+	<setForAttributesByDefault>false</setForAttributesByDefault>
+	<independentRightsOfChildObjects>true</independentRightsOfChildObjects>
+	<object>
+		<name>Catalog.Products</name>
+		<right>
+			<name>Read</name>
+			<value>true</value>
+			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
+		</right>
+	</object>
+	<restrictionTemplate>
+		<name>OwnerOnly</name>
+		<condition>WHERE Owner = &amp;CurrentUser</condition>
+	</restrictionTemplate>
+</Rights>"#,
+        )
+        .unwrap();
+
+        let report =
+            super::source_bootstrap_readiness_report(&root, std::slice::from_ref(&role_xml), &[])
+                .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "role_rights_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(row.source_path, "Roles/Editor/Ext/Rights.xml");
+        assert!(
+            row.reason
+                .contains("Role Rights.xml requires active base blob")
+        );
+        assert!(row.reason.contains("base Role object table order"));
+        assert!(row.reason.contains("platform right UUID slots"));
+        assert!(row.reason.contains("restricted-right payload shape"));
+        assert!(row.reason.contains("restriction templates"));
 
         let _ = fs::remove_dir_all(root);
     }

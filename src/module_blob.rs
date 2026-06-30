@@ -14503,6 +14503,54 @@ pub fn pack_role_rights_blob_from_xml(
     })
 }
 
+pub fn role_rights_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+    let rights = parse_role_rights_xml(xml)?;
+    let conditional_rights = rights
+        .objects
+        .iter()
+        .flat_map(|object| object.rights.iter())
+        .filter(|right| right.restriction_by_condition.is_some())
+        .count();
+    let enabled_rights = rights
+        .objects
+        .iter()
+        .flat_map(|object| object.rights.iter())
+        .filter(|right| right.value)
+        .count();
+    let total_rights = rights
+        .objects
+        .iter()
+        .map(|object| object.rights.len())
+        .sum::<usize>();
+    let mut blockers = Vec::new();
+    blockers.push(format!(
+        "source XML has {} object entries but does not carry the base Role object table order or per-object entry identifiers",
+        rights.objects.len()
+    ));
+    blockers.push(format!(
+        "source XML has {total_rights} explicit rights ({enabled_rights} enabled) by name, while the Config row stores platform right UUID slots whose order and complete disabled-right set are read from the base blob"
+    ));
+    if conditional_rights > 0 {
+        blockers.push(format!(
+            "source XML has {conditional_rights} conditional rights, but the base blob owns the restricted-right payload shape and condition slot mapping"
+        ));
+    }
+    if !rights.restriction_templates.is_empty() {
+        blockers.push(format!(
+            "source XML has {} restriction templates, but staging currently patches the existing base template table instead of generating its full serialized shape",
+            rights.restriction_templates.len()
+        ));
+    }
+    if rights.set_for_attributes_by_default.is_some()
+        || rights.independent_rights_of_child_objects.is_some()
+    {
+        blockers.push(
+            "source XML may set optional role flags, but their presence and trailing field positions are preserved from the base blob".to_string(),
+        );
+    }
+    Ok(blockers)
+}
+
 pub fn pack_command_interface_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
@@ -28575,6 +28623,63 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,-1"));
         assert!(!text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,1"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn audits_role_rights_as_base_dependent_with_precise_blockers() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>true</setForNewObjects>
+	<setForAttributesByDefault>false</setForAttributesByDefault>
+	<independentRightsOfChildObjects>true</independentRightsOfChildObjects>
+	<object>
+		<name>Catalog.Products</name>
+		<right>
+			<name>View</name>
+			<value>true</value>
+		</right>
+		<right>
+			<name>Read</name>
+			<value>true</value>
+			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
+		</right>
+	</object>
+	<restrictionTemplate>
+		<name>OwnerOnly</name>
+		<condition>WHERE Owner = &amp;CurrentUser</condition>
+	</restrictionTemplate>
+</Rights>
+"#;
+
+        let blockers = super::role_rights_base_free_blockers(xml)?;
+
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("base Role object table order"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("platform right UUID slots"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("conditional rights"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("restriction templates"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("trailing field positions"))
+        );
 
         Ok(())
     }
