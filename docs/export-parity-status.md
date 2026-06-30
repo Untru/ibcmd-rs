@@ -44,6 +44,10 @@ Incremental selected verification after this snapshot:
 | Round 10 MXL template slice | unit-level formatter verification | Moxel system style `-13` is emitted as `style:FieldTextColor` |
 | Round 10 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits nested `CommonAttribute` child object headers |
 | Round 10 source staging readiness slice | unit-level staging verification | object/form `Help.xml` rows use deterministic body ids without querying active `Config` |
+| Round 11 Form.xml slice | unit-level packer verification | new `CheckBoxField` form child items can be compiled from XML |
+| Round 11 Role Rights.xml slice | unit-level rights packer verification | omitted false/no-restriction rights are treated as false while preserving base table shape |
+| Round 11 InformationRegister metadata slice | unit-level metadata XML verification | `InformationRegister` emits generated type `InternalInfo` entries |
+| Round 11 source staging readiness slice | unit-level staging verification | common/object/nested command module bodies are prepared without active module blobs |
 
 Performance note for selected extraction:
 
@@ -140,5 +144,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #17 | MXL `style:FieldTextColor` extraction | merged to `master` in round 10 |
 | #22 | Configuration.xml nested CommonAttribute child headers | merged to `master` in round 10 |
 | #21 | Help.xml staging without active Config query | merged to `master` in round 10 |
+| #16 | Form.xml new `CheckBoxField` compilation | merged to `master` in round 11 |
+| #13 | omitted false Role Rights.xml entries | merged to `master` in round 11 |
+| #18 | InformationRegister generated type InternalInfo | merged to `master` in round 11 |
+| #21 | module body staging without active module blobs | merged to `master` in round 11 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
