@@ -51,7 +51,7 @@ Verification:
 
 ## Task B - Issue #15, High-Volume Object Metadata XML
 
-Worktree: `E:\ibcmd_lab\worktrees\issue-15-object-metadata-v8`
+Worktree: `E:\ibcmd_lab\worktrees\issue-15-object-metadata-v10`
 
 Goal: reduce remaining metadata XML parity debt for high-volume object owners.
 
