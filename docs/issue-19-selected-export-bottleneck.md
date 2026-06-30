@@ -307,5 +307,57 @@ Remaining performance follow-up:
   `E:\ibcmd_lab\perf`;
 - keep issue #19 open until the measured selected export confirms the expected
   wall-time improvement on the real `ut_ibcmd` sample.
-- isolate the new full source-layout stop in ExchangePlan `Content.xml`
-  extraction before another full timing report can be produced.
+
+## Round 29 ExchangePlan Content.xml blocker isolation
+
+The full source-layout stop after Round 28 was reproduced through a selected
+ExchangePlan content run for the real `ut_ibcmd` row:
+
+```powershell
+E:\ibcmd_lab\worktrees\issue-19-exchange-content-v1\target\debug\ibcmd-rs.exe `
+  mssql-dump-config `
+  --server localhost `
+  --database ut_ibcmd `
+  --output-dir E:\ibcmd_lab\perf\issue-19-exchange-content-v1-polny-selected-after `
+  --overwrite `
+  --no-binary-rows `
+  --file-name-list E:\ibcmd_lab\perf\issue-19-exchange-content-v1-polny-selected-file-names.txt
+```
+
+The selected file-name list contains only:
+
+```text
+00fa91bf-4a38-4fe7-830d-2f265c9e251d.1
+```
+
+That is `ExchangePlans\Полный\Ext\Content.xml`. The raw content body was saved
+for inspection at:
+
+```text
+E:\ibcmd_lab\perf\issue-19-exchange-content-v1-polny-content-inflated.txt
+```
+
+The body shape is a supported flat ExchangePlan content list:
+
+```text
+{2,1699,<metadata-id>,<auto-record>,...,0}
+```
+
+The generic source-layout path was updated to build metadata object/type
+reference indexes when source assets are being extracted without metadata XML
+output, and the ExchangePlan content parser now reports the exact unsupported
+content item instead of only the asset path. The selected repro now stops with:
+
+```text
+failed to extract exchange plan content from source asset ExchangePlans\Полный\Ext\Content.xml
+
+Caused by:
+    ExchangePlanContent item 0 references unsupported metadata id ff76e85a-6d29-41d3-a83e-f4a34139c6b2
+```
+
+The referenced metadata id is a direct `Config.FileName` row with metadata code
+`16` and name `ВыгружатьВнутренниеШтрихкодыШтучныхТоваров`, so the remaining
+blocker is not the ExchangePlan content framing. The next step is to determine
+why this real Constant row is not present in the source-layout object reference
+index during the selected/full extraction path, or to add a targeted reference
+index path for ExchangePlan content ids.

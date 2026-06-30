@@ -716,12 +716,17 @@ fn dump_table_rows_with_options(
         .collect::<BTreeSet<_>>();
     let needs_standalone_refs =
         file_names_have_standalone_content_asset(file_names_owned.iter().map(String::as_str));
+    let needs_source_layout_refs = !write_binary_rows;
     let standalone_required_refs = if needs_standalone_refs && !extract_metadata_xml {
         standalone_content_reference_uuids_from_config_rows(&rows)
     } else {
         BTreeSet::new()
     };
-    let metadata_texts = if extract_metadata_xml || extract_module_text || needs_standalone_refs {
+    let metadata_texts = if extract_metadata_xml
+        || extract_module_text
+        || needs_standalone_refs
+        || needs_source_layout_refs
+    {
         build_metadata_text_rows(&rows)
     } else {
         Vec::new()
@@ -745,12 +750,13 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let type_index = if extract_metadata_xml {
+    let type_index = if extract_metadata_xml || needs_source_layout_refs {
         build_metadata_type_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let refs_for_standalone = extract_metadata_xml || needs_standalone_refs;
+    let refs_for_standalone =
+        extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
     let form_refs = if refs_for_standalone {
         build_form_source_reference_index_from_texts(&metadata_texts)
     } else {
@@ -766,7 +772,7 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let object_refs = if extract_metadata_xml {
+    let object_refs = if extract_metadata_xml || needs_source_layout_refs {
         build_metadata_object_reference_index_from_texts(&metadata_texts)
     } else if needs_standalone_refs {
         build_standalone_object_reference_index_from_texts(
@@ -971,7 +977,11 @@ fn dump_table_rows_streamed(
         .collect::<BTreeSet<_>>();
     let metadata_fetch_started = Instant::now();
     let mut metadata_fetch_used_bcp = false;
-    let mut metadata_rows = if extract_metadata_xml || extract_module_text || needs_standalone_refs
+    let needs_source_layout_refs = !write_binary_rows;
+    let mut metadata_rows = if extract_metadata_xml
+        || extract_module_text
+        || needs_standalone_refs
+        || needs_source_layout_refs
     {
         if selected_file_names.is_empty() {
             metadata_fetch_used_bcp = true;
@@ -1021,23 +1031,29 @@ fn dump_table_rows_streamed(
     } else {
         BTreeSet::new()
     };
-    let selected_metadata_rows =
-        if extract_metadata_xml || extract_module_text || needs_standalone_refs {
-            metadata_rows
-                .iter()
-                .filter(|row| metadata_file_names.contains(&row.file_name))
-                .cloned()
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+    let selected_metadata_rows = if extract_metadata_xml
+        || extract_module_text
+        || needs_standalone_refs
+        || needs_source_layout_refs
+    {
+        metadata_rows
+            .iter()
+            .filter(|row| metadata_file_names.contains(&row.file_name))
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let metadata_texts_started = Instant::now();
-    let selected_metadata_texts =
-        if extract_metadata_xml || extract_module_text || needs_standalone_refs {
-            build_metadata_text_rows(&selected_metadata_rows)
-        } else {
-            Vec::new()
-        };
+    let selected_metadata_texts = if extract_metadata_xml
+        || extract_module_text
+        || needs_standalone_refs
+        || needs_source_layout_refs
+    {
+        build_metadata_text_rows(&selected_metadata_rows)
+    } else {
+        Vec::new()
+    };
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
     let selected_configuration_index_needs =
         selected_configuration_source_asset_index_needs(&file_names);
@@ -1153,18 +1169,21 @@ fn dump_table_rows_streamed(
     }
     let write_index_rows = rows_for_source_indexes(&headers, &selected_metadata_rows);
     let metadata_texts_started = Instant::now();
-    let index_metadata_texts =
-        if extract_metadata_xml || extract_module_text || needs_standalone_refs {
-            if broad_metadata_indexes {
-                build_metadata_text_rows(&metadata_rows)
-            } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
-                build_metadata_text_rows(&metadata_rows)
-            } else {
-                build_metadata_text_rows(&selected_metadata_rows)
-            }
+    let index_metadata_texts = if extract_metadata_xml
+        || extract_module_text
+        || needs_standalone_refs
+        || needs_source_layout_refs
+    {
+        if broad_metadata_indexes {
+            build_metadata_text_rows(&metadata_rows)
+        } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
+            build_metadata_text_rows(&metadata_rows)
         } else {
-            Vec::new()
-        };
+            build_metadata_text_rows(&selected_metadata_rows)
+        }
+    } else {
+        Vec::new()
+    };
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
     let reference_indexes_started = Instant::now();
     let metadata_texts_by_file_name = index_metadata_texts
@@ -1195,7 +1214,9 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_metadata_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let type_index = if extract_metadata_xml && source_reference_needs.type_index {
+    let type_index = if (extract_metadata_xml || needs_source_layout_refs)
+        && source_reference_needs.type_index
+    {
         build_metadata_type_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
@@ -1228,7 +1249,9 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_subsystem_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let object_refs = if extract_metadata_xml && source_reference_needs.object_refs {
+    let object_refs = if (extract_metadata_xml || needs_source_layout_refs)
+        && source_reference_needs.object_refs
+    {
         build_metadata_object_reference_index_from_texts(&index_metadata_texts)
     } else if needs_standalone_refs {
         build_standalone_object_reference_index_from_texts(
@@ -3881,14 +3904,14 @@ fn write_source_asset(
             )?;
         }
         SourceAssetKind::ExchangePlanContent => {
-            let items = parse_exchange_plan_content_blob(bytes, context.object_refs).with_context(
-                || {
-                    format!(
-                        "failed to extract exchange plan content from source asset {}",
-                        asset.primary_path.display()
-                    )
-                },
-            )?;
+            let items =
+                parse_exchange_plan_content_blob(bytes, context.object_refs, context.type_index)
+                    .with_context(|| {
+                        format!(
+                            "failed to extract exchange plan content from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -4210,6 +4233,7 @@ enum ClientApplicationInterfaceNode {
     Panel { id: String, uuid: String },
 }
 
+#[derive(Debug)]
 struct ExchangePlanContentItem {
     metadata: String,
     auto_record: &'static str,
@@ -6274,20 +6298,48 @@ fn parse_client_application_interface_children(
 fn parse_exchange_plan_content_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<ExchangePlanContentItem>> {
-    let inflated = inflate_raw_deflate(bytes).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
-    if fields.first()?.trim() != "2" {
-        return None;
+    type_index: &BTreeMap<String, String>,
+) -> Result<Vec<ExchangePlanContentItem>> {
+    let inflated = inflate_raw_deflate(bytes).context("failed to inflate ExchangePlanContent")?;
+    let text = String::from_utf8(inflated).context("ExchangePlanContent is not valid UTF-8")?;
+    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)
+        .context("ExchangePlanContent body is not a braced 1C value")?;
+    let marker = fields
+        .first()
+        .map(|field| field.trim())
+        .context("ExchangePlanContent body is empty")?;
+    if marker != "2" {
+        bail!("unsupported ExchangePlanContent marker {marker}, expected 2");
     }
-    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let count = fields
+        .get(1)
+        .context("ExchangePlanContent body has no item count")?
+        .trim()
+        .parse::<usize>()
+        .context("ExchangePlanContent item count is not numeric")?;
     let mut items = Vec::with_capacity(count);
     let mut index = 2usize;
-    for _ in 0..count {
-        let object_id = parse_uuid_field(fields.get(index)?.trim())?;
-        let auto_record = exchange_plan_auto_record_xml(fields.get(index + 1)?.trim());
-        let metadata = object_refs.get(&object_id)?.clone();
+    for item_index in 0..count {
+        let object_slot = fields
+            .get(index)
+            .with_context(|| format!("ExchangePlanContent item {item_index} has no metadata id"))?;
+        let object_id = parse_uuid_field(object_slot.trim()).with_context(|| {
+            format!(
+                "ExchangePlanContent item {item_index} metadata id is not a UUID: {}",
+                object_slot.trim()
+            )
+        })?;
+        let auto_record_slot = fields.get(index + 1).with_context(|| {
+            format!("ExchangePlanContent item {item_index} has no AutoRecord value")
+        })?;
+        let auto_record = exchange_plan_auto_record_xml(auto_record_slot.trim());
+        let metadata = object_refs
+            .get(&object_id)
+            .or_else(|| type_index.get(&object_id))
+            .cloned()
+            .with_context(|| {
+                format!("ExchangePlanContent item {item_index} references unsupported metadata id {object_id}")
+            })?;
         items.push(ExchangePlanContentItem {
             metadata,
             auto_record,
@@ -6295,7 +6347,7 @@ fn parse_exchange_plan_content_blob(
         index += 2;
     }
 
-    Some(items)
+    Ok(items)
 }
 
 fn parse_business_process_flowchart_blob(bytes: &[u8]) -> Option<BusinessProcessFlowchart> {
@@ -33906,6 +33958,107 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_exchange_plan_content_without_metadata_xml_indexes() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let plan_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_object_type_id = "11111111-1111-4111-8111-111111111111";
+        let plan = deflate_for_test(
+            format!(
+                "{{1,\r\n{{37,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,\r\n{{3,\r\n{{1,0,{plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let catalog = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{catalog_object_type_id},22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let content = deflate_for_test(
+            format!("{{2,2,{catalog_uuid},0,{catalog_object_type_id},2,0}}").as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: plan_uuid.to_string(),
+                part_no: 0,
+                data_size: plan.len() as i64,
+                binary_hex: encode_hex_for_test(&plan),
+            },
+            ConfigRow {
+                file_name: format!("{plan_uuid}.1"),
+                part_no: 0,
+                data_size: content.len() as i64,
+                binary_hex: encode_hex_for_test(&content),
+            },
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog),
+            },
+        ];
+
+        let dumped = dump_table_rows_with_options(
+            &root,
+            "Config",
+            rows,
+            false,
+            false,
+            false,
+            false,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 0);
+        assert_eq!(dumped.source_asset_rows, 1);
+        let xml = fs::read_to_string(root.join("ExchangePlans/Sync/Ext/Content.xml")).unwrap();
+        assert!(xml.contains("<Metadata>Catalog.Customers</Metadata>"));
+        assert!(xml.contains("<Metadata>cfg:CatalogObject.Customers</Metadata>"));
+        assert!(xml.contains("<AutoRecord>Auto</AutoRecord>"));
+        assert!(!root.join("ConfigDumpInfo.xml").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn exchange_plan_content_reports_unresolved_metadata_id() {
+        let missing_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let content = deflate_for_test(format!("{{2,1,{missing_id},0}}").as_bytes());
+        let err = parse_exchange_plan_content_blob(&content, &BTreeMap::new(), &BTreeMap::new())
+            .unwrap_err();
+
+        let message = format!("{err:#}");
+        assert!(message.contains("ExchangePlanContent item 0"));
+        assert!(message.contains(missing_id));
+        assert!(message.contains("unsupported metadata id"));
+    }
+
+    #[test]
+    fn exchange_plan_content_resolves_constant_metadata_refs() {
+        let constant_uuid = "ff76e85a-6d29-41d3-a83e-f4a34139c6b2";
+        let constant = metadata_text_row_from_text(
+            constant_uuid,
+            format!(
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{constant_uuid}}},\"UseInternalBarcodes\",{{1,\"en\",\"Use internal barcodes\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}}}},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444}}\r\n}},0}}"
+            ),
+        )
+        .unwrap();
+        let object_refs = build_metadata_object_reference_index_from_texts(&[constant]);
+        let content = deflate_for_test(format!("{{2,1,{constant_uuid},0}}").as_bytes());
+
+        let items =
+            parse_exchange_plan_content_blob(&content, &object_refs, &BTreeMap::new()).unwrap();
+
+        assert_eq!(items[0].metadata, "Constant.UseInternalBarcodes");
     }
 
     #[test]
