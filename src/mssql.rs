@@ -1252,8 +1252,8 @@ fn configuration_asset_bootstrap_rows(
         "4",
         "configuration_binary_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        true,
-        "configuration binary asset is stored directly from source bytes",
+        false,
+        "configuration binary asset is stored directly from source bytes without reading the active Config row",
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -3616,9 +3616,9 @@ fn prepare_configuration_raw_deflated_body_row(
 }
 
 fn prepare_configuration_binary_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     properties: &SimpleMetadataXmlProperties,
     body_path: PathBuf,
     suffix: &str,
@@ -3627,7 +3627,6 @@ fn prepare_configuration_binary_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let blob = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read Configuration binary {}",
@@ -7644,6 +7643,86 @@ mod tests {
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(body)
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_configuration_binary_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-configuration-binary-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let configuration_xml = root.join("Configuration.xml");
+        let ext = root.join("Ext");
+        fs::create_dir_all(&ext).unwrap();
+        fs::write(
+            &configuration_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Configuration uuid="ffffffff-ffff-4fff-ffff-ffffffffffff">
+    <Properties><Name>Main</Name></Properties>
+  </Configuration>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(ext.join("ParentConfigurations.bin"), b"parent-configs").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&configuration_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "configuration_binary_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "ffffffff-ffff-4fff-ffff-ffffffffffff.4"
+        );
+        assert_eq!(row.source_path, "Ext/ParentConfigurations.bin");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_configuration_binary_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-configuration-binary-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let body_path = root.join("Ext").join("ParentConfigurations.bin");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let body = b"parent-configs";
+        fs::write(&body_path, body).unwrap();
+        let properties = test_simple_metadata_properties(
+            "Configuration",
+            "ffffffff-ffff-4fff-ffff-ffffffffffff",
+            "Main",
+        );
+
+        let rows = super::prepare_configuration_binary_body_row(
+            PathBuf::from("missing-sqlcmd-for-configuration-binary-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &properties,
+            body_path.clone(),
+            "4",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "ffffffff-ffff-4fff-ffff-ffffffffffff.4");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(rows[0].blob, body);
+        assert_eq!(rows[0].blob_sha256, hex_sha256(body));
 
         let _ = fs::remove_dir_all(root);
     }

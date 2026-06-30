@@ -14355,6 +14355,7 @@ struct FunctionalOptionProperties {
 
 struct SubsystemProperties {
     include_in_command_interface: bool,
+    child_subsystems: Vec<String>,
 }
 
 struct ExchangePlanProperties {
@@ -14431,9 +14432,15 @@ struct ReportProperties {
 
 struct DataProcessorProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    default_form: Option<String>,
+    auxiliary_form: Option<String>,
 }
 
 struct DocumentProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
+struct SettingsStorageProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
 
@@ -14687,6 +14694,7 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
     let object_text = *root_fields.get(1)?;
     let fields = split_1c_braced_fields(object_text, 0)?;
     let mut entries = Vec::new();
+    let header_index = metadata_header_field_index(&fields, &row.file_name);
 
     if object_code == 0 {
         push_indexed_generated_type(&mut entries, &fields, 1, "DefinedType", &header.name);
@@ -14746,6 +14754,15 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
     if object_code == 19 {
         push_indexed_generated_type(&mut entries, &fields, 12, "ReportManager", &header.name);
     }
+    if object_code == 2 && header_index == Some(1) && field_starts_with(fields.get(1), "{0,") {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            2,
+            "SettingsStorageManager",
+            &header.name,
+        );
+    }
     if object_code == 57 {
         push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 3, "CatalogRef", &header.name);
@@ -14753,7 +14770,6 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
         push_indexed_generated_type(&mut entries, &fields, 7, "CatalogList", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 34, "CatalogManager", &header.name);
     }
-    let header_index = metadata_header_field_index(&fields, &row.file_name);
 
     if object_code == 20 && header_index == Some(5) {
         if let Some(type_id) = fields.get(1).copied().and_then(parse_uuid_field) {
@@ -15190,11 +15206,14 @@ fn extract_metadata_source_xml_from_text_row(
             parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
     } else if kind == "DataProcessor" {
-        let data_processor = parse_data_processor_properties_from_text(text, uuid)?;
+        let data_processor = parse_data_processor_properties_from_text(text, uuid, form_refs)?;
         format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(text, uuid)?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
+    } else if kind == "SettingsStorage" {
+        let settings_storage = parse_settings_storage_properties_from_text(text, uuid)?;
+        format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
     } else if kind == "Enum" {
         let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
         format_enum_source_xml(&header, &enumeration, source_version).into_bytes()
@@ -15204,7 +15223,7 @@ fn extract_metadata_source_xml_from_text_row(
         format_functional_options_parameter_source_xml(&header, &properties, source_version)
             .into_bytes()
     } else if kind == "Subsystem" {
-        let subsystem = parse_subsystem_properties_from_text(text, uuid)?;
+        let subsystem = parse_subsystem_properties_from_text(text, uuid, subsystem_refs)?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
         let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid)?;
@@ -15507,7 +15526,11 @@ fn parse_functional_option_properties_from_text(
     })
 }
 
-fn parse_subsystem_properties_from_text(text: &str, uuid: &str) -> Option<SubsystemProperties> {
+fn parse_subsystem_properties_from_text(
+    text: &str,
+    uuid: &str,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> Option<SubsystemProperties> {
     let fields = metadata_object_fields(text)?;
     if fields.first().map(|value| value.trim()) != Some("22")
         || metadata_header_field_index(&fields, uuid) != Some(1)
@@ -15516,7 +15539,31 @@ fn parse_subsystem_properties_from_text(text: &str, uuid: &str) -> Option<Subsys
     }
     Some(SubsystemProperties {
         include_in_command_interface: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true),
+        child_subsystems: parse_subsystem_child_references(&fields, uuid, subsystem_refs),
     })
+}
+
+fn parse_subsystem_child_references(
+    fields: &[&str],
+    uuid: &str,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut children = Vec::new();
+    for field in fields.iter().skip(3) {
+        for child_uuid in uuid_like_values_in_text_order(field) {
+            if child_uuid == uuid || !seen.insert(child_uuid.clone()) {
+                continue;
+            }
+            let Some(subsystem_ref) = subsystem_refs.get(&child_uuid) else {
+                continue;
+            };
+            if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+                children.push(reference);
+            }
+        }
+    }
+    children
 }
 
 fn parse_exchange_plan_properties_from_text(
@@ -15752,9 +15799,36 @@ fn parse_document_properties_from_text(text: &str, uuid: &str) -> Option<Documen
     Some(DocumentProperties { generated_types })
 }
 
+fn parse_settings_storage_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<SettingsStorageProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("2")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+        || !field_starts_with(fields.get(1), "{0,")
+    {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        2,
+        3,
+        &format!("SettingsStorageManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(SettingsStorageProperties { generated_types })
+}
+
 fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<DataProcessorProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -15772,7 +15846,11 @@ fn parse_data_processor_properties_from_text(
         "Manager",
     );
 
-    Some(DataProcessorProperties { generated_types })
+    Some(DataProcessorProperties {
+        generated_types,
+        default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
+        auxiliary_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
+    })
 }
 
 fn parse_enum_properties_from_text(
@@ -18408,6 +18486,19 @@ fn format_subsystem_source_xml(
             ),
         );
     }
+    if !subsystem.child_subsystems.is_empty()
+        && let Some(offset) = xml.find("\t</Subsystem>")
+    {
+        let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+        for reference in &subsystem.child_subsystems {
+            child_objects.push_str(&format!(
+                "\t\t\t<Subsystem>{}</Subsystem>\r\n",
+                escape_xml_text(reference)
+            ));
+        }
+        child_objects.push_str("\t\t</ChildObjects>\r\n");
+        xml.insert_str(offset, &child_objects);
+    }
     xml
 }
 
@@ -18813,6 +18904,19 @@ fn format_document_source_xml(
     xml
 }
 
+fn format_settings_storage_source_xml(
+    header: &MetadataHeader,
+    settings_storage: &SettingsStorageProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("SettingsStorage", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&settings_storage.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    xml
+}
+
 fn format_data_processor_source_xml(
     header: &MetadataHeader,
     data_processor: &DataProcessorProperties,
@@ -18822,6 +18926,22 @@ fn format_data_processor_source_xml(
     let internal_info = format_generated_types_internal_info_xml(&data_processor.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = String::new();
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultForm",
+            data_processor.default_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryForm",
+            data_processor.auxiliary_form.as_deref(),
+        );
+        xml.insert_str(index, &properties);
     }
     xml
 }
@@ -29266,6 +29386,12 @@ mod tests {
             root.join("Subsystems/StandardSubsystems/Subsystems/Users.xml")
                 .exists()
         );
+        let parent_xml =
+            fs::read_to_string(root.join("Subsystems/StandardSubsystems.xml")).unwrap();
+        assert!(
+            parent_xml
+                .contains("<Subsystem>Subsystem.StandardSubsystems.Subsystem.Users</Subsystem>")
+        );
         assert!(
             fs::read_to_string(
                 root.join("Subsystems/StandardSubsystems/Subsystems/Users/Ext/Help.xml")
@@ -29478,6 +29604,47 @@ mod tests {
             PathBuf::from("Subsystems/Hidden.xml")
         );
         assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
+    }
+
+    #[test]
+    fn extracts_subsystem_child_objects_to_metadata_xml() {
+        let parent_uuid = "11111111-1111-4111-8111-111111111111";
+        let child_uuid = "22222222-2222-4222-8222-222222222222";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"Parent\",{{1,\"en\",\"Parent\"}},\"\"}},1,{child_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let subsystem_refs = BTreeMap::from([(
+            child_uuid.to_string(),
+            SubsystemSourceReference {
+                relative_path: PathBuf::from("Subsystems/Parent/Subsystems/Child.xml"),
+            },
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            parent_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &subsystem_refs,
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Subsystems/Parent.xml")
+        );
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Subsystem>Subsystem.Parent.Subsystem.Child</Subsystem>"));
+        assert!(xml.find("\t\t</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
     }
 
     #[test]
@@ -30730,6 +30897,67 @@ mod tests {
     }
 
     #[test]
+    fn extracts_settings_storage_xml_with_manager_generated_type() {
+        let uuid = "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let manager_type_id = "44444444-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let manager_value_id = "44444444-cccc-4ccc-8ccc-cccccccccccc";
+        let plain = format!(
+            "{{1,\r\n{{2,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"UserSettings\",{{1,\"en\",\"User settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000}},2,\r\n{{0}},\r\n{{0}}\r\n}},0}}"
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let generated_types = parse_generated_type_entries_from_blob(&blob, uuid).unwrap();
+        let xml = String::from_utf8(extracted.xml.clone()).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("SettingsStorages").join("UserSettings.xml")
+        );
+        assert_eq!(properties.kind, "SettingsStorage");
+        assert_eq!(properties.uuid, uuid);
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="SettingsStorageManager.UserSettings" category="Manager">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+        assert!(generated_types.contains(&(
+            manager_type_id.to_string(),
+            "cfg:SettingsStorageManager.UserSettings".to_string()
+        )));
+        assert!(!repacked.blob.is_empty());
+        let repacked_plain =
+            String::from_utf8(inflate_raw_deflate(&repacked.blob).unwrap()).unwrap();
+        assert_eq!(repacked_plain, plain);
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
+        assert!(xml_v21.contains("SettingsStorageManager.UserSettings"));
+    }
+
+    #[test]
     fn extracts_additional_simple_service_metadata_xml_from_blobs() {
         let language_uuid = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         let language_blob = deflate_for_test(
@@ -31735,16 +31963,34 @@ mod tests {
     }
 
     #[test]
-    fn extracts_data_processor_manager_generated_type_to_metadata_xml() {
+    fn extracts_data_processor_generated_type_and_default_forms_to_metadata_xml() {
         let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let default_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let auxiliary_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
         let manager_type_id = "11111111-1111-4111-8111-111111111111";
         let manager_value_id = "22222222-2222-4222-8222-222222222222";
         let data_processor_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,{{0}},{{0}}}}\r\n}}"
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}}\r\n}}"
             )
             .as_bytes(),
         );
+        let form_refs = BTreeMap::from([
+            (
+                default_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/MainForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                auxiliary_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/AssistantForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
 
         for source_version in [
             InfobaseConfigSourceVersion::V2_20,
@@ -31756,7 +32002,7 @@ mod tests {
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
-                &BTreeMap::new(),
+                &form_refs,
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 source_version,
@@ -31781,6 +32027,10 @@ mod tests {
             );
             assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
             assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+            assert!(xml.contains("<DefaultForm>DataProcessor.Loader.Form.MainForm</DefaultForm>"));
+            assert!(xml.contains(
+                "<AuxiliaryForm>DataProcessor.Loader.Form.AssistantForm</AuxiliaryForm>"
+            ));
         }
     }
 
