@@ -29,8 +29,8 @@ The full JSON report is retained at
 `E:\ibcmd_lab\full_diff_20260630_184120\diff_full_source_only.json`.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
-Candidate: latest `ibcmd-rs` export after round 21 plus the orphan `.2`
-source asset mapping fix.
+Candidate: `ibcmd-rs` full export snapshot generated before the round 22 and
+round 23 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -113,6 +113,12 @@ Verification history:
 | Round 22 root/common attribute metadata slice | unit-level metadata XML verification | root `Configuration.xml` emits additional child families; `CommonAttribute` emits native-shaped `Content` and `AutoUse` enum values |
 | Round 22 source staging readiness slice | unit-level readiness audit verification | form body staging remains base-dependent, but readiness reports precise blockers for layout, trailing sections, modules and item assets |
 | Round 22 V8 container slice | unit-level module blob/container verification | shared `v8_container` parser/builder preserves module blob behavior and tests multi-element, round-trip and multi-page rejection behavior |
+| Round 23 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table items extract `AutoRefresh` / `AutoRefreshPeriod` from property bag keys `5`/`6` and pack them back into existing rows |
+| Round 23 object metadata slice | unit-level metadata XML verification | `Document` metadata emits owned `Form` and `Template` child refs from generic form/template indexes |
+| Round 23 partial metadata slice | unit-level metadata XML verification | `InformationRegister` reads `UseStandardCommands` from the extended native owner tuple while keeping simplified-shape fallback |
+| Round 23 MXL template slice | unit-level extractor/packer verification | SpreadsheetDocument MOXCEL merge region kind `2` is preserved as `verticalUnmerge` and packs back into the same region list |
+| Round 23 source staging readiness slice | unit-level readiness audit verification | `Role/Ext/Rights.xml` remains base-dependent, but readiness now reports exact blockers around role object order, right UUID slots, restrictions and template/trailing layout |
+| Round 23 native dump performance slice | unit-level fetch/timing verification | streamed `mssql-dump-config` routes blob-bearing metadata/direct prepare reads through the existing native `bcp` parser and reports `sqlcmd`/`bcp` timing split |
 
 Performance note for selected extraction:
 
@@ -126,6 +132,7 @@ Performance note for selected extraction:
 - `Ext` `.8/.9/.a/.b` selected source-mode run is byte-identical to native and no longer performs a broad metadata fetch. Latest timing: `prepare_indexes_ms=1552`, split into `prepare_metadata_fetch_ms=211`, `prepare_metadata_texts_ms=768`, and `prepare_reference_indexes_ms=573`. Detailed reference-index timings were `prepare_command_refs_ms=392`, `prepare_form_refs_ms=163`, `prepare_metadata_refs_ms=14`; all other reference-index builders were skipped.
 - Broader selected command-interface diagnostics can still need a targeted/cache reference index when command UUIDs only exist inside owner metadata blobs rather than as direct `FileName` rows.
 - Issue #19 bottleneck note: `docs/issue-19-selected-export-bottleneck.md` pinpoints selected command-interface `command_refs` as the next safe optimization target.
+- Round 23 #19 follow-up: streamed `mssql-dump-config` no longer uses `sqlcmd` for blob-bearing metadata/direct prepare reads; those paths now use the existing native `bcp` parser. `sqlcmd` still remains for lightweight row headers/control queries. The latest full-run evidence before this change had `fetch_rows_ms=11176` against `process_rows_wall_ms=85887` and `prepare_indexes_ms=33210`, so the primary remaining bottleneck is CPU/source generation and reference/index preparation, not SQL blob transfer.
 - Scope decision: `ConfigDumpInfo.xml` is intentionally not generated. The native file is derived from the `versions` row, but it is not needed for our export/import target and should not be treated as remaining work.
 
 Diff by file kind:
@@ -254,5 +261,11 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #22 | root child families and CommonAttribute content/AutoUse metadata XML | merged to `master` in round 22 |
 | #16 | Form command `ModifiesSavedData` extract/pack support | merged to `master` in round 22 |
 | #23 | shared V8 container parser/builder extraction | merged to `master` in round 22 |
+| #15 | Document owned Form/Template child refs | merged to `master` in round 23 |
+| #16 | Form.xml wrapper `55` table `AutoRefresh` / `AutoRefreshPeriod` extraction and packing | merged to `master` in round 23 |
+| #17 | SpreadsheetDocument `verticalUnmerge` merge-region extraction and packing | merged to `master` in round 23 |
+| #18 | InformationRegister extended-tuple `UseStandardCommands` metadata XML | merged to `master` in round 23 |
+| #19 | `mssql-dump-config` blob-bearing prepare fetches routed through native `bcp` parser with timing split | merged to `master` in round 23 |
+| #21 | precise Role `Rights.xml` base-free staging blocker audit | merged to `master` in round 23 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

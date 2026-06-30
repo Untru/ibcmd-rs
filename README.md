@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 23 | Form.xml | wrapper `55` table items extract and pack `AutoRefresh` / `AutoRefreshPeriod` through existing property bag keys |
+| 23 | Object metadata XML | `Document` metadata emits owned `Form` and `Template` child refs from generic indexes |
+| 23 | Partial metadata XML | `InformationRegister` reads `UseStandardCommands` from the extended native owner tuple |
+| 23 | MXL templates | SpreadsheetDocument MOXCEL merge regions preserve `verticalUnmerge` instead of converting it to ordinary `merge` |
+| 23 | Source staging readiness | `Role/Ext/Rights.xml` readiness reports precise base-blob blockers instead of a generic reason |
+| 23 | Native dump performance | `mssql-dump-config` routes blob-bearing metadata/direct prepare reads through the existing native `bcp` parser and reports `sqlcmd`/`bcp` timing split |
 | 22 | Form.xml | `Command/ModifiesSavedData=true` is extracted and packed for form commands |
 | 22 | Root/CommonAttributes metadata XML | root `Configuration.xml` child families expanded; `CommonAttribute` emits native-shaped `Content` items and `AutoUse` enum values |
 | 22 | Source staging readiness | form body readiness audit now reports precise base-blob blockers for layout, trailing sections, modules and item assets |
@@ -142,10 +148,12 @@ cargo run -- mssql-stage-source-objects --database target_db --source-root C:\fu
 
 ### bcp client compatibility
 
-The `mssql-storage-*` and `mssql-delta-*` commands shell out to `bcp`. By
-default they invoke it with `-T -n` (trusted connection, native format), which
-works across `bcp` versions including `bcp 13` (Microsoft ODBC Driver 13 for SQL
-Server).
+The `mssql-storage-*` and `mssql-delta-*` commands shell out to `bcp`. Native
+`mssql-dump-config` also uses the existing `bcp` native parser for blob-bearing
+row fetches in streamed export paths, while lightweight headers/control queries
+still use `sqlcmd`. By default these paths invoke `bcp` with native format,
+which works across `bcp` versions including `bcp 13` (Microsoft ODBC Driver 13
+for SQL Server).
 
 `bcp 18+` (ODBC Driver 18) defaults to encrypted connections and may need the
 server certificate to be trusted. Pass `--bcp-trust-cert` to add `bcp -u` (trust
