@@ -3292,9 +3292,9 @@ fn prepare_spreadsheet_template_body_row(
 }
 
 fn prepare_html_template_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -3303,14 +3303,7 @@ fn prepare_html_template_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    prepare_help_blob_body_row(
-        sqlcmd,
-        server,
-        database,
-        body_id,
-        body_path,
-        "HTML Template",
-    )
+    prepare_help_blob_body_row(Path::new(""), "", "", body_id, body_path, "HTML Template")
 }
 
 fn prepare_binary_template_body_row(
@@ -6236,6 +6229,14 @@ mod tests {
 "#
     }
 
+    fn sample_html_template_xml() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Page>index</Page>
+</Help>
+"#
+    }
+
     fn sample_style_body_xml() -> &'static [u8] {
         br#"<?xml version="1.0" encoding="UTF-8"?>
 <Style xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" version="2.21">
@@ -7744,6 +7745,58 @@ mod tests {
     }
 
     #[test]
+    fn reports_html_template_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-html-template-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Web.xml");
+        let template_ext = root.join("CommonTemplates").join("Web").join("Ext");
+        fs::create_dir_all(&template_ext).unwrap();
+        fs::write(
+            &template_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>Web</Name>
+      <TemplateType>HTMLDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            template_ext.join("Template.xml"),
+            sample_html_template_xml(),
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&template_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "template_html_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd.0"
+        );
+        assert_eq!(row.source_path, "CommonTemplates/Web/Ext/Template.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("does not need an active base blob"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_style_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-style-body-readiness-{}",
@@ -8133,6 +8186,55 @@ mod tests {
         let expected = pack_moxel_spreadsheet_blob_from_xml_with_source(
             sample_spreadsheet_template_xml(),
             None,
+        )
+        .unwrap();
+        assert_eq!(rows[0].blob, expected.blob);
+        assert_eq!(rows[0].blob_sha256, hex_sha256(&rows[0].blob));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_html_template_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-html-template-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Web.xml");
+        let body_path = root
+            .join("CommonTemplates")
+            .join("Web")
+            .join("Ext")
+            .join("Template.xml");
+        let page_path = body_path.with_extension("").join("index.html");
+        fs::create_dir_all(page_path.parent().unwrap()).unwrap();
+        fs::write(&template_xml, b"<CommonTemplate/>").unwrap();
+        fs::write(&body_path, sample_html_template_xml()).unwrap();
+        fs::write(&page_path, b"<html><body>hello</body></html>").unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonTemplate",
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+            "Web",
+        );
+
+        let rows = super::prepare_html_template_body_row(
+            PathBuf::from("missing-sqlcmd-for-html-template-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &template_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "dddddddd-dddd-4ddd-dddd-dddddddddddd.0");
+        assert_eq!(rows[0].path, body_path);
+        let expected = pack_help_blob_from_parts(
+            &[(
+                "index".to_string(),
+                b"<html><body>hello</body></html>".to_vec(),
+            )],
+            &[],
         )
         .unwrap();
         assert_eq!(rows[0].blob, expected.blob);
