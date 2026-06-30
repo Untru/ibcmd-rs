@@ -15850,6 +15850,8 @@ struct RegisterProperties {
     use_standard_commands: bool,
     register_type: Option<&'static str>,
     include_help_in_contents: Option<bool>,
+    data_lock_control_mode: Option<&'static str>,
+    full_text_search: Option<&'static str>,
     default_record_form: Option<String>,
     default_list_form: Option<String>,
     auxiliary_record_form: Option<String>,
@@ -17449,6 +17451,8 @@ fn parse_register_properties_from_text(
     let use_standard_commands = parse_register_use_standard_commands(kind, &fields, uuid);
     let register_type = parse_register_type(kind, &fields, uuid);
     let include_help_in_contents = parse_register_include_help_in_contents(kind);
+    let data_lock_control_mode = parse_register_data_lock_control_mode(kind, &fields, uuid);
+    let full_text_search = parse_register_full_text_search(kind, &fields, uuid);
     let form_refs = parse_register_form_refs(kind, &fields, uuid, form_refs);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
@@ -17462,6 +17466,8 @@ fn parse_register_properties_from_text(
         use_standard_commands,
         register_type,
         include_help_in_contents,
+        data_lock_control_mode,
+        full_text_search,
         default_record_form: form_refs.0,
         default_list_form: form_refs.1,
         auxiliary_record_form: form_refs.2,
@@ -17508,6 +17514,38 @@ fn accumulation_register_type_xml(value: u32) -> Option<&'static str> {
     match value {
         0 => Some("Balance"),
         1 => Some("Turnover"),
+        _ => None,
+    }
+}
+
+fn parse_register_data_lock_control_mode(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> Option<&'static str> {
+    if kind != "AccumulationRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    match fields.get(header_index + 5).map(|field| field.trim()) {
+        Some("0") => Some("Automatic"),
+        Some("1") => Some("Managed"),
+        _ => None,
+    }
+}
+
+fn parse_register_full_text_search(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> Option<&'static str> {
+    if kind != "AccumulationRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    match fields.get(header_index + 6).map(|field| field.trim()) {
+        Some("0") => Some("DontUse"),
+        Some("1") => Some("Use"),
         _ => None,
     }
 }
@@ -21390,6 +21428,16 @@ fn format_register_source_xml(
                 xml_bool(include_help_in_contents)
             ));
         }
+        push_optional_simple_property_xml(
+            &mut properties,
+            "DataLockControlMode",
+            register.data_lock_control_mode,
+        );
+        push_optional_simple_property_xml(
+            &mut properties,
+            "FullTextSearch",
+            register.full_text_search,
+        );
         xml.insert_str(index, &properties);
     }
     if kind == "InformationRegister"
@@ -34542,6 +34590,59 @@ mod tests {
             );
             assert!(!xml.contains("ConfigDumpInfo"));
         }
+    }
+
+    #[test]
+    fn extracts_accumulation_register_lock_and_full_text_flags() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{28,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\r\n\
+{{3,\r\n{{1,0,{register_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1,{zero_uuid},{zero_uuid},0,0,0,1\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("AccumulationRegisters/Sales.xml")
+        );
+        assert!(xml.contains("<DataLockControlMode>Automatic</DataLockControlMode>"));
+        assert!(xml.contains("<FullTextSearch>DontUse</FullTextSearch>"));
+        assert!(
+            xml.find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                .unwrap()
+                < xml
+                    .find("<DataLockControlMode>Automatic</DataLockControlMode>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<DataLockControlMode>Automatic</DataLockControlMode>")
+                .unwrap()
+                < xml
+                    .find("<FullTextSearch>DontUse</FullTextSearch>")
+                    .unwrap()
+        );
     }
 
     #[test]
