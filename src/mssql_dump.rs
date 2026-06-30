@@ -14431,6 +14431,8 @@ struct ReportProperties {
 
 struct DataProcessorProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    default_form: Option<String>,
+    auxiliary_form: Option<String>,
 }
 
 struct DocumentProperties {
@@ -15190,7 +15192,7 @@ fn extract_metadata_source_xml_from_text_row(
             parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
     } else if kind == "DataProcessor" {
-        let data_processor = parse_data_processor_properties_from_text(text, uuid)?;
+        let data_processor = parse_data_processor_properties_from_text(text, uuid, form_refs)?;
         format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(text, uuid)?;
@@ -15755,6 +15757,7 @@ fn parse_document_properties_from_text(text: &str, uuid: &str) -> Option<Documen
 fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<DataProcessorProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -15772,7 +15775,11 @@ fn parse_data_processor_properties_from_text(
         "Manager",
     );
 
-    Some(DataProcessorProperties { generated_types })
+    Some(DataProcessorProperties {
+        generated_types,
+        default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
+        auxiliary_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
+    })
 }
 
 fn parse_enum_properties_from_text(
@@ -18822,6 +18829,22 @@ fn format_data_processor_source_xml(
     let internal_info = format_generated_types_internal_info_xml(&data_processor.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = String::new();
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultForm",
+            data_processor.default_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryForm",
+            data_processor.auxiliary_form.as_deref(),
+        );
+        xml.insert_str(index, &properties);
     }
     xml
 }
@@ -31735,16 +31758,34 @@ mod tests {
     }
 
     #[test]
-    fn extracts_data_processor_manager_generated_type_to_metadata_xml() {
+    fn extracts_data_processor_generated_type_and_default_forms_to_metadata_xml() {
         let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let default_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let auxiliary_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
         let manager_type_id = "11111111-1111-4111-8111-111111111111";
         let manager_value_id = "22222222-2222-4222-8222-222222222222";
         let data_processor_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,{{0}},{{0}}}}\r\n}}"
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}}\r\n}}"
             )
             .as_bytes(),
         );
+        let form_refs = BTreeMap::from([
+            (
+                default_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/MainForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                auxiliary_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/AssistantForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
 
         for source_version in [
             InfobaseConfigSourceVersion::V2_20,
@@ -31756,7 +31797,7 @@ mod tests {
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 &BTreeMap::new(),
-                &BTreeMap::new(),
+                &form_refs,
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 source_version,
@@ -31781,6 +31822,10 @@ mod tests {
             );
             assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
             assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+            assert!(xml.contains("<DefaultForm>DataProcessor.Loader.Form.MainForm</DefaultForm>"));
+            assert!(xml.contains(
+                "<AuxiliaryForm>DataProcessor.Loader.Form.AssistantForm</AuxiliaryForm>"
+            ));
         }
     }
 
