@@ -61,6 +61,10 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 22 | Form.xml | `Command/ModifiesSavedData=true` is extracted and packed for form commands |
+| 22 | Root/CommonAttributes metadata XML | root `Configuration.xml` child families expanded; `CommonAttribute` emits native-shaped `Content` items and `AutoUse` enum values |
+| 22 | Source staging readiness | form body readiness audit now reports precise base-blob blockers for layout, trailing sections, modules and item assets |
+| 22 | V8 container layer | module blob V8 container parser/builder moved into a shared tested internal module |
 | 21 | Form.xml | nested `AutoCommandBar` items preserve `HorizontalAlign` and `Autofill` settings |
 | 21 | Object metadata XML | `DataProcessor` emits `UseStandardCommands` from the metadata blob |
 | 21 | Source staging readiness | configuration `Ext/MobileClientSignature.bin` rows are covered as base-free raw-deflated bodies |

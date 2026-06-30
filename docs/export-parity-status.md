@@ -109,6 +109,10 @@ Verification history:
 | Round 21 Form.xml slice | unit-level packer verification | nested `AutoCommandBar` items preserve `HorizontalAlign` and `Autofill` settings |
 | Round 21 object metadata slice | unit-level metadata XML verification | `DataProcessor` emits `UseStandardCommands` from the metadata blob |
 | Round 21 source staging readiness slice | unit-level staging verification | configuration `Ext/MobileClientSignature.bin` rows are covered as base-free raw-deflated bodies |
+| Round 22 Form.xml slice | unit-level extractor/packer verification | form command `ModifiesSavedData=true` is extracted from slot 10 and packed back into existing/new command rows |
+| Round 22 root/common attribute metadata slice | unit-level metadata XML verification | root `Configuration.xml` emits additional child families; `CommonAttribute` emits native-shaped `Content` and `AutoUse` enum values |
+| Round 22 source staging readiness slice | unit-level readiness audit verification | form body staging remains base-dependent, but readiness reports precise blockers for layout, trailing sections, modules and item assets |
+| Round 22 V8 container slice | unit-level module blob/container verification | shared `v8_container` parser/builder preserves module blob behavior and tests multi-element, round-trip and multi-page rejection behavior |
 
 Performance note for selected extraction:
 
@@ -246,5 +250,9 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #16 | Form.xml nested `AutoCommandBar` settings | merged to `master` in round 21 |
 | #15 | DataProcessor `UseStandardCommands` metadata XML | merged to `master` in round 21 |
 | #21 | configuration MobileClientSignature raw-deflated base-free coverage | merged to `master` in round 21 |
+| #21 | precise form body base-blob blocker audit | merged to `master` in round 22 |
+| #22 | root child families and CommonAttribute content/AutoUse metadata XML | merged to `master` in round 22 |
+| #16 | Form command `ModifiesSavedData` extract/pack support | merged to `master` in round 22 |
+| #23 | shared V8 container parser/builder extraction | merged to `master` in round 22 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
