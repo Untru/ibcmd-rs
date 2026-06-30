@@ -3635,12 +3635,20 @@ fn canonical_data_composition_attr_value(
     match suffix {
         "LocalStringType" => "v8:LocalStringType".to_string(),
         "Field" => "dcscor:Field".to_string(),
+        _ if is_data_core_xsi_type(suffix) => format!("v8:{suffix}"),
         _ if is_dcs_settings_xsi_type(suffix) => format!("dcsset:{suffix}"),
+        _ if element_namespace == Some(DCS_CORE_NS) && !value.contains(':') => {
+            format!("dcscor:{value}")
+        }
         _ if element_namespace == Some(DCS_SETTINGS_NS) && !value.contains(':') => {
             format!("dcsset:{value}")
         }
         _ => value.to_string(),
     }
+}
+
+fn is_data_core_xsi_type(value: &str) -> bool {
+    matches!(value, "StandardPeriod" | "StandardPeriodVariant")
 }
 
 fn is_dcs_settings_xsi_type(value: &str) -> bool {
@@ -33039,6 +33047,67 @@ mod tests {
             r#"<v8:Type xmlns:d6p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d6p1:CatalogRef.Номенклатура</v8:Type>"#
         ));
         assert!(!xml.contains("<v8:TypeId>"));
+    }
+
+    #[test]
+    fn normalizes_dcs_core_xsi_type_values() {
+        let raw = concat!(
+            "\0\0\0\0",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\">\r\n",
+            "\t\t<parameter>\r\n",
+            "\t\t\t<choiceParameterLinks>\r\n",
+            "\t\t\t\t<dcscor:value xsi:type=\"ChoiceParameters\">\r\n",
+            "\t\t\t\t\t<dcscor:value xsi:type=\"DesignTimeValue\">Catalog.Products</dcscor:value>\r\n",
+            "\t\t\t\t</dcscor:value>\r\n",
+            "\t\t\t</choiceParameterLinks>\r\n",
+            "\t\t</parameter>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &BTreeMap::new())
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(r#"<dcscor:value xsi:type="dcscor:ChoiceParameters">"#));
+        assert!(xml.contains(
+            r#"<dcscor:value xsi:type="dcscor:DesignTimeValue">Catalog.Products</dcscor:value>"#
+        ));
+        assert!(!xml.contains(r#"xsi:type="ChoiceParameters""#));
+        assert!(!xml.contains(r#"xsi:type="DesignTimeValue""#));
+    }
+
+    #[test]
+    fn normalizes_dcs_data_core_standard_period_xsi_type_values() {
+        let raw = concat!(
+            "\0\0\0\0",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:d4p1=\"http://v8.1c.ru/8.1/data/core\">\r\n",
+            "\t\t<parameter>\r\n",
+            "\t\t\t<value xsi:type=\"d4p1:StandardPeriod\">\r\n",
+            "\t\t\t\t<d4p1:variant xsi:type=\"d4p1:StandardPeriodVariant\">Custom</d4p1:variant>\r\n",
+            "\t\t\t</value>\r\n",
+            "\t\t</parameter>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &BTreeMap::new())
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(r#"<value xsi:type="v8:StandardPeriod">"#));
+        assert!(
+            xml.contains(r#"<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>"#)
+        );
+        assert!(!xml.contains("d4p1:StandardPeriod"));
     }
 
     #[test]
