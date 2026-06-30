@@ -15220,6 +15220,7 @@ fn moxel_vertical_alignment(value: usize) -> Option<&'static str> {
 fn moxel_text_placement(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Auto"),
+        1 => Some("Cut"),
         2 => Some("Block"),
         3 => Some("Wrap"),
         _ => None,
@@ -34818,8 +34819,27 @@ mod tests {
         assert_eq!(moxel_horizontal_alignment(6), Some("Center"));
         assert_eq!(moxel_horizontal_alignment(7), Some("Right"));
         assert_eq!(moxel_text_placement(0), Some("Auto"));
+        assert_eq!(moxel_text_placement(1), Some("Cut"));
         assert_eq!(moxel_text_placement(2), Some("Block"));
         assert_eq!(moxel_text_placement(3), Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_decodes_cut_text_placement() {
+        let format = parse_moxel_format("{16384,1}", &[]).unwrap();
+
+        assert_eq!(format.text_placement, Some("Cut"));
+
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{16384,1},{1,0}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(
+            xml.contains("\t<format>\r\n\t\t<textPlacement>Cut</textPlacement>\r\n\t</format>")
+        );
     }
 
     #[test]
