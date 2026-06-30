@@ -7489,9 +7489,6 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
         xml.push_str(&escape_xml_element_text(&object.name));
         xml.push_str("</name>\r\n");
         for right in &object.rights {
-            if !right.value && right.restriction_by_condition.is_none() {
-                continue;
-            }
             xml.push_str("\t\t<right>\r\n\t\t\t<name>");
             xml.push_str(&escape_xml_element_text(&right.name));
             xml.push_str("</name>\r\n\t\t\t<value>");
@@ -31199,7 +31196,7 @@ mod tests {
         assert!(xml.contains("<name>TotalsControl</name>"));
         assert!(xml.contains("<field>ВерсияОбъекта</field>"));
         assert!(xml.contains("ГДЕ ЛОЖЬ"));
-        assert!(!xml.contains("<name>Delete</name>"));
+        assert!(xml.contains("<name>Delete</name>\r\n\t\t\t<value>false</value>"));
         assert!(xml.contains("<name>Insert</name>"));
         assert!(xml.contains("<name>View</name>"));
         assert!(xml.contains("<restrictionTemplate>"));
@@ -31219,7 +31216,7 @@ mod tests {
     }
 
     #[test]
-    fn format_role_rights_omits_false_rights_without_restrictions() {
+    fn format_role_rights_preserves_false_rights_without_restrictions() {
         let xml = format_role_rights_xml(&RoleRights {
             set_for_new_objects: false,
             set_for_attributes_by_default: true,
@@ -31256,7 +31253,27 @@ mod tests {
         assert!(xml.contains("<value>false</value>"));
         assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
         assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
-        assert!(!xml.contains("<name>Edit</name>"));
+        assert!(xml.contains("<name>Edit</name>"));
+    }
+
+    #[test]
+    fn role_rights_blob_formats_disabled_attribute_rights() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{object_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}}}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "InformationRegister.Prices.Attribute.Comment".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let xml = format_role_rights_xml(&rights);
+
+        assert!(xml.contains("<name>InformationRegister.Prices.Attribute.Comment</name>"));
+        assert!(xml.contains("<name>View</name>\r\n\t\t\t<value>false</value>"));
+        assert!(xml.contains("<name>Edit</name>\r\n\t\t\t<value>false</value>"));
     }
 
     #[test]
