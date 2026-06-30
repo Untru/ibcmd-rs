@@ -16462,6 +16462,22 @@ fn parse_exchange_plan_properties_from_text(
     push_generated_type_entry(
         &mut generated_types,
         &fields,
+        5,
+        6,
+        &format!("ExchangePlanSelection.{}", header.name),
+        "Selection",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        7,
+        8,
+        &format!("ExchangePlanList.{}", header.name),
+        "List",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
         9,
         10,
         &format!("ExchangePlanManager.{}", header.name),
@@ -32344,13 +32360,17 @@ mod tests {
         let object_value_id = "22222222-2222-4222-8222-222222222222";
         let ref_type_id = "33333333-3333-4333-8333-333333333331";
         let ref_value_id = "33333333-3333-4333-8333-333333333332";
+        let selection_type_id = "55555555-5555-4555-8555-555555555551";
+        let selection_value_id = "55555555-5555-4555-8555-555555555552";
+        let list_type_id = "66666666-6666-4666-8666-666666666661";
+        let list_value_id = "66666666-6666-4666-8666-666666666662";
         let manager_type_id = "44444444-4444-4444-8444-444444444441";
         let manager_value_id = "44444444-4444-4444-8444-444444444442";
         let blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{37,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\
-55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
-66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+{selection_type_id},{selection_value_id},\
+{list_type_id},{list_value_id},\
 {manager_type_id},{manager_value_id},\r\n\
 {{0,\r\n{{3,\r\n{{1,0,{exchange_plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"exchange comment\"}}\r\n}},0}}\r\n}}"
             )
@@ -32385,6 +32405,14 @@ mod tests {
         assert!(xml.contains(r#"<xr:GeneratedType name="ExchangePlanRef.Sync" category="Ref">"#));
         assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="ExchangePlanSelection.Sync" category="Selection">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{selection_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{selection_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="ExchangePlanList.Sync" category="List">"#));
+        assert!(xml.contains(&format!("<xr:TypeId>{list_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{list_value_id}</xr:ValueId>")));
         assert!(
             xml.contains(
                 r#"<xr:GeneratedType name="ExchangePlanManager.Sync" category="Manager">"#
@@ -32393,6 +32421,18 @@ mod tests {
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
         assert!(xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap());
+        assert!(
+            xml.find("ExchangePlanRef.Sync").unwrap()
+                < xml.find("ExchangePlanSelection.Sync").unwrap()
+        );
+        assert!(
+            xml.find("ExchangePlanSelection.Sync").unwrap()
+                < xml.find("ExchangePlanList.Sync").unwrap()
+        );
+        assert!(
+            xml.find("ExchangePlanList.Sync").unwrap()
+                < xml.find("ExchangePlanManager.Sync").unwrap()
+        );
         assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
         assert!(
             xml.find("<Comment>exchange comment</Comment>").unwrap()
