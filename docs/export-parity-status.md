@@ -79,6 +79,9 @@ Incremental selected verification after this snapshot:
 | Round 18 partial metadata slice | unit-level metadata XML verification | `ExchangePlan` emits `UseStandardCommands` from the metadata blob |
 | Round 18 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits `Catalog` child object headers |
 | Round 18 source staging readiness slice | unit-level staging verification | root configuration raw-id `MainSectionCommandInterface.xml` rows are covered as base-free |
+| Round 19 Form.xml slice | unit-level packer verification | new `InputField` items preserve extended options (`Width`, `HorizontalStretch`, `AutoMaxWidth`, `MaxWidth`) |
+| Round 19 partial metadata slice | unit-level metadata XML verification | `Subsystem` emits `UseStandardCommands` from the metadata blob |
+| Round 19 source staging readiness slice | unit-level staging verification | `WSReference` definition rows are covered as base-free raw-deflated bodies |
 
 Performance note for selected extraction:
 
@@ -209,5 +212,8 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | ExchangePlan `UseStandardCommands` metadata XML | merged to `master` in round 18 |
 | #22 | Configuration.xml root Catalog child headers | merged to `master` in round 18 |
 | #21 | configuration MainSectionCommandInterface.xml raw-id base-free coverage | merged to `master` in round 18 |
+| #16 | Form.xml new `InputField` extended options generation | merged to `master` in round 19 |
+| #18 | Subsystem `UseStandardCommands` metadata XML | merged to `master` in round 19 |
+| #21 | WSReference definition raw-deflated base-free coverage | merged to `master` in round 19 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

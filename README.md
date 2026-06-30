@@ -60,6 +60,9 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 19 | Form.xml | new `InputField` items preserve extended options (`Width`, `HorizontalStretch`, `AutoMaxWidth`, `MaxWidth`) |
+| 19 | Partial metadata XML | `Subsystem` emits `UseStandardCommands` from the metadata blob |
+| 19 | Source staging readiness | `WSReference` definition rows are covered as base-free raw-deflated bodies |
 | 18 | Form.xml | new top-level `Button` items preserve explicit `DefaultButton` values |
 | 18 | Partial metadata XML | `ExchangePlan` emits `UseStandardCommands` from the metadata blob |
 | 18 | Configuration.xml | root `Catalog` child object headers are emitted |
