@@ -8831,6 +8831,7 @@ struct FormChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
+    row_picture_data_path: Option<String>,
     update_on_data_change: Option<&'static str>,
     user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
@@ -10624,6 +10625,11 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        row_picture_data_path: if tag == "Table" {
+            parse_form_table_property_bag_string(&fields, "19").filter(|value| !value.is_empty())
+        } else {
+            None
+        },
         update_on_data_change: if tag == "Table" {
             parse_form_table_update_on_data_change(&fields)
         } else {
@@ -11540,6 +11546,15 @@ fn parse_form_table_property_bag_number(fields: &[&str], key: &str) -> Option<St
         .get(1)
         .map(|field| field.trim().to_string())
         .filter(|value| value.parse::<u32>().is_ok())
+}
+
+fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -> Option<String> {
+    let value = form_table_property_bag_value(fields, key)?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.first().and_then(|field| parse_1c_string(field))? != "S" {
+        return None;
+    }
+    fields.get(1).and_then(|field| parse_1c_string(field))
 }
 
 fn resolve_form_child_item_user_settings_groups(items: &mut [FormChildItem], fields: &[&str]) {
@@ -12589,6 +12604,14 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
+        ));
+    }
+    if item.tag == "Table"
+        && let Some(row_picture_data_path) = &item.row_picture_data_path
+    {
+        xml.push_str(&format!(
+            "{tab}\t<RowPictureDataPath>{}</RowPictureDataPath>\r\n",
+            escape_xml_text(row_picture_data_path)
         ));
     }
     if item.tag == "Button"
@@ -28830,6 +28853,32 @@ mod tests {
     }
 
     #[test]
+    fn extracts_wrapper55_table_row_picture_data_path() {
+        let mut attribute_names_by_id = BTreeMap::new();
+        attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+
+        let item = parse_form_child_item_with_attrs(
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,19,{"S","Rows.DefaultPicture"},{0}}"##,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            item.row_picture_data_path.as_deref(),
+            Some("Rows.DefaultPicture")
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>"));
+    }
+
+    #[test]
     fn extracts_wrapper55_table_user_settings_group() {
         let attributes = vec![FormAttribute {
             id: "1".to_string(),
@@ -30393,6 +30442,7 @@ mod tests {
             auto_refresh_period: None,
             use_alternation_row_color: None,
             default_item: None,
+            row_picture_data_path: None,
             update_on_data_change: None,
             user_settings_group: None,
             allow_getting_current_row_url: None,
@@ -30460,6 +30510,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     default_item: None,
+                    row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
                     allow_getting_current_row_url: None,
@@ -30528,6 +30579,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     default_item: None,
+                    row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
                     allow_getting_current_row_url: None,
