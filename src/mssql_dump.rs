@@ -8036,6 +8036,7 @@ struct FormChildItem {
     file_drag_mode: Option<&'static str>,
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
+    use_alternation_row_color: Option<bool>,
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
@@ -9811,6 +9812,11 @@ fn parse_form_child_item_with_attrs(
         },
         auto_refresh_period: if tag == "Table" {
             parse_form_table_property_bag_number(&fields, "6")
+        } else {
+            None
+        },
+        use_alternation_row_color: if tag == "Table" {
+            parse_form_table_property_bag_bool(&fields, "9")
         } else {
             None
         },
@@ -11626,6 +11632,16 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n",
                 escape_xml_text(auto_refresh_period)
+            ));
+        }
+        if let Some(use_alternation_row_color) = item.use_alternation_row_color {
+            xml.push_str(&format!(
+                "{tab}\t<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n",
+                if use_alternation_row_color {
+                    "true"
+                } else {
+                    "false"
+                }
             ));
         }
     }
@@ -26210,11 +26226,13 @@ mod tests {
         assert_eq!(item.skip_on_input, Some(false));
         assert_eq!(item.auto_refresh, Some(false));
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
+        assert_eq!(item.use_alternation_row_color, Some(false));
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
         assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
+        assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
     }
 
     #[test]
@@ -27753,6 +27771,7 @@ mod tests {
             file_drag_mode: None,
             auto_refresh: None,
             auto_refresh_period: None,
+            use_alternation_row_color: None,
             button_representation: None,
             location_in_command_bar: None,
             default_button: None,
@@ -27815,6 +27834,7 @@ mod tests {
                     file_drag_mode: None,
                     auto_refresh: None,
                     auto_refresh_period: None,
+                    use_alternation_row_color: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
@@ -27878,6 +27898,7 @@ mod tests {
                     file_drag_mode: None,
                     auto_refresh: None,
                     auto_refresh_period: None,
+                    use_alternation_row_color: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
