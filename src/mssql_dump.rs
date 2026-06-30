@@ -15620,6 +15620,26 @@ fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<Metadat
     nested_headers_from_text_inside_object_code(text, owner_uuid, 9)
 }
 
+fn nested_child_commands_from_text(
+    text: &str,
+    owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<MetadataChildCommand> {
+    nested_command_headers_from_text(text, owner_uuid)
+        .into_iter()
+        .map(|header| {
+            let properties = parse_common_command_properties_from_text(
+                text,
+                &header.uuid,
+                type_index,
+                object_refs,
+            );
+            MetadataChildCommand { header, properties }
+        })
+        .collect()
+}
+
 fn nested_metadata_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
     nested_headers_from_text(text, owner_uuid, |_| true)
 }
@@ -16047,7 +16067,7 @@ struct ReportProperties {
     explanation: Vec<(String, String)>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
-    child_commands: Vec<MetadataHeader>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 struct DataProcessorProperties {
@@ -16061,6 +16081,12 @@ struct DataProcessorProperties {
     child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
+}
+
+struct MetadataChildCommand {
+    header: MetadataHeader,
+    properties: Option<CommonCommandProperties>,
 }
 
 struct DocumentProperties {
@@ -16999,11 +17025,12 @@ fn extract_metadata_source_xml_from_text_row(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let nested_commands = if metadata_kind_can_own_commands(kind) && kind != "Report" {
-        nested_command_headers_from_text(text, uuid)
-    } else {
-        Vec::new()
-    };
+    let nested_commands =
+        if metadata_kind_can_own_commands(kind) && !matches!(kind, "Report" | "DataProcessor") {
+            nested_command_headers_from_text(text, uuid)
+        } else {
+            Vec::new()
+        };
     let mut xml = if kind == "CommonPicture" {
         let picture = parse_common_picture_properties_from_text(text, uuid)?;
         format_common_picture_source_xml(&header, &picture, source_version).into_bytes()
@@ -17014,14 +17041,21 @@ fn extract_metadata_source_xml_from_text_row(
             parse_catalog_properties_from_text(text, uuid, type_index, form_refs, template_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if kind == "Report" {
-        let report =
-            parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
+        let report = parse_report_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            form_refs,
+            template_refs,
+            object_refs,
+        )?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
     } else if kind == "DataProcessor" {
         let data_processor = parse_data_processor_properties_from_text(
             text,
             uuid,
             type_index,
+            object_refs,
             form_refs,
             template_refs,
         )?;
@@ -18138,6 +18172,7 @@ fn parse_catalog_properties_from_text(
 fn parse_report_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     object_refs: &BTreeMap<String, String>,
@@ -18183,7 +18218,7 @@ fn parse_report_properties_from_text(
         explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: parse_report_child_templates_from_text(text, template_refs),
-        child_commands: nested_command_headers_from_text(text, uuid),
+        child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
     })
 }
 
@@ -18413,6 +18448,7 @@ fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DataProcessorProperties> {
@@ -18461,6 +18497,7 @@ fn parse_data_processor_properties_from_text(
             &header.name,
             template_refs,
         ),
+        child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
     })
 }
 
@@ -22089,7 +22126,7 @@ fn format_report_source_xml(
             ));
         }
         for command in &report.child_commands {
-            push_metadata_header_child_object_xml(&mut xml, "Command", command);
+            push_metadata_child_command_xml(&mut xml, command);
         }
         xml.push_str("\t\t</ChildObjects>\r\n");
     }
@@ -22275,6 +22312,7 @@ fn format_data_processor_source_xml(
     if !data_processor.child_metadata_objects.is_empty()
         || !data_processor.child_forms.is_empty()
         || !data_processor.child_templates.is_empty()
+        || !data_processor.child_commands.is_empty()
     {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
         for child in &data_processor.child_metadata_objects {
@@ -22291,6 +22329,9 @@ fn format_data_processor_source_xml(
                 "\t\t\t<Template>{}</Template>\r\n",
                 escape_xml_element_text(template)
             ));
+        }
+        for command in &data_processor.child_commands {
+            push_metadata_child_command_xml(&mut child_objects, command);
         }
         child_objects.push_str("\t\t</ChildObjects>\r\n");
         if let Some(index) = xml.find("\t</DataProcessor>") {
@@ -23017,6 +23058,66 @@ fn push_metadata_header_child_object_xml(
     );
 }
 
+fn push_metadata_child_command_xml(xml: &mut String, command: &MetadataChildCommand) {
+    xml.push_str(&format!(
+        "\t\t\t<Command uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&command.header.uuid),
+        escape_xml_element_text(&command.header.name),
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &command.header.synonyms);
+    if command.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&command.header.comment)
+        ));
+    }
+    if let Some(properties) = &command.properties {
+        push_metadata_child_command_properties_xml(xml, properties);
+    }
+    xml.push_str("\t\t\t\t</Properties>\r\n\t\t\t</Command>\r\n");
+}
+
+fn push_metadata_child_command_properties_xml(
+    xml: &mut String,
+    properties: &CommonCommandProperties,
+) {
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Group>{}</Group>\r\n",
+        escape_xml_text(properties.group.as_deref().unwrap_or("ActionsPanelTools"))
+    ));
+    format_common_command_parameter_type_xml_with_indent(
+        xml,
+        &properties.command_parameter_types,
+        "\t\t\t\t\t",
+    );
+    xml.push_str(&format!(
+        "\t\t\t\t\t<ParameterUseMode>{}</ParameterUseMode>\r\n\
+\t\t\t\t\t<ModifiesData>{}</ModifiesData>\r\n\
+\t\t\t\t\t<Representation>{}</Representation>\r\n",
+        properties.parameter_use_mode,
+        xml_bool(properties.modifies_data),
+        properties.representation
+    ));
+    push_common_command_tooltip_xml_with_indent(xml, "\t\t\t\t\t", &properties.tooltip);
+    format_common_command_picture_xml_with_indent(xml, "\t\t\t\t\t", properties);
+    if let Some(shortcut) = properties.shortcut.as_deref() {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Shortcut>{}</Shortcut>\r\n",
+            escape_xml_element_text(shortcut)
+        ));
+    } else {
+        xml.push_str("\t\t\t\t\t<Shortcut/>\r\n");
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t<OnMainServerUnavalableBehavior>{}</OnMainServerUnavalableBehavior>\r\n",
+        properties.on_main_server_unavailable_behavior
+    ));
+}
+
 fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
     xml.push_str(&format!(
         "\t\t\t<{tag} uuid=\"{}\">\r\n\
@@ -23218,50 +23319,74 @@ fn format_common_command_source_xml_native(
 }
 
 fn push_common_command_tooltip_xml(xml: &mut String, values: &[(String, String)]) {
+    push_common_command_tooltip_xml_with_indent(xml, "\t\t\t", values);
+}
+
+fn push_common_command_tooltip_xml_with_indent(
+    xml: &mut String,
+    indent: &str,
+    values: &[(String, String)],
+) {
     if values.is_empty() {
-        xml.push_str("\t\t\t<ToolTip/>\r\n");
+        xml.push_str(&format!("{indent}<ToolTip/>\r\n"));
         return;
     }
-    xml.push_str("\t\t\t<ToolTip>\r\n");
+    xml.push_str(&format!("{indent}<ToolTip>\r\n"));
     for (lang, content) in values {
         let content = content.replace("\r\n", "\n").replace('\r', "\n");
-        xml.push_str("\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
         xml.push_str(&format!(
-            "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
             escape_xml_text(lang)
         ));
         xml.push_str(&format!(
-            "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            "{indent}\t\t<v8:content>{}</v8:content>\r\n",
             escape_xml_element_text(&content)
         ));
-        xml.push_str("\t\t\t\t</v8:item>\r\n");
+        xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
     }
-    xml.push_str("\t\t\t</ToolTip>\r\n");
+    xml.push_str(&format!("{indent}</ToolTip>\r\n"));
 }
 
 fn format_common_command_picture_xml(xml: &mut String, properties: &CommonCommandProperties) {
+    format_common_command_picture_xml_with_indent(xml, "\t\t\t", properties);
+}
+
+fn format_common_command_picture_xml_with_indent(
+    xml: &mut String,
+    indent: &str,
+    properties: &CommonCommandProperties,
+) {
     let Some(reference) = properties.picture_ref.as_deref() else {
-        xml.push_str("\t\t\t<Picture/>\r\n");
+        xml.push_str(&format!("{indent}<Picture/>\r\n"));
         return;
     };
-    xml.push_str("\t\t\t<Picture>\r\n");
+    xml.push_str(&format!("{indent}<Picture>\r\n"));
     xml.push_str(&format!(
-        "\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n",
+        "{indent}\t<xr:Ref>{}</xr:Ref>\r\n",
         escape_xml_text(reference)
     ));
     xml.push_str(&format!(
-        "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+        "{indent}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
         xml_bool(properties.picture_load_transparent)
     ));
-    xml.push_str("\t\t\t</Picture>\r\n");
+    xml.push_str(&format!("{indent}</Picture>\r\n"));
 }
 
 fn format_common_command_parameter_type_xml(xml: &mut String, types: &[String]) {
+    format_common_command_parameter_type_xml_with_indent(xml, types, "\t\t\t");
+}
+
+fn format_common_command_parameter_type_xml_with_indent(
+    xml: &mut String,
+    types: &[String],
+    indent: &str,
+) {
     if types.is_empty() {
-        xml.push_str("\t\t\t<CommandParameterType/>\r\n");
+        xml.push_str(&format!("{indent}<CommandParameterType/>\r\n"));
         return;
     }
-    xml.push_str("\t\t\t<CommandParameterType>\r\n");
+    xml.push_str(&format!("{indent}<CommandParameterType>\r\n"));
     for value_type in types {
         let tag_name = if value_type.starts_with("cfg:DefinedType.") {
             "TypeSet"
@@ -23269,11 +23394,11 @@ fn format_common_command_parameter_type_xml(xml: &mut String, types: &[String]) 
             "Type"
         };
         xml.push_str(&format!(
-            "\t\t\t\t<v8:{tag_name}>{}</v8:{tag_name}>\r\n",
+            "{indent}\t<v8:{tag_name}>{}</v8:{tag_name}>\r\n",
             escape_xml_text(value_type)
         ));
     }
-    xml.push_str("\t\t\t</CommandParameterType>\r\n");
+    xml.push_str(&format!("{indent}</CommandParameterType>\r\n"));
 }
 
 fn format_command_group_source_xml(
@@ -38286,7 +38411,7 @@ mod tests {
         let form_list_marker = FORM_LIST_MARKERS[0];
         let report_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}}\r\n}}\r\n}}"
+                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Refresh tip\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}},0,0,0}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -38373,6 +38498,18 @@ mod tests {
         assert!(xml.contains(&format!(r#"<Command uuid="{command_uuid}">"#)));
         assert!(xml.contains("<Name>Refresh</Name>"));
         assert!(xml.contains("<Comment>command comment</Comment>"));
+        assert!(xml.contains("<Group>ActionsPanelTools</Group>"));
+        assert!(xml.contains("<CommandParameterType/>"));
+        assert!(xml.contains("<ParameterUseMode>Single</ParameterUseMode>"));
+        assert!(xml.contains("<ModifiesData>false</ModifiesData>"));
+        assert!(xml.contains("<Representation>Auto</Representation>"));
+        assert!(xml.contains("<ToolTip>"));
+        assert!(xml.contains("<v8:content>Refresh tip</v8:content>"));
+        assert!(xml.contains("<Picture/>"));
+        assert!(xml.contains("<Shortcut/>"));
+        assert!(
+            xml.contains("<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>")
+        );
         assert!(
             xml.find("<Form>SettingsForm</Form>").unwrap()
                 < xml.find("<Form>MainForm</Form>").unwrap()
@@ -38385,11 +38522,26 @@ mod tests {
             xml.find("<Template>MainSchema</Template>").unwrap() < xml.find("<Command").unwrap()
         );
         assert!(
+            xml.find("<Comment>command comment</Comment>").unwrap() < xml.find("<Group>").unwrap()
+        );
+        assert!(xml.find("<Group>").unwrap() < xml.find("<CommandParameterType/>").unwrap());
+        assert!(
+            xml.find("<CommandParameterType/>").unwrap() < xml.find("<ParameterUseMode>").unwrap()
+        );
+        assert!(xml.find("<ModifiesData>").unwrap() < xml.find("<Representation>").unwrap());
+        assert!(xml.find("<Representation>").unwrap() < xml.find("<ToolTip>").unwrap());
+        assert!(xml.find("<ToolTip>").unwrap() < xml.find("<Picture/>").unwrap());
+        assert!(xml.find("<Picture/>").unwrap() < xml.find("<Shortcut/>").unwrap());
+        assert!(
+            xml.find("<Shortcut/>").unwrap()
+                < xml.find("<OnMainServerUnavalableBehavior>").unwrap()
+        );
+        assert!(
             xml.find("<DefaultVariantForm/>").unwrap() < xml.find("<VariantsStorage>").unwrap(),
             "{xml}"
         );
         assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
-        assert_eq!(xml.matches("<Command").count(), 1);
+        assert_eq!(xml.matches("<Command uuid=").count(), 1);
 
         let extracted_v21 = extract_metadata_source_xml_with_refs(
             &report_blob,
@@ -39591,6 +39743,74 @@ mod tests {
                 "{xml}"
             );
         }
+    }
+
+    #[test]
+    fn extracts_data_processor_child_command_properties_to_metadata_xml() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let catalog_type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Load tip\"}},1,\r\n\
+{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n\
+{{\"Pattern\",{{\"#\",{catalog_type_uuid}}}}},\r\n\
+{{3,\r\n{{1,0,{command_uuid}}},\"Load\",{{1,\"en\",\"Load\"}},\"command comment\"}},1,0,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let type_index = BTreeMap::from([(
+            catalog_type_uuid.to_string(),
+            "cfg:CatalogRef.Products".to_string(),
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("DataProcessors").join("Loader.xml")
+        );
+        assert!(xml.contains(r#"<Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#));
+        assert!(xml.contains("<Name>Load</Name>"));
+        assert!(xml.contains("<Comment>command comment</Comment>"));
+        assert!(xml.contains("<Group>ActionsPanelTools</Group>"));
+        assert!(xml.contains("<CommandParameterType>"));
+        assert!(xml.contains("<v8:Type>cfg:CatalogRef.Products</v8:Type>"));
+        assert!(xml.contains("<ParameterUseMode>Single</ParameterUseMode>"));
+        assert!(xml.contains("<ModifiesData>true</ModifiesData>"));
+        assert!(xml.contains("<Representation>Auto</Representation>"));
+        assert!(xml.contains("<ToolTip>"));
+        assert!(xml.contains("<v8:content>Load tip</v8:content>"));
+        assert!(xml.contains("<Picture/>"));
+        assert!(xml.contains("<Shortcut/>"));
+        assert!(
+            xml.contains("<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>")
+        );
+        assert_eq!(xml.matches("<Command uuid=").count(), 1, "{xml}");
+        assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
+        assert!(xml.find("<Group>").unwrap() < xml.find("<CommandParameterType>").unwrap());
+        assert!(
+            xml.find("</CommandParameterType>").unwrap() < xml.find("<ParameterUseMode>").unwrap()
+        );
+        assert!(xml.find("<ModifiesData>").unwrap() < xml.find("<Representation>").unwrap());
     }
 
     #[test]
