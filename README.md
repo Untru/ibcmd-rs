@@ -61,6 +61,14 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 26 | Native dump performance | native `bcp` row batch cap reduced to 256 MiB and timing JSON reports batch count/max size diagnostics |
+| 26 | Role Rights.xml | role object refs use UUID plus serialized tail fields, preserving repeated owner refs and standard-attribute refs |
+| 26 | Form.xml | wrapper `55` table items extract and pack observed `UpdateOnDataChange=Auto` through property bag key `14` |
+| 26 | Object metadata XML | Catalog standard attribute labels and DataProcessor object/presentation scalars are parsed from metadata blobs |
+| 26 | Register/ExchangePlan metadata XML | AccumulationRegister and ExchangePlan generated type `InternalInfo` coverage expanded |
+| 26 | Configuration.xml | root `DefaultStyle` and `DefaultLanguage` refs are emitted from UUID-backed metadata fields |
+| 26 | DCS templates | observed DCS body `AnyIBRef`/`TypeSet` and settings `xsi:type` values are canonicalized |
+| 26 | Source staging readiness | readable `CommandInterface.xml` refs now report precise base-free blockers while raw refs remain base-free |
 | 25 | Role Rights.xml | explicit disabled `false` rights without restrictions are preserved in export and pack paths |
 | 25 | Form.xml | wrapper `55` table items extract and pack `UseAlternationRowColor` through the existing property bag |
 | 25 | Object metadata XML | `Document` metadata emits numbering settings, standard command flag and default form refs |

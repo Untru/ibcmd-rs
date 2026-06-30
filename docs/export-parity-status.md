@@ -30,7 +30,7 @@ The full JSON report is retained at
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
-round 25 incremental verified fixes listed below.
+round 26 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -133,6 +133,14 @@ Verification history:
 | Round 25 MXL template slice | unit-level template body verification | SpreadsheetDocument text-node quotes remain literal while XML structural characters stay escaped |
 | Round 25 Configuration.xml slice | unit-level metadata XML verification | root scalar application/compatibility properties are emitted in native-shaped metadata XML |
 | Round 25 source staging readiness slice | unit-level readiness audit verification | `Catalog/Ext/Predefined.xml` and `ChartOfCharacteristicTypes/Ext/Predefined.xml` remain base-dependent, but readiness reports precise blockers for row order, parent/type slots and trailing fields |
+| Round 26 native dump performance slice | unit-level timing/batching verification | native `bcp` row batch cap is reduced to 256 MiB and timing JSON reports batch count/max rows/max binary bytes |
+| Round 26 Role Rights.xml slice | unit-level extractor/packer verification | role object refs use UUID plus serialized tail fields, preserving repeated owner refs and standard-attribute refs |
+| Round 26 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table items extract and pack observed `UpdateOnDataChange=Auto` through property bag key `14` |
+| Round 26 object metadata slice | unit-level metadata XML verification | Catalog standard attribute labels and DataProcessor object/presentation scalars are parsed from metadata blobs |
+| Round 26 register/exchange metadata slice | unit-level metadata XML verification | AccumulationRegister and ExchangePlan generated type `InternalInfo` coverage is expanded |
+| Round 26 Configuration.xml slice | unit-level metadata XML verification | root `DefaultStyle` and `DefaultLanguage` refs are emitted from UUID-backed metadata fields |
+| Round 26 DCS template slice | unit-level template body verification | observed DCS body `AnyIBRef`/`TypeSet` and settings `xsi:type` values are canonicalized |
+| Round 26 source staging readiness slice | unit-level readiness audit verification | readable `CommandInterface.xml` refs now report precise base-free blockers while raw `kind:uuid` refs remain base-free |
 
 Performance note for selected extraction:
 
@@ -296,5 +304,13 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | InformationRegister default record/list form refs | merged to `master` in round 25 |
 | #21 | precise Predefined.xml base-free staging blocker audit | merged to `master` in round 25 |
 | #22 | root Configuration.xml scalar application/compatibility properties | merged to `master` in round 25 |
+| #13 | Role Rights.xml tail-aware object refs and standard attribute refs | merged to `master` in round 26 |
+| #15 | Catalog standard attribute labels and DataProcessor owner presentation metadata | merged to `master` in round 26 |
+| #16 | Form.xml wrapper `55` table `UpdateOnDataChange=Auto` extraction and packing | merged to `master` in round 26 |
+| #17 | DCS template body canonicalization for observed TypeSet/xsi:type values | merged to `master` in round 26 |
+| #18 | AccumulationRegister and ExchangePlan generated type metadata XML | merged to `master` in round 26 |
+| #19 | native dump `bcp` batch memory cap and batch diagnostics | merged to `master` in round 26 |
+| #21 | precise readable `CommandInterface.xml` base-free blocker audit | merged to `master` in round 26 |
+| #22 | root Configuration.xml default style/language refs | merged to `master` in round 26 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
