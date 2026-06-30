@@ -9452,7 +9452,11 @@ fn format_form_layout_new_child_item(
             command_uuids,
             source,
         ),
-        "InputField" => Ok(format_form_layout_new_input_field_item(item, item_uuid)),
+        "InputField" => Ok(format_form_layout_new_input_field_item(
+            item,
+            item_uuid,
+            attribute_ids_by_name,
+        )),
         "LabelField" => Ok(format_form_layout_new_label_field_item(item, item_uuid)),
         "CheckBoxField" => Ok(format_form_layout_new_checkbox_field_item(item, item_uuid)),
         "TextDocumentField" => Ok(format_form_layout_new_text_document_field_item(
@@ -9649,9 +9653,17 @@ fn format_form_layout_new_extended_button_item(
     Ok(text)
 }
 
-fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
-    if item.read_only.is_some() {
-        return format_form_layout_new_extended_input_field_item(item, item_uuid);
+fn format_form_layout_new_input_field_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> String {
+    if item.read_only.is_some() || item.data_path.is_some() {
+        return format_form_layout_new_extended_input_field_item(
+            item,
+            item_uuid,
+            attribute_ids_by_name,
+        );
     }
 
     let title_location = item
@@ -9674,6 +9686,7 @@ fn format_form_layout_new_input_field_item(item: &FormXmlChildItem, item_uuid: &
 fn format_form_layout_new_extended_input_field_item(
     item: &FormXmlChildItem,
     item_uuid: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
 ) -> String {
     let title_location = item
         .title_location
@@ -9684,13 +9697,19 @@ fn format_form_layout_new_extended_input_field_item(
     } else {
         "0"
     };
+    let data_path = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| format_form_attribute_data_path(data_path, attribute_ids_by_name))
+        .unwrap_or_else(|| "{0}".to_string());
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,0,2,{},{},0,{},{{1,0}},{{0}},{{0}},1,{},2,0,2,{{1,0}},{{1,0}},1,1,0,3,0",
+        "{{48,{{{},{}}},0,0,0,2,{},{},0,{},{{1,0}},{},{{0}},1,{},2,0,2,{{1,0}},{{1,0}},1,1,0,3,0",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
         title_location,
         format_1c_synonyms(&item.title),
+        data_path,
         read_only
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
@@ -10541,6 +10560,18 @@ fn patch_form_layout_child_item_entry(
     if item.tag == "TextDocumentField"
         && let Some(data_path) = &item.data_path
         && let Some(data_path_range) = fields.get(11)
+        && let Some(data_path_ref) = form_attribute_data_path_replacement(
+            &text[data_path_range.clone()],
+            data_path,
+            attribute_ids_by_name,
+        )
+    {
+        replacements.push((data_path_range.clone(), data_path_ref));
+    }
+    if item.tag == "InputField"
+        && let Some(data_path) = &item.data_path
+        && let Some(data_path_range) = fields.get(11)
+        && text[data_path_range.clone()].trim_start().starts_with('{')
         && let Some(data_path_ref) = form_attribute_data_path_replacement(
             &text[data_path_range.clone()],
             data_path,
@@ -25630,6 +25661,66 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             assert_eq!(&parsed.layout[input_fields[14].clone()], expected_code);
             assert_eq!(parsed.module_text, "Old module");
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_input_field_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{78,22222222-2222-4222-8222-222222222222},0,0,0,2,"AuthorField",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<Attributes>
+		<Attribute name="Author" id="1"></Attribute>
+	</Attributes>
+	<ChildItems>
+		<InputField name="AuthorField" id="78">
+			<DataPath>Author</DataPath>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[11].clone()], "{1,{1}}");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_input_field_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<Attributes>
+		<Attribute name="Author" id="1"></Attribute>
+	</Attributes>
+	<ChildItems>
+		<InputField name="AuthorField" id="78">
+			<DataPath>Author</DataPath>
+		</InputField>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let input_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[input_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[input_fields[5].clone()], "2");
+        assert_eq!(&parsed.layout[input_fields[6].clone()], r#""AuthorField""#);
+        assert_eq!(&parsed.layout[input_fields[11].clone()], "{1,{1}}");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
