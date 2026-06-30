@@ -17675,17 +17675,32 @@ fn parse_common_attribute_content(
     else {
         return Vec::new();
     };
-    fields
-        .iter()
-        .skip(2)
-        .take(count)
-        .filter_map(|field| {
-            Some(CommonAttributeContentItem {
-                metadata: parse_design_time_reference(field, object_refs)?,
-                use_mode: parse_common_attribute_content_use(field).unwrap_or("Use"),
-            })
-        })
-        .collect()
+    let mut content = Vec::new();
+    let mut index = 2usize;
+    while content.len() < count && index < fields.len() {
+        let field = fields[index];
+        if let Some(metadata) = parse_design_time_reference(field, object_refs) {
+            let settings = fields
+                .get(index + 1)
+                .filter(|field| is_common_attribute_content_settings(field));
+            content.push(CommonAttributeContentItem {
+                metadata,
+                use_mode: settings
+                    .and_then(|field| parse_common_attribute_content_use(field))
+                    .unwrap_or_else(|| parse_common_attribute_content_use(field).unwrap_or("Use")),
+            });
+            index += if settings.is_some() { 2 } else { 1 };
+        } else {
+            index += 1;
+        }
+    }
+    content
+}
+
+fn is_common_attribute_content_settings(field: &str) -> bool {
+    split_1c_braced_fields(field, 0)
+        .and_then(|fields| fields.first().map(|field| field.trim() == "2"))
+        .unwrap_or(false)
 }
 
 fn parse_common_attribute_content_use(field: &str) -> Option<&'static str> {
@@ -17699,6 +17714,7 @@ fn common_attribute_content_use_xml(value: &str) -> Option<&'static str> {
     match value {
         "0" => Some("DontUse"),
         "1" => Some("Use"),
+        "2" => Some("DontUse"),
         _ => None,
     }
 }
@@ -33161,6 +33177,70 @@ mod tests {
         let xml_v21 = String::from_utf8_lossy(&extracted_v21.xml);
         assert!(xml_v21.contains(r#"version="2.21""#));
         assert!(!xml_v21.contains(r#"version="2.20""#));
+    }
+
+    #[test]
+    fn extracts_common_attribute_xml_with_native_content_pairs() {
+        let uuid = "33333333-3333-4333-8333-333333333333";
+        let catalog_uuid = "44444444-4444-4444-8444-444444444444";
+        let document_uuid = "55555555-5555-4555-8555-555555555555";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let plain = r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"NativeContent",
+{1,"en","Native content"},"",0,0,@ZERO_UUID@,0},
+{"Pattern",
+{"S",20,1}
+}
+}
+},
+{3,2,@CATALOG_UUID@,
+{2,1,@ZERO_UUID@},@DOCUMENT_UUID@,
+{2,2,@ZERO_UUID@}
+},0,1,1,1,
+{1,@ZERO_UUID@},
+{1,@ZERO_UUID@},
+{1,@ZERO_UUID@},0,0,0,0,1},0}"#
+            .replace("@UUID@", uuid)
+            .replace("@CATALOG_UUID@", catalog_uuid)
+            .replace("@DOCUMENT_UUID@", document_uuid)
+            .replace("@ZERO_UUID@", zero_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs = BTreeMap::from([
+            (catalog_uuid.to_string(), "Catalog.Products".to_string()),
+            (document_uuid.to_string(), "Document.Invoice".to_string()),
+        ]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert_eq!(xml.matches("<xr:Metadata>").count(), 2);
+            assert!(xml.contains("<xr:Metadata>Catalog.Products</xr:Metadata>"));
+            assert!(xml.contains("<xr:Use>Use</xr:Use>"));
+            assert!(xml.contains("<xr:Metadata>Document.Invoice</xr:Metadata>"));
+            assert!(xml.contains("<xr:Use>DontUse</xr:Use>"));
+            assert!(!xml.contains("<Use>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
     }
 
     #[test]
