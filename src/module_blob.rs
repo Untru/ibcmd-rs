@@ -16,13 +16,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
+use crate::v8_container::{
+    V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
+};
 
-const V8_MAGIC_NUMBER: u32 = 0x7fff_ffff;
-const V8_PAGE_SIZE: u32 = 512;
-const FILE_HEADER_SIZE: usize = 16;
-const BLOCK_HEADER_SIZE: usize = 31;
-const ELEM_ADDR_SIZE: usize = 12;
-const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
 // Platform-level 1C standard pictures and form type IDs, not database metadata UUIDs.
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
@@ -833,26 +830,6 @@ pub struct VersionReplacement {
     pub new_uuid: String,
 }
 
-#[derive(Debug, Clone)]
-struct ModuleElement {
-    header: Vec<u8>,
-    data: Vec<u8>,
-}
-
-#[derive(Debug, Clone)]
-struct ParsedElement {
-    name: String,
-    header: Vec<u8>,
-    data: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct BlockHeader {
-    data_size: usize,
-    page_size: usize,
-    next_page_addr: u32,
-}
-
 pub fn pack_module_blob(args: &ModuleBlobPackArgs) -> Result<ModuleBlobPackReport> {
     let text = fs::read(&args.text)
         .with_context(|| format!("failed to read BSL text {}", args.text.display()))?;
@@ -913,19 +890,21 @@ pub fn pack_module_blob_bytes(
         .as_ref()
         .and_then(|elements| elements.get("info"))
         .map(|element| element.header.clone())
-        .unwrap_or_else(|| make_element_header("info"));
+        .unwrap_or_else(|| make_v8_element_header("info"));
     let text_header = base_elements
         .as_ref()
         .and_then(|elements| elements.get("text"))
         .map(|element| element.header.clone())
-        .unwrap_or_else(|| make_element_header("text"));
+        .unwrap_or_else(|| make_v8_element_header("text"));
 
     let inner = build_module_inner(&[
-        ModuleElement {
+        V8Element {
+            name: "info".to_string(),
             header: info_header,
             data: info.clone(),
         },
-        ModuleElement {
+        V8Element {
+            name: "text".to_string(),
             header: text_header,
             data: text.to_vec(),
         },
@@ -19333,7 +19312,7 @@ fn xml_local_name(name: &[u8]) -> String {
     String::from_utf8_lossy(name).to_string()
 }
 
-fn read_base_elements_from_blob(blob: &[u8]) -> Result<BTreeMap<String, ParsedElement>> {
+fn read_base_elements_from_blob(blob: &[u8]) -> Result<BTreeMap<String, V8Element>> {
     let inner = inflate_raw(blob).context("failed to inflate base blob")?;
     let elements = parse_v8_container(&inner).context("failed to parse base blob")?;
     Ok(elements
@@ -19344,216 +19323,11 @@ fn read_base_elements_from_blob(blob: &[u8]) -> Result<BTreeMap<String, ParsedEl
 
 fn read_element_from_blob(blob: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
     let inner = inflate_raw(blob).context("failed to inflate base blob")?;
-    read_element_from_v8_container(&inner, target_name).context("failed to parse base blob")
+    read_v8_element_data(&inner, target_name).context("failed to parse base blob")
 }
 
-fn read_element_from_v8_container(bytes: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
-    if bytes.len() < FILE_HEADER_SIZE + BLOCK_HEADER_SIZE {
-        return Err(anyhow!("container is too short"));
-    }
-    if read_u32(bytes, 0)? != V8_MAGIC_NUMBER {
-        return Err(anyhow!("unexpected file header next page marker"));
-    }
-    if read_u32(bytes, 8)? != 1 {
-        return Err(anyhow!("unsupported module container storage version"));
-    }
-
-    let toc_header = read_block_header(bytes, FILE_HEADER_SIZE)?;
-    let toc_start = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
-    let toc_end = toc_start + toc_header.data_size;
-    if toc_end > bytes.len() {
-        return Err(anyhow!("TOC block exceeds container length"));
-    }
-    if toc_header.data_size % ELEM_ADDR_SIZE != 0 {
-        return Err(anyhow!("TOC size is not divisible by element address size"));
-    }
-
-    for entry in bytes[toc_start..toc_end].chunks_exact(ELEM_ADDR_SIZE) {
-        let header_addr = read_u32(entry, 0)? as usize;
-        let data_addr = read_u32(entry, 4)? as usize;
-        let marker = read_u32(entry, 8)?;
-        if marker != V8_MAGIC_NUMBER {
-            continue;
-        }
-        let header = read_block_payload(bytes, header_addr)?;
-        if element_name(&header)? == target_name {
-            return read_block_payload(bytes, data_addr).map(Some);
-        }
-    }
-    Ok(None)
-}
-
-fn build_module_inner(elements: &[ModuleElement; 2]) -> Result<Vec<u8>> {
-    let toc_len = elements.len() * ELEM_ADDR_SIZE;
-    let toc_block_total = BLOCK_HEADER_SIZE + toc_len;
-    let mut offset = FILE_HEADER_SIZE + toc_block_total;
-
-    let mut addresses = Vec::with_capacity(elements.len());
-    for element in elements {
-        let header_addr = offset;
-        offset += BLOCK_HEADER_SIZE + element.header.len();
-
-        let data_addr = offset;
-        let data_page = page_size_for_data(element.data.len());
-        offset += BLOCK_HEADER_SIZE + data_page;
-
-        addresses.push((header_addr, data_addr));
-    }
-
-    let mut bytes = Vec::with_capacity(offset);
-    write_u32(&mut bytes, V8_MAGIC_NUMBER);
-    write_u32(&mut bytes, V8_PAGE_SIZE);
-    write_u32(&mut bytes, 1);
-    write_u32(&mut bytes, 0);
-
-    let mut toc = Vec::with_capacity(toc_len);
-    for (header_addr, data_addr) in addresses {
-        write_u32(&mut toc, checked_u32(header_addr, "header address")?);
-        write_u32(&mut toc, checked_u32(data_addr, "data address")?);
-        write_u32(&mut toc, V8_MAGIC_NUMBER);
-    }
-    write_block(&mut bytes, &toc, toc.len())?;
-
-    for element in elements {
-        write_block(&mut bytes, &element.header, element.header.len())?;
-        write_block(
-            &mut bytes,
-            &element.data,
-            page_size_for_data(element.data.len()),
-        )?;
-    }
-
-    Ok(bytes)
-}
-
-fn write_block(target: &mut Vec<u8>, data: &[u8], page_size: usize) -> Result<()> {
-    if page_size < data.len() {
-        return Err(anyhow!(
-            "page size {} is less than data size {}",
-            page_size,
-            data.len()
-        ));
-    }
-    let header = format!(
-        "\r\n{:08x} {:08x} {:08x} \r\n",
-        data.len(),
-        page_size,
-        V8_MAGIC_NUMBER
-    );
-    if header.len() != BLOCK_HEADER_SIZE {
-        return Err(anyhow!("invalid block header length {}", header.len()));
-    }
-    target.extend_from_slice(header.as_bytes());
-    target.extend_from_slice(data);
-    target.resize(target.len() + (page_size - data.len()), 0);
-    Ok(())
-}
-
-fn page_size_for_data(len: usize) -> usize {
-    if len < V8_PAGE_SIZE as usize {
-        V8_PAGE_SIZE as usize
-    } else {
-        len
-    }
-}
-
-fn make_element_header(name: &str) -> Vec<u8> {
-    let mut header = vec![0; ELEM_HEADER_PREFIX_SIZE];
-    for unit in name.encode_utf16() {
-        header.extend_from_slice(&unit.to_le_bytes());
-    }
-    header.extend_from_slice(&[0, 0, 0, 0]);
-    header
-}
-
-fn parse_v8_container(bytes: &[u8]) -> Result<Vec<ParsedElement>> {
-    if bytes.len() < FILE_HEADER_SIZE + BLOCK_HEADER_SIZE {
-        return Err(anyhow!("container is too short"));
-    }
-    if read_u32(bytes, 0)? != V8_MAGIC_NUMBER {
-        return Err(anyhow!("unexpected file header next page marker"));
-    }
-    if read_u32(bytes, 8)? != 1 {
-        return Err(anyhow!("unsupported module container storage version"));
-    }
-
-    let toc_header = read_block_header(bytes, FILE_HEADER_SIZE)?;
-    let toc_start = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
-    let toc_end = toc_start + toc_header.data_size;
-    if toc_end > bytes.len() {
-        return Err(anyhow!("TOC block exceeds container length"));
-    }
-    if toc_header.data_size % ELEM_ADDR_SIZE != 0 {
-        return Err(anyhow!("TOC size is not divisible by element address size"));
-    }
-
-    let mut result = Vec::new();
-    for entry in bytes[toc_start..toc_end].chunks_exact(ELEM_ADDR_SIZE) {
-        let header_addr = read_u32(entry, 0)? as usize;
-        let data_addr = read_u32(entry, 4)? as usize;
-        let marker = read_u32(entry, 8)?;
-        if marker != V8_MAGIC_NUMBER {
-            continue;
-        }
-        let header = read_block_payload(bytes, header_addr)?;
-        let data = read_block_payload(bytes, data_addr)?;
-        let name = element_name(&header)?;
-        result.push(ParsedElement { name, header, data });
-    }
-    Ok(result)
-}
-
-fn read_block_payload(bytes: &[u8], offset: usize) -> Result<Vec<u8>> {
-    let header = read_block_header(bytes, offset)?;
-    let start = offset + BLOCK_HEADER_SIZE;
-    let data_end = start + header.data_size;
-    let page_end = start + header.page_size;
-    if data_end > bytes.len() || page_end > bytes.len() {
-        return Err(anyhow!("block at {} exceeds container length", offset));
-    }
-    if header.next_page_addr != V8_MAGIC_NUMBER {
-        return Err(anyhow!("multi-page V8 blocks are not supported yet"));
-    }
-    Ok(bytes[start..data_end].to_vec())
-}
-
-fn read_block_header(bytes: &[u8], offset: usize) -> Result<BlockHeader> {
-    let end = offset + BLOCK_HEADER_SIZE;
-    if end > bytes.len() {
-        return Err(anyhow!("block header at {} exceeds input length", offset));
-    }
-    let raw = &bytes[offset..end];
-    if raw[0] != b'\r'
-        || raw[1] != b'\n'
-        || raw[10] != b' '
-        || raw[19] != b' '
-        || raw[28] != b' '
-        || raw[29] != b'\r'
-        || raw[30] != b'\n'
-    {
-        return Err(anyhow!("invalid block header at {}", offset));
-    }
-    Ok(BlockHeader {
-        data_size: parse_hex_u32(&raw[2..10])? as usize,
-        page_size: parse_hex_u32(&raw[11..19])? as usize,
-        next_page_addr: parse_hex_u32(&raw[20..28])?,
-    })
-}
-
-fn element_name(header: &[u8]) -> Result<String> {
-    if header.len() < ELEM_HEADER_PREFIX_SIZE {
-        return Err(anyhow!("element header is too short"));
-    }
-    let raw = &header[ELEM_HEADER_PREFIX_SIZE..];
-    let mut units = Vec::new();
-    for pair in raw.chunks_exact(2) {
-        let unit = u16::from_le_bytes([pair[0], pair[1]]);
-        if unit == 0 {
-            break;
-        }
-        units.push(unit);
-    }
-    String::from_utf16(&units).context("element name is not valid UTF-16LE")
+fn build_module_inner(elements: &[V8Element; 2]) -> Result<Vec<u8>> {
+    build_v8_container(elements)
 }
 
 fn inflate_raw(input: &[u8]) -> Result<Vec<u8>> {
@@ -19636,29 +19410,6 @@ fn base64_value(byte: u8) -> Option<u8> {
         b'/' => Some(63),
         _ => None,
     }
-}
-
-fn parse_hex_u32(bytes: &[u8]) -> Result<u32> {
-    let text = std::str::from_utf8(bytes)?;
-    Ok(u32::from_str_radix(text, 16)?)
-}
-
-fn read_u32(bytes: &[u8], offset: usize) -> Result<u32> {
-    let end = offset + 4;
-    if end > bytes.len() {
-        return Err(anyhow!("u32 at {} exceeds input length", offset));
-    }
-    Ok(u32::from_le_bytes(bytes[offset..end].try_into()?))
-}
-
-fn write_u32(target: &mut Vec<u8>, value: u32) {
-    target.extend_from_slice(&value.to_le_bytes());
-}
-
-fn checked_u32(value: usize, name: &str) -> Result<u32> {
-    value
-        .try_into()
-        .with_context(|| format!("{name} does not fit into u32: {value}"))
 }
 
 fn replace_header_uuid(text: &mut String) -> Result<VersionReplacement> {
@@ -19776,9 +19527,9 @@ mod tests {
     use super::{
         CommonCommandRepresentation, DEFAULT_INFO, MetadataSourceContext, build_module_inner,
         common_command_representation_code, deflate_raw, inflate_raw,
-        parse_common_command_representation, parse_v8_container,
+        parse_common_command_representation,
     };
-    use crate::module_blob::ModuleElement;
+    use crate::v8_container::{V8Element, make_v8_element_header, parse_v8_container};
 
     fn decode_base64_for_test(input: &str) -> anyhow::Result<Vec<u8>> {
         fn value(byte: u8) -> anyhow::Result<u8> {
@@ -19845,12 +19596,14 @@ mod tests {
     #[test]
     fn packs_module_inner_with_plain_info_and_text() {
         let inner = build_module_inner(&[
-            ModuleElement {
-                header: super::make_element_header("info"),
+            V8Element {
+                name: "info".to_string(),
+                header: make_v8_element_header("info"),
                 data: DEFAULT_INFO.to_vec(),
             },
-            ModuleElement {
-                header: super::make_element_header("text"),
+            V8Element {
+                name: "text".to_string(),
+                header: make_v8_element_header("text"),
                 data: b"\xEF\xBB\xBFProcedure Test()\r\nEndProcedure".to_vec(),
             },
         ])
@@ -19870,12 +19623,14 @@ mod tests {
     #[test]
     fn module_outer_blob_is_raw_deflate() {
         let inner = build_module_inner(&[
-            ModuleElement {
-                header: super::make_element_header("info"),
+            V8Element {
+                name: "info".to_string(),
+                header: make_v8_element_header("info"),
                 data: DEFAULT_INFO.to_vec(),
             },
-            ModuleElement {
-                header: super::make_element_header("text"),
+            V8Element {
+                name: "text".to_string(),
+                header: make_v8_element_header("text"),
                 data: b"text".to_vec(),
             },
         ])
