@@ -49,14 +49,14 @@ use crate::module_blob::{
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
     pack_help_blob_from_parts, pack_module_blob_bytes,
     pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
-    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
-    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
-    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
-    predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
-    raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
-    versions_base_free_blockers,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml_with_source,
+    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
+    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
+    parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml,
+    parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes,
+    patch_versions_blob_bytes_allowing_additions, predefined_data_base_free_blockers,
+    raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
+    raw_deflated_plain_sha256, role_rights_base_free_blockers, versions_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -3252,7 +3252,9 @@ fn prepare_metadata_body_rows(
         "Form" | "CommonForm" => {
             prepare_form_body_row(sqlcmd, server, database, xml_path, properties, source)
         }
-        "Role" => prepare_role_rights_body_row(sqlcmd, server, database, xml_path, properties),
+        "Role" => {
+            prepare_role_rights_body_row(sqlcmd, server, database, xml_path, properties, source)
+        }
         _ => Ok(Vec::new()),
     }?;
     rows.extend(prepare_object_help_body_row(
@@ -3937,6 +3939,7 @@ fn prepare_role_rights_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_role_rights_body_path(xml_path);
     if !body_path.exists() {
@@ -3946,7 +3949,7 @@ fn prepare_role_rights_body_row(
     let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
-    let packed = pack_role_rights_blob_from_xml(&base_body, &xml)
+    let packed = pack_role_rights_blob_from_xml_with_source(&base_body, &xml, source)
         .with_context(|| format!("failed to pack Role rights {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
