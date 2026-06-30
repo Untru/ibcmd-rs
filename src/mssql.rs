@@ -855,8 +855,8 @@ fn source_bootstrap_readiness_report(
                 format!("{}.0", properties.uuid),
                 "common_module_body",
                 BootstrapGeneration::CanGenerateWithoutBaseBlob,
-                true,
-                "module body packer can synthesize default module info without a base blob; current staging still fetches the active module blob to preserve existing info",
+                false,
+                "module body packer synthesizes default module info without reading the active Config row",
             ));
         }
 
@@ -1106,8 +1106,8 @@ fn metadata_body_bootstrap_rows(
             suffix,
             "module_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "module body packer can synthesize default module info without a base blob; current staging fetches the active module blob to preserve existing info",
+            false,
+            "module body packer synthesizes default module info without reading the active Config row",
         ));
     }
 
@@ -1120,8 +1120,8 @@ fn metadata_body_bootstrap_rows(
             format!("{}.2", source.command_id),
             "nested_command_module_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "nested command module packer can synthesize default module info without a base blob; current staging fetches the active command module blob to preserve existing info",
+            false,
+            "nested command module packer synthesizes default module info without reading the active Config row",
         ));
     }
 
@@ -3961,9 +3961,9 @@ fn resolve_help_body_id_from_config_rows(
 }
 
 fn prepare_object_module_body_rows(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -3978,10 +3978,9 @@ fn prepare_object_module_body_rows(
             continue;
         }
         let body_id = format!("{}.{}", properties.uuid, suffix);
-        let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
         let text = fs::read(&body_path)
             .with_context(|| format!("failed to read module body {}", body_path.display()))?;
-        let packed = pack_module_blob_bytes(&text, Some(&base_body), None)
+        let packed = pack_module_blob_bytes(&text, None, None)
             .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
         rows.push(PreparedMetadataBodyStage {
             body_id,
@@ -4042,9 +4041,9 @@ fn predefined_data_body_suffix(kind: &str) -> Option<&'static str> {
 }
 
 fn prepare_nested_command_module_body_rows(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
@@ -4053,14 +4052,13 @@ fn prepare_nested_command_module_body_rows(
     let mut rows = Vec::with_capacity(sources.len());
     for source in sources {
         let body_id = format!("{}.2", source.command_id);
-        let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
         let text = fs::read(&source.body_path).with_context(|| {
             format!(
                 "failed to read nested command module body {}",
                 source.body_path.display()
             )
         })?;
-        let packed = pack_module_blob_bytes(&text, Some(&base_body), None).with_context(|| {
+        let packed = pack_module_blob_bytes(&text, None, None).with_context(|| {
             format!(
                 "failed to pack nested command module body {}",
                 source.body_path.display()
@@ -4308,8 +4306,7 @@ fn prepare_common_module_object_stage(
     let base_metadata_blob = fetch_config_blob(sqlcmd, server, database, &module_id)?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     let module_body_id = format!("{module_id}.0");
-    let base_module_blob = fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
-    let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
+    let packed_module = pack_module_blob_bytes(&text, None, None)?;
 
     Ok(PreparedCommonModuleObjectStage {
         module_id,
@@ -4424,9 +4421,7 @@ fn stage_common_module_specs(
                 let module_body_id = format!("{}.0", spec.module_id);
                 let text = fs::read(&spec.text)
                     .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
-                let base_module_blob =
-                    fetch_config_blob(sqlcmd, server, database, &module_body_id)?;
-                let packed_module = pack_module_blob_bytes(&text, Some(&base_module_blob), None)?;
+                let packed_module = pack_module_blob_bytes(&text, None, None)?;
                 Ok(PreparedCommonModuleStage {
                     spec,
                     module_body_id,
@@ -6188,7 +6183,7 @@ mod tests {
     use crate::cli::InfobaseConfigSourceVersion;
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties, hex_sha256,
-        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
+        module_blob_text_sha256, pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
         raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
@@ -7345,7 +7340,7 @@ mod tests {
         assert_eq!(report.config_rows, 7);
         assert_eq!(report.rows_requiring_base_blob, 4);
         assert_eq!(report.rows_generatable_without_base_blob, 3);
-        assert_eq!(report.current_staging_rows_fetching_base_blob, 6);
+        assert_eq!(report.current_staging_rows_fetching_base_blob, 4);
         assert_eq!(report.objects_requiring_base_blob, 2);
         assert_eq!(report.objects_fully_generatable_without_base_blob, 0);
 
@@ -7385,7 +7380,8 @@ mod tests {
             .unwrap();
         assert_eq!(row.generation, "can_generate_without_base_blob");
         assert_eq!(row.source_path, "CommonModules/Utils/Ext/Module.bsl");
-        assert!(row.current_staging_fetches_base_blob);
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
 
         let row = report
             .rows
@@ -7442,6 +7438,104 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5");
         assert_eq!(rows[0].path, body_path);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_object_module_body_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-object-module-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let catalog_xml = root.join("Catalogs").join("Products.xml");
+        let body_path = root
+            .join("Catalogs")
+            .join("Products")
+            .join("Ext")
+            .join("ObjectModule.bsl");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&catalog_xml, b"<Catalog/>").unwrap();
+        let text = b"Procedure OnWrite()\nEndProcedure";
+        fs::write(&body_path, text).unwrap();
+        let properties = test_simple_metadata_properties(
+            "Catalog",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Products",
+        );
+
+        let rows = super::prepare_object_module_body_rows(
+            PathBuf::from("missing-sqlcmd-for-object-module-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &catalog_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            module_blob_text_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(text)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_nested_command_module_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-nested-command-module-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let xml_path = root.join("DataProcessors").join("Loader.xml");
+        let body_path = root
+            .join("DataProcessors")
+            .join("Loader")
+            .join("Commands")
+            .join("Load")
+            .join("Ext")
+            .join("CommandModule.bsl");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Loader</Name></Properties>
+    <ChildObjects>
+      <Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+        <Properties><Name>Load</Name></Properties>
+      </Command>
+    </ChildObjects>
+  </DataProcessor>
+</MetaDataObject>"#;
+        fs::write(&xml_path, xml).unwrap();
+        let text = b"Procedure CommandProcessing()\nEndProcedure";
+        fs::write(&body_path, text).unwrap();
+        let properties = test_simple_metadata_properties(
+            "DataProcessor",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Loader",
+        );
+
+        let rows = super::prepare_nested_command_module_body_rows(
+            PathBuf::from("missing-sqlcmd-for-nested-command-module-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &xml_path,
+            xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.2");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            module_blob_text_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(text)
+        );
 
         let _ = fs::remove_dir_all(root);
     }
