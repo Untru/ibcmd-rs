@@ -43,11 +43,10 @@ use crate::module_blob::{
     VersionReplacement, hex_sha256, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes_with_base,
-    pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
-    pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source,
-    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
-    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
+    pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml_with_base,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -996,8 +995,8 @@ fn metadata_body_bootstrap_rows(
             "0",
             "picture_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "picture packer can create a new ExtPicture wrapper from Picture.xml and referenced bytes; current staging fetches base to preserve wrapper fields",
+            false,
+            "picture packer creates a new ExtPicture wrapper from Picture.xml and referenced bytes without reading the active Config row",
         )),
         "Configuration" => rows.extend(configuration_asset_bootstrap_rows(
             source_root,
@@ -1241,8 +1240,8 @@ fn configuration_asset_bootstrap_rows(
         "2",
         "configuration_picture_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        true,
-        "configuration picture body can be generated from source bytes; current staging fetches base to preserve wrapper fields",
+        false,
+        "configuration picture body creates a new ExtPicture wrapper from source bytes without reading the active Config row",
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -1318,8 +1317,8 @@ fn configuration_asset_bootstrap_rows(
         "c",
         "configuration_picture_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        true,
-        "configuration picture body can be generated from source bytes; current staging fetches base to preserve wrapper fields",
+        false,
+        "configuration picture body creates a new ExtPicture wrapper from source bytes without reading the active Config row",
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -3383,9 +3382,9 @@ fn prepare_binary_template_body_row(
 }
 
 fn prepare_common_picture_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -3394,7 +3393,6 @@ fn prepare_common_picture_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read ExtPicture XML {}", body_path.display()))?;
     let file_name = parse_ext_picture_file_name_from_xml(&xml)
@@ -3402,7 +3400,7 @@ fn prepare_common_picture_body_row(
     let picture_path = body_path.with_extension("").join(&file_name);
     let picture = fs::read(&picture_path)
         .with_context(|| format!("failed to read ExtPicture file {}", picture_path.display()))?;
-    let packed = pack_ext_picture_blob_from_bytes_with_base(Some(&base_body), &picture)
+    let packed = pack_ext_picture_blob_from_bytes(&picture)
         .with_context(|| format!("failed to pack ExtPicture {}", picture_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
@@ -3500,9 +3498,9 @@ fn prepare_configuration_asset_body_rows(
 }
 
 fn prepare_configuration_ext_picture_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     properties: &SimpleMetadataXmlProperties,
     body_path: PathBuf,
     suffix: &str,
@@ -3511,7 +3509,6 @@ fn prepare_configuration_ext_picture_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read Configuration ExtPicture {}",
@@ -3531,13 +3528,12 @@ fn prepare_configuration_ext_picture_body_row(
             picture_path.display()
         )
     })?;
-    let packed = pack_ext_picture_blob_from_bytes_with_base(Some(&base_body), &picture)
-        .with_context(|| {
-            format!(
-                "failed to pack Configuration ExtPicture {}",
-                picture_path.display()
-            )
-        })?;
+    let packed = pack_ext_picture_blob_from_bytes(&picture).with_context(|| {
+        format!(
+            "failed to pack Configuration ExtPicture {}",
+            picture_path.display()
+        )
+    })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -6239,7 +6235,8 @@ mod tests {
     use crate::cli::InfobaseConfigSourceVersion;
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties, hex_sha256,
-        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes, raw_deflated_plain_sha256,
+        pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
+        raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use std::fs;
@@ -6286,6 +6283,18 @@ mod tests {
 	</Schedule>
 </JobSchedule>
 "#
+    }
+
+    fn sample_ext_picture_xml(file_name: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<ExtPicture xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.17">
+	<Picture>
+		<xr:Abs>{file_name}</xr:Abs>
+	</Picture>
+</ExtPicture>
+"#
+        )
     }
 
     #[test]
@@ -7572,6 +7581,54 @@ mod tests {
     }
 
     #[test]
+    fn reports_common_picture_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-common-picture-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let picture_xml = root.join("CommonPictures").join("Logo.xml");
+        let picture_ext = root.join("CommonPictures").join("Logo").join("Ext");
+        let picture_body = picture_ext.join("Picture.xml");
+        let picture_file = picture_ext.join("Picture").join("logo.png");
+        fs::create_dir_all(picture_file.parent().unwrap()).unwrap();
+        fs::write(
+            &picture_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonPicture uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Logo</Name></Properties>
+  </CommonPicture>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(&picture_body, sample_ext_picture_xml("logo.png")).unwrap();
+        fs::write(&picture_file, b"PNG").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&picture_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "picture_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0"
+        );
+        assert_eq!(row.source_path, "CommonPictures/Logo/Ext/Picture.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_additional_indexes_body_as_currently_base_free() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-additional-indexes-readiness-{}",
@@ -7787,6 +7844,49 @@ mod tests {
     }
 
     #[test]
+    fn prepares_common_picture_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-common-picture-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let picture_xml = root.join("CommonPictures").join("Logo.xml");
+        let picture_body = root
+            .join("CommonPictures")
+            .join("Logo")
+            .join("Ext")
+            .join("Picture.xml");
+        let picture_file = picture_body.with_extension("").join("logo.png");
+        fs::create_dir_all(picture_file.parent().unwrap()).unwrap();
+        fs::write(&picture_xml, b"<CommonPicture/>").unwrap();
+        fs::write(&picture_body, sample_ext_picture_xml("logo.png")).unwrap();
+        fs::write(&picture_file, b"PNG").unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonPicture",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Logo",
+        );
+
+        let rows = super::prepare_common_picture_body_row(
+            PathBuf::from("missing-sqlcmd-for-common-picture-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &picture_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0");
+        assert_eq!(rows[0].path, picture_body);
+        assert_eq!(
+            raw_deflated_first_base64_payload_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(b"PNG")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn prepares_scheduled_job_schedule_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-scheduled-job-no-fetch-{}",
@@ -7825,6 +7925,90 @@ mod tests {
                 "\u{feff}{00010101000000,00010101000000,00010101080000,00010101170000,00010101000000,0,60,0,2,6,7,0,1,12,1,2,3,4,5,6,7,8,9,10,11,12,1,0,0}"
                     .as_bytes(),
             )
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_configuration_picture_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-configuration-picture-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let configuration_xml = root.join("Configuration.xml");
+        let splash_xml = root.join("Ext").join("Splash.xml");
+        let splash_file = root.join("Ext").join("Splash").join("splash.png");
+        fs::create_dir_all(splash_file.parent().unwrap()).unwrap();
+        fs::write(
+            &configuration_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Configuration uuid="ffffffff-ffff-4fff-ffff-ffffffffffff">
+    <Properties><Name>Main</Name></Properties>
+  </Configuration>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(&splash_xml, sample_ext_picture_xml("splash.png")).unwrap();
+        fs::write(&splash_file, b"SPLASH").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&configuration_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| {
+                row.row_kind == "configuration_picture_body"
+                    && row.config_file_name == "ffffffff-ffff-4fff-ffff-ffffffffffff.2"
+            })
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(row.source_path, "Ext/Splash.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_configuration_picture_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-configuration-picture-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let body_path = root.join("Ext").join("Splash.xml");
+        let picture_file = body_path.with_extension("").join("splash.png");
+        fs::create_dir_all(picture_file.parent().unwrap()).unwrap();
+        fs::write(&body_path, sample_ext_picture_xml("splash.png")).unwrap();
+        fs::write(&picture_file, b"SPLASH").unwrap();
+        let properties = test_simple_metadata_properties(
+            "Configuration",
+            "ffffffff-ffff-4fff-ffff-ffffffffffff",
+            "Main",
+        );
+
+        let rows = super::prepare_configuration_ext_picture_body_row(
+            PathBuf::from("missing-sqlcmd-for-configuration-picture-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &properties,
+            body_path.clone(),
+            "2",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "ffffffff-ffff-4fff-ffff-ffffffffffff.2");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_first_base64_payload_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(b"SPLASH")
         );
 
         let _ = fs::remove_dir_all(root);
