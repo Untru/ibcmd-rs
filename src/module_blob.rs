@@ -2050,6 +2050,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     if let Some(font) = parse_spreadsheet_font_xml_attributes(&event)? {
                         document.fonts.push(font);
                     }
+                } else if local == "format" {
+                    document
+                        .formats
+                        .push(SpreadsheetDocumentXmlFormat::default());
                 } else if local == "tfl"
                     && let Some(header_footer) = current_header_footer.as_mut()
                 {
@@ -3442,7 +3446,7 @@ fn format_spreadsheet_format_index_for_moxel(
 }
 
 fn spreadsheet_empty_format_for_moxel() -> String {
-    "{1,0}".to_string()
+    "{0}".to_string()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23677,6 +23681,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(text.contains(r#"{2,{33024,6,1},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_empty_format_slots_as_native_zero_flag_defaults() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<format/>
+	<format>
+		<width>88</width>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{128,88},{0}}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

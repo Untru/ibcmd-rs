@@ -15048,10 +15048,10 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
 }
 
 fn moxel_format_values<'a>(flags: u64, fields: &[&'a str]) -> Option<[Option<&'a str>; 64]> {
-    if flags == 0 {
-        return None;
-    }
     let mut values = [None; 64];
+    if flags == 0 {
+        return (fields.len() == 1).then_some(values);
+    }
     let mut field_index = 1usize;
     for (bit, value) in values.iter_mut().enumerate() {
         if flags & (1u64 << bit) == 0 {
@@ -35100,6 +35100,22 @@ mod tests {
         assert_eq!(format.width, Some(72));
         assert_eq!(format.text_orientation, Some(900));
         assert_eq!(format.text_placement, Some("Wrap"));
+    }
+
+    #[test]
+    fn formats_moxel_width_table_tolerates_empty_format_slots() {
+        let (column_formats, formats) = parse_moxel_formats(
+            &["3", "{0}", "{128,111}", "{128,222}"],
+            1,
+            &[],
+            &BTreeSet::new(),
+        );
+
+        assert_eq!(column_formats.len(), 1);
+        assert_eq!(column_formats[0].width, Some(222));
+        assert_eq!(formats.len(), 2);
+        assert!(formats[0].is_empty());
+        assert_eq!(formats[1].width, Some(111));
     }
 
     #[test]
