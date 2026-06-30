@@ -8992,6 +8992,7 @@ struct FormChildItem {
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
     choice_folders_and_items: Option<&'static str>,
+    restore_current_row: Option<bool>,
     row_picture_data_path: Option<String>,
     update_on_data_change: Option<&'static str>,
     user_settings_group: Option<String>,
@@ -10792,6 +10793,11 @@ fn parse_form_child_item_with_attrs(
         },
         choice_folders_and_items: if tag == "Table" {
             parse_form_table_choice_folders_and_items(&fields)
+        } else {
+            None
+        },
+        restore_current_row: if tag == "Table" {
+            parse_form_table_property_bag_bool(&fields, "12")
         } else {
             None
         },
@@ -12751,6 +12757,12 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
                 escape_xml_text(choice_folders_and_items)
+            ));
+        }
+        if let Some(restore_current_row) = item.restore_current_row {
+            xml.push_str(&format!(
+                "{tab}\t<RestoreCurrentRow>{}</RestoreCurrentRow>\r\n",
+                if restore_current_row { "true" } else { "false" }
             ));
         }
         if let Some(update_on_data_change) = item.update_on_data_change {
@@ -29316,6 +29328,7 @@ mod tests {
         assert_eq!(item.use_alternation_row_color, Some(false));
         assert_eq!(item.default_item, Some(true));
         assert_eq!(item.choice_folders_and_items, Some("Items"));
+        assert_eq!(item.restore_current_row, Some(false));
         assert_eq!(item.update_on_data_change, Some("Auto"));
         assert_eq!(item.allow_getting_current_row_url, Some(true));
 
@@ -29326,6 +29339,7 @@ mod tests {
         assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
         assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
         assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
+        assert!(xml.contains("<RestoreCurrentRow>false</RestoreCurrentRow>"));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
         assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
     }
@@ -30921,6 +30935,7 @@ mod tests {
             use_alternation_row_color: None,
             default_item: None,
             choice_folders_and_items: None,
+            restore_current_row: None,
             row_picture_data_path: None,
             update_on_data_change: None,
             user_settings_group: None,
@@ -30990,6 +31005,7 @@ mod tests {
                     use_alternation_row_color: None,
                     default_item: None,
                     choice_folders_and_items: None,
+                    restore_current_row: None,
                     row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
@@ -31060,6 +31076,7 @@ mod tests {
                     use_alternation_row_color: None,
                     default_item: None,
                     choice_folders_and_items: None,
+                    restore_current_row: None,
                     row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
