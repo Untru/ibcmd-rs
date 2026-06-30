@@ -113,11 +113,11 @@ Diff by file kind:
 |---|---|---|
 | ConfigDumpInfo.xml | do not generate | Not required for the replacement export/import workflow; do not count it as parity debt. |
 
-## Active Delegation
+## Delegation History
 
 | Issue | Scope | Status |
 |---|---|---|
-| #15 | Catalogs/Documents/DataProcessors/Reports metadata XML | in-progress |
-| #18 | register/subsystem/exchange-plan metadata and auxiliary assets | in-progress |
+| #15 | Catalogs/Documents/DataProcessors/Reports metadata XML | merged to `master` |
+| #18 | register/subsystem/exchange-plan metadata and auxiliary assets | merged to `master` |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

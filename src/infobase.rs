@@ -144,6 +144,7 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
         replace_config_save: args.replace_config_save,
         allow_non_lab: args.allow_non_lab,
         batch_size: args.batch_size,
+        source_version: Some(config.source_version),
         path_prefix: args.path_prefix.clone(),
         script_output: args.script_output.clone(),
     };

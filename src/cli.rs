@@ -596,6 +596,9 @@ pub struct MssqlAuditSourceParityArgs {
     /// Optional maximum number of staged XML objects per SQL batch.
     #[arg(long)]
     pub batch_size: Option<usize>,
+    /// Expected source XML version. When set, selected root XML files must match it.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
     /// Optional source path prefix to audit. Can be repeated.
     #[arg(long)]
     pub path_prefix: Vec<String>,
@@ -1013,6 +1016,9 @@ pub struct MssqlStageSourceObjectsArgs {
     /// Optional maximum number of staged XML objects per SQL batch.
     #[arg(long)]
     pub batch_size: Option<usize>,
+    /// Expected source XML version. When set, selected root XML files must match it.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
     /// Optional source path prefix to stage. Can be repeated.
     #[arg(long)]
     pub path_prefix: Vec<String>,
@@ -3045,6 +3051,7 @@ mod tests {
             r"C:\sources",
             "--path-prefix",
             "Catalogs/Products",
+            "--source-version=8.5.1",
             "--replace-config-save",
             "--allow-non-lab",
         ]);
@@ -3053,6 +3060,10 @@ mod tests {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
                 assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
+                assert_eq!(
+                    args.source_version,
+                    Some(InfobaseConfigSourceVersion::V2_21)
+                );
                 assert!(args.replace_config_save);
                 assert!(args.allow_non_lab);
             }
@@ -3068,6 +3079,7 @@ mod tests {
             r"C:\sources",
             "--batch-size",
             "2",
+            "--source-version=2.20",
             "--path-prefix",
             "Catalogs/Products",
             "-o",
@@ -3078,6 +3090,10 @@ mod tests {
                 assert_eq!(args.database, "TestDb");
                 assert_eq!(args.source_root, PathBuf::from(r"C:\sources"));
                 assert_eq!(args.batch_size, Some(2));
+                assert_eq!(
+                    args.source_version,
+                    Some(InfobaseConfigSourceVersion::V2_20)
+                );
                 assert_eq!(args.path_prefix, vec!["Catalogs/Products"]);
                 assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\parity.json")));
             }

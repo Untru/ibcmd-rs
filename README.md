@@ -22,6 +22,11 @@ Current parity tracking is summarized in
 the compact top-level view for the `ut_ibcmd` export comparison against native
 `ibcmd`.
 
+EDT XML exporter/importer plugin findings are summarized in
+[docs/edt-xml-layer-analysis.md](docs/edt-xml-layer-analysis.md). The short
+version: use the EDT XML layer as a reference for ordering, file layout and
+import hierarchy, not as a production runtime dependency.
+
 | Object / group | Status | Ready | Remaining |
 |---|---|---:|---:|
 | CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, EventSubscriptions, FunctionalOptions, ScheduledJobs, StyleItems, CommandGroups, FunctionalOptionsParameters, Languages, SessionParameters, DocumentNumerators, WSReferences, IntegrationServices, Ext | done / byte-identical | 100.0% | 0 |
@@ -82,7 +87,7 @@ cargo run -- mssql-stage-common-module-objects --database target_db --xml Common
 cargo run -- mssql-stage-metadata-objects --database target_db --source-root C:\full\xml-sources --xml Constants\SomeConstant.xml --xml SessionParameters\SomeParameter.xml --replace-config-save --allow-non-lab
 cargo run -- mssql-stage-source-metadata-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
 cargo run -- mssql-stage-source-common-module-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
-cargo run -- mssql-stage-source-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
+cargo run -- mssql-stage-source-objects --database target_db --source-root C:\full\xml-sources --source-version 2.21 --replace-config-save --allow-non-lab
 ```
 
 ### bcp client compatibility

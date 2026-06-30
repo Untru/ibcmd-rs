@@ -402,6 +402,7 @@ fn dump_table_rows_eager(
         inflate,
         extract_module_text,
         extract_metadata_xml,
+        InfobaseConfigSourceVersion::V2_20,
     )
 }
 
@@ -475,6 +476,29 @@ fn dump_table_rows(
         inflate,
         extract_module_text,
         extract_metadata_xml,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+#[cfg(test)]
+fn dump_table_rows_with_source_version(
+    output_dir: &Path,
+    table: &str,
+    rows: Vec<ConfigRow>,
+    inflate: bool,
+    extract_module_text: bool,
+    extract_metadata_xml: bool,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<DumpedTable> {
+    dump_table_rows_with_options(
+        output_dir,
+        table,
+        rows,
+        true,
+        inflate,
+        extract_module_text,
+        extract_metadata_xml,
+        source_version,
     )
 }
 
@@ -486,6 +510,7 @@ fn dump_table_rows_with_options(
     inflate: bool,
     extract_module_text: bool,
     extract_metadata_xml: bool,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
     if write_binary_rows {
@@ -614,7 +639,7 @@ fn dump_table_rows_with_options(
     let context = DumpRowContext {
         output_dir,
         table,
-        source_version: InfobaseConfigSourceVersion::V2_20,
+        source_version,
         write_binary_rows,
         inflate,
         extract_module_text,
@@ -22412,7 +22437,16 @@ mod tests {
             },
         ];
 
-        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+        let dumped = dump_table_rows_with_source_version(
+            &root,
+            "Config",
+            rows,
+            false,
+            false,
+            true,
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 4);
         let owned_xml_bytes = fs::read(root.join("Catalogs/Products/Forms/ListForm.xml")).unwrap();
@@ -26235,7 +26269,16 @@ mod tests {
             },
         ];
 
-        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+        let dumped = dump_table_rows_with_source_version(
+            &root,
+            "Config",
+            rows,
+            false,
+            false,
+            true,
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 1);
         assert_eq!(dumped.source_asset_rows, 1);
@@ -26695,7 +26738,7 @@ mod tests {
 
         assert!(xml.starts_with('\u{feff}'));
         assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
-        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains(r#"version="2.21""#));
         assert!(xml.contains("<Comment/>"));
         assert!(xml.contains("<TemplateType>DataCompositionSchema</TemplateType>"));
         assert!(!xml.ends_with("\r\n"));

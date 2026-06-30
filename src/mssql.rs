@@ -10,8 +10,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{
-    MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs,
-    MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
+    InfobaseConfigSourceVersion, MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs,
+    MssqlDeltaExportArgs, MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
     MssqlStageAccumulationRegisterObjectArgs, MssqlStageBotObjectArgs,
     MssqlStageBusinessProcessObjectArgs, MssqlStageCalculationRegisterObjectArgs,
     MssqlStageCatalogObjectArgs, MssqlStageChartOfAccountsObjectArgs,
@@ -75,6 +75,7 @@ pub struct MssqlCompareReport {
 pub struct MssqlSourceParityAuditReport {
     pub database: String,
     pub source_root: PathBuf,
+    pub source_version: Option<String>,
     pub path_prefixes: Vec<String>,
     pub source_coverage: SourceLoadCoverageAuditReport,
     pub selected_metadata_xml_files: usize,
@@ -332,6 +333,7 @@ pub struct StagedCommonModuleReport {
 #[derive(Debug, Serialize)]
 pub struct StageSourceObjectsReport {
     pub database: String,
+    pub source_version: Option<String>,
     pub metadata_objects: Vec<StagedMetadataObjectReport>,
     pub common_modules: Vec<StagedCommonModuleObjectReport>,
     pub scripts: Vec<PathBuf>,
@@ -538,6 +540,10 @@ pub fn audit_source_parity(
             args.source_root.display()
         ));
     }
+    if let Some(source_version) = args.source_version {
+        validate_selected_source_versions(&metadata_xmls, source_version)?;
+        validate_selected_source_versions(&common_module_xmls, source_version)?;
+    }
 
     let source = MetadataSourceContext::new(args.source_root.clone());
     let metadata_results = parallel::install(|| {
@@ -671,6 +677,9 @@ pub fn audit_source_parity(
     Ok(MssqlSourceParityAuditReport {
         database: args.database.clone(),
         source_root: source_coverage.root.clone(),
+        source_version: args
+            .source_version
+            .map(|version| version.as_str().to_string()),
         path_prefixes: args.path_prefix.clone(),
         source_coverage,
         selected_metadata_xml_files: metadata_xmls.len(),
@@ -1502,6 +1511,9 @@ pub fn stage_source_objects(
 
     Ok(StageSourceObjectsReport {
         database: args.database.clone(),
+        source_version: args
+            .source_version
+            .map(|version| version.as_str().to_string()),
         metadata_objects,
         common_modules,
         scripts,
@@ -3526,6 +3538,63 @@ fn xml_attr_value_for_stage(event: &BytesStart<'_>, name: &str) -> Option<String
         .map(|attr| String::from_utf8_lossy(attr.value.as_ref()).to_string())
 }
 
+fn validate_selected_source_versions(
+    paths: &[PathBuf],
+    expected: InfobaseConfigSourceVersion,
+) -> Result<()> {
+    for path in paths {
+        let actual = source_xml_version(path)?;
+        match actual.as_deref() {
+            Some(version) if version == expected.as_str() => {}
+            Some(version) => {
+                return Err(anyhow!(
+                    "source XML version mismatch in {}: expected {}, got {}",
+                    path.display(),
+                    expected.as_str(),
+                    version
+                ));
+            }
+            None => {
+                return Err(anyhow!(
+                    "source XML version not found in {}: expected {}",
+                    path.display(),
+                    expected.as_str()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn source_xml_version(path: &Path) -> Result<Option<String>> {
+    let xml =
+        fs::read(path).with_context(|| format!("failed to read source XML {}", path.display()))?;
+    source_xml_version_from_bytes(&xml)
+        .with_context(|| format!("failed to read source XML version from {}", path.display()))
+}
+
+fn source_xml_version_from_bytes(xml: &[u8]) -> Result<Option<String>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) | Ok(Event::Empty(event)) => {
+                let local = xml_local_name_for_stage(event.local_name().as_ref());
+                if local == "MetaDataObject" {
+                    return Ok(xml_attr_value_for_stage(&event, "version"));
+                }
+                return Ok(None);
+            }
+            Ok(Event::Decl(_)) | Ok(Event::Comment(_)) | Ok(Event::Text(_)) => {}
+            Ok(Event::Eof) => return Ok(None),
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+}
+
 fn xml_local_name_for_stage(name: &[u8]) -> String {
     String::from_utf8_lossy(name).to_string()
 }
@@ -5459,14 +5528,18 @@ mod tests {
         infer_common_module_text_path, is_root_common_module_xml, is_root_metadata_xml,
         is_stage_metadata_xml, quote_ident, quote_string, require_non_lab_confirmation,
         source_common_module_xmls, source_metadata_xmls, source_stage_batch_reports,
-        validate_delta_manifest, validate_storage_manifest,
+        source_xml_version_from_bytes, validate_delta_manifest, validate_selected_source_versions,
+        validate_storage_manifest,
     };
+    use crate::cli::InfobaseConfigSourceVersion;
     use crate::module_blob::{
         CommonModuleXmlProperties, ReturnValuesReuse, SimpleMetadataXmlProperties, hex_sha256,
         pack_help_blob_from_parts, pack_raw_deflated_blob_from_bytes,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_simple_metadata_properties(
         kind: &str,
@@ -5535,6 +5608,56 @@ mod tests {
             with.contains(&"-u".to_string()),
             "--bcp-trust-cert must add -u for bcp 18+"
         );
+    }
+
+    #[test]
+    fn reads_source_xml_version_from_metadata_object_root() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonModule uuid="11111111-1111-4111-8111-111111111111"/>
+</MetaDataObject>"#;
+
+        assert_eq!(
+            source_xml_version_from_bytes(xml).unwrap(),
+            Some("2.21".to_string())
+        );
+    }
+
+    #[test]
+    fn validates_selected_source_xml_version_before_staging() {
+        let dir = std::env::temp_dir().join(format!(
+            "ibcmd-rs-source-version-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let xml = dir.join("CommonModule.xml");
+        fs::write(
+            &xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20">
+  <CommonModule uuid="11111111-1111-4111-8111-111111111111">
+    <Properties><Name>Module</Name></Properties>
+  </CommonModule>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+
+        validate_selected_source_versions(
+            std::slice::from_ref(&xml),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let error = validate_selected_source_versions(
+            std::slice::from_ref(&xml),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("source XML version mismatch"));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
