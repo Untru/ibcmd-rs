@@ -61,6 +61,11 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 39 | Form.xml | default `Table` child item `SkipOnInput=false` is suppressed while explicit `true` remains exported |
+| 39 | MXL templates | MOXCEL system style refs `-25`, `-26`, `-27`, `-34`, `-35`, `-36`, `-37`, and `-38` now map to native report/table/button style color refs |
+| 39 | InformationRegister metadata XML | extended owner tuple field emits `DataLockControlMode` for `InformationRegister` as well as `AccumulationRegister` |
+| 39 | Role Rights.xml | role rights object ordering can follow metadata tree order while preserving serialized order within one owner |
+| 39 | Source staging readiness | Form body base-dependency audit now reports precise counts for root/layout scalars, child items, trailing sections and `Ext/Form/Items/**` assets |
 | 38 | Form.xml | default `WindowOpeningMode=DontBlock` is suppressed in export while explicit XML still packs into the form layout |
 | 38 | MXL templates | native empty format slots `{0}` are preserved, so later width-bearing formats are no longer dropped |
 | 38 | MXL templates | mixed `NamedItemCells` / `NamedItemDrawing` lists now preserve valid named areas without packing bogus drawing areas |
