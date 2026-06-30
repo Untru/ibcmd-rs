@@ -59,6 +59,10 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 17 | Form.xml | new `InputField` items preserve explicit `SkipOnInput` values |
+| 17 | Partial metadata XML | `Task` generated type `InternalInfo` entries are emitted |
+| 17 | MXL templates | SpreadsheetDocument `style:FieldSelectionBackColor` is supported in pack path |
+| 17 | Source staging readiness | root configuration raw-id `CommandInterface.xml` rows are covered as base-free |
 | 16 | Form.xml | new `LabelField` items preserve explicit `ShowInHeader` values |
 | 16 | Partial metadata XML | `AccountingRegister` and `CalculationRegister` generated type `InternalInfo` entries are emitted |
 | 16 | Configuration.xml | root `Constant` child object headers are emitted |

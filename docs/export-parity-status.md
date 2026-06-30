@@ -68,6 +68,10 @@ Incremental selected verification after this snapshot:
 | Round 16 partial metadata slice | unit-level metadata XML verification | `AccountingRegister` and `CalculationRegister` emit generated type `InternalInfo` entries |
 | Round 16 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits `Constant` child object headers |
 | Round 16 source staging readiness slice | unit-level staging verification | raw-id `CommandInterface.xml` rows can be prepared without active Config blobs |
+| Round 17 Form.xml slice | unit-level packer verification | new `InputField` items preserve explicit `SkipOnInput` values |
+| Round 17 partial metadata slice | unit-level metadata XML verification | `Task` emits generated type `InternalInfo` entries |
+| Round 17 MXL template slice | unit-level packer verification | SpreadsheetDocument `style:FieldSelectionBackColor` is supported in pack path |
+| Round 17 source staging readiness slice | unit-level staging verification | root configuration raw-id `CommandInterface.xml` rows are covered as base-free |
 
 Performance note for selected extraction:
 
@@ -188,5 +192,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #18 | AccountingRegister/CalculationRegister generated type InternalInfo | merged to `master` in round 16 |
 | #22 | Configuration.xml root Constant child headers | merged to `master` in round 16 |
 | #21 | raw-id CommandInterface.xml staging without active Config query | merged to `master` in round 16 |
+| #16 | Form.xml new `InputField/SkipOnInput` generation | merged to `master` in round 17 |
+| #18 | Task generated type InternalInfo | merged to `master` in round 17 |
+| #17 | SpreadsheetDocument `style:FieldSelectionBackColor` pack | merged to `master` in round 17 |
+| #21 | configuration CommandInterface.xml raw-id base-free coverage | merged to `master` in round 17 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
