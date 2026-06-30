@@ -103,3 +103,36 @@ Suggested evidence:
 - report exact source asset class and whether it is now base-free or remains a
   documented blocker.
 
+## Task D - Issue #23, Shared V8 Container Layer
+
+Worktree: `E:\ibcmd_lab\worktrees\issue-23-v8-container-v1`
+
+Goal: extract the low-level V8 container parser/builder from
+`src/module_blob.rs` into a shared internal module without changing current
+module blob behavior.
+
+Scope:
+
+- primary files: `src/v8_container.rs`, `src/lib.rs`, `src/module_blob.rs`;
+- focused tests in the new module and existing `module_blob` tests;
+- do not touch metadata XML, form XML, rights, template, or SQL staging code
+  unless a compile error requires a mechanical import/API adjustment.
+
+Acceptance:
+
+- parse a V8 container from bytes and expose element name, raw header bytes, and
+  raw data bytes;
+- build a V8 container from named elements while preserving the existing
+  `pack_module_blob_bytes` / `unpack_module_blob_text` behavior;
+- add tests for a synthetic multi-element container, build/parse round-trip,
+  module blob round-trip through the new shared API, and multi-page block
+  behavior (supported or precisely rejected);
+- do not add `v8unpack-rs` as a runtime dependency and do not copy its code;
+- if using `v8unpack-rs`, use it only as a behavior reference.
+
+Suggested evidence:
+
+- `cargo test module_blob`;
+- `cargo test v8_container`;
+- `cargo fmt --check`;
+- `git diff --check`.
