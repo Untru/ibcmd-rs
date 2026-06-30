@@ -538,7 +538,7 @@ mod tests {
         ));
         fs::write(
             &path,
-            r#"{"vrunner":{"dbms-type":"MSSQLServer","dbms-server":"localhost","dbms-base":"OstrovokEmpty","dbms-user":"sa","dbms-pwd":"secret"}}"#,
+            r#"{"vrunner":{"dbms-type":"MSSQLServer","dbms-server":"localhost","dbms-base":"OstrovokEmpty","dbms-user":"test-sql-user","dbms-pwd":"dummy-value-for-settings-test"}}"#,
         )
         .unwrap();
 
@@ -549,7 +549,7 @@ mod tests {
         );
         assert_eq!(
             settings_value(&settings, "dbms-pwd"),
-            Some("secret".to_string())
+            Some("dummy-value-for-settings-test".to_string())
         );
 
         let _ = fs::remove_file(path);

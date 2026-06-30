@@ -8,18 +8,22 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
-use quick_xml::Reader;
 use quick_xml::events::Event;
+use quick_xml::name::ResolveResult;
+use quick_xml::{NsReader, Reader};
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::cli::MssqlDumpConfigArgs;
+use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
 use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
 
+// Platform-level 1C standard pictures, not metadata UUIDs from one database.
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
 const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
+const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
+const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 
 #[derive(Debug, Serialize)]
 pub struct MssqlDumpConfigReport {
@@ -51,6 +55,22 @@ pub struct MssqlDumpedTableReport {
 pub struct MssqlDumpTimingReport {
     pub fetch_headers_ms: u64,
     pub prepare_indexes_ms: u64,
+    pub prepare_metadata_fetch_ms: u64,
+    pub prepare_metadata_texts_ms: u64,
+    pub prepare_reference_indexes_ms: u64,
+    pub prepare_command_refs_ms: u64,
+    pub prepare_metadata_refs_ms: u64,
+    pub prepare_type_index_ms: u64,
+    pub prepare_form_refs_ms: u64,
+    pub prepare_template_refs_ms: u64,
+    pub prepare_subsystem_refs_ms: u64,
+    pub prepare_object_refs_ms: u64,
+    pub prepare_field_refs_ms: u64,
+    pub prepare_functional_option_refs_ms: u64,
+    pub prepare_source_assets_ms: u64,
+    pub prepare_help_refs_ms: u64,
+    pub prepare_standalone_refs_ms: u64,
+    pub prepare_body_owners_ms: u64,
     pub fetch_rows_ms: u64,
     pub process_rows_wall_ms: u64,
     pub binary_write_cpu_ms: u64,
@@ -92,6 +112,22 @@ impl MssqlDumpTimingReport {
     fn add_assign(&mut self, other: &Self) {
         self.fetch_headers_ms += other.fetch_headers_ms;
         self.prepare_indexes_ms += other.prepare_indexes_ms;
+        self.prepare_metadata_fetch_ms += other.prepare_metadata_fetch_ms;
+        self.prepare_metadata_texts_ms += other.prepare_metadata_texts_ms;
+        self.prepare_reference_indexes_ms += other.prepare_reference_indexes_ms;
+        self.prepare_command_refs_ms += other.prepare_command_refs_ms;
+        self.prepare_metadata_refs_ms += other.prepare_metadata_refs_ms;
+        self.prepare_type_index_ms += other.prepare_type_index_ms;
+        self.prepare_form_refs_ms += other.prepare_form_refs_ms;
+        self.prepare_template_refs_ms += other.prepare_template_refs_ms;
+        self.prepare_subsystem_refs_ms += other.prepare_subsystem_refs_ms;
+        self.prepare_object_refs_ms += other.prepare_object_refs_ms;
+        self.prepare_field_refs_ms += other.prepare_field_refs_ms;
+        self.prepare_functional_option_refs_ms += other.prepare_functional_option_refs_ms;
+        self.prepare_source_assets_ms += other.prepare_source_assets_ms;
+        self.prepare_help_refs_ms += other.prepare_help_refs_ms;
+        self.prepare_standalone_refs_ms += other.prepare_standalone_refs_ms;
+        self.prepare_body_owners_ms += other.prepare_body_owners_ms;
         self.fetch_rows_ms += other.fetch_rows_ms;
         self.process_rows_wall_ms += other.process_rows_wall_ms;
         self.binary_write_cpu_ms += other.binary_write_cpu_ms;
@@ -136,7 +172,12 @@ impl MssqlDumpTimingReport {
             SourceAssetKind::Form => self.source_asset_form_cpu_ms += elapsed_ms,
             SourceAssetKind::Help => self.source_asset_help_cpu_ms += elapsed_ms,
             SourceAssetKind::MoxelSpreadsheet => self.source_asset_moxel_cpu_ms += elapsed_ms,
-            SourceAssetKind::InflatedBinary | SourceAssetKind::InflatedBase64OrBinary => {
+            SourceAssetKind::DataCompositionSchema
+            | SourceAssetKind::ClientApplicationInterface
+            | SourceAssetKind::InflatedBinary
+            | SourceAssetKind::InflatedBase64OrBinary
+            | SourceAssetKind::HomePageWorkArea
+            | SourceAssetKind::WsDefinition => {
                 self.source_asset_inflated_cpu_ms += elapsed_ms;
             }
             SourceAssetKind::CommandInterface => {
@@ -158,9 +199,6 @@ impl MssqlDumpTimingReport {
                 self.source_asset_business_process_cpu_ms += elapsed_ms;
             }
             SourceAssetKind::Schedule => self.source_asset_schedule_cpu_ms += elapsed_ms,
-            SourceAssetKind::ConfigDumpInfo => {
-                self.source_asset_config_dump_info_cpu_ms += elapsed_ms;
-            }
         }
     }
 }
@@ -183,7 +221,7 @@ struct MssqlDumpRowManifest {
     part_no: i32,
     data_size: i64,
     binary_bytes: usize,
-    binary_path: String,
+    binary_path: Option<String>,
     inflated_path: Option<String>,
     module_text_path: Option<String>,
     metadata_xml_path: Option<String>,
@@ -242,7 +280,9 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     let mut reports = Vec::new();
     let mut manifest_tables = Vec::new();
     let mut total_timings = MssqlDumpTimingReport::default();
-    let selected_file_names = expand_selected_file_names(&args.file_names);
+    let selected_file_names =
+        selected_file_names_from_args(&args.file_names, &args.file_name_lists)?;
+    let write_binary_rows = args.write_binary_rows && !args.no_binary_rows;
     for table in table_names {
         let dumped = dump_table_rows_streamed(
             &args.sqlcmd,
@@ -258,10 +298,11 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             table,
             &selected_file_names,
             &args.output_dir,
-            args.write_binary_rows,
+            write_binary_rows,
             args.inflate,
             args.extract_module_text,
             args.extract_metadata_xml,
+            args.source_version,
         )?;
         reports.push(MssqlDumpedTableReport {
             table: table.to_string(),
@@ -308,6 +349,25 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         timings: total_timings,
         tables: reports,
     })
+}
+
+fn normalize_source_xml_version_bytes(
+    bytes: &[u8],
+    source_version: InfobaseConfigSourceVersion,
+) -> Vec<u8> {
+    let from = match source_version {
+        InfobaseConfigSourceVersion::V2_20 => "version=\"2.21\"",
+        InfobaseConfigSourceVersion::V2_21 => "version=\"2.20\"",
+    };
+    let to = format!("version=\"{}\"", source_version.as_str());
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
+    if text.contains(from) {
+        text.replace(from, &to).into_bytes()
+    } else {
+        bytes.to_vec()
+    }
 }
 
 #[allow(dead_code)]
@@ -368,6 +428,7 @@ struct DumpedRow {
 struct DumpRowContext<'a> {
     output_dir: &'a Path,
     table: &'a str,
+    source_version: InfobaseConfigSourceVersion,
     write_binary_rows: bool,
     inflate: bool,
     extract_module_text: bool,
@@ -380,6 +441,7 @@ struct DumpRowContext<'a> {
     type_index: &'a BTreeMap<String, String>,
     object_refs: &'a BTreeMap<String, String>,
     field_refs: &'a BTreeMap<String, String>,
+    functional_option_refs: &'a BTreeMap<String, String>,
     help_refs: &'a BTreeMap<String, String>,
     standalone_refs: &'a StandaloneContentReferences,
     form_refs: &'a BTreeMap<String, FormSourceReference>,
@@ -498,6 +560,17 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
+    let functional_option_refs = if extract_metadata_xml {
+        build_functional_option_reference_index_from_texts(
+            &metadata_texts,
+            &object_refs,
+            &form_refs,
+            &template_refs,
+            &subsystem_refs,
+        )
+    } else {
+        BTreeMap::new()
+    };
     let source_assets = source_asset_paths_with_indexes(
         &rows,
         &metadata_texts,
@@ -541,6 +614,7 @@ fn dump_table_rows_with_options(
     let context = DumpRowContext {
         output_dir,
         table,
+        source_version: InfobaseConfigSourceVersion::V2_20,
         write_binary_rows,
         inflate,
         extract_module_text,
@@ -553,6 +627,7 @@ fn dump_table_rows_with_options(
         type_index: &type_index,
         object_refs: &object_refs,
         field_refs: &field_refs,
+        functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
         standalone_refs: &standalone_refs,
         form_refs: &form_refs,
@@ -608,6 +683,7 @@ fn dump_table_rows_streamed(
     inflate: bool,
     extract_module_text: bool,
     extract_metadata_xml: bool,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
     if write_binary_rows {
@@ -649,9 +725,12 @@ fn dump_table_rows_streamed(
         .filter(|file_name| !file_name.contains('.'))
         .cloned()
         .collect::<BTreeSet<_>>();
-    let metadata_rows = if extract_metadata_xml || extract_module_text {
+    let metadata_fetch_started = Instant::now();
+    let mut metadata_rows = if extract_metadata_xml || extract_module_text {
         if selected_file_names.is_empty() {
             fetch_metadata_rows(sqlcmd, server, user, password, database, table)?
+        } else if metadata_file_names.is_empty() {
+            Vec::new()
         } else {
             fetch_rows(
                 sqlcmd,
@@ -666,70 +745,174 @@ fn dump_table_rows_streamed(
     } else {
         Vec::new()
     };
-    let index_rows = rows_for_source_indexes(&headers, &metadata_rows);
-    let metadata_texts = if extract_metadata_xml || extract_module_text {
-        build_metadata_text_rows(&metadata_rows)
+    timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+    let selected_metadata_rows = if extract_metadata_xml || extract_module_text {
+        metadata_rows
+            .iter()
+            .filter(|row| metadata_file_names.contains(&row.file_name))
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
-    let metadata_texts_by_file_name = metadata_texts
+    let metadata_texts_started = Instant::now();
+    let selected_metadata_texts = if extract_metadata_xml || extract_module_text {
+        build_metadata_text_rows(&selected_metadata_rows)
+    } else {
+        Vec::new()
+    };
+    timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+    let selected_configuration_index_needs =
+        selected_configuration_source_asset_index_needs(&file_names);
+    let selected_metadata_index_needs = if selected_configuration_index_needs.is_none() {
+        selected_metadata_source_reference_index_needs(&selected_metadata_texts)
+    } else {
+        None
+    };
+    let broad_metadata_indexes = selected_file_names.is_empty()
+        || selected_configuration_index_needs
+            .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata)
+        || selected_metadata_index_needs
+            .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata)
+        || (selected_configuration_index_needs.is_none()
+            && selected_metadata_index_needs.is_none()
+            && selected_export_needs_broad_metadata_indexes(
+                extract_module_text,
+                &file_names,
+                &selected_metadata_texts,
+            ));
+    if broad_metadata_indexes && !selected_file_names.is_empty() {
+        let metadata_fetch_started = Instant::now();
+        metadata_rows = fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+        timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+    } else if extract_metadata_xml
+        && selected_configuration_index_needs.is_some_and(|needs| needs.metadata_refs)
+    {
+        let metadata_fetch_started = Instant::now();
+        let selected_body_rows =
+            fetch_rows_direct_hex(sqlcmd, server, user, password, database, table, &file_names)?;
+        let targeted_metadata_file_names =
+            selected_configuration_direct_metadata_reference_file_names(&selected_body_rows);
+        if !targeted_metadata_file_names.is_empty() {
+            metadata_rows = fetch_rows_direct_hex(
+                sqlcmd,
+                server,
+                user,
+                password,
+                database,
+                table,
+                &targeted_metadata_file_names,
+            )?;
+        }
+        timings.prepare_metadata_fetch_ms += elapsed_ms(metadata_fetch_started);
+    }
+    let write_index_rows = rows_for_source_indexes(&headers, &selected_metadata_rows);
+    let metadata_texts_started = Instant::now();
+    let index_metadata_texts = if extract_metadata_xml || extract_module_text {
+        if broad_metadata_indexes {
+            build_metadata_text_rows(&metadata_rows)
+        } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
+            build_metadata_text_rows(&metadata_rows)
+        } else {
+            build_metadata_text_rows(&selected_metadata_rows)
+        }
+    } else {
+        Vec::new()
+    };
+    timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+    let reference_indexes_started = Instant::now();
+    let metadata_texts_by_file_name = index_metadata_texts
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let index_metadata_texts = if extract_metadata_xml || extract_module_text {
-        build_metadata_text_rows(&index_rows)
-    } else {
-        Vec::new()
-    };
 
     let module_text_paths = if extract_module_text {
-        module_body_paths_from_texts(&index_rows, &index_metadata_texts)
+        module_body_paths_from_texts(&write_index_rows, &index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let command_refs = if extract_metadata_xml {
-        build_command_interface_reference_index_from_texts(&metadata_texts)
+    let index_part_started = Instant::now();
+    let source_reference_needs = selected_configuration_index_needs
+        .or(selected_metadata_index_needs)
+        .unwrap_or_else(SourceReferenceIndexNeeds::full);
+    let command_refs = if extract_metadata_xml && source_reference_needs.command_refs {
+        build_command_interface_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let metadata_refs = if extract_metadata_xml {
-        build_metadata_command_reference_index_from_texts(&metadata_texts)
+    timings.prepare_command_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let metadata_refs = if extract_metadata_xml && source_reference_needs.metadata_refs {
+        build_metadata_command_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let type_index = if extract_metadata_xml {
-        build_metadata_type_index_from_texts(&metadata_texts)
+    timings.prepare_metadata_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let type_index = if extract_metadata_xml && source_reference_needs.type_index {
+        build_metadata_type_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let form_refs = if extract_metadata_xml {
-        build_form_source_reference_index_from_texts(&metadata_texts)
+    timings.prepare_type_index_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let form_refs = if extract_metadata_xml && source_reference_needs.form_refs {
+        build_form_source_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let template_refs = if extract_metadata_xml {
-        build_template_source_reference_index_from_texts(&index_rows, &index_metadata_texts)
+    timings.prepare_form_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let template_refs = if extract_metadata_xml && source_reference_needs.template_refs {
+        build_template_source_reference_index_from_texts(&metadata_rows, &index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let subsystem_refs = if extract_metadata_xml {
-        build_subsystem_source_reference_index_from_texts(&metadata_texts)
+    timings.prepare_template_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let subsystem_refs = if extract_metadata_xml && source_reference_needs.subsystem_refs {
+        build_subsystem_source_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let object_refs = if extract_metadata_xml {
-        build_metadata_object_reference_index_from_texts(&metadata_texts)
+    timings.prepare_subsystem_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let object_refs = if extract_metadata_xml && source_reference_needs.object_refs {
+        build_metadata_object_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let field_refs = if extract_metadata_xml {
-        build_metadata_field_reference_index_from_texts(&metadata_texts)
+    timings.prepare_object_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let field_refs = if extract_metadata_xml && source_reference_needs.field_refs {
+        build_metadata_field_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
+    timings.prepare_field_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let functional_option_refs =
+        if extract_metadata_xml && source_reference_needs.functional_option_refs {
+            build_functional_option_reference_index_from_texts(
+                &index_metadata_texts,
+                &object_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            )
+        } else {
+            BTreeMap::new()
+        };
+    timings.prepare_functional_option_refs_ms += elapsed_ms(index_part_started);
+    let source_asset_metadata_texts = if selected_configuration_index_needs.is_some() {
+        &selected_metadata_texts
+    } else {
+        &index_metadata_texts
+    };
+    let index_part_started = Instant::now();
     let source_assets = source_asset_paths_with_indexes(
-        &index_rows,
-        &index_metadata_texts,
+        &write_index_rows,
+        source_asset_metadata_texts,
         &command_refs,
         &metadata_refs,
         &object_refs,
@@ -739,18 +922,23 @@ fn dump_table_rows_streamed(
         &template_refs,
         &subsystem_refs,
     );
-    let help_refs = if extract_metadata_xml {
+    timings.prepare_source_assets_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let help_refs = if extract_metadata_xml && source_reference_needs.help_refs {
         build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
     } else {
         BTreeMap::new()
     };
+    timings.prepare_help_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
     let standalone_refs = if extract_metadata_xml
+        && source_reference_needs.standalone_refs
         && source_assets
             .values()
             .any(|asset| matches!(asset.kind, SourceAssetKind::StandaloneContent))
     {
         build_standalone_content_references(
-            &metadata_texts,
+            &index_metadata_texts,
             &object_refs,
             &form_refs,
             &template_refs,
@@ -759,18 +947,23 @@ fn dump_table_rows_streamed(
     } else {
         StandaloneContentReferences::default()
     };
-    let body_owners = if extract_metadata_xml {
-        build_body_owner_source_index_from_texts(&metadata_texts, &subsystem_refs)
+    timings.prepare_standalone_refs_ms += elapsed_ms(index_part_started);
+    let index_part_started = Instant::now();
+    let body_owners = if extract_metadata_xml && source_reference_needs.body_owners {
+        build_body_owner_source_index_from_texts(&index_metadata_texts, &subsystem_refs)
     } else {
         BTreeMap::new()
     };
+    timings.prepare_body_owners_ms += elapsed_ms(index_part_started);
     let configuration_module_groups = configuration_module_groups(&file_names);
     ensure_unique_source_asset_paths(&source_assets)?;
+    timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
     timings.prepare_indexes_ms = elapsed_ms(prepare_started);
 
     let context = DumpRowContext {
         output_dir,
         table,
+        source_version,
         write_binary_rows,
         inflate,
         extract_module_text,
@@ -783,6 +976,7 @@ fn dump_table_rows_streamed(
         type_index: &type_index,
         object_refs: &object_refs,
         field_refs: &field_refs,
+        functional_option_refs: &functional_option_refs,
         help_refs: &help_refs,
         standalone_refs: &standalone_refs,
         form_refs: &form_refs,
@@ -923,6 +1117,202 @@ fn build_metadata_text_rows(rows: &[ConfigRow]) -> Vec<MetadataTextRow> {
             metadata_text_row_from_blob(&row.file_name, &bytes)
         })
         .collect()
+}
+
+fn selected_export_needs_broad_metadata_indexes(
+    extract_module_text: bool,
+    file_names: &BTreeSet<String>,
+    selected_metadata_texts: &[MetadataTextRow],
+) -> bool {
+    let metadata_by_id = selected_metadata_texts
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    for file_name in file_names {
+        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            continue;
+        };
+        let Some(row) = metadata_by_id.get(metadata_id) else {
+            return true;
+        };
+        if !selected_body_suffix_is_self_contained(row.kind.as_deref(), suffix, extract_module_text)
+        {
+            return true;
+        }
+    }
+    selected_metadata_texts
+        .iter()
+        .any(metadata_text_needs_broad_indexes)
+}
+
+#[derive(Clone, Copy)]
+struct SourceReferenceIndexNeeds {
+    command_refs: bool,
+    metadata_refs: bool,
+    type_index: bool,
+    form_refs: bool,
+    template_refs: bool,
+    subsystem_refs: bool,
+    object_refs: bool,
+    field_refs: bool,
+    functional_option_refs: bool,
+    help_refs: bool,
+    standalone_refs: bool,
+    body_owners: bool,
+}
+
+impl SourceReferenceIndexNeeds {
+    fn full() -> Self {
+        Self {
+            command_refs: true,
+            metadata_refs: true,
+            type_index: true,
+            form_refs: true,
+            template_refs: true,
+            subsystem_refs: true,
+            object_refs: true,
+            field_refs: true,
+            functional_option_refs: true,
+            help_refs: true,
+            standalone_refs: true,
+            body_owners: true,
+        }
+    }
+
+    fn none() -> Self {
+        Self {
+            command_refs: false,
+            metadata_refs: false,
+            type_index: false,
+            form_refs: false,
+            template_refs: false,
+            subsystem_refs: false,
+            object_refs: false,
+            field_refs: false,
+            functional_option_refs: false,
+            help_refs: false,
+            standalone_refs: false,
+            body_owners: false,
+        }
+    }
+
+    fn needs_broad_metadata(self) -> bool {
+        self.command_refs
+            || self.type_index
+            || self.form_refs
+            || self.template_refs
+            || self.subsystem_refs
+            || self.object_refs
+            || self.field_refs
+            || self.functional_option_refs
+            || self.help_refs
+            || self.standalone_refs
+            || self.body_owners
+    }
+}
+
+fn selected_configuration_source_asset_index_needs(
+    file_names: &BTreeSet<String>,
+) -> Option<SourceReferenceIndexNeeds> {
+    if file_names.is_empty() {
+        return None;
+    }
+    let mut needs = SourceReferenceIndexNeeds::none();
+    for file_name in file_names {
+        if file_name == "versions" {
+            continue;
+        }
+        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            return None;
+        };
+        if metadata_id.is_empty() {
+            return None;
+        }
+        match suffix {
+            "2" | "4" | "10" | "b" | "c" => {}
+            "8" => {
+                needs.form_refs = true;
+            }
+            "9" => {
+                needs.command_refs = true;
+                needs.metadata_refs = true;
+            }
+            "a" => {
+                needs.metadata_refs = true;
+            }
+            _ => return None,
+        }
+    }
+    Some(needs)
+}
+
+fn selected_metadata_source_reference_index_needs(
+    selected_metadata_texts: &[MetadataTextRow],
+) -> Option<SourceReferenceIndexNeeds> {
+    if selected_metadata_texts.is_empty() {
+        return None;
+    }
+
+    let mut needs = SourceReferenceIndexNeeds::none();
+    for row in selected_metadata_texts {
+        match row.kind.as_deref() {
+            Some("Enum") => {
+                needs.form_refs = true;
+                needs.template_refs = true;
+            }
+            _ => return None,
+        }
+    }
+
+    Some(needs)
+}
+
+fn selected_configuration_direct_metadata_reference_file_names(
+    rows: &[ConfigRow],
+) -> BTreeSet<String> {
+    let mut file_names = BTreeSet::new();
+    for row in rows {
+        let Some((_, suffix)) = row.file_name.rsplit_once('.') else {
+            continue;
+        };
+        if !matches!(suffix, "a") {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        file_names.extend(uuid_like_values(&text));
+    }
+    file_names
+}
+
+fn selected_body_suffix_is_self_contained(
+    kind: Option<&str>,
+    suffix: &str,
+    extract_module_text: bool,
+) -> bool {
+    matches!((kind, suffix), (Some("WSReference"), "0"))
+        || (extract_module_text && matches!((kind, suffix), (Some("IntegrationService"), "0")))
+}
+
+fn metadata_text_needs_broad_indexes(row: &MetadataTextRow) -> bool {
+    !matches!(
+        row.kind.as_deref(),
+        Some("CommonModule")
+            | Some("CommonPicture")
+            | Some("DocumentNumerator")
+            | Some("IntegrationService")
+            | Some("Language")
+            | Some("Role")
+            | Some("StyleItem")
+            | Some("WSReference")
+    )
 }
 
 fn metadata_text_row_from_blob(file_name: &str, blob: &[u8]) -> Option<MetadataTextRow> {
@@ -1238,10 +1628,16 @@ fn dump_table_row_bytes(
     }
 
     let safe_name = safe_storage_file_name(file_name, part_no);
-    let binary_relative = PathBuf::from(context.table).join(format!("{safe_name}.bin"));
+    let binary_relative = if context.write_binary_rows {
+        Some(PathBuf::from(context.table).join(format!("{safe_name}.bin")))
+    } else {
+        None
+    };
     if context.write_binary_rows {
         let started = Instant::now();
-        let binary_path = context.output_dir.join(&binary_relative);
+        let binary_path = context
+            .output_dir
+            .join(binary_relative.as_ref().expect("binary path is present"));
         fs::write(&binary_path, &bytes)
             .with_context(|| format!("failed to write {}", binary_path.display()))?;
         timings.binary_write_cpu_ms += elapsed_ms(started);
@@ -1334,9 +1730,11 @@ fn dump_table_row_bytes(
                 row,
                 context.type_index,
                 context.object_refs,
+                context.functional_option_refs,
                 context.form_refs,
                 context.template_refs,
                 context.subsystem_refs,
+                context.source_version,
             )
         } else {
             extract_metadata_source_xml_with_refs(
@@ -1344,9 +1742,11 @@ fn dump_table_row_bytes(
                 file_name,
                 context.type_index,
                 context.object_refs,
+                context.functional_option_refs,
                 context.form_refs,
                 context.template_refs,
                 context.subsystem_refs,
+                context.source_version,
             )
         };
         match extracted {
@@ -1356,8 +1756,7 @@ fn dump_table_row_bytes(
                     fs::create_dir_all(parent)
                         .with_context(|| format!("failed to create {}", parent.display()))?;
                 }
-                fs::write(&path, extracted.xml)
-                    .with_context(|| format!("failed to write {}", path.display()))?;
+                write_source_xml_file(&path, extracted.xml, context.source_version)?;
                 metadata_xml_rows = 1;
                 timings.metadata_xml_cpu_ms += elapsed_ms(started);
                 Some(extracted.relative_path.to_string_lossy().replace('\\', "/"))
@@ -1412,7 +1811,7 @@ fn dump_table_row_bytes(
             part_no,
             data_size,
             binary_bytes: bytes.len(),
-            binary_path: binary_relative.to_string_lossy().replace('\\', "/"),
+            binary_path: binary_relative.map(|path| path.to_string_lossy().replace('\\', "/")),
             inflated_path: inflated_relative,
             module_text_path: module_text_relative,
             metadata_xml_path: metadata_xml_relative,
@@ -1443,12 +1842,14 @@ fn ensure_unique_source_asset_paths(source_assets: &BTreeMap<String, SourceAsset
 #[derive(Clone)]
 enum SourceAssetKind {
     CommandInterface,
-    ConfigDumpInfo,
+    ClientApplicationInterface,
     ExchangePlanContent,
     BusinessProcessFlowchart,
+    DataCompositionSchema,
     ExtPicture,
     Form,
     Help,
+    HomePageWorkArea,
     InflatedBase64OrBinary,
     InflatedBinary,
     MoxelSpreadsheet,
@@ -1457,6 +1858,7 @@ enum SourceAssetKind {
     Schedule,
     StandaloneContent,
     StyleBody,
+    WsDefinition,
 }
 
 #[derive(Clone, Default)]
@@ -1504,20 +1906,15 @@ fn source_asset_paths_with_indexes(
     }
 
     let mut paths = BTreeMap::new();
-    if file_names.contains("versions") {
-        paths.insert(
-            "versions".to_string(),
-            SourceAsset {
-                primary_path: PathBuf::from("ConfigDumpInfo.xml"),
-                kind: SourceAssetKind::ConfigDumpInfo,
-            },
-        );
-    }
     for (metadata_id, suffixes) in suffixes_by_id {
-        if file_names.contains(metadata_id) || !is_configuration_module_group(&suffixes) {
+        if file_names.contains(metadata_id) {
             continue;
         }
+        let is_configuration_group = is_configuration_module_group(&suffixes);
         for (suffix, path, kind) in CONFIGURATION_SOURCE_ASSET_SUFFIXES {
+            if !is_configuration_group && !suffixes.contains(suffix) {
+                continue;
+            }
             let body_id = format!("{metadata_id}.{suffix}");
             if file_names.contains(body_id.as_str()) {
                 paths.insert(
@@ -1530,7 +1927,7 @@ fn source_asset_paths_with_indexes(
             }
         }
         let standalone_id = format!("{metadata_id}.f");
-        if file_names.contains(standalone_id.as_str()) {
+        if is_configuration_group && file_names.contains(standalone_id.as_str()) {
             paths.insert(
                 standalone_id,
                 SourceAsset {
@@ -1543,11 +1940,22 @@ fn source_asset_paths_with_indexes(
             ("9", "Ext/MainSectionCommandInterface.xml"),
             ("a", "Ext/CommandInterface.xml"),
         ] {
+            if !is_configuration_group && !suffixes.contains(suffix) {
+                continue;
+            }
             let interface_id = format!("{metadata_id}.{suffix}");
-            if let Some(row) = rows_by_file_name.get(interface_id.as_str())
-                && let Ok(bytes) = decode_hex(&row.binary_hex)
-                && parse_command_interface_blob(&bytes, &command_refs, &metadata_refs).is_some()
-            {
+            let is_selected_header = rows_by_file_name
+                .get(interface_id.as_str())
+                .is_some_and(|row| row.binary_hex.is_empty());
+            let is_command_interface = is_selected_header
+                || rows_by_file_name
+                    .get(interface_id.as_str())
+                    .and_then(|row| decode_hex(&row.binary_hex).ok())
+                    .is_some_and(|bytes| {
+                        parse_command_interface_blob(&bytes, &command_refs, &metadata_refs)
+                            .is_some()
+                    });
+            if is_command_interface {
                 paths.insert(
                     interface_id,
                     SourceAsset {
@@ -1616,7 +2024,7 @@ fn template_body_source_asset(template_type: &str) -> Option<(&'static str, Sour
         "DataCompositionAppearanceTemplate" => {
             Some(("Template.xml", SourceAssetKind::InflatedBinary))
         }
-        "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
+        "DataCompositionSchema" => Some(("Template.xml", SourceAssetKind::DataCompositionSchema)),
         "GraphicalSchema" => Some(("Template.xml", SourceAssetKind::InflatedBinary)),
         "HTMLDocument" => Some(("Template.xml", SourceAssetKind::Help)),
         "TextDocument" => Some(("Template.txt", SourceAssetKind::InflatedBinary)),
@@ -1659,7 +2067,7 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     (
         "8",
         "Ext/HomePageWorkArea.xml",
-        SourceAssetKind::InflatedBinary,
+        SourceAssetKind::HomePageWorkArea,
     ),
     (
         "10",
@@ -1669,7 +2077,7 @@ const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     (
         "b",
         "Ext/ClientApplicationInterface.xml",
-        SourceAssetKind::InflatedBinary,
+        SourceAssetKind::ClientApplicationInterface,
     ),
     (
         "c",
@@ -1820,7 +2228,7 @@ fn source_assets_from_metadata_text_inner(
             }),
             "WSReference" => Some(SourceAsset {
                 primary_path: object_path.join("Ext").join("WSDefinition.xml"),
-                kind: SourceAssetKind::InflatedBinary,
+                kind: SourceAssetKind::WsDefinition,
             }),
             "Role"
                 if rows_by_file_name
@@ -1924,6 +2332,417 @@ fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
     };
     format!("{uuid}.{suffix}")
 }
+
+fn write_source_xml_file(
+    path: &Path,
+    xml: impl AsRef<[u8]>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<()> {
+    let normalized = normalize_source_xml_version_bytes(xml.as_ref(), source_version);
+    fs::write(path, normalized).with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn is_xml_path(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("xml")
+}
+
+const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
+const DCS_COMMON_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/common";
+const DCS_CORE_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/core";
+const DCS_SETTINGS_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/settings";
+const DATA_CORE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/core";
+const DATA_UI_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui";
+const STYLE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/style";
+const SYS_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/fonts/system";
+const WEB_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/web";
+const WIN_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/windows";
+const XSI_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
+const XS_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema";
+const DCS_SETTINGS_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+
+fn normalize_data_composition_schema_template_xml(inflated: &[u8]) -> Option<Vec<u8>> {
+    let xml_start = find_bytes(inflated, b"<?xml")?;
+    let text = std::str::from_utf8(&inflated[xml_start..]).ok()?;
+    let documents = split_embedded_xml_documents(text);
+    let schema_doc = documents.iter().find(|document| {
+        document.contains("<SchemaFile") && document.contains("dataCompositionSchema")
+    })?;
+    let mut xml = canonicalize_data_composition_schema_document(schema_doc)?;
+    if let Some(settings_doc) = documents
+        .iter()
+        .find(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
+        && let Some(settings) = canonicalize_data_composition_settings_document(settings_doc)
+    {
+        insert_data_composition_settings(&mut xml, &settings);
+    }
+    Some(xml.into_bytes())
+}
+
+fn extract_ws_definition_xml(inflated: &[u8]) -> Option<Vec<u8>> {
+    let xml_start = find_bytes(inflated, b"<?xml")?;
+    let xml = &inflated[xml_start..];
+    let mut content = Vec::with_capacity(3 + xml.len());
+    content.extend_from_slice(b"\xEF\xBB\xBF");
+    content.extend_from_slice(xml);
+    Some(content)
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn split_embedded_xml_documents(text: &str) -> Vec<&str> {
+    let mut starts = Vec::new();
+    let mut cursor = 0;
+    while let Some(offset) = text[cursor..].find("<?xml") {
+        starts.push(cursor + offset);
+        cursor += offset + "<?xml".len();
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(text.len());
+            text[*start..end].trim_matches('\u{feff}').trim()
+        })
+        .filter(|document| !document.is_empty())
+        .collect()
+}
+
+fn canonicalize_data_composition_schema_document(document: &str) -> Option<String> {
+    let mut writer = DataCompositionXmlWriter::new();
+    writer.fixed_decl_and_schema_root();
+    let root_len = writer.output.len();
+    writer.write_document(document, DataCompositionDocumentMode::Schema)?;
+    let body = writer.output[root_len..].to_string();
+    writer.output.truncate(root_len);
+    writer
+        .output
+        .push_str(&normalize_data_composition_schema_body_indent(&body));
+    writer.output.push_str("\r\n</DataCompositionSchema>");
+    Some(writer.output)
+}
+
+fn canonicalize_data_composition_settings_document(document: &str) -> Option<String> {
+    let mut writer = DataCompositionXmlWriter::new();
+    writer.write_document(document, DataCompositionDocumentMode::Settings)?;
+    let settings = writer
+        .output
+        .trim_start_matches(['\r', '\n', '\t'])
+        .to_string();
+    Some(indent_data_composition_settings(&settings))
+}
+
+fn insert_data_composition_settings(xml: &mut String, settings: &str) {
+    let marker = "\r\n\t</settingsVariant>";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, settings);
+        return;
+    }
+    let root_marker = "\r\n</DataCompositionSchema>";
+    if let Some(index) = xml.find(root_marker) {
+        xml.insert_str(index, settings);
+    }
+}
+
+fn normalize_data_composition_schema_body_indent(body: &str) -> String {
+    let body = body.strip_prefix("\r\n\r\n").unwrap_or(body);
+    body.trim_end_matches(['\r', '\n', '\t']).to_string()
+}
+
+fn deindent_lines_by_one_tab(text: &str) -> String {
+    text.split_inclusive('\n')
+        .map(|line| line.strip_prefix('\t').unwrap_or(line))
+        .collect()
+}
+
+fn is_xml_whitespace(text: &str) -> bool {
+    text.bytes()
+        .all(|byte| matches!(byte, b'\r' | b'\n' | b'\t' | b' '))
+}
+
+fn indent_data_composition_settings(settings: &str) -> String {
+    let mut indented = String::from("\r\n");
+    for line in settings.split_inclusive('\n') {
+        indented.push_str("\t\t");
+        indented.push_str(line);
+    }
+    indented
+}
+
+enum DataCompositionDocumentMode {
+    Schema,
+    Settings,
+}
+
+struct DataCompositionXmlWriter {
+    output: String,
+    skip_depth: usize,
+}
+
+impl DataCompositionXmlWriter {
+    fn new() -> Self {
+        Self {
+            output: String::new(),
+            skip_depth: 0,
+        }
+    }
+
+    fn fixed_decl_and_schema_root(&mut self) {
+        self.output.push_str(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+        );
+    }
+
+    fn write_document(&mut self, document: &str, mode: DataCompositionDocumentMode) -> Option<()> {
+        let mut reader = NsReader::from_str(document);
+        reader.config_mut().trim_text(false);
+        loop {
+            match reader.read_event().ok()? {
+                Event::Start(event) => {
+                    let (namespace, local) = reader.resolve_element(event.name());
+                    let local = local.as_ref();
+                    if self.should_skip(namespace_ref(&namespace), local, &mode) {
+                        continue;
+                    }
+                    if self.skip_depth == 0 {
+                        self.write_start_tag(
+                            &reader,
+                            &event,
+                            namespace_ref(&namespace),
+                            local,
+                            false,
+                            &mode,
+                        )?;
+                    }
+                }
+                Event::Empty(event) => {
+                    if self.skip_depth == 0 {
+                        let (namespace, local) = reader.resolve_element(event.name());
+                        self.write_start_tag(
+                            &reader,
+                            &event,
+                            namespace_ref(&namespace),
+                            local.as_ref(),
+                            true,
+                            &mode,
+                        )?;
+                    }
+                }
+                Event::End(event) => {
+                    let (namespace, local) = reader.resolve_element(event.name());
+                    let local = local.as_ref();
+                    if self.should_skip(namespace_ref(&namespace), local, &mode) {
+                        continue;
+                    }
+                    if matches!(mode, DataCompositionDocumentMode::Schema)
+                        && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
+                        && local == b"dataCompositionSchema"
+                    {
+                        continue;
+                    }
+                    let name = if matches!(mode, DataCompositionDocumentMode::Settings)
+                        && namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
+                        && local == b"Settings"
+                    {
+                        "dcsset:settings".to_string()
+                    } else {
+                        canonical_data_composition_name(namespace_ref(&namespace), local)?
+                    };
+                    self.output.push_str("</");
+                    self.output.push_str(&name);
+                    self.output.push('>');
+                }
+                Event::Text(event) => {
+                    if self.skip_depth == 0 {
+                        let text = std::str::from_utf8(event.as_ref()).ok()?;
+                        if matches!(mode, DataCompositionDocumentMode::Schema)
+                            && is_xml_whitespace(text)
+                        {
+                            self.output.push_str(&deindent_lines_by_one_tab(text));
+                        } else {
+                            self.output.push_str(text);
+                        }
+                    }
+                }
+                Event::CData(event) => {
+                    if self.skip_depth == 0 {
+                        self.output.push_str("<![CDATA[");
+                        self.output
+                            .push_str(std::str::from_utf8(event.as_ref()).ok()?);
+                        self.output.push_str("]]>");
+                    }
+                }
+                Event::Comment(event) => {
+                    if self.skip_depth == 0 {
+                        self.output.push_str("<!--");
+                        self.output
+                            .push_str(std::str::from_utf8(event.as_ref()).ok()?);
+                        self.output.push_str("-->");
+                    }
+                }
+                Event::GeneralRef(event) => {
+                    if self.skip_depth == 0 {
+                        self.output.push('&');
+                        self.output
+                            .push_str(std::str::from_utf8(event.as_ref()).ok()?);
+                        self.output.push(';');
+                    }
+                }
+                Event::Decl(_) => {}
+                Event::Eof => break,
+                _ => {}
+            }
+        }
+        Some(())
+    }
+
+    fn should_skip(
+        &self,
+        namespace: Option<&[u8]>,
+        local: &[u8],
+        mode: &DataCompositionDocumentMode,
+    ) -> bool {
+        matches!(mode, DataCompositionDocumentMode::Schema)
+            && namespace.is_none()
+            && local == b"SchemaFile"
+    }
+
+    fn write_start_tag(
+        &mut self,
+        reader: &NsReader<&[u8]>,
+        event: &quick_xml::events::BytesStart<'_>,
+        namespace: Option<&[u8]>,
+        local: &[u8],
+        empty: bool,
+        mode: &DataCompositionDocumentMode,
+    ) -> Option<()> {
+        if matches!(mode, DataCompositionDocumentMode::Schema)
+            && namespace == Some(DCS_SCHEMA_NS)
+            && local == b"dataCompositionSchema"
+        {
+            return Some(());
+        }
+        let is_settings_root = matches!(mode, DataCompositionDocumentMode::Settings)
+            && namespace == Some(DCS_SETTINGS_NS)
+            && local == b"Settings";
+        let name = if is_settings_root {
+            "dcsset:settings".to_string()
+        } else {
+            canonical_data_composition_name(namespace, local)?
+        };
+        self.output.push('<');
+        self.output.push_str(&name);
+        if is_settings_root {
+            self.output.push_str(
+                " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"",
+            );
+        }
+        for attribute in event.attributes().with_checks(false) {
+            let attribute = attribute.ok()?;
+            if is_xmlns_attribute(attribute.key.as_ref()) {
+                continue;
+            }
+            let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
+            let attr_name = canonical_data_composition_attr_name(
+                namespace_ref(&attr_namespace),
+                attr_local.as_ref(),
+            )?;
+            let value = attribute
+                .decode_and_unescape_value(reader.decoder())
+                .ok()?
+                .into_owned();
+            let value = canonical_data_composition_attr_value(&attr_name, &value, namespace);
+            self.output.push(' ');
+            self.output.push_str(&attr_name);
+            self.output.push_str("=\"");
+            self.output.push_str(&escape_xml_text(&value));
+            self.output.push('"');
+        }
+        if empty {
+            self.output.push_str("/>");
+        } else {
+            self.output.push('>');
+        }
+        Some(())
+    }
+}
+
+fn namespace_ref<'a>(namespace: &'a ResolveResult<'a>) -> Option<&'a [u8]> {
+    match namespace {
+        ResolveResult::Bound(namespace) => Some(namespace.0),
+        _ => None,
+    }
+}
+
+fn is_xmlns_attribute(name: &[u8]) -> bool {
+    name == b"xmlns" || name.starts_with(b"xmlns:")
+}
+
+fn canonical_data_composition_name(namespace: Option<&[u8]>, local: &[u8]) -> Option<String> {
+    let local = std::str::from_utf8(local).ok()?;
+    match namespace {
+        Some(DCS_SCHEMA_NS) => Some(local.to_string()),
+        Some(DCS_COMMON_NS) => Some(format!("dcscom:{local}")),
+        Some(DCS_CORE_NS) => Some(format!("dcscor:{local}")),
+        Some(DCS_SETTINGS_NS) => Some(format!("dcsset:{local}")),
+        Some(DATA_CORE_NS) => Some(format!("v8:{local}")),
+        Some(DATA_UI_NS) => Some(format!("v8ui:{local}")),
+        Some(STYLE_NS) => Some(format!("style:{local}")),
+        Some(SYS_NS) => Some(format!("sys:{local}")),
+        Some(WEB_NS) => Some(format!("web:{local}")),
+        Some(WIN_NS) => Some(format!("win:{local}")),
+        Some(XSI_NS) => Some(format!("xsi:{local}")),
+        Some(XS_NS) => Some(format!("xs:{local}")),
+        Some(_) | None => Some(local.to_string()),
+    }
+}
+
+fn canonical_data_composition_attr_name(namespace: Option<&[u8]>, local: &[u8]) -> Option<String> {
+    let local = std::str::from_utf8(local).ok()?;
+    match namespace {
+        Some(XSI_NS) => Some(format!("xsi:{local}")),
+        Some(XS_NS) => Some(format!("xs:{local}")),
+        Some(DATA_CORE_NS) => Some(format!("v8:{local}")),
+        Some(DATA_UI_NS) => Some(format!("v8ui:{local}")),
+        Some(DCS_CORE_NS) => Some(format!("dcscor:{local}")),
+        Some(DCS_SETTINGS_NS) => Some(format!("dcsset:{local}")),
+        Some(DCS_COMMON_NS) => Some(format!("dcscom:{local}")),
+        Some(_) | None => Some(local.to_string()),
+    }
+}
+
+fn canonical_data_composition_attr_value(
+    attr_name: &str,
+    value: &str,
+    element_namespace: Option<&[u8]>,
+) -> String {
+    if attr_name != "xsi:type" {
+        return value.to_string();
+    }
+    let suffix = value
+        .rsplit_once(':')
+        .map(|(_, suffix)| suffix)
+        .unwrap_or(value);
+    match suffix {
+        "LocalStringType" => "v8:LocalStringType".to_string(),
+        "Field" => "dcscor:Field".to_string(),
+        "SettingsParameterValue"
+        | "SelectedItemField"
+        | "FilterItemComparison"
+        | "StructureItemGroup"
+        | "OrderItemAuto"
+        | "SelectedItemAuto" => format!("dcsset:{suffix}"),
+        _ if element_namespace == Some(DCS_SETTINGS_NS) && !value.contains(':') => {
+            format!("dcsset:{value}")
+        }
+        _ => value.to_string(),
+    }
+}
+
 fn write_source_asset(
     context: &DumpRowContext<'_>,
     asset: &SourceAsset,
@@ -1953,11 +2772,15 @@ fn write_source_asset(
             let picture_path = picture_dir.join(picture_file_name);
             fs::write(&picture_path, &picture.content)
                 .with_context(|| format!("failed to write {}", picture_path.display()))?;
-            fs::write(
+            write_source_xml_file(
                 &xml_path,
-                format_ext_picture_xml(picture_file_name, picture.transparent_pixel),
-            )
-            .with_context(|| format!("failed to write {}", xml_path.display()))?;
+                format_ext_picture_xml(
+                    picture_file_name,
+                    picture.transparent_pixel,
+                    context.source_version,
+                ),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::Schedule => {
             let xml = extract_schedule_xml(bytes).with_context(|| {
@@ -1971,7 +2794,7 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::StandaloneContent => {
             let xml = extract_standalone_content_xml(bytes, context.standalone_refs).with_context(
@@ -1987,7 +2810,7 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::StyleBody => {
             let xml = extract_style_body_xml(bytes, context.object_refs).with_context(|| {
@@ -2001,7 +2824,7 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::Form => {
             let form_xml_started = Instant::now();
@@ -2030,7 +2853,7 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(&path, xml, context.source_version)?;
             timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
 
             let form_items_started = Instant::now();
@@ -2083,8 +2906,79 @@ fn write_source_asset(
                         .with_context(|| format!("failed to write {}", file_path.display()))?;
                 }
             }
-            fs::write(&xml_path, format_help_xml(&help.pages))
-                .with_context(|| format!("failed to write {}", xml_path.display()))?;
+            write_source_xml_file(
+                &xml_path,
+                format_help_xml(&help.pages),
+                context.source_version,
+            )?;
+        }
+        SourceAssetKind::DataCompositionSchema => {
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let content =
+                normalize_data_composition_schema_template_xml(&inflated).unwrap_or(inflated);
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(&path, content, context.source_version)?;
+        }
+        SourceAssetKind::WsDefinition => {
+            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+                format!(
+                    "failed to inflate source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let content = extract_ws_definition_xml(&inflated).unwrap_or(inflated);
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(&path, content, context.source_version)?;
+        }
+        SourceAssetKind::HomePageWorkArea => {
+            let work_area =
+                parse_home_page_work_area_blob(bytes, context.form_refs).with_context(|| {
+                    format!(
+                        "failed to extract home page work area from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(
+                &path,
+                format_home_page_work_area_xml(&work_area, context.source_version),
+                context.source_version,
+            )?;
+        }
+        SourceAssetKind::ClientApplicationInterface => {
+            let interface = parse_client_application_interface_blob(bytes).with_context(|| {
+                format!(
+                    "failed to extract client application interface from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(
+                &path,
+                format_client_application_interface_xml(&interface),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::InflatedBinary => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {
@@ -2098,8 +2992,12 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, inflated)
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            if is_xml_path(&asset.primary_path) {
+                write_source_xml_file(&path, inflated, context.source_version)?;
+            } else {
+                fs::write(&path, inflated)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+            }
         }
         SourceAssetKind::InflatedBase64OrBinary => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {
@@ -2120,8 +3018,12 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, content)
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            if is_xml_path(&asset.primary_path) {
+                write_source_xml_file(&path, content, context.source_version)?;
+            } else {
+                fs::write(&path, content)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+            }
         }
         SourceAssetKind::PredefinedData { xsi_type } => {
             let items =
@@ -2136,8 +3038,11 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, format_predefined_data_xml(xsi_type, &items))
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(
+                &path,
+                format_predefined_data_xml(xsi_type, &items),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::RoleRights => {
             let rights = parse_role_rights_blob(bytes, context.object_refs, context.field_refs)
@@ -2152,8 +3057,11 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, format_role_rights_xml(&rights))
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(
+                &path,
+                format_role_rights_xml(&rights),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::CommandInterface => {
             let entries =
@@ -2169,23 +3077,11 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, format_command_interface_xml(&entries))
-                .with_context(|| format!("failed to write {}", path.display()))?;
-        }
-        SourceAssetKind::ConfigDumpInfo => {
-            let _ = parse_config_dump_versions_blob(bytes).with_context(|| {
-                format!(
-                    "failed to parse config dump versions from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
-            let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
-            }
-            fs::write(&path, format_config_dump_info_xml())
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(
+                &path,
+                format_command_interface_xml(&entries),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::ExchangePlanContent => {
             let items = parse_exchange_plan_content_blob(bytes, context.object_refs).with_context(
@@ -2201,8 +3097,11 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, format_exchange_plan_content_xml(&items))
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(
+                &path,
+                format_exchange_plan_content_xml(&items),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::BusinessProcessFlowchart => {
             let flowchart = parse_business_process_flowchart_blob(bytes).with_context(|| {
@@ -2216,8 +3115,11 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, format_business_process_flowchart_xml(&flowchart))
-                .with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(
+                &path,
+                format_business_process_flowchart_xml(&flowchart),
+                context.source_version,
+            )?;
         }
         SourceAssetKind::MoxelSpreadsheet => {
             let xml =
@@ -2232,7 +3134,7 @@ fn write_source_asset(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            fs::write(&path, xml).with_context(|| format!("failed to write {}", path.display()))?;
+            write_source_xml_file(&path, xml, context.source_version)?;
         }
     }
 
@@ -2458,9 +3360,56 @@ impl MoxelFormat {
     }
 }
 
-struct CommandInterfaceEntry {
+struct CommandInterface {
+    commands_order: Vec<CommandInterfaceOrderEntry>,
+    commands_placement: Vec<CommandInterfacePlacementEntry>,
+    groups_order: Vec<String>,
+    commands_visibility: Vec<CommandInterfaceVisibilityEntry>,
+    subsystems_order: Vec<String>,
+}
+
+struct CommandInterfacePlacementEntry {
+    name: String,
+    command_group: String,
+    placement: &'static str,
+}
+
+struct CommandInterfaceOrderEntry {
+    name: String,
+    command_group: String,
+}
+
+struct CommandInterfaceVisibilityEntry {
     name: String,
     common: bool,
+}
+
+struct HomePageWorkArea {
+    template: &'static str,
+    left_column: Vec<HomePageWorkAreaItem>,
+    right_column: Vec<HomePageWorkAreaItem>,
+}
+
+struct HomePageWorkAreaItem {
+    form: String,
+    height: String,
+    common: bool,
+}
+
+struct ClientApplicationInterface {
+    top: Option<ClientApplicationInterfaceGroup>,
+    left: Option<ClientApplicationInterfaceGroup>,
+    panel_defs: Vec<String>,
+}
+
+struct ClientApplicationInterfaceGroup {
+    id: Option<String>,
+    children: Vec<ClientApplicationInterfaceNode>,
+}
+
+enum ClientApplicationInterfaceNode {
+    Group(ClientApplicationInterfaceGroup),
+    Panel { id: String, uuid: String },
 }
 
 struct ExchangePlanContentItem {
@@ -2612,6 +3561,8 @@ fn build_metadata_object_reference_index_from_texts(
     rows: &[MetadataTextRow],
 ) -> BTreeMap<String, String> {
     let mut index = BTreeMap::new();
+    let empty_form_refs = BTreeMap::new();
+    let empty_template_refs = BTreeMap::new();
     for row in rows {
         if let Some(name) = parse_configuration_reference_text(&row.text) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
@@ -2621,11 +3572,35 @@ fn build_metadata_object_reference_index_from_texts(
             continue;
         };
         index.insert(row.file_name.clone(), format!("{kind}.{}", header.name));
+        if kind == "Enum" {
+            for value in parse_enum_values_from_text(&row.text) {
+                index.insert(
+                    value.uuid,
+                    format!("Enum.{}.EnumValue.{}", header.name, value.name),
+                );
+            }
+        }
         for command in nested_command_headers_from_text(&row.text, &row.file_name) {
             index.insert(
                 command.uuid,
                 format!("{}.{}.Command.{}", kind, header.name, command.name),
             );
+        }
+        for (child, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                &empty_form_refs,
+                &empty_template_refs,
+            ) {
+                index.entry(child.uuid).or_insert(reference);
+            }
         }
         if kind == "WebService" {
             for operation in
@@ -2676,6 +3651,7 @@ fn build_standalone_content_references(
             if let Some(reference) = standalone_child_reference(
                 kind,
                 &header.name,
+                &header.uuid,
                 &row.text,
                 marker_start,
                 &child,
@@ -2731,9 +3707,113 @@ fn build_help_reference_index(
     refs
 }
 
+fn build_functional_option_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut refs = object_refs.clone();
+    for (uuid, subsystem_ref) in subsystem_refs {
+        if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    let required_refs = functional_option_reference_uuids_from_texts(rows);
+    if required_refs.is_empty() {
+        return refs;
+    }
+    for row in rows {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        let mut seen = BTreeSet::new();
+        for (child, marker_start) in
+            nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, &required_refs)
+        {
+            if refs.contains_key(&child.uuid) || seen.contains(&child.uuid) {
+                continue;
+            }
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) {
+                seen.insert(child.uuid.clone());
+                refs.insert(child.uuid, reference);
+            }
+        }
+    }
+    refs
+}
+
+fn functional_option_reference_uuids_from_texts(rows: &[MetadataTextRow]) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    for row in rows {
+        if row.kind.as_deref() != Some("FunctionalOption") {
+            continue;
+        }
+        let Some(fields) = metadata_object_fields(&row.text) else {
+            continue;
+        };
+        if let Some(uuid) = fields
+            .get(2)
+            .and_then(|field| parse_non_zero_uuid(field.trim()))
+        {
+            refs.insert(uuid);
+        }
+        if let Some(content) = fields.get(3) {
+            refs.extend(uuid_like_values_in_text_order(content));
+        }
+    }
+    refs
+}
+
+fn nested_headers_with_offsets_matching_uuids(
+    text: &str,
+    owner_uuid: &str,
+    uuids: &BTreeSet<String>,
+) -> Vec<(MetadataHeader, usize)> {
+    let mut headers = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut offset = 0usize;
+    let marker = "{1,0,";
+
+    while let Some(relative) = text[offset..].find(marker) {
+        let marker_start = offset + relative;
+        let uuid_start = marker_start + marker.len();
+        let uuid_end = uuid_start + 36;
+        offset = uuid_start;
+
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if uuid == owner_uuid
+            || !uuids.contains(uuid)
+            || !is_uuid_text(uuid)
+            || !is_metadata_header_marker(text, uuid_end)
+            || !seen.insert(uuid.to_string())
+        {
+            continue;
+        }
+        if let Some(header) = parse_metadata_header_from_text(text, uuid) {
+            headers.push((header, marker_start));
+        }
+    }
+
+    headers
+}
+
 fn standalone_child_reference(
     owner_kind: &str,
     owner_name: &str,
+    owner_uuid: &str,
     text: &str,
     marker_start: usize,
     child: &MetadataHeader,
@@ -2772,6 +3852,69 @@ fn standalone_child_reference(
             child.name
         ));
     }
+    if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+        && tabular_section.uuid != child.uuid
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+            tabular_section.name, child.name
+        ));
+    }
+    if metadata_kind_uses_register_resources(owner_kind)
+        && is_offset_inside_metadata_object_code(text, marker_start, 5)
+        && is_offset_inside_register_resource_list(text, marker_start)
+    {
+        return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
+    }
+    if owner_kind == "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+        && is_offset_inside_tabular_section_attribute_list(text, marker_start)
+        && let Some((tabular_section, tabular_end)) =
+            preceding_metadata_header_for_code_with_bounds(text, marker_start, 11)
+        && tabular_section.uuid != child.uuid
+        && !contains_metadata_header_uuid_between(text, tabular_end, marker_start, owner_uuid)
+        && !contains_metadata_header_name_between(text, tabular_end, marker_start, owner_name)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+            tabular_section.name, child.name
+        ));
+    }
+    if owner_kind == "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if metadata_kind_uses_code27_attributes(owner_kind)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if metadata_kind_uses_code4_attributes(owner_kind)
+        && is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "BusinessProcess"
+        && is_offset_inside_metadata_object_code(text, marker_start, 3)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+        && !is_offset_inside_metadata_object_code(text, marker_start, 8)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
     if is_offset_inside_metadata_object_code(text, marker_start, 5) {
         return Some(format!(
             "{owner_kind}.{owner_name}.Attribute.{}",
@@ -2792,11 +3935,17 @@ fn standalone_child_reference(
             child.name
         ));
     }
+    if metadata_kind_uses_register_resources(owner_kind)
+        && is_offset_inside_metadata_object_code(text, marker_start, 8)
+        && is_offset_inside_register_dimension_list(text, marker_start)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
     if is_offset_inside_metadata_object_code(text, marker_start, 8) {
-        if owner_kind == "Document"
-            && let Some(tabular_section) =
-                preceding_metadata_header_for_code(text, marker_start, 11)
-        {
+        if let Some(tabular_section) = preceding_metadata_header_for_code(text, marker_start, 11) {
             return Some(format!(
                 "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
                 tabular_section.name, child.name
@@ -2811,6 +3960,54 @@ fn standalone_child_reference(
         ));
     }
     None
+}
+
+fn metadata_kind_uses_register_resources(kind: &str) -> bool {
+    matches!(
+        kind,
+        "AccumulationRegister"
+            | "AccountingRegister"
+            | "CalculationRegister"
+            | "InformationRegister"
+    )
+}
+
+fn metadata_kind_uses_code27_attributes(kind: &str) -> bool {
+    matches!(kind, "Report" | "Task" | "ChartOfCharacteristicTypes")
+}
+
+fn metadata_kind_uses_code4_attributes(kind: &str) -> bool {
+    kind == "ExchangePlan" || metadata_kind_uses_register_resources(kind)
+}
+
+fn is_offset_inside_register_resource_list(text: &str, offset: usize) -> bool {
+    const REGISTER_RESOURCE_LIST_MARKER: &str = "{b64d9a41-1642-11d6-a3c7-0050bae0a776,";
+    let Some(start) = text[..offset].rfind(REGISTER_RESOURCE_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
+}
+
+fn is_offset_inside_register_dimension_list(text: &str, offset: usize) -> bool {
+    const REGISTER_DIMENSION_LIST_MARKER: &str = "{b64d9a43-1642-11d6-a3c7-0050bae0a776,";
+    let Some(start) = text[..offset].rfind(REGISTER_DIMENSION_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
+}
+
+fn is_offset_inside_tabular_section_attribute_list(text: &str, offset: usize) -> bool {
+    const TABULAR_SECTION_ATTRIBUTE_LIST_MARKER: &str = "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,";
+    let Some(start) = text[..offset].rfind(TABULAR_SECTION_ATTRIBUTE_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
 }
 
 fn template_source_reference_name(template_ref: &TemplateSourceReference) -> Option<String> {
@@ -2952,55 +4149,62 @@ fn build_form_source_reference_index_from_texts(
     index
 }
 
-fn owned_form_uuid_values(text: &str) -> Option<BTreeSet<String>> {
-    const FORM_LIST_MARKERS: &[&str] = &[
-        "fdf816d2-1ead-11d5-b975-0050bae0a95d",
-        "fb880e93-47d7-4127-9357-a20e69c17545",
-        "13134204-f60b-11d5-a3c7-0050bae0a776",
-        "87c509ab-3d38-4d67-b379-aca796298578",
-        "b64d9a44-1642-11d6-a3c7-0050bae0a776",
-        "d5b0e5ed-256d-401c-9c36-f630cafd8a62",
-        "a3b368c0-29e2-11d6-a3c7-0050bae0a776",
-        "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
-        "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
-        "b8533c0c-2342-4db3-91a2-c2b08cbf6b23",
-        "ec81ad10-ca07-11d5-b9a5-0050bae0a95d",
-        "33f2e54b-37ce-4a7a-a569-b648d7aa4634",
-        "3f58cbfb-4172-4e54-be49-561a579bb38b",
-    ];
+// Platform-level 1C markers for owned form lists in metadata blobs. These are
+// not configuration object UUIDs and must not be replaced with DB-specific IDs.
+const FORM_LIST_MARKERS: &[&str] = &[
+    "fdf816d2-1ead-11d5-b975-0050bae0a95d",
+    "fb880e93-47d7-4127-9357-a20e69c17545",
+    "13134204-f60b-11d5-a3c7-0050bae0a776",
+    "87c509ab-3d38-4d67-b379-aca796298578",
+    "b64d9a44-1642-11d6-a3c7-0050bae0a776",
+    "d5b0e5ed-256d-401c-9c36-f630cafd8a62",
+    "a3b368c0-29e2-11d6-a3c7-0050bae0a776",
+    "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
+    "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+    "b8533c0c-2342-4db3-91a2-c2b08cbf6b23",
+    "ec81ad10-ca07-11d5-b9a5-0050bae0a95d",
+    "33f2e54b-37ce-4a7a-a569-b648d7aa4634",
+    "3f58cbfb-4172-4e54-be49-561a579bb38b",
+];
 
-    let mut refs = BTreeSet::new();
+fn owned_form_uuid_values(text: &str) -> Option<BTreeSet<String>> {
+    owned_form_uuid_values_in_text_order(text).map(|values| values.into_iter().collect())
+}
+
+fn owned_form_uuid_values_in_text_order(text: &str) -> Option<Vec<String>> {
+    let mut refs = Vec::new();
+    let mut seen = BTreeSet::new();
     let mut found_marker = false;
     for marker in FORM_LIST_MARKERS {
-        let Some(marker_index) = text.find(marker) else {
-            continue;
-        };
-        found_marker = true;
-        let Some(block_start) = text[..marker_index].rfind('{') else {
-            continue;
-        };
-        let Some(block_end) = text[marker_index..]
-            .find('}')
-            .map(|offset| marker_index + offset + 1)
-        else {
-            continue;
-        };
-        let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
-            continue;
-        };
-        if fields.first().map(|field| field.trim()) != Some(*marker) {
-            continue;
-        }
-        let Some(count) = fields
-            .get(1)
-            .and_then(|field| field.trim().parse::<usize>().ok())
-        else {
-            continue;
-        };
-        for field in fields.iter().skip(2).take(count) {
-            let value = field.trim().trim_matches('"').to_ascii_lowercase();
-            if is_uuid_like_ascii(value.as_bytes()) {
-                refs.insert(value);
+        let mut offset = 0usize;
+        while let Some(relative_index) = text[offset..].find(marker) {
+            let marker_index = offset + relative_index;
+            found_marker = true;
+            offset = marker_index + marker.len();
+
+            let Some(block_start) = text[..marker_index].rfind('{') else {
+                continue;
+            };
+            let Some(block_end) = scan_1c_braced_value(text, block_start) else {
+                continue;
+            };
+            let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
+                continue;
+            };
+            if fields.first().map(|field| field.trim()) != Some(*marker) {
+                continue;
+            }
+            let Some(count) = fields
+                .get(1)
+                .and_then(|field| field.trim().parse::<usize>().ok())
+            else {
+                continue;
+            };
+            for field in fields.iter().skip(2).take(count) {
+                let value = field.trim().trim_matches('"').to_ascii_lowercase();
+                if is_uuid_like_ascii(value.as_bytes()) && seen.insert(value.clone()) {
+                    refs.push(value);
+                }
             }
         }
     }
@@ -3195,15 +4399,23 @@ fn resolve_subsystem_source_path(
 }
 
 fn uuid_like_values(text: &str) -> BTreeSet<String> {
+    uuid_like_values_in_text_order(text).into_iter().collect()
+}
+
+fn uuid_like_values_in_text_order(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
-    let mut values = BTreeSet::new();
+    let mut values = Vec::new();
+    let mut seen = BTreeSet::new();
     if bytes.len() < 36 {
         return values;
     }
     for start in 0..=bytes.len() - 36 {
         let value = &bytes[start..start + 36];
         if is_uuid_like_ascii(value) {
-            values.insert(String::from_utf8_lossy(value).to_ascii_lowercase());
+            let value = String::from_utf8_lossy(value).to_ascii_lowercase();
+            if seen.insert(value.clone()) {
+                values.push(value);
+            }
         }
     }
     values
@@ -3406,15 +4618,107 @@ fn parse_command_interface_blob(
     bytes: &[u8],
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
-) -> Option<Vec<CommandInterfaceEntry>> {
+) -> Option<CommandInterface> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
     if fields.first()?.trim() != "7" {
         return None;
     }
+
+    parse_command_interface_order_fields(&fields, command_refs, metadata_refs)
+        .or_else(|| parse_command_interface_subsystems_order_fields(&fields, metadata_refs))
+        .or_else(|| parse_command_interface_visibility_fields(&fields, command_refs, metadata_refs))
+}
+
+fn parse_command_interface_order_fields(
+    fields: &[&str],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
+    if fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(4)?.trim().parse::<usize>().ok()?;
+    let default_group_uuid = fields.get(5)?.trim();
+    if !is_uuid_text(default_group_uuid) {
+        return None;
+    }
+    let mut commands_order = Vec::with_capacity(count);
+    let mut groups_order = Vec::<String>::new();
+    let mut index = 6usize;
+    for _ in 0..count {
+        let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
+        index += 1;
+        let code = command_ref.first()?.trim();
+        let uuid = command_ref.get(1).map(|value| value.trim())?;
+        if !code.chars().all(|ch| ch.is_ascii_digit()) || !is_uuid_text(uuid) {
+            return None;
+        }
+        let group_uuid = match fields.get(index)?.trim() {
+            "0" => default_group_uuid,
+            value => value,
+        };
+        index += 1;
+        if !is_uuid_text(group_uuid) {
+            return None;
+        }
+        let name = command_interface_command_name(code, uuid, command_refs, metadata_refs);
+        let command_group = command_interface_group_name(group_uuid, metadata_refs);
+        if !groups_order.iter().any(|group| group == &command_group) {
+            groups_order.push(command_group.clone());
+        }
+        commands_order.push(CommandInterfaceOrderEntry {
+            name,
+            command_group,
+        });
+    }
+
+    Some(CommandInterface {
+        commands_order,
+        commands_placement: Vec::new(),
+        groups_order,
+        commands_visibility: Vec::new(),
+        subsystems_order: Vec::new(),
+    })
+}
+
+fn parse_command_interface_subsystems_order_fields(
+    fields: &[&str],
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
+    if fields.get(1)?.trim() != "0"
+        || fields.get(2)?.trim() != "0"
+        || fields.get(3)?.trim() != "0"
+        || fields.get(4)?.trim() != "1"
+    {
+        return None;
+    }
+    let count = fields.get(5)?.trim().parse::<usize>().ok()?;
+    let mut subsystems_order = Vec::with_capacity(count);
+    let mut index = 6usize;
+    for _ in 0..count {
+        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
+        subsystems_order.push(command_interface_subsystem_name(&uuid, metadata_refs));
+        index += 1;
+    }
+
+    Some(CommandInterface {
+        commands_order: Vec::new(),
+        commands_placement: Vec::new(),
+        groups_order: Vec::new(),
+        commands_visibility: Vec::new(),
+        subsystems_order,
+    })
+}
+
+fn parse_command_interface_visibility_fields(
+    fields: &[&str],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
     let count = fields.get(2)?.trim().parse::<usize>().ok()?;
-    let mut entries = Vec::with_capacity(count);
+    let mut commands_visibility = Vec::with_capacity(count);
     let mut index = 3usize;
     for _ in 0..count {
         let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
@@ -3433,10 +4737,143 @@ fn parse_command_interface_blob(
         } else {
             code.to_string()
         };
-        entries.push(CommandInterfaceEntry { name, common });
+        commands_visibility.push(CommandInterfaceVisibilityEntry { name, common });
     }
 
+    let commands_placement =
+        parse_command_interface_placement_tail(fields, &mut index, command_refs, metadata_refs)
+            .unwrap_or_default();
+    let commands_order =
+        parse_command_interface_order_tail(fields, &mut index, command_refs, metadata_refs)
+            .unwrap_or_default();
+    let groups_order = parse_command_interface_groups_order_tail(fields, &mut index, metadata_refs)
+        .unwrap_or_default();
+
+    Some(CommandInterface {
+        commands_order,
+        commands_placement,
+        groups_order,
+        commands_visibility,
+        subsystems_order: Vec::new(),
+    })
+}
+
+fn parse_command_interface_placement_tail(
+    fields: &[&str],
+    index: &mut usize,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<CommandInterfacePlacementEntry>> {
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = parse_command_interface_command_name_field(
+            fields.get(*index)?,
+            command_refs,
+            metadata_refs,
+        )?;
+        *index += 1;
+        let command_group = command_interface_group_name(fields.get(*index)?.trim(), metadata_refs);
+        *index += 1;
+        let placement = command_interface_placement_name(fields.get(*index)?.trim())?;
+        *index += 1;
+        entries.push(CommandInterfacePlacementEntry {
+            name,
+            command_group,
+            placement,
+        });
+    }
     Some(entries)
+}
+
+fn parse_command_interface_order_tail(
+    fields: &[&str],
+    index: &mut usize,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<CommandInterfaceOrderEntry>> {
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let command_group = command_interface_group_name(fields.get(*index)?.trim(), metadata_refs);
+        *index += 1;
+        let name = parse_command_interface_command_name_field(
+            fields.get(*index)?,
+            command_refs,
+            metadata_refs,
+        )?;
+        *index += 1;
+        entries.push(CommandInterfaceOrderEntry {
+            name,
+            command_group,
+        });
+    }
+    Some(entries)
+}
+
+fn parse_command_interface_groups_order_tail(
+    fields: &[&str],
+    index: &mut usize,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<String>> {
+    if fields.get(*index)?.trim() == "0" {
+        *index += 1;
+    }
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut groups = Vec::with_capacity(count);
+    for _ in 0..count {
+        groups.push(command_interface_group_name(
+            fields.get(*index)?.trim(),
+            metadata_refs,
+        ));
+        *index += 1;
+    }
+    Some(groups)
+}
+
+fn parse_command_interface_command_name_field(
+    field: &str,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<String> {
+    let command_ref = split_1c_braced_fields(field, 0)?;
+    let code = command_ref.first()?.trim();
+    if !code.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let uuid = command_ref.get(1).map(|value| value.trim())?;
+    if !is_uuid_text(uuid) {
+        return None;
+    }
+    Some(command_interface_command_name(
+        code,
+        uuid,
+        command_refs,
+        metadata_refs,
+    ))
+}
+
+fn command_interface_placement_name(code: &str) -> Option<&'static str> {
+    match code {
+        "0" => Some("Auto"),
+        "1" => Some("Manual"),
+        _ => None,
+    }
 }
 
 fn parse_command_interface_common_flag(value: &str) -> Option<bool> {
@@ -3447,6 +4884,231 @@ fn parse_command_interface_common_flag(value: &str) -> Option<bool> {
     } else {
         None
     }
+}
+
+fn command_interface_group_name(
+    uuid: &str,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> String {
+    if let Some(name) = common_command_group_name(uuid) {
+        return name.to_string();
+    }
+    metadata_refs
+        .get(uuid)
+        .filter(|reference| reference.kind == "CommandGroup")
+        .map(|reference| format!("CommandGroup.{}", reference.name))
+        .unwrap_or_else(|| uuid.to_string())
+}
+
+fn command_interface_subsystem_name(
+    uuid: &str,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> String {
+    metadata_refs
+        .get(uuid)
+        .filter(|reference| reference.kind == "Subsystem")
+        .map(|reference| format!("Subsystem.{}", reference.name))
+        .unwrap_or_else(|| format!("Subsystem.{uuid}"))
+}
+
+fn parse_home_page_work_area_blob(
+    bytes: &[u8],
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<HomePageWorkArea> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    parse_home_page_work_area_text(text.trim_start_matches('\u{feff}'), form_refs)
+}
+
+fn parse_home_page_work_area_text(
+    text: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<HomePageWorkArea> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let template = home_page_work_area_template_name(fields.get(1)?.trim())?;
+    let mut index = 2usize;
+    let left_column = parse_home_page_work_area_column(&fields, &mut index, form_refs)?;
+    let right_column = parse_home_page_work_area_column(&fields, &mut index, form_refs)?;
+
+    Some(HomePageWorkArea {
+        template,
+        left_column,
+        right_column,
+    })
+}
+
+fn home_page_work_area_template_name(code: &str) -> Option<&'static str> {
+    match code {
+        "2" => Some("TwoColumnsVariableWidth"),
+        _ => None,
+    }
+}
+
+fn parse_home_page_work_area_column(
+    fields: &[&str],
+    index: &mut usize,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<HomePageWorkAreaItem>> {
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut items = Vec::with_capacity(count);
+    for _ in 0..count {
+        let item = parse_home_page_work_area_item(fields.get(*index)?, form_refs)?;
+        *index += 1;
+        items.push(item);
+    }
+    Some(items)
+}
+
+fn parse_home_page_work_area_item(
+    field: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<HomePageWorkAreaItem> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    let form_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let form_uuid = parse_non_zero_uuid(form_fields.get(1)?.trim())?;
+    let form = form_refs
+        .get(&form_uuid)
+        .and_then(form_source_reference_name)
+        .unwrap_or(form_uuid);
+    let height = fields.get(2)?.trim().to_string();
+    let common = parse_command_interface_common_flag(fields.get(3)?)?;
+
+    Some(HomePageWorkAreaItem {
+        form,
+        height,
+        common,
+    })
+}
+
+fn parse_client_application_interface_blob(bytes: &[u8]) -> Option<ClientApplicationInterface> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    parse_client_application_interface_text(text.trim_start_matches('\u{feff}'))
+}
+
+fn parse_client_application_interface_text(text: &str) -> Option<ClientApplicationInterface> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+
+    let mut top = None;
+    let mut left = None;
+    let mut index = 1usize;
+    while index < fields.len() {
+        let Some(area_fields) = fields
+            .get(index)
+            .and_then(|field| split_1c_braced_fields(field, 0))
+        else {
+            break;
+        };
+        if area_fields.len() < 3 || area_fields.first().map(|value| value.trim()) != Some("0") {
+            break;
+        }
+        let area_code = area_fields.get(1)?.trim();
+        let group = parse_client_application_interface_area(area_fields.get(2)?)?;
+        match area_code {
+            "1" => top = group,
+            "3" => left = group,
+            _ => {}
+        }
+        index += 1;
+    }
+
+    let mut panel_defs = Vec::new();
+    while index + 1 < fields.len() {
+        let code = fields.get(index)?.trim();
+        if code == "0" {
+            break;
+        }
+        let panel_def_fields = split_1c_braced_fields(fields.get(index + 1)?, 0)?;
+        let panel_uuid = parse_non_zero_uuid(panel_def_fields.first()?.trim())?;
+        panel_defs.push(panel_uuid);
+        index += 2;
+    }
+
+    Some(ClientApplicationInterface {
+        top,
+        left,
+        panel_defs,
+    })
+}
+
+fn parse_client_application_interface_area(
+    field: &str,
+) -> Option<Option<ClientApplicationInterfaceGroup>> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count == 0 {
+        return Some(None);
+    }
+    let group = fields
+        .get(3)
+        .and_then(|field| parse_client_application_interface_group(field, true))?;
+    Some(Some(group))
+}
+
+fn parse_client_application_interface_group(
+    field: &str,
+    with_id: bool,
+) -> Option<ClientApplicationInterfaceGroup> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let id = if with_id {
+        Some(parse_non_zero_uuid(fields.get(1)?.trim())?)
+    } else {
+        None
+    };
+    if fields.get(2)?.trim() != "0" {
+        return None;
+    }
+    let children = parse_client_application_interface_children(fields.get(3)?)?;
+    Some(ClientApplicationInterfaceGroup { id, children })
+}
+
+fn parse_client_application_interface_children(
+    field: &str,
+) -> Option<Vec<ClientApplicationInterfaceNode>> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut children = Vec::with_capacity(count);
+    let mut index = 2usize;
+    for _ in 0..count {
+        let _layout_marker = fields.get(index)?;
+        index += 1;
+        let child_fields = split_1c_braced_fields(fields.get(index)?, 0)?;
+        index += 1;
+        if child_fields.len() >= 4
+            && child_fields.first().map(|value| value.trim()) == Some("0")
+            && child_fields.get(2).map(|value| value.trim()) == Some("0")
+        {
+            children.push(ClientApplicationInterfaceNode::Group(
+                parse_client_application_interface_group(fields.get(index - 1)?, true)?,
+            ));
+        } else {
+            let id = parse_non_zero_uuid(child_fields.get(1)?.trim())?;
+            let uuid = parse_non_zero_uuid(child_fields.get(2)?.trim())?;
+            children.push(ClientApplicationInterfaceNode::Group(
+                ClientApplicationInterfaceGroup {
+                    id: None,
+                    children: vec![ClientApplicationInterfaceNode::Panel { id, uuid }],
+                },
+            ));
+        }
+    }
+    Some(children)
 }
 
 fn parse_exchange_plan_content_blob(
@@ -3474,16 +5136,6 @@ fn parse_exchange_plan_content_blob(
     }
 
     Some(items)
-}
-
-fn parse_config_dump_versions_blob(bytes: &[u8]) -> Option<usize> {
-    let inflated = inflate_raw_deflate(bytes).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
-    if fields.first()?.trim() != "1" {
-        return None;
-    }
-    fields.get(1)?.trim().parse::<usize>().ok()
 }
 
 fn parse_business_process_flowchart_blob(bytes: &[u8]) -> Option<BusinessProcessFlowchart> {
@@ -3842,7 +5494,7 @@ fn command_interface_command_name(
         return name.clone();
     }
     if let Some(metadata) = metadata_refs.get(uuid) {
-        if code == "0"
+        if matches!(code, "0" | "100")
             && let Some(standard) = command_interface_standard_command(&metadata.kind)
         {
             return format!(
@@ -3921,7 +5573,7 @@ fn parse_role_rights_blob(
 
     objects.reverse();
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
-    let set_for_new_objects = parse_role_bool_field(fields.get(4)?)?;
+    let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
     Some(RoleRights {
         set_for_new_objects,
         objects,
@@ -4602,13 +6254,18 @@ fn extract_ext_picture_transparent_pixel(text: &str) -> Option<(i32, i32)> {
     Some((x, y))
 }
 
-fn format_ext_picture_xml(file_name: &str, transparent_pixel: Option<(i32, i32)>) -> String {
+fn format_ext_picture_xml(
+    file_name: &str,
+    transparent_pixel: Option<(i32, i32)>,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<ExtPicture xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+<ExtPicture xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{}\">\r\n\
 \t<Picture>\r\n\
 \t\t<xr:Abs>{file_name}</xr:Abs>\r\n\
 \t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+        source_version.as_str(),
         xml_bool(transparent_pixel.is_some())
     );
     if let Some((x, y)) = transparent_pixel {
@@ -4735,7 +6392,7 @@ fn format_help_xml(pages: &[HelpPage]) -> String {
 
 fn format_predefined_data_xml(xsi_type: &str, items: &[PredefinedItem]) -> String {
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <PredefinedData xmlns=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"{}\" version=\"2.20\">\r\n",
         escape_xml_text(xsi_type)
     );
@@ -4824,25 +6481,180 @@ fn predefined_string_allowed_length_xml(value: u8) -> &'static str {
     }
 }
 
-fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
+fn format_command_interface_xml(command_interface: &CommandInterface) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<CommandInterface xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-\t<CommandsVisibility>\r\n",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<CommandInterface xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
     );
-    for entry in entries {
-        xml.push_str(&format!(
-            "\t\t<Command name=\"{}\">\r\n\
+    if !command_interface.commands_visibility.is_empty() {
+        xml.push_str("\t<CommandsVisibility>\r\n");
+        for entry in &command_interface.commands_visibility {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\">\r\n\
 \t\t\t<Visibility>\r\n\
 \t\t\t\t<xr:Common>{}</xr:Common>\r\n\
 \t\t\t</Visibility>\r\n\
 \t\t</Command>\r\n",
-            escape_xml_text(&entry.name),
-            xml_bool(entry.common)
+                escape_xml_text(&entry.name),
+                xml_bool(entry.common)
+            ));
+        }
+        xml.push_str("\t</CommandsVisibility>\r\n");
+    }
+    if !command_interface.commands_placement.is_empty() {
+        xml.push_str("\t<CommandsPlacement>\r\n");
+        for entry in &command_interface.commands_placement {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\">\r\n\
+\t\t\t<CommandGroup>{}</CommandGroup>\r\n\
+\t\t\t<Placement>{}</Placement>\r\n\
+\t\t</Command>\r\n",
+                escape_xml_text(&entry.name),
+                escape_xml_text(&entry.command_group),
+                entry.placement
+            ));
+        }
+        xml.push_str("\t</CommandsPlacement>\r\n");
+    }
+    if !command_interface.commands_order.is_empty() {
+        xml.push_str("\t<CommandsOrder>\r\n");
+        for entry in &command_interface.commands_order {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\">\r\n\
+\t\t\t<CommandGroup>{}</CommandGroup>\r\n\
+\t\t</Command>\r\n",
+                escape_xml_text(&entry.name),
+                escape_xml_text(&entry.command_group)
+            ));
+        }
+        xml.push_str("\t</CommandsOrder>\r\n");
+    }
+    if !command_interface.groups_order.is_empty() {
+        xml.push_str("\t<GroupsOrder>\r\n");
+        for group in &command_interface.groups_order {
+            xml.push_str(&format!(
+                "\t\t<Group>{}</Group>\r\n",
+                escape_xml_text(group)
+            ));
+        }
+        xml.push_str("\t</GroupsOrder>\r\n");
+    }
+    if !command_interface.subsystems_order.is_empty() {
+        xml.push_str("\t<SubsystemsOrder>\r\n");
+        for subsystem in &command_interface.subsystems_order {
+            xml.push_str(&format!(
+                "\t\t<Subsystem>{}</Subsystem>\r\n",
+                escape_xml_text(subsystem)
+            ));
+        }
+        xml.push_str("\t</SubsystemsOrder>\r\n");
+    }
+    xml.push_str("</CommandInterface>");
+    xml
+}
+
+fn format_home_page_work_area_xml(
+    work_area: &HomePageWorkArea,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<HomePageWorkArea xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{}\">\r\n",
+        source_version.as_str()
+    );
+    xml.push_str(&format!(
+        "\t<WorkingAreaTemplate>{}</WorkingAreaTemplate>\r\n",
+        work_area.template
+    ));
+    push_home_page_work_area_column_xml(&mut xml, "LeftColumn", &work_area.left_column);
+    push_home_page_work_area_column_xml(&mut xml, "RightColumn", &work_area.right_column);
+    xml.push_str("</HomePageWorkArea>");
+    xml
+}
+
+fn push_home_page_work_area_column_xml(
+    xml: &mut String,
+    tag: &str,
+    items: &[HomePageWorkAreaItem],
+) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
+    for item in items {
+        xml.push_str(&format!(
+            "\t\t<Item>\r\n\
+\t\t\t<Form>{}</Form>\r\n\
+\t\t\t<Height>{}</Height>\r\n\
+\t\t\t<Visibility>\r\n\
+\t\t\t\t<xr:Common>{}</xr:Common>\r\n\
+\t\t\t</Visibility>\r\n\
+\t\t</Item>\r\n",
+            escape_xml_element_text(&item.form),
+            escape_xml_element_text(&item.height),
+            xml_bool(item.common)
         ));
     }
-    xml.push_str("\t</CommandsVisibility>\r\n</CommandInterface>\r\n");
+    xml.push_str(&format!("\t</{tag}>\r\n"));
+}
+
+fn format_client_application_interface_xml(interface: &ClientApplicationInterface) -> String {
+    let mut xml = String::from(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n",
+    );
+    if let Some(group) = &interface.top {
+        push_client_application_interface_area_xml(&mut xml, "top", group);
+    }
+    if let Some(group) = &interface.left {
+        push_client_application_interface_area_xml(&mut xml, "left", group);
+    }
+    for panel_def in &interface.panel_defs {
+        xml.push_str(&format!(
+            "\t<panelDef id=\"{}\"/>\r\n",
+            escape_xml_text(panel_def)
+        ));
+    }
+    xml.push_str("</ClientApplicationInterface>");
     xml
+}
+
+fn push_client_application_interface_area_xml(
+    xml: &mut String,
+    tag: &str,
+    group: &ClientApplicationInterfaceGroup,
+) {
+    xml.push_str(&format!("\t<{tag}>\r\n"));
+    push_client_application_interface_group_xml(xml, group, 2);
+    xml.push_str(&format!("\t</{tag}>\r\n"));
+}
+
+fn push_client_application_interface_group_xml(
+    xml: &mut String,
+    group: &ClientApplicationInterfaceGroup,
+    indent: usize,
+) {
+    let tab = "\t".repeat(indent);
+    if let Some(id) = &group.id {
+        xml.push_str(&format!("{tab}<group id=\"{}\">\r\n", escape_xml_text(id)));
+    } else {
+        xml.push_str(&format!("{tab}<group>\r\n"));
+    }
+    for child in &group.children {
+        match child {
+            ClientApplicationInterfaceNode::Group(child_group) => {
+                push_client_application_interface_group_xml(xml, child_group, indent + 1);
+            }
+            ClientApplicationInterfaceNode::Panel { id, uuid } => {
+                let child_tab = "\t".repeat(indent + 1);
+                xml.push_str(&format!(
+                    "{child_tab}<panel id=\"{}\">\r\n\
+{child_tab}\t<uuid>{}</uuid>\r\n\
+{child_tab}</panel>\r\n",
+                    escape_xml_text(id),
+                    escape_xml_text(uuid)
+                ));
+            }
+        }
+    }
+    xml.push_str(&format!("{tab}</group>\r\n"));
 }
 
 fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String {
@@ -5082,17 +6894,13 @@ fn push_flowchart_connection_end_xml(
     xml.push_str(&format!("\t\t\t\t\t</{tag}>\r\n"));
 }
 
-fn format_config_dump_info_xml() -> String {
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<ConfigDumpInfo xmlns=\"http://v8.1c.ru/8.3/xcf/dumpinfo\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" format=\"Hierarchical\" version=\"2.20\">\r\n\
-\t<ConfigVersions/>\r\n\
-</ConfigDumpInfo>\r\n"
-        .to_string()
+fn normalize_role_condition_text(condition: &str) -> String {
+    condition.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn format_role_rights_xml(rights: &RoleRights) -> String {
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Rights xmlns=\"http://v8.1c.ru/8.2/roles\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Rights\" version=\"2.20\">\r\n\
 \t<setForNewObjects>{}</setForNewObjects>\r\n\
 \t<setForAttributesByDefault>true</setForAttributesByDefault>\r\n\
@@ -5104,6 +6912,9 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
         xml.push_str(&escape_xml_element_text(&object.name));
         xml.push_str("</name>\r\n");
         for right in &object.rights {
+            if !right.value && right.restriction_by_condition.is_none() {
+                continue;
+            }
             xml.push_str("\t\t<right>\r\n\t\t\t<name>");
             xml.push_str(&escape_xml_element_text(&right.name));
             xml.push_str("</name>\r\n\t\t\t<value>");
@@ -5117,7 +6928,9 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
                     xml.push_str("</field>\r\n");
                 }
                 xml.push_str("\t\t\t\t<condition>");
-                xml.push_str(&escape_xml_element_text(&restriction.condition));
+                xml.push_str(&escape_xml_element_text(&normalize_role_condition_text(
+                    &restriction.condition,
+                )));
                 xml.push_str("</condition>\r\n\t\t\t</restrictionByCondition>\r\n");
             }
             xml.push_str("\t\t</right>\r\n");
@@ -5128,10 +6941,12 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
         xml.push_str("\t<restrictionTemplate>\r\n\t\t<name>");
         xml.push_str(&escape_xml_element_text(&template.name));
         xml.push_str("</name>\r\n\t\t<condition>");
-        xml.push_str(&escape_xml_element_text(&template.condition));
+        xml.push_str(&escape_xml_element_text(&normalize_role_condition_text(
+            &template.condition,
+        )));
         xml.push_str("</condition>\r\n\t</restrictionTemplate>\r\n");
     }
-    xml.push_str("</Rights>\r\n");
+    xml.push_str("</Rights>");
     xml
 }
 
@@ -5150,6 +6965,7 @@ struct JobSchedule {
     months: Vec<String>,
     weeks_period: String,
     days_repeat_period: String,
+    detailed_daily_schedules: Vec<JobSchedule>,
 }
 
 fn extract_schedule_xml(bytes: &[u8]) -> Result<String> {
@@ -5275,6 +7091,10 @@ fn push_standalone_priority_item_xml(xml: &mut String, reference: &str) {
 
 fn parse_job_schedule_text(text: &str) -> Option<JobSchedule> {
     let fields = split_1c_braced_fields(text, 0)?;
+    parse_job_schedule_fields(&fields, true)
+}
+
+fn parse_job_schedule_fields(fields: &[&str], include_details: bool) -> Option<JobSchedule> {
     let mut index = 0usize;
     let begin_date = format_1c_date(fields.get(index)?.trim())?;
     index += 1;
@@ -5309,6 +7129,23 @@ fn parse_job_schedule_text(text: &str) -> Option<JobSchedule> {
     let weeks_period = parse_schedule_number(fields.get(index)?)?;
     index += 1;
     let days_repeat_period = parse_schedule_number(fields.get(index)?)?;
+    index += 1;
+
+    let detailed_daily_schedules = if include_details {
+        let count = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut schedules = Vec::with_capacity(count);
+        index += usize::from(fields.get(index).is_some());
+        for field in fields.iter().skip(index).take(count) {
+            let detail_fields = split_1c_braced_fields(field, 0)?;
+            schedules.push(parse_job_schedule_fields(&detail_fields, false)?);
+        }
+        schedules
+    } else {
+        Vec::new()
+    };
 
     Some(JobSchedule {
         begin_date,
@@ -5325,6 +7162,7 @@ fn parse_job_schedule_text(text: &str) -> Option<JobSchedule> {
         months,
         weeks_period,
         days_repeat_period,
+        detailed_daily_schedules,
     })
 }
 
@@ -5375,14 +7213,28 @@ fn format_1c_time(value: &str) -> Option<String> {
 }
 
 fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<JobSchedule xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<Schedule{}>\r\n",
+        format_job_schedule_attrs(schedule)
+    );
+    push_job_schedule_lists_xml(&mut xml, "\t\t", schedule);
+    for detail in &schedule.detailed_daily_schedules {
+        xml.push_str(&format!(
+            "\t\t<ent:DetailedDailySchedules{}>\r\n",
+            format_job_schedule_attrs(detail)
+        ));
+        push_job_schedule_lists_xml(&mut xml, "\t\t\t", detail);
+        xml.push_str("\t\t</ent:DetailedDailySchedules>\r\n");
+    }
+    xml.push_str("\t</Schedule>\r\n</JobSchedule>");
+    xml
+}
+
+fn format_job_schedule_attrs(schedule: &JobSchedule) -> String {
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<JobSchedule xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.17\">\r\n\
-\t<Schedule BeginDate=\"{}\" EndDate=\"{}\" BeginTime=\"{}\" EndTime=\"{}\" CompletionTime=\"{}\" CompletionInterval=\"{}\" RepeatPeriodInDay=\"{}\" RepeatPause=\"{}\" WeekDayInMonth=\"{}\" DayInMonth=\"{}\" WeeksPeriod=\"{}\" DaysRepeatPeriod=\"{}\">\r\n\
-\t\t<ent:WeekDays>{}</ent:WeekDays>\r\n\
-\t\t<ent:Months>{}</ent:Months>\r\n\
-\t</Schedule>\r\n\
-</JobSchedule>\r\n",
+        " BeginDate=\"{}\" EndDate=\"{}\" BeginTime=\"{}\" EndTime=\"{}\" CompletionTime=\"{}\" CompletionInterval=\"{}\" RepeatPeriodInDay=\"{}\" RepeatPause=\"{}\" WeekDayInMonth=\"{}\" DayInMonth=\"{}\" WeeksPeriod=\"{}\" DaysRepeatPeriod=\"{}\"",
         schedule.begin_date,
         schedule.end_date,
         schedule.begin_time,
@@ -5394,10 +7246,24 @@ fn format_job_schedule_xml(schedule: &JobSchedule) -> String {
         schedule.week_day_in_month,
         schedule.day_in_month,
         schedule.weeks_period,
-        schedule.days_repeat_period,
-        schedule.week_days.join(" "),
-        schedule.months.join(" ")
+        schedule.days_repeat_period
     )
+}
+
+fn push_job_schedule_lists_xml(xml: &mut String, indent: &str, schedule: &JobSchedule) {
+    push_job_schedule_list_xml(xml, indent, "WeekDays", &schedule.week_days);
+    push_job_schedule_list_xml(xml, indent, "Months", &schedule.months);
+}
+
+fn push_job_schedule_list_xml(xml: &mut String, indent: &str, name: &str, values: &[String]) {
+    if values.is_empty() {
+        xml.push_str(&format!("{indent}<ent:{name}/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{indent}<ent:{name}>{}</ent:{name}>\r\n",
+            values.join(" ")
+        ));
+    }
 }
 
 #[allow(dead_code)]
@@ -5566,6 +7432,8 @@ struct FormAutoCommandBar {
 struct FormAttribute {
     id: String,
     name: String,
+    title: Vec<(String, String)>,
+    value_types: Vec<ConstantValueType>,
     main_attribute: bool,
     use_always: Vec<String>,
     settings: Option<FormDynamicListSettings>,
@@ -6592,6 +8460,14 @@ fn parse_form_attribute(
     if name.is_empty() {
         return None;
     }
+    let title = fields
+        .get(4)
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default();
+    let value_types = fields
+        .get(5)
+        .and_then(|field| parse_metadata_type_pattern(field, object_refs))
+        .unwrap_or_default();
     let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
     let settings = fields
         .get(14)
@@ -6603,6 +8479,8 @@ fn parse_form_attribute(
     Some(FormAttribute {
         id: id.to_string(),
         name,
+        title,
+        value_types,
         main_attribute,
         use_always,
         settings,
@@ -9447,10 +11325,13 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
             escape_xml_text(&attribute.name),
             escape_xml_text(&attribute.id)
         ));
+        xml.push_str(&format_form_localized_section("Title", &attribute.title, 3));
         if attribute.settings.is_some() {
             xml.push_str("\t\t\t<Type>\r\n");
             xml.push_str("\t\t\t\t<v8:Type>cfg:DynamicList</v8:Type>\r\n");
             xml.push_str("\t\t\t</Type>\r\n");
+        } else if !attribute.value_types.is_empty() {
+            xml.push_str(&format_metadata_types_xml(&attribute.value_types));
         }
         if attribute.main_attribute {
             xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
@@ -12204,6 +14085,14 @@ fn preceding_metadata_header_for_code(
     offset: usize,
     code: u32,
 ) -> Option<MetadataHeader> {
+    preceding_metadata_header_for_code_with_bounds(text, offset, code).map(|(header, _)| header)
+}
+
+fn preceding_metadata_header_for_code_with_bounds(
+    text: &str,
+    offset: usize,
+    code: u32,
+) -> Option<(MetadataHeader, usize)> {
     let code_marker = format!("{{{code},");
     let mut search_end = offset;
     while let Some(start) = text[..search_end].rfind(&code_marker) {
@@ -12223,10 +14112,50 @@ fn preceding_metadata_header_for_code(
             continue;
         }
         if let Some(header) = parse_metadata_header_from_text(text, uuid) {
-            return Some(header);
+            return Some((header, end));
         }
     }
     None
+}
+
+fn contains_metadata_header_uuid_between(text: &str, start: usize, end: usize, uuid: &str) -> bool {
+    start < end && text[start..end].contains(&format!("{{1,0,{uuid}}}"))
+}
+
+fn contains_metadata_header_name_between(text: &str, start: usize, end: usize, name: &str) -> bool {
+    if start >= end {
+        return false;
+    }
+    let mut offset = start;
+    let marker = "{1,0,";
+    while offset < end {
+        let Some(relative) = text[offset..end].find(marker) else {
+            return false;
+        };
+        let marker_start = offset + relative;
+        let uuid_start = marker_start + marker.len();
+        let uuid_end = uuid_start + 36;
+        offset = uuid_start;
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
+            continue;
+        }
+        let Some(name_start) =
+            expect_comma_at(text, uuid_end + 1).map(|pos| skip_ascii_ws_at(text, pos))
+        else {
+            continue;
+        };
+        let Some((header_name, consumed)) = parse_1c_quoted_string_with_len(&text[name_start..])
+        else {
+            continue;
+        };
+        if name_start + consumed <= end && header_name == name {
+            return true;
+        }
+    }
+    false
 }
 
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
@@ -12298,7 +14227,7 @@ struct SubsystemSourceReference {
     relative_path: PathBuf,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct MetadataHeader {
     uuid: String,
     name: String,
@@ -12310,6 +14239,12 @@ struct MetadataHeader {
 struct CommonPictureProperties {
     availability_for_choice: bool,
     availability_for_appearance: bool,
+}
+
+struct FunctionalOptionProperties {
+    location: Option<String>,
+    privileged_get_mode: bool,
+    content: Vec<String>,
 }
 
 struct CommonModuleFlags {
@@ -12365,6 +14300,23 @@ struct CatalogProperties {
     explanation: Vec<(String, String)>,
 }
 
+struct EnumProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
+    quick_choice: bool,
+    choice_mode: &'static str,
+    default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    values: Vec<MetadataHeader>,
+    child_forms: Vec<String>,
+    child_templates: Vec<String>,
+}
+
 struct GeneratedTypeEntry {
     name: String,
     category: &'static str,
@@ -12373,11 +14325,32 @@ struct GeneratedTypeEntry {
 }
 
 struct ConstantProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
     value_type: ConstantValueType,
+    tooltip: Vec<(String, String)>,
+    extended_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
     use_standard_commands: bool,
+    default_form: Option<String>,
+    password_mode: bool,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
+    mask: String,
+    min_value: Option<String>,
+    max_value: Option<String>,
+    fill_checking: &'static str,
+    choice_parameters: Vec<ChoiceParameter>,
+    choice_history_on_input: &'static str,
+    data_lock_control_mode: &'static str,
+}
+
+struct ChoiceParameter {
+    name: String,
+    value_ref: String,
 }
 
 struct DefinedTypeProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
     value_types: Vec<ConstantValueType>,
 }
 
@@ -12386,6 +14359,7 @@ struct CommonCommandProperties {
     picture_ref: Option<String>,
     picture_load_transparent: bool,
     tooltip: Vec<(String, String)>,
+    shortcut: Option<String>,
     include_help_in_contents: bool,
     group: Option<String>,
     command_parameter_types: Vec<String>,
@@ -12407,6 +14381,22 @@ struct StyleItemProperties {
     value_xml: String,
 }
 
+struct ScheduledJobProperties {
+    method_name: String,
+    description: String,
+    key: String,
+    use_job: bool,
+    predefined: bool,
+    restart_count_on_failure: u32,
+    restart_interval_on_failure: u32,
+}
+
+struct EventSubscriptionProperties {
+    source_types: Vec<ConstantValueType>,
+    event: String,
+    handler: String,
+}
+
 struct StyleBodyItem {
     name: String,
     standard_order: Option<usize>,
@@ -12415,6 +14405,51 @@ struct StyleBodyItem {
 
 struct TypedMetadataProperties {
     value_types: Vec<ConstantValueType>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FunctionalOptionsParameterProperties {
+    use_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct LanguageProperties {
+    language_code: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DocumentNumeratorProperties {
+    number_type: &'static str,
+    number_length: u32,
+    number_allowed_length: &'static str,
+    number_periodicity: &'static str,
+    check_unique: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WSReferenceProperties {
+    location_url: String,
+    manager_type_id: String,
+    manager_value_id: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct IntegrationServiceProperties {
+    external_address: String,
+    manager_type_id: String,
+    manager_value_id: String,
+    channels: Vec<IntegrationServiceChannelProperties>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct IntegrationServiceChannelProperties {
+    header: MetadataHeader,
+    manager_type_id: String,
+    manager_value_id: String,
+    external_name: String,
+    receive_message_processing: String,
+    message_direction: &'static str,
+    transactioned: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -12429,7 +14464,9 @@ enum ConstantValueType {
         fraction_digits: u32,
         allowed_sign_flag: u8,
     },
-    DateTime,
+    DateTime {
+        date_fractions: &'static str,
+    },
     Reference {
         reference: String,
     },
@@ -12504,14 +14541,41 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
             &header.name,
         );
         push_indexed_generated_type(&mut entries, &fields, 5, "BusinessProcessRef", &header.name);
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            11,
+            "BusinessProcessManager",
+            &header.name,
+        );
     }
     if object_code == 37 {
         push_indexed_generated_type(&mut entries, &fields, 1, "ExchangePlanObject", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 3, "ExchangePlanRef", &header.name);
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            9,
+            "ExchangePlanManager",
+            &header.name,
+        );
     }
     if object_code == 40 {
         push_indexed_generated_type(&mut entries, &fields, 1, "DocumentObject", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 3, "DocumentRef", &header.name);
+        push_indexed_generated_type(&mut entries, &fields, 26, "DocumentManager", &header.name);
+    }
+    if object_code == 17 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            7,
+            "DataProcessorManager",
+            &header.name,
+        );
+    }
+    if object_code == 19 {
+        push_indexed_generated_type(&mut entries, &fields, 12, "ReportManager", &header.name);
     }
     if object_code == 57 {
         push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
@@ -12711,9 +14775,11 @@ fn extract_metadata_source_xml(
         uuid,
         type_index,
         &BTreeMap::new(),
+        &BTreeMap::new(),
         form_refs,
         template_refs,
         &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
     )
 }
 
@@ -12722,9 +14788,11 @@ fn extract_metadata_source_xml_with_refs(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
     if uuid.contains('.') {
         return None;
@@ -12734,9 +14802,11 @@ fn extract_metadata_source_xml_with_refs(
         &row,
         type_index,
         object_refs,
+        functional_option_refs,
         form_refs,
         template_refs,
         subsystem_refs,
+        source_version,
     )
 }
 
@@ -12744,9 +14814,11 @@ fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
     let uuid = row.file_name.as_str();
     if uuid.contains('.') {
@@ -12766,16 +14838,17 @@ fn extract_metadata_source_xml_from_text_row(
         let relative_path = PathBuf::from("CommonModules")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_common_module_source_xml(&header, &flags).into_bytes();
+        let xml = format_common_module_source_xml(&header, &flags, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 16 {
         let header = row.header.as_ref()?;
-        let constant = parse_constant_properties_from_text(text, uuid, type_index)?;
+        let constant =
+            parse_constant_properties_from_text(text, uuid, type_index, object_refs, form_refs)?;
         let relative_path = PathBuf::from("Constants")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_constant_source_xml(&header, &constant).into_bytes();
+        let xml = format_constant_source_xml(&header, &constant, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 3
@@ -12789,7 +14862,8 @@ fn extract_metadata_source_xml_from_text_row(
         let relative_path = PathBuf::from("CommandGroups")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_command_group_source_xml(&header, &command_group).into_bytes();
+        let xml =
+            format_command_group_source_xml(&header, &command_group, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if row
@@ -12803,7 +14877,8 @@ fn extract_metadata_source_xml_from_text_row(
         let relative_path = PathBuf::from("CommonCommands")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_common_command_source_xml(&header, &common_command).into_bytes();
+        let xml = format_common_command_source_xml_native(&header, &common_command, source_version)
+            .into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 3 && row.kind.as_deref().is_some_and(|kind| kind == "StyleItem") {
@@ -12815,13 +14890,64 @@ fn extract_metadata_source_xml_from_text_row(
         let xml = format_style_item_source_xml(&header, &style_item).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
+    if row
+        .kind
+        .as_deref()
+        .is_some_and(|kind| kind == "ScheduledJob")
+    {
+        if let Some(scheduled_job) =
+            parse_scheduled_job_properties_from_text(text, uuid, object_refs)
+        {
+            let header = row.header.as_ref()?;
+            let relative_path = PathBuf::from("ScheduledJobs")
+                .join(sanitize_source_path_segment(&header.name))
+                .with_extension("xml");
+            let xml = format_scheduled_job_source_xml(&header, &scheduled_job, source_version)
+                .into_bytes();
+            return Some(ExtractedMetadataSourceXml { relative_path, xml });
+        }
+    }
+    if row
+        .kind
+        .as_deref()
+        .is_some_and(|kind| kind == "EventSubscription")
+    {
+        if let Some(event_subscription) =
+            parse_event_subscription_properties_from_text(text, uuid, type_index, object_refs)
+        {
+            let header = row.header.as_ref()?;
+            let relative_path = PathBuf::from("EventSubscriptions")
+                .join(sanitize_source_path_segment(&header.name))
+                .with_extension("xml");
+            let xml =
+                format_event_subscription_source_xml(&header, &event_subscription, source_version)
+                    .into_bytes();
+            return Some(ExtractedMetadataSourceXml { relative_path, xml });
+        }
+    }
     if object_code == 0 && is_defined_type_metadata_text(text, uuid) {
         let header = row.header.as_ref()?;
         let defined_type = parse_defined_type_properties_from_text(text, uuid, type_index)?;
         let relative_path = PathBuf::from("DefinedTypes")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_defined_type_source_xml(&header, &defined_type).into_bytes();
+        let xml =
+            format_defined_type_source_xml(&header, &defined_type, source_version).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
+    if row
+        .kind
+        .as_deref()
+        .is_some_and(|kind| kind == "FunctionalOption")
+    {
+        let header = row.header.as_ref()?;
+        let properties =
+            parse_functional_option_properties_from_text(text, uuid, functional_option_refs)?;
+        let relative_path = PathBuf::from("FunctionalOptions")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml =
+            format_functional_option_source_xml(header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if is_form_metadata_text(text, uuid) {
@@ -12856,7 +14982,8 @@ fn extract_metadata_source_xml_from_text_row(
         let template_type = template_ref
             .map(|template_ref| template_ref.template_type)
             .unwrap_or("BinaryData");
-        let xml = format_template_source_xml(kind, &header, template_type).into_bytes();
+        let xml =
+            format_template_source_xml(kind, &header, template_type, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     let kind = row.kind.as_deref()?;
@@ -12883,13 +15010,36 @@ fn extract_metadata_source_xml_from_text_row(
     };
     let mut xml = if kind == "CommonPicture" {
         let picture = parse_common_picture_properties_from_text(text, uuid)?;
-        format_common_picture_source_xml(&header, &picture).into_bytes()
+        format_common_picture_source_xml(&header, &picture, source_version).into_bytes()
+    } else if kind == "Role" {
+        format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     } else if kind == "Catalog" {
         let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
+    } else if kind == "Enum" {
+        let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
+        format_enum_source_xml(&header, &enumeration, source_version).into_bytes()
+    } else if kind == "FunctionalOptionsParameter" {
+        let properties =
+            parse_functional_options_parameter_properties_from_text(text, uuid, object_refs)?;
+        format_functional_options_parameter_source_xml(&header, &properties, source_version)
+            .into_bytes()
+    } else if kind == "Language" {
+        let language = parse_language_properties_from_text(text, uuid)?;
+        format_language_source_xml(&header, &language, source_version).into_bytes()
+    } else if kind == "DocumentNumerator" {
+        let document_numerator = parse_document_numerator_properties_from_text(text, uuid)?;
+        format_document_numerator_source_xml(&header, &document_numerator, source_version)
+            .into_bytes()
+    } else if kind == "WSReference" {
+        let ws_reference = parse_ws_reference_properties_from_text(text, uuid)?;
+        format_ws_reference_source_xml(&header, &ws_reference, source_version).into_bytes()
+    } else if kind == "IntegrationService" {
+        let service = parse_integration_service_properties_from_text(text, uuid)?;
+        format_integration_service_source_xml(&header, &service, source_version).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
-        format_typed_metadata_source_xml(kind, &header, &typed).into_bytes()
+        format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
     } else {
         format_metadata_source_xml(kind, &header).into_bytes()
     };
@@ -13131,6 +15281,37 @@ fn parse_common_picture_properties_from_text(
     })
 }
 
+fn parse_functional_option_properties_from_text(
+    text: &str,
+    uuid: &str,
+    refs: &BTreeMap<String, String>,
+) -> Option<FunctionalOptionProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("2")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+    let location = fields
+        .get(2)
+        .and_then(|field| parse_non_zero_uuid(field.trim()))
+        .and_then(|uuid| refs.get(&uuid).cloned());
+    let content = fields
+        .get(3)
+        .map(|field| {
+            uuid_like_values_in_text_order(field)
+                .into_iter()
+                .filter_map(|uuid| refs.get(&uuid).cloned())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some(FunctionalOptionProperties {
+        location,
+        privileged_get_mode: parse_1c_bool_field(fields.get(4).copied()).unwrap_or(false),
+        content,
+    })
+}
+
 fn parse_catalog_properties_from_text(
     text: &str,
     uuid: &str,
@@ -13237,6 +15418,211 @@ fn parse_catalog_properties_from_text(
         extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
     })
+}
+
+fn parse_enum_properties_from_text(
+    text: &str,
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<EnumProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("20") {
+        return None;
+    }
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("EnumRef.{}", header.name),
+        "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("EnumManager.{}", header.name),
+        "Manager",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        7,
+        8,
+        &format!("EnumList.{}", header.name),
+        "List",
+    );
+
+    let values = parse_enum_values_from_text(text);
+
+    Some(EnumProperties {
+        generated_types,
+        use_standard_commands: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(true),
+        quick_choice: parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true),
+        choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(11).copied()).unwrap_or(2)),
+        default_list_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
+        default_choice_form: parse_catalog_form_ref(fields.get(10).copied(), form_refs),
+        auxiliary_list_form: parse_catalog_form_ref(fields.get(13).copied(), form_refs),
+        auxiliary_choice_form: parse_catalog_form_ref(fields.get(14).copied(), form_refs),
+        list_presentation: parse_1c_synonyms(fields.get(15).copied().unwrap_or("{0}")),
+        extended_list_presentation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
+        explanation: parse_1c_synonyms(fields.get(17).copied().unwrap_or("{0}")),
+        values,
+        child_forms: owned_enum_form_names_in_text_order(text, &header.name, form_refs),
+        child_templates: owned_enum_template_names_in_text_order(text, &header.name, template_refs),
+    })
+}
+
+fn parse_enum_values_from_text(text: &str) -> Vec<MetadataHeader> {
+    let Some(root_fields) = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0) else {
+        return Vec::new();
+    };
+    root_fields
+        .iter()
+        .rev()
+        .find_map(|field| parse_enum_values(field))
+        .unwrap_or_default()
+}
+
+fn parse_enum_values(text: &str) -> Option<Vec<MetadataHeader>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count == 0 || fields.len() < count + 2 {
+        return None;
+    }
+    let values = fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_enum_value_header(field))
+        .collect::<Vec<_>>();
+    if values.len() == count {
+        Some(values)
+    } else {
+        None
+    }
+}
+
+fn parse_enum_value_header(text: &str) -> Option<MetadataHeader> {
+    let marker = "{1,0,";
+    let uuid_start = text.find(marker)? + marker.len();
+    let uuid_end = uuid_start + 36;
+    let uuid = text.get(uuid_start..uuid_end)?;
+    if !is_uuid_text(uuid) {
+        return None;
+    }
+    parse_metadata_header_from_text(text, uuid)
+}
+
+fn owned_enum_form_names_in_text_order(
+    text: &str,
+    enum_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = BTreeSet::new();
+    if let Some(form_uuids) = owned_form_uuid_values_in_text_order(text) {
+        for uuid in form_uuids {
+            let Some(form_ref) = form_refs.get(&uuid) else {
+                continue;
+            };
+            if form_ref.kind != "Form"
+                || !is_owned_enum_child_path(&form_ref.relative_path, enum_name, "Forms")
+            {
+                continue;
+            }
+            let Some(name) = source_path_file_stem(&form_ref.relative_path) else {
+                continue;
+            };
+            if seen.insert(name.clone()) {
+                names.push(name);
+            }
+        }
+    }
+
+    let mut path_names = form_refs
+        .values()
+        .filter(|form_ref| {
+            form_ref.kind == "Form"
+                && is_owned_enum_child_path(&form_ref.relative_path, enum_name, "Forms")
+        })
+        .filter_map(|form_ref| {
+            source_path_file_stem(&form_ref.relative_path)
+                .map(|name| (form_ref.relative_path.clone(), name))
+        })
+        .collect::<Vec<_>>();
+    path_names.sort_by(|(left_path, _), (right_path, _)| left_path.cmp(right_path));
+    for (_, name) in path_names {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+
+    names
+}
+
+fn owned_enum_template_names_in_text_order(
+    text: &str,
+    enum_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = BTreeSet::new();
+    for uuid in uuid_like_values_in_text_order(text) {
+        let Some(template_ref) = template_refs.get(&uuid) else {
+            continue;
+        };
+        if template_ref.kind != "Template"
+            || !is_owned_enum_child_path(&template_ref.relative_path, enum_name, "Templates")
+        {
+            continue;
+        }
+        let Some(name) = source_path_file_stem(&template_ref.relative_path) else {
+            continue;
+        };
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+
+    let mut path_names = template_refs
+        .values()
+        .filter(|template_ref| {
+            template_ref.kind == "Template"
+                && is_owned_enum_child_path(&template_ref.relative_path, enum_name, "Templates")
+        })
+        .filter_map(|template_ref| {
+            source_path_file_stem(&template_ref.relative_path)
+                .map(|name| (template_ref.relative_path.clone(), name))
+        })
+        .collect::<Vec<_>>();
+    path_names.sort_by(|(left_path, _), (right_path, _)| left_path.cmp(right_path));
+    for (_, name) in path_names {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    }
+
+    names
+}
+
+fn is_owned_enum_child_path(path: &Path, enum_name: &str, child_folder: &str) -> bool {
+    let parts = path
+        .iter()
+        .filter_map(|part| part.to_str())
+        .collect::<Vec<_>>();
+    parts.len() == 4
+        && parts.first() == Some(&"Enums")
+        && parts.get(1) == Some(&enum_name)
+        && parts.get(2) == Some(&child_folder)
+}
+
+fn source_path_file_stem(path: &Path) -> Option<String> {
+    path.file_stem()?.to_str().map(ToString::to_string)
 }
 
 fn push_generated_type_entry(
@@ -13393,6 +15779,15 @@ fn catalog_code_series_xml(value: u32) -> Option<&'static str> {
     }
 }
 
+fn enum_choice_mode_xml(value: u32) -> &'static str {
+    match value {
+        0 => "FromList",
+        1 => "QuickChoice",
+        2 => "BothWays",
+        _ => "BothWays",
+    }
+}
+
 fn parse_1c_bool_flag(value: &str) -> Option<bool> {
     match value {
         "0" => Some(false),
@@ -13414,6 +15809,8 @@ fn parse_constant_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ConstantProperties> {
     let marker = format!("{{1,0,{uuid}}}");
     let marker_start = text.find(&marker)?;
@@ -13425,12 +15822,129 @@ fn parse_constant_properties_from_text(
 
     let constant_object_start = text[..marker_start].rfind("{16,")?;
     let constant_fields = split_1c_braced_fields(text, constant_object_start)?;
+    let constant_detail_fields = split_1c_braced_fields(constant_fields.get(1)?, 0)?;
+    let tooltip = parse_1c_synonyms(constant_detail_fields.get(4).copied().unwrap_or("{0}"));
+    let extended_presentation = parse_1c_synonyms(constant_fields.get(8).copied().unwrap_or("{0}"));
+    let explanation = parse_1c_synonyms(constant_fields.get(9).copied().unwrap_or("{0}"));
     let use_standard_commands = parse_1c_bool_flag(constant_fields.get(7)?.trim())?;
+    let default_form = parse_catalog_form_ref(constant_fields.get(10).copied(), form_refs);
+    let password_mode = parse_1c_bool_flag(constant_detail_fields.get(2)?.trim())?;
+    let format = parse_1c_synonyms(constant_detail_fields.get(3).copied().unwrap_or("{0}"));
+    let edit_format = parse_1c_synonyms(constant_detail_fields.get(18).copied().unwrap_or("{0}"));
+    let mask = constant_detail_fields
+        .get(6)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
+        .unwrap_or_default();
+    let min_value = parse_constant_bound_value(constant_detail_fields.get(8).copied());
+    let max_value = parse_constant_bound_value(constant_detail_fields.get(9).copied());
+    let fill_checking = match constant_detail_fields.get(13).map(|field| field.trim()) {
+        Some("1") => "ShowError",
+        _ => "DontCheck",
+    };
+    let choice_parameters =
+        parse_constant_choice_parameters(constant_detail_fields.get(16).copied(), object_refs);
+    let choice_history_on_input = match constant_detail_fields.get(22).map(|field| field.trim()) {
+        Some("1") => "DontUse",
+        _ => "Auto",
+    };
+    let data_lock_control_mode = match constant_fields.get(6).map(|field| field.trim()) {
+        Some("0") => "Automatic",
+        _ => "Managed",
+    };
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &constant_fields,
+        2,
+        3,
+        &format!("ConstantManager.{}", header.name),
+        "Manager",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &constant_fields,
+        4,
+        5,
+        &format!("ConstantValueManager.{}", header.name),
+        "ValueManager",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &constant_fields,
+        13,
+        14,
+        &format!("ConstantValueKey.{}", header.name),
+        "ValueKey",
+    );
 
     Some(ConstantProperties {
+        generated_types,
         value_type,
+        tooltip,
+        extended_presentation,
+        explanation,
         use_standard_commands,
+        default_form,
+        password_mode,
+        format,
+        edit_format,
+        mask,
+        min_value,
+        max_value,
+        fill_checking,
+        choice_parameters,
+        choice_history_on_input,
+        data_lock_control_mode,
     })
+}
+
+fn parse_constant_choice_parameters(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<ChoiceParameter> {
+    let Some(fields) = field.and_then(|field| split_1c_braced_fields(field, 0)) else {
+        return Vec::new();
+    };
+    let count = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut parameters = Vec::new();
+    let mut index = 2usize;
+    for _ in 0..count {
+        let (Some(name), Some(value)) = (fields.get(index), fields.get(index + 1)) else {
+            break;
+        };
+        if let Some(name) = parse_1c_quoted_string(name.trim())
+            && let Some(value_ref) = parse_design_time_reference(value, object_refs)
+        {
+            parameters.push(ChoiceParameter { name, value_ref });
+        }
+        index += 2;
+    }
+    parameters
+}
+
+fn parse_design_time_reference(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    uuid_like_values(text)
+        .into_iter()
+        .rev()
+        .filter_map(|uuid| object_refs.get(&uuid).cloned())
+        .next()
+}
+
+fn parse_constant_bound_value(field: Option<&str>) -> Option<String> {
+    let fields = split_1c_braced_fields(field?, 0)?;
+    if fields.first()?.trim() != r#""S""# {
+        return None;
+    }
+    fields
+        .get(1)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
 }
 
 fn parse_typed_metadata_properties_from_text(
@@ -13446,6 +15960,249 @@ fn parse_typed_metadata_properties_from_text(
     }
 
     Some(TypedMetadataProperties { value_types })
+}
+
+fn parse_functional_options_parameter_properties_from_text(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FunctionalOptionsParameterProperties> {
+    let fields = metadata_object_fields(text)?;
+    if metadata_header_field_index(&fields, uuid) != Some(1) {
+        return None;
+    }
+    let use_refs = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .map(|fields| parse_functional_options_parameter_use_refs(&fields, object_refs))
+        .unwrap_or_default();
+    Some(FunctionalOptionsParameterProperties { use_refs })
+}
+
+fn parse_functional_options_parameter_use_refs(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .collect()
+}
+
+fn parse_language_properties_from_text(text: &str, uuid: &str) -> Option<LanguageProperties> {
+    let fields = metadata_object_fields(text)?;
+    if metadata_header_field_index(&fields, uuid) != Some(1) {
+        return None;
+    }
+    let language_code = fields
+        .get(2)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))?;
+    Some(LanguageProperties { language_code })
+}
+
+fn parse_document_numerator_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<DocumentNumeratorProperties> {
+    let fields = metadata_object_fields(text)?;
+    if metadata_header_field_index(&fields, uuid) != Some(1) {
+        return None;
+    }
+    Some(DocumentNumeratorProperties {
+        number_type: document_numerator_number_type_xml(parse_1c_u32_field(
+            fields.get(2).copied(),
+        )?),
+        number_length: parse_1c_u32_field(fields.get(3).copied())?,
+        number_allowed_length: document_numerator_allowed_length_xml(parse_1c_u32_field(
+            fields.get(4).copied(),
+        )?),
+        check_unique: parse_1c_bool_field(fields.get(5).copied())?,
+        number_periodicity: document_numerator_periodicity_xml(parse_1c_u32_field(
+            fields.get(6).copied(),
+        )?),
+    })
+}
+
+fn document_numerator_number_type_xml(value: u32) -> &'static str {
+    match value {
+        0 => "Number",
+        _ => "String",
+    }
+}
+
+fn document_numerator_allowed_length_xml(value: u32) -> &'static str {
+    match value {
+        1 => "Fixed",
+        _ => "Variable",
+    }
+}
+
+fn document_numerator_periodicity_xml(value: u32) -> &'static str {
+    match value {
+        1 => "Month",
+        2 => "Quarter",
+        3 => "Day",
+        4 => "None",
+        _ => "Year",
+    }
+}
+
+fn parse_ws_reference_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<WSReferenceProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("2")
+        || metadata_header_field_index(&fields, uuid) != Some(2)
+    {
+        return None;
+    }
+    let location_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let location_url = location_fields
+        .first()
+        .and_then(|field| parse_1c_quoted_string(field.trim()))?;
+    Some(WSReferenceProperties {
+        location_url,
+        manager_type_id: parse_uuid_field(fields.get(3)?.trim())?,
+        manager_value_id: parse_uuid_field(fields.get(4)?.trim())?,
+    })
+}
+
+fn parse_integration_service_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<IntegrationServiceProperties> {
+    let root_fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("0")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+    let mut channels = root_fields
+        .get(3)
+        .and_then(|field| parse_integration_service_channels(field))
+        .unwrap_or_default();
+    if channels.is_empty() {
+        channels = parse_integration_service_channels_from_text(text);
+    }
+    Some(IntegrationServiceProperties {
+        manager_type_id: parse_uuid_field(fields.get(2)?.trim())?,
+        manager_value_id: parse_uuid_field(fields.get(3)?.trim())?,
+        external_address: fields
+            .get(4)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        channels,
+    })
+}
+
+fn parse_integration_service_channels_from_text(
+    text: &str,
+) -> Vec<IntegrationServiceChannelProperties> {
+    let mut channels = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut offset = 0usize;
+    while let Some(relative) = text[offset..].find("{1,") {
+        let start = offset + relative;
+        offset = start + 3;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if let Some(channel) = parse_integration_service_channel(&text[start..end])
+            && seen.insert(channel.header.uuid.clone())
+        {
+            channels.push(channel);
+        }
+    }
+    channels
+}
+
+fn parse_integration_service_channels(
+    text: &str,
+) -> Option<Vec<IntegrationServiceChannelProperties>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let channel_items = split_1c_braced_sequence(fields.get(2)?)?;
+    Some(
+        channel_items
+            .into_iter()
+            .take(count)
+            .filter_map(|field| parse_integration_service_channel(field))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn parse_integration_service_channel(text: &str) -> Option<IntegrationServiceChannelProperties> {
+    let object_start = text.find("{1,")?;
+    let fields = split_1c_braced_fields(text, object_start)?;
+    if fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    let header_text = *fields.get(1)?;
+    let uuid = uuid_like_values_in_text_order(header_text)
+        .into_iter()
+        .next()?;
+    let header = parse_metadata_header_from_text(header_text, &uuid)?;
+    Some(IntegrationServiceChannelProperties {
+        header,
+        manager_type_id: parse_uuid_field(fields.get(2)?.trim())?,
+        manager_value_id: parse_uuid_field(fields.get(3)?.trim())?,
+        external_name: fields
+            .get(4)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        receive_message_processing: fields
+            .get(5)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        message_direction: integration_service_message_direction_xml(parse_1c_u32_field(
+            fields.get(6).copied(),
+        )?),
+        transactioned: parse_1c_bool_field(fields.get(7).copied())?,
+    })
+}
+
+fn integration_service_message_direction_xml(value: u32) -> &'static str {
+    match value {
+        1 => "Receive",
+        _ => "Send",
+    }
+}
+
+fn split_1c_braced_sequence(text: &str) -> Option<Vec<&str>> {
+    let text = text.trim();
+    if !text.starts_with('{') || !text.ends_with('}') {
+        return None;
+    }
+    let mut fields = Vec::new();
+    let mut offset = 1usize;
+    let end = text.len().checked_sub(1)?;
+    while offset < end {
+        offset = skip_ascii_ws_at(text, offset);
+        while text[offset..].starts_with(',') {
+            offset += 1;
+            offset = skip_ascii_ws_at(text, offset);
+        }
+        if offset >= end {
+            break;
+        }
+        if !text[offset..].starts_with('{') {
+            return None;
+        }
+        let item_end = scan_1c_braced_value(text, offset)?;
+        fields.push(text[offset..item_end].trim());
+        offset = item_end;
+    }
+    Some(fields)
 }
 
 fn parse_typed_metadata_value_types_before(
@@ -13471,8 +16228,21 @@ fn parse_defined_type_properties_from_text(
     if value_types.is_empty() {
         return None;
     }
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("DefinedType.{}", header.name),
+        "DefinedType",
+    );
 
-    Some(DefinedTypeProperties { value_types })
+    Some(DefinedTypeProperties {
+        generated_types,
+        value_types,
+    })
 }
 
 fn parse_command_group_properties_from_text(
@@ -13521,6 +16291,9 @@ fn parse_common_command_properties_from_text(
         parse_common_command_picture_value(fields.get(1)?, object_refs)?;
     let representation = common_command_representation_xml(fields.get(2)?.trim().parse().ok()?);
     let tooltip = parse_1c_synonyms(fields.get(3).copied().unwrap_or("{0}"));
+    let shortcut = fields
+        .get(5)
+        .and_then(|field| parse_common_command_shortcut_value(field));
     let include_help_in_contents = fields
         .get(6)
         .and_then(|field| parse_1c_bool_flag(field.trim()))
@@ -13546,6 +16319,7 @@ fn parse_common_command_properties_from_text(
         picture_ref,
         picture_load_transparent,
         tooltip,
+        shortcut,
         include_help_in_contents,
         group,
         command_parameter_types,
@@ -13580,6 +16354,9 @@ fn parse_command_group_picture_value(
             {
                 return Some((Some(reference.clone()), load_transparent));
             }
+            if let Some(reference) = common_command_standard_picture_name(uuid) {
+                return Some((Some(reference.to_string()), load_transparent));
+            }
         }
         if ref_fields.first()?.trim() == "-13" {
             return Some((Some("StdPicture.Print".to_string()), load_transparent));
@@ -13606,10 +16383,16 @@ fn parse_common_command_picture_value(
     }
     if picture_kind == 1 {
         let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+        if ref_fields.first()?.trim() == "-7" {
+            return Some((
+                Some("StdPicture.InputFieldOpen".to_string()),
+                load_transparent,
+            ));
+        }
         if ref_fields.first()?.trim() == "0" {
             let uuid = ref_fields.get(1)?.trim();
-            if uuid.eq_ignore_ascii_case(STD_PICTURE_USER_UUID) {
-                return Some((Some("StdPicture.User".to_string()), load_transparent));
+            if let Some(reference) = common_command_standard_picture_name(uuid) {
+                return Some((Some(reference.to_string()), load_transparent));
             }
             if let Some(reference) = object_refs.get(uuid)
                 && reference.starts_with("CommonPicture.")
@@ -13619,6 +16402,43 @@ fn parse_common_command_picture_value(
         }
     }
     Some((None, load_transparent))
+}
+
+fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let key_code = fields.get(1)?.trim().parse::<u16>().ok()?;
+    let modifier_code = fields
+        .get(2)
+        .and_then(|field| field.trim().parse::<u16>().ok())
+        .unwrap_or(0);
+    if key_code == 0 || modifier_code != 0 {
+        return None;
+    }
+    if (112..=123).contains(&key_code) {
+        return Some(format!("F{}", key_code - 111));
+    }
+    None
+}
+
+fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
+    match uuid.to_ascii_lowercase().as_str() {
+        STD_PICTURE_USER_UUID => Some("StdPicture.User"),
+        STD_PICTURE_LOAD_REPORT_SETTINGS_UUID => Some("StdPicture.LoadReportSettings"),
+        STD_PICTURE_INFORMATION_REGISTER_UUID => Some("StdPicture.InformationRegister"),
+        "37cf7cc0-abad-4385-b597-6fd2d8dc085a" => Some("StdPicture.Task"),
+        "2f130057-bb2a-4e22-bba5-e108fac26940" => Some("StdPicture.ChooseValue"),
+        "e8a49985-fef7-45a9-b6bb-ddd2b9028172" => Some("StdPicture.DataHistory"),
+        "a24cff7f-a1a5-4403-af82-a7b31852cde9" => Some("StdPicture.BusinessProcessObject"),
+        "448d6f55-d885-496c-870d-d1bd78374745" => Some("StdPicture.CloneListItem"),
+        "723765ab-0b92-4745-a621-1ba0f77c92c9" => Some("StdPicture.EventLog"),
+        "4d2570b5-205f-413c-b4cc-b2097f61684f" => Some("StdPicture.CreateInitialImage"),
+        "894cf65b-4109-4533-a1d7-c87b1fcc80a3" => Some("StdPicture.Write"),
+        "08a45a70-c221-4339-b3b1-9f11cb22147d" => Some("StdPicture.Delete"),
+        _ => None,
+    }
 }
 
 fn parse_common_command_group_value(
@@ -13642,33 +16462,26 @@ fn parse_common_command_parameter_type_names(
     value: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Vec<String> {
-    let Some(fields) = split_1c_braced_fields(value, 0) else {
-        return Vec::new();
-    };
-    fields
+    parse_metadata_type_pattern(value, type_index)
+        .unwrap_or_default()
         .iter()
-        .skip(1)
-        .filter_map(|field| {
-            let type_id = field
-                .trim()
-                .trim_start_matches('{')
-                .trim_end_matches('}')
-                .trim();
-            type_index.get(type_id).cloned()
-        })
+        .map(metadata_type_xml_name)
         .collect()
 }
 
 fn common_command_group_name(uuid: &str) -> Option<&'static str> {
+    // Platform standard command group UUIDs; these are not configuration-specific ids.
     match uuid.to_ascii_lowercase().as_str() {
         "77ea1b8f-dd79-4717-9dba-5628e7f348cf" => Some("NavigationPanelOrdinary"),
         "bc80566a-86a5-4e87-acd4-872239385a2e" => Some("NavigationPanelSeeAlso"),
+        "1af6d528-0b86-4fba-ab95-bd7475db03ba" => Some("NavigationPanelImportant"),
         "4f499c31-050b-47c5-aa84-d0366c0a0da8" => Some("ActionsPanelCreate"),
         "5b360bff-01a1-49b6-93d2-26e7e8e3a038" => Some("ActionsPanelReports"),
         "aabb34e1-98c1-4bd0-bf7f-243f95437b44" => Some("ActionsPanelTools"),
         "dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0" => Some("FormCommandBarCreateBasedOn"),
         "cb50f5c0-8013-4262-93a2-f0db379d6b6b" => Some("FormCommandBarImportant"),
         "eacad741-96b9-4b3a-bf79-dde9ecead1a1" => Some("FormNavigationPanelGoTo"),
+        "8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8" => Some("FormNavigationPanelSeeAlso"),
         "dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2" => Some("FormNavigationPanelImportant"),
         _ => None,
     }
@@ -13734,6 +16547,76 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
         }),
         _ => None,
     }
+}
+
+fn parse_scheduled_job_properties_from_text(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ScheduledJobProperties> {
+    let fields = metadata_object_fields(text)?;
+    if metadata_header_field_index(&fields, uuid) != Some(1) {
+        return None;
+    }
+    let key = fields
+        .get(2)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
+        .unwrap_or_default();
+    let description = fields
+        .get(3)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
+        .unwrap_or_default();
+    let use_job = parse_1c_bool_field(fields.get(4).copied())?;
+    let predefined = parse_1c_bool_field(fields.get(5).copied())?;
+    let module_uuid = parse_uuid_field(fields.get(6)?.trim())?;
+    let module_ref = object_refs.get(&module_uuid)?;
+    let method = fields
+        .get(7)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))?;
+    let restart_count_on_failure = parse_1c_u32_field(fields.get(8).copied())?;
+    let restart_interval_on_failure = parse_1c_u32_field(fields.get(9).copied())?;
+
+    Some(ScheduledJobProperties {
+        method_name: format!("{module_ref}.{method}"),
+        description,
+        key,
+        use_job,
+        predefined,
+        restart_count_on_failure,
+        restart_interval_on_failure,
+    })
+}
+
+fn parse_event_subscription_properties_from_text(
+    text: &str,
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<EventSubscriptionProperties> {
+    let fields = metadata_object_fields(text)?;
+    if metadata_header_field_index(&fields, uuid) != Some(1) {
+        return None;
+    }
+    let raw_event = fields
+        .get(3)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))?;
+    let event = raw_event
+        .split_once('_')
+        .map(|(event, _)| event)
+        .unwrap_or(raw_event.as_str())
+        .to_string();
+    let source_types = parse_event_subscription_type_pattern(fields.get(2)?, type_index, &event)?;
+    let module_uuid = parse_uuid_field(fields.get(4)?.trim())?;
+    let module_ref = object_refs.get(&module_uuid)?;
+    let method = fields
+        .get(5)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))?;
+
+    Some(EventSubscriptionProperties {
+        source_types,
+        event,
+        handler: format!("{module_ref}.{method}"),
+    })
 }
 
 fn extract_style_body_xml(bytes: &[u8], object_refs: &BTreeMap<String, String>) -> Result<String> {
@@ -14001,7 +16884,13 @@ fn parse_style_color_value(value: &str) -> Option<String> {
     let code_fields = split_1c_braced_fields(color_fields.get(2)?, 0)?;
     let code = code_fields.first()?.trim().parse::<i32>().ok()?;
     match variant {
-        0 => Some(format!("#{:06X}", code.max(0) as u32 & 0x00ff_ffff)),
+        0 => {
+            let color = code.max(0) as u32 & 0x00ff_ffff;
+            let red = color & 0xff;
+            let green = (color >> 8) & 0xff;
+            let blue = (color >> 16) & 0xff;
+            Some(format!("#{red:02X}{green:02X}{blue:02X}"))
+        }
         2 => style_web_color_name(code).map(ToOwned::to_owned),
         3 => style_system_color_name(code).map(ToOwned::to_owned),
         _ => None,
@@ -14036,7 +16925,7 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         20 => Some("web:Cream"),
         21 => Some("web:Crimson"),
         26 => Some("web:DarkGray"),
-        27 => Some("web:DarkGray"),
+        27 => Some("web:DarkGreen"),
         31 => Some("web:DarkGreen"),
         23 => Some("web:DarkBlue"),
         33 => Some("web:DarkRed"),
@@ -14085,8 +16974,8 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
 fn style_system_color_name(code: i32) -> Option<&'static str> {
     match code {
         -1 => Some("style:FormBackColor"),
-        -11 => Some("style:FormTextColor"),
-        -3 => Some("style:ButtonBackColor"),
+        -3 => Some("style:FormTextColor"),
+        -11 => Some("style:FieldTextColor"),
         -15 => Some("style:ButtonTextColor"),
         -7 => Some("style:FieldBackColor"),
         -13 => Some("style:FieldTextColor"),
@@ -14121,54 +17010,231 @@ fn parse_style_font_value_xml(value: &str) -> String {
         .and_then(|field| split_1c_braced_fields(field, 0))
         .unwrap_or_default();
     let kind = font_fields.get(1).map(|field| field.trim()).unwrap_or("0");
-    let raw = font_fields.get(3).copied().unwrap_or("{0}");
-    let raw_fields = split_1c_braced_fields(raw, 0).unwrap_or_default();
     let mut attrs = Vec::<(&str, String)>::new();
-    if kind == "2" {
-        if let Some(code) = raw_fields.first().map(|field| field.trim())
-            && code == "-31"
-        {
-            attrs.push(("ref", "style:NormalTextFont".to_string()));
-            attrs.push(("kind", "StyleItem".to_string()));
-        }
-    } else if kind == "0" {
-        attrs.push(("kind", "Absolute".to_string()));
-        attrs.push(("faceName", "Arial".to_string()));
+    let (height, weight, italic, underline, strikeout, kind_xml, scale, include_false_flags) =
+        match kind {
+            "0" => {
+                attrs.push((
+                    "faceName",
+                    font_fields
+                        .get(16)
+                        .and_then(|field| parse_1c_quoted_string(field.trim()))
+                        .unwrap_or_else(|| "Arial".to_string()),
+                ));
+                (
+                    font_height_xml(font_fields.get(3).map(|field| field.trim())),
+                    font_fields
+                        .get(7)
+                        .and_then(|field| field.trim().parse::<i32>().ok())
+                        .unwrap_or(400),
+                    font_fields
+                        .get(8)
+                        .and_then(|field| parse_1c_bool_flag(field.trim()))
+                        .unwrap_or(false),
+                    font_fields
+                        .get(9)
+                        .and_then(|field| parse_1c_bool_flag(field.trim()))
+                        .unwrap_or(false),
+                    font_fields
+                        .get(10)
+                        .and_then(|field| parse_1c_bool_flag(field.trim()))
+                        .unwrap_or(false),
+                    "Absolute",
+                    font_fields
+                        .get(18)
+                        .map(|field| field.trim())
+                        .unwrap_or("100"),
+                    true,
+                )
+            }
+            "1" => {
+                attrs.push(("ref", "sys:DefaultGUIFont".to_string()));
+                if font_fields.len() >= 11 {
+                    (
+                        font_height_xml(font_fields.get(4).map(|field| field.trim())),
+                        font_fields
+                            .get(5)
+                            .and_then(|field| field.trim().parse::<i32>().ok())
+                            .unwrap_or(400),
+                        font_fields
+                            .get(6)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(7)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(8)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        "WindowsFont",
+                        font_fields
+                            .get(10)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        true,
+                    )
+                } else if font_fields.len() >= 10 {
+                    (
+                        None,
+                        font_fields
+                            .get(4)
+                            .and_then(|field| field.trim().parse::<i32>().ok())
+                            .unwrap_or(400),
+                        font_fields
+                            .get(5)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(6)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(7)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        "WindowsFont",
+                        font_fields
+                            .get(9)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        true,
+                    )
+                } else {
+                    (
+                        None,
+                        400,
+                        false,
+                        false,
+                        false,
+                        "WindowsFont",
+                        font_fields
+                            .get(5)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        false,
+                    )
+                }
+            }
+            _ => {
+                let raw = font_fields.get(3).copied().unwrap_or("{0}");
+                let raw_fields = split_1c_braced_fields(raw, 0).unwrap_or_default();
+                if let Some(code) = raw_fields
+                    .first()
+                    .and_then(|field| field.trim().parse::<i32>().ok())
+                    && let Some((_, name)) = standard_style_item_for_code(code)
+                {
+                    attrs.push(("ref", format!("style:{name}")));
+                }
+                if font_fields.len() >= 11 {
+                    (
+                        font_height_xml(font_fields.get(4).map(|field| field.trim())),
+                        font_fields
+                            .get(5)
+                            .and_then(|field| field.trim().parse::<i32>().ok())
+                            .unwrap_or(400),
+                        font_fields
+                            .get(6)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(7)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(8)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        "StyleItem",
+                        font_fields
+                            .get(10)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        true,
+                    )
+                } else if font_fields.len() >= 10 {
+                    (
+                        None,
+                        font_fields
+                            .get(4)
+                            .and_then(|field| field.trim().parse::<i32>().ok())
+                            .unwrap_or(400),
+                        font_fields
+                            .get(5)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(6)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        font_fields
+                            .get(7)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        "StyleItem",
+                        font_fields
+                            .get(9)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        true,
+                    )
+                } else if font_fields.get(2).map(|field| field.trim()) == Some("2")
+                    && font_fields.len() >= 7
+                {
+                    (
+                        font_height_xml(font_fields.get(4).map(|field| field.trim())),
+                        400,
+                        false,
+                        false,
+                        false,
+                        "StyleItem",
+                        font_fields
+                            .get(6)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        false,
+                    )
+                } else {
+                    (
+                        None,
+                        font_fields
+                            .get(4)
+                            .and_then(|field| field.trim().parse::<i32>().ok())
+                            .unwrap_or(400),
+                        false,
+                        font_fields
+                            .get(5)
+                            .and_then(|field| parse_1c_bool_flag(field.trim()))
+                            .unwrap_or(false),
+                        false,
+                        "StyleItem",
+                        font_fields
+                            .get(7)
+                            .map(|field| field.trim())
+                            .unwrap_or("100"),
+                        false,
+                    )
+                }
+            }
+        };
+    if let Some(height) = height {
+        attrs.push(("height", height));
     }
-    if kind == "0"
-        && let Some(height) = font_fields.get(2).map(|field| field.trim())
-        && height != "0"
-    {
-        attrs.push(("height", height.to_string()));
+    let bold = weight >= 700;
+    if include_false_flags || bold {
+        attrs.push(("bold", xml_bool(bold).to_string()));
     }
-    let bold = font_fields
-        .get(4)
-        .and_then(|field| field.trim().parse::<i32>().ok())
-        .map(|weight| weight >= 700)
-        .unwrap_or(false);
-    let italic = font_fields
-        .get(5)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let underline = font_fields
-        .get(6)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let strikeout = font_fields
-        .get(7)
-        .and_then(|field| parse_1c_bool_flag(field.trim()))
-        .unwrap_or(false);
-    let scale = font_fields
-        .get(9)
-        .map(|field| field.trim())
-        .unwrap_or("100");
-    attrs.push(("bold", xml_bool(bold).to_string()));
-    attrs.push(("italic", xml_bool(italic).to_string()));
-    attrs.push(("underline", xml_bool(underline).to_string()));
-    attrs.push(("strikeout", xml_bool(strikeout).to_string()));
-    if !attrs.iter().any(|(name, _)| *name == "kind") {
-        attrs.push(("kind", "StyleItem".to_string()));
+    if include_false_flags || italic {
+        attrs.push(("italic", xml_bool(italic).to_string()));
     }
+    if include_false_flags || underline {
+        attrs.push(("underline", xml_bool(underline).to_string()));
+    }
+    if include_false_flags || strikeout {
+        attrs.push(("strikeout", xml_bool(strikeout).to_string()));
+    }
+    attrs.push(("kind", kind_xml.to_string()));
     if scale != "100" || kind == "0" {
         attrs.push(("scale", scale.to_string()));
     }
@@ -14179,6 +17245,15 @@ fn parse_style_font_value_xml(value: &str) -> String {
     }
     xml.push_str("/>");
     xml
+}
+
+fn font_height_xml(raw: Option<&str>) -> Option<String> {
+    let value = raw?.parse::<i32>().ok()?;
+    let height = value / 10;
+    if height == 0 {
+        return None;
+    }
+    Some(height.to_string())
 }
 
 fn parse_metadata_type_pattern(
@@ -14194,6 +17269,51 @@ fn parse_metadata_type_pattern(
         .skip(1)
         .map(|field| parse_metadata_type_pattern_element(field, type_index))
         .collect()
+}
+
+fn parse_event_subscription_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    event: &str,
+) -> Option<Vec<ConstantValueType>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    let type_ids = fields
+        .iter()
+        .skip(1)
+        .map(|field| metadata_type_pattern_field_type_id(field))
+        .collect::<Option<Vec<_>>>()?;
+    fields
+        .iter()
+        .skip(1)
+        .map(|field| {
+            parse_event_subscription_type_pattern_element(field, type_index, event, &type_ids)
+        })
+        .collect()
+}
+
+fn parse_event_subscription_type_pattern_element(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    event: &str,
+    pattern_type_ids: &[String],
+) -> Option<ConstantValueType> {
+    let element = split_1c_braced_fields(value, 0)?;
+    if element.first()?.trim() == r##""#""## && element.len() >= 2 {
+        let type_id = parse_uuid_field(element.get(1)?.trim())?;
+        let reference = type_index
+            .get(&type_id)
+            .cloned()
+            .or_else(|| {
+                event_subscription_builtin_type_reference(event, pattern_type_ids, &type_id)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| builtin_type_reference(&type_id).map(ToOwned::to_owned))?;
+        return Some(ConstantValueType::Reference { reference });
+    }
+    parse_metadata_type_pattern_element(value, type_index)
 }
 
 fn parse_metadata_type_pattern_element(
@@ -14216,7 +17336,13 @@ fn parse_metadata_type_pattern_element(
             fraction_digits: element.get(2)?.trim().parse().ok()?,
             allowed_sign_flag: element.get(3)?.trim().parse().ok()?,
         }),
-        r#""D""# => Some(ConstantValueType::DateTime),
+        r#""D""# => Some(ConstantValueType::DateTime {
+            date_fractions: match element.get(1).map(|field| field.trim()) {
+                Some(r#""D""#) => "Date",
+                Some(r#""T""#) => "Time",
+                _ => "DateTime",
+            },
+        }),
         r##""#""## if element.len() >= 2 => {
             let type_id = parse_uuid_field(element.get(1)?.trim())?;
             let reference = type_index
@@ -14229,6 +17355,50 @@ fn parse_metadata_type_pattern_element(
     }
 }
 
+fn metadata_type_pattern_field_type_id(value: &str) -> Option<String> {
+    let element = split_1c_braced_fields(value, 0)?;
+    if element.first()?.trim() == r##""#""## && element.len() >= 2 {
+        parse_uuid_field(element.get(1)?.trim())
+    } else {
+        Some(String::new())
+    }
+}
+
+fn event_subscription_builtin_type_reference(
+    event: &str,
+    pattern_type_ids: &[String],
+    type_id: &str,
+) -> Option<&'static str> {
+    if event == "FillCheckProcessing" {
+        return match type_id {
+            "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:BusinessProcessObject"),
+            _ => None,
+        };
+    }
+    if pattern_type_ids.len() == 4
+        && pattern_type_ids
+            == [
+                "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed",
+                "30b100d6-b29f-47ac-aec7-cb8ca8a54767",
+                "82a1b659-b220-4d94-a9bd-14d757b95a48",
+                "cf4abea6-37b2-11d4-940f-008048da11f9",
+            ]
+    {
+        return match type_id {
+            "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:ChartOfAccountsObject"),
+            _ => None,
+        };
+    }
+    if pattern_type_ids.len() == 1
+        && pattern_type_ids.first().map(String::as_str)
+            == Some("fcd3404e-1523-48ce-9bc0-ecdb822684a1")
+        && matches!(event, "BeforeWrite" | "OnSetNewNumber")
+    {
+        return Some("cfg:BusinessProcessObject");
+    }
+    None
+}
+
 fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
     match type_id {
         "e199ca70-93cf-46ce-a54b-6edc88c3a296" => Some("v8:ValueStorage"),
@@ -14237,6 +17407,33 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "4500381b-db30-4a10-9db4-990038032acf" => Some("v8:FixedArray"),
         "220455ea-6c85-4513-996f-bbe79ed07774" => Some("v8:FixedMap"),
         "0a52f9de-73ea-4507-81e8-66217bead73a" => Some("cfg:ExchangePlanRef"),
+        "0195e80c-b157-11d4-9435-004095e12fc7" => Some("cfg:ConstantValueManager"),
+        "061d872a-5787-460e-95ac-ed74ea3a3e84" => Some("cfg:DocumentObject"),
+        "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:BusinessProcessObject"),
+        "30b100d6-b29f-47ac-aec7-cb8ca8a54767" => Some("cfg:ChartOfCalculationTypesObject"),
+        "3e63355c-1378-4953-be9b-1deb5fb6bec5" => Some("cfg:ChartOfAccountsObject"),
+        "82a1b659-b220-4d94-a9bd-14d757b95a48" => Some("cfg:ChartOfCharacteristicTypesObject"),
+        "857c4a91-e5f4-4fac-86ec-787626f1c108" => Some("cfg:ExchangePlanObject"),
+        "cf4abea6-37b2-11d4-940f-008048da11f9" => Some("cfg:CatalogObject"),
+        "fcd3404e-1523-48ce-9bc0-ecdb822684a1" => Some("cfg:TaskObject"),
+        "13134201-f60b-11d5-a3c7-0050bae0a776" => Some("cfg:InformationRegisterRecordSet"),
+        "2deed9b8-0056-4ffe-a473-c20a6c32a0bc" => Some("cfg:AccountingRegisterRecordSet"),
+        "b64d9a40-1642-11d6-a3c7-0050bae0a776" => Some("cfg:AccumulationRegisterRecordSet"),
+        "f2de87a8-64e5-45eb-a22d-b3aedab050e7" => Some("cfg:CalculationRegisterRecordSet"),
+        "274bf899-db0e-4df6-8ab5-67bf6371ec0b" => Some("cfg:SequenceRecordSet"),
+        "bc587f20-35d9-11d6-a3c7-0050bae0a776" => Some("cfg:RecalculationRecordSet"),
+        "0dee6ca3-50a1-4f94-8c34-e70eeb802d81" => Some("cfg:AccumulationRegisterManager"),
+        "1aa09f48-f6d5-4999-a7f5-02a15794c795" => Some("cfg:InformationRegisterManager"),
+        "2066866d-9d38-47fe-a272-3cd416eb9c85" => Some("cfg:ChartOfAccountsManager"),
+        "26dd1dee-252a-4942-b4b5-62ea44ed8030" => Some("cfg:DocumentManager"),
+        "2d0abc8e-dede-4184-afd7-7ae8da588d47" => Some("cfg:CalculationRegisterManager"),
+        "38f1038d-8b0b-438b-bfbe-830a60a1153a" => Some("cfg:BusinessProcessManager"),
+        "3ab47eda-6a5c-4590-9b08-0e633aa2f376" => Some("cfg:AccountingRegisterManager"),
+        "3eab4ff4-f2d1-4c96-831c-04711b093999" => Some("cfg:ChartOfCalculationTypesManager"),
+        "5e268c17-8035-458f-8041-daf9b15d05c9" => Some("cfg:TaskManager"),
+        "7612de75-8b10-466a-b235-68572c605d92" => Some("cfg:ChartOfCharacteristicTypesManager"),
+        "82faabf3-7f9b-4b2e-b499-98876415f270" => Some("cfg:CatalogManager"),
+        "92e7f73f-bd66-4d9e-bc43-bae2acfadfd5" => Some("cfg:DocumentJournalManager"),
         _ => None,
     }
 }
@@ -14337,6 +17534,10 @@ fn parse_1c_quoted_string_with_len(input: &str) -> Option<(String, usize)> {
     None
 }
 
+fn parse_1c_quoted_string(input: &str) -> Option<String> {
+    parse_1c_quoted_string_with_len(input).map(|(value, _)| value)
+}
+
 fn parse_1c_synonyms(input: &str) -> Vec<(String, String)> {
     let mut values = Vec::new();
     let mut offset = 0;
@@ -14414,13 +17615,15 @@ fn expect_comma_at(text: &str, offset: usize) -> Option<usize> {
 fn format_common_picture_source_xml(
     header: &MetadataHeader,
     picture: &CommonPictureProperties,
+    source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{}\">\r\n\
 \t<CommonPicture uuid=\"{}\">\r\n\
 \t\t<Properties>\r\n\
 \t\t\t<Name>{}</Name>\r\n",
+        source_version.as_str(),
         escape_xml_text(&header.uuid),
         escape_xml_text(&header.name)
     );
@@ -14458,6 +17661,55 @@ fn format_common_picture_source_xml(
 </MetaDataObject>",
         xml_bool(picture.availability_for_choice),
         xml_bool(picture.availability_for_appearance)
+    ));
+    xml
+}
+
+fn format_full_metadata_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{}\">\r\n\
+\t<{kind} uuid=\"{}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>{}</Name>\r\n",
+        source_version.as_str(),
+        escape_xml_text(&header.uuid),
+        escape_xml_element_text(&header.name)
+    );
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_element_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t</Properties>\r\n\
+\t</{kind}>\r\n\
+</MetaDataObject>"
     ));
     xml
 }
@@ -14518,11 +17770,11 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
             xml.push_str("\t\t\t\t<v8:item>\r\n");
             xml.push_str(&format!(
                 "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
+                escape_xml_element_text(lang)
             ));
             xml.push_str(&format!(
                 "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
+                escape_xml_element_text(content)
             ));
             xml.push_str("\t\t\t\t</v8:item>\r\n");
         }
@@ -14598,11 +17850,11 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
             xml.push_str("\t\t\t\t<v8:item>\r\n");
             xml.push_str(&format!(
                 "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
+                escape_xml_element_text(lang)
             ));
             xml.push_str(&format!(
                 "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
+                escape_xml_element_text(content)
             ));
             xml.push_str("\t\t\t\t</v8:item>\r\n");
         }
@@ -14779,6 +18031,212 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
     );
     xml.push_str("\t\t</Properties>\r\n\t</Catalog>\r\n</MetaDataObject>");
     xml
+}
+
+fn format_enum_source_xml(
+    header: &MetadataHeader,
+    enumeration: &EnumProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
+        " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""
+    } else {
+        ""
+    };
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\"{} xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{}\">\r\n\
+\t<Enum uuid=\"{}\">\r\n",
+        palette_namespace,
+        source_version.as_str(),
+        escape_xml_text(&header.uuid),
+    );
+
+    if !enumeration.generated_types.is_empty() {
+        xml.push_str("\t\t<InternalInfo>\r\n");
+        for generated_type in &enumeration.generated_types {
+            xml.push_str(&format!(
+                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+                escape_xml_text(&generated_type.name),
+                escape_xml_text(generated_type.category),
+                escape_xml_text(&generated_type.type_id),
+                escape_xml_text(&generated_type.value_id)
+            ));
+        }
+        xml.push_str("\t\t</InternalInfo>\r\n");
+    }
+
+    xml.push_str("\t\t<Properties>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_element_text(&header.name)
+    ));
+    push_header_synonym_xml(&mut xml, "\t\t\t", &header.synonyms);
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+        xml_bool(enumeration.use_standard_commands)
+    ));
+    push_enum_standard_attributes_xml(&mut xml);
+    xml.push_str(&format!(
+        "\t\t\t<Characteristics/>\r\n\
+\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
+\t\t\t<ChoiceMode>{}</ChoiceMode>\r\n",
+        xml_bool(enumeration.quick_choice),
+        enumeration.choice_mode
+    ));
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultListForm",
+        enumeration.default_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultChoiceForm",
+        enumeration.default_choice_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryListForm",
+        enumeration.auxiliary_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "AuxiliaryChoiceForm",
+        enumeration.auxiliary_choice_form.as_deref(),
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ListPresentation",
+        &enumeration.list_presentation,
+    );
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ExtendedListPresentation",
+        &enumeration.extended_list_presentation,
+    );
+    push_localized_property(&mut xml, "\t\t\t", "Explanation", &enumeration.explanation);
+    xml.push_str("\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n");
+    xml.push_str("\t\t</Properties>\r\n");
+
+    if !enumeration.values.is_empty()
+        || !enumeration.child_forms.is_empty()
+        || !enumeration.child_templates.is_empty()
+    {
+        xml.push_str("\t\t<ChildObjects>\r\n");
+        for value in &enumeration.values {
+            xml.push_str(&format!(
+                "\t\t\t<EnumValue uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+                escape_xml_text(&value.uuid),
+                escape_xml_element_text(&value.name)
+            ));
+            push_header_synonym_xml(&mut xml, "\t\t\t\t\t", &value.synonyms);
+            if value.comment.is_empty() {
+                xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+            } else {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+                    escape_xml_element_text(&value.comment)
+                ));
+            }
+            if source_version == InfobaseConfigSourceVersion::V2_21 {
+                xml.push_str("\t\t\t\t\t<Color>auto</Color>\r\n");
+            }
+            xml.push_str("\t\t\t\t</Properties>\r\n\t\t\t</EnumValue>\r\n");
+        }
+        for form in &enumeration.child_forms {
+            xml.push_str(&format!(
+                "\t\t\t<Form>{}</Form>\r\n",
+                escape_xml_element_text(form)
+            ));
+        }
+        for template in &enumeration.child_templates {
+            xml.push_str(&format!(
+                "\t\t\t<Template>{}</Template>\r\n",
+                escape_xml_element_text(template)
+            ));
+        }
+        xml.push_str("\t\t</ChildObjects>\r\n");
+    }
+
+    xml.push_str("\t</Enum>\r\n</MetaDataObject>");
+    xml
+}
+
+fn push_header_synonym_xml(xml: &mut String, indent: &str, synonyms: &[(String, String)]) {
+    if synonyms.is_empty() {
+        xml.push_str(&format!("{indent}<Synonym/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{indent}<Synonym>\r\n"));
+    for (lang, content) in synonyms {
+        xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(lang)
+        ));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(content)
+        ));
+        xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
+    }
+    xml.push_str(&format!("{indent}</Synonym>\r\n"));
+}
+
+fn push_enum_standard_attributes_xml(xml: &mut String) {
+    xml.push_str("\t\t\t<StandardAttributes>\r\n");
+    for name in ["Order", "Ref"] {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
+\t\t\t\t\t<xr:LinkByType/>\r\n\
+\t\t\t\t\t<xr:FillChecking>DontCheck</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:ToolTip/>\r\n\
+\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:Format/>\r\n\
+\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+\t\t\t\t\t<xr:EditFormat/>\r\n\
+\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Synonym/>\r\n\
+\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
+\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n",
+            escape_xml_text(name)
+        ));
+    }
+    xml.push_str("\t\t\t</StandardAttributes>\r\n");
 }
 
 fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
@@ -14979,23 +18437,61 @@ fn push_localized_property(
         xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
         xml.push_str(&format!(
             "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
-            escape_xml_text(lang)
+            escape_xml_element_text(lang)
         ));
         xml.push_str(&format!(
             "{indent}\t\t<v8:content>{}</v8:content>\r\n",
-            escape_xml_text(content)
+            escape_xml_element_text(content)
         ));
         xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
     }
     xml.push_str(&format!("{indent}</{name}>\r\n"));
 }
 
-fn format_template_source_xml(kind: &str, header: &MetadataHeader, template_type: &str) -> String {
-    let mut xml = format_metadata_source_xml(kind, header);
+fn format_template_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    template_type: &str,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml(kind, header, source_version);
     let insert = format!(
         "\t\t\t<TemplateType>{}</TemplateType>\r\n",
         escape_xml_text(template_type)
     );
+    xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
+    xml
+}
+
+fn format_functional_option_source_xml(
+    header: &MetadataHeader,
+    properties: &FunctionalOptionProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("FunctionalOption", header, source_version);
+    let mut insert = String::new();
+    if let Some(location) = &properties.location {
+        insert.push_str(&format!(
+            "\t\t\t<Location>{}</Location>\r\n",
+            escape_xml_text(location)
+        ));
+    }
+    insert.push_str(&format!(
+        "\t\t\t<PrivilegedGetMode>{}</PrivilegedGetMode>\r\n",
+        xml_bool(properties.privileged_get_mode)
+    ));
+    if properties.content.is_empty() {
+        insert.push_str("\t\t\t<Content/>\r\n");
+    } else {
+        insert.push_str("\t\t\t<Content>\r\n");
+        for item in &properties.content {
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:Object>{}</xr:Object>\r\n",
+                escape_xml_text(item)
+            ));
+        }
+        insert.push_str("\t\t\t</Content>\r\n");
+    }
     xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
     xml
 }
@@ -15053,66 +18549,67 @@ fn insert_metadata_child_commands_xml(
     xml.insert_str(index, &child_objects);
 }
 
-fn format_common_command_source_xml(
+fn format_common_command_source_xml_native(
     header: &MetadataHeader,
     properties: &CommonCommandProperties,
+    source_version: InfobaseConfigSourceVersion,
 ) -> String {
-    let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-\t<CommonCommand uuid=\"{}\">\r\n\
-\t\t<Properties>\r\n\
-\t\t\t<Name>{}</Name>\r\n",
-        escape_xml_text(&header.uuid),
-        escape_xml_text(&header.name)
-    );
-    if header.synonyms.is_empty() {
-        xml.push_str("\t\t\t<Synonym/>\r\n");
-    } else {
-        xml.push_str("\t\t\t<Synonym>\r\n");
-        for (lang, content) in &header.synonyms {
-            xml.push_str("\t\t\t\t<v8:item>\r\n");
-            xml.push_str(&format!(
-                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
-            ));
-            xml.push_str(&format!(
-                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
-            ));
-            xml.push_str("\t\t\t\t</v8:item>\r\n");
-        }
-        xml.push_str("\t\t\t</Synonym>\r\n");
-    }
-    xml.push_str(&format!(
-        "\t\t\t<Comment>{}</Comment>\r\n\
-\t\t\t<Group>{}</Group>\r\n",
-        escape_xml_text(&header.comment),
+    let mut xml = format_full_metadata_source_xml("CommonCommand", header, source_version);
+    let mut insert = format!(
+        "\t\t\t<Group>{}</Group>\r\n\
+\t\t\t<Representation>{}</Representation>\r\n",
         escape_xml_text(properties.group.as_deref().unwrap_or("ActionsPanelTools")),
-    ));
-    format_common_command_picture_xml(&mut xml, properties);
-    xml.push_str(&format!(
-        "\t\t\t<Representation>{}</Representation>\r\n",
         properties.representation
-    ));
-    push_localized_property(&mut xml, "\t\t\t", "ToolTip", &properties.tooltip);
-    xml.push_str(&format!(
+    );
+    push_common_command_tooltip_xml(&mut insert, &properties.tooltip);
+    format_common_command_picture_xml(&mut insert, properties);
+    if let Some(shortcut) = properties.shortcut.as_deref() {
+        insert.push_str(&format!(
+            "\t\t\t<Shortcut>{}</Shortcut>\r\n",
+            escape_xml_element_text(shortcut)
+        ));
+    } else {
+        insert.push_str("\t\t\t<Shortcut/>\r\n");
+    }
+    insert.push_str(&format!(
         "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
         xml_bool(properties.include_help_in_contents)
     ));
-    format_common_command_parameter_type_xml(&mut xml, &properties.command_parameter_types);
-    xml.push_str(&format!(
+    format_common_command_parameter_type_xml(&mut insert, &properties.command_parameter_types);
+    insert.push_str(&format!(
         "\t\t\t<ParameterUseMode>{}</ParameterUseMode>\r\n\
 \t\t\t<ModifiesData>{}</ModifiesData>\r\n\
-\t\t\t<OnMainServerUnavalableBehavior>{}</OnMainServerUnavalableBehavior>\r\n\
-\t\t</Properties>\r\n\
-\t</CommonCommand>\r\n\
-</MetaDataObject>\r\n",
+\t\t\t<OnMainServerUnavalableBehavior>{}</OnMainServerUnavalableBehavior>\r\n",
         properties.parameter_use_mode,
         xml_bool(properties.modifies_data),
         properties.on_main_server_unavailable_behavior,
     ));
+    if let Some(index) = xml.find("\t\t</Properties>\r\n") {
+        xml.insert_str(index, &insert);
+    }
     xml
+}
+
+fn push_common_command_tooltip_xml(xml: &mut String, values: &[(String, String)]) {
+    if values.is_empty() {
+        xml.push_str("\t\t\t<ToolTip/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<ToolTip>\r\n");
+    for (lang, content) in values {
+        let content = content.replace("\r\n", "\n").replace('\r', "\n");
+        xml.push_str("\t\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_text(lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&content)
+        ));
+        xml.push_str("\t\t\t\t</v8:item>\r\n");
+    }
+    xml.push_str("\t\t\t</ToolTip>\r\n");
 }
 
 fn format_common_command_picture_xml(xml: &mut String, properties: &CommonCommandProperties) {
@@ -15139,8 +18636,13 @@ fn format_common_command_parameter_type_xml(xml: &mut String, types: &[String]) 
     }
     xml.push_str("\t\t\t<CommandParameterType>\r\n");
     for value_type in types {
+        let tag_name = if value_type.starts_with("cfg:DefinedType.") {
+            "TypeSet"
+        } else {
+            "Type"
+        };
         xml.push_str(&format!(
-            "\t\t\t\t<v8:Type>{}</v8:Type>\r\n",
+            "\t\t\t\t<v8:{tag_name}>{}</v8:{tag_name}>\r\n",
             escape_xml_text(value_type)
         ));
     }
@@ -15150,78 +18652,51 @@ fn format_common_command_parameter_type_xml(xml: &mut String, types: &[String]) 
 fn format_command_group_source_xml(
     header: &MetadataHeader,
     properties: &CommandGroupProperties,
+    source_version: InfobaseConfigSourceVersion,
 ) -> String {
-    let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-\t<CommandGroup uuid=\"{}\">\r\n\
-\t\t<Properties>\r\n\
-\t\t\t<Name>{}</Name>\r\n",
-        escape_xml_text(&header.uuid),
-        escape_xml_text(&header.name)
-    );
-    if header.synonyms.is_empty() {
-        xml.push_str("\t\t\t<Synonym/>\r\n");
-    } else {
-        xml.push_str("\t\t\t<Synonym>\r\n");
-        for (lang, content) in &header.synonyms {
-            xml.push_str("\t\t\t\t<v8:item>\r\n");
-            xml.push_str(&format!(
-                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
-            ));
-            xml.push_str(&format!(
-                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
-            ));
-            xml.push_str("\t\t\t\t</v8:item>\r\n");
-        }
-        xml.push_str("\t\t\t</Synonym>\r\n");
-    }
-    xml.push_str(&format!(
-        "\t\t\t<Comment>{}</Comment>\r\n\
-\t\t\t<Representation>{}</Representation>\r\n",
-        escape_xml_text(&header.comment),
+    let mut xml = format_full_metadata_source_xml("CommandGroup", header, source_version);
+    let mut insert = format!(
+        "\t\t\t<Representation>{}</Representation>\r\n",
         properties.representation
-    ));
+    );
     if properties.tooltip.is_empty() {
-        xml.push_str("\t\t\t<ToolTip/>\r\n");
+        insert.push_str("\t\t\t<ToolTip/>\r\n");
     } else {
-        xml.push_str("\t\t\t<ToolTip>\r\n");
+        insert.push_str("\t\t\t<ToolTip>\r\n");
         for (lang, content) in &properties.tooltip {
-            xml.push_str("\t\t\t\t<v8:item>\r\n");
-            xml.push_str(&format!(
+            insert.push_str("\t\t\t\t<v8:item>\r\n");
+            insert.push_str(&format!(
                 "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
+                escape_xml_element_text(lang)
             ));
-            xml.push_str(&format!(
+            insert.push_str(&format!(
                 "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
+                escape_xml_element_text(content)
             ));
-            xml.push_str("\t\t\t\t</v8:item>\r\n");
+            insert.push_str("\t\t\t\t</v8:item>\r\n");
         }
-        xml.push_str("\t\t\t</ToolTip>\r\n");
+        insert.push_str("\t\t\t</ToolTip>\r\n");
     }
-    xml.push_str("\t\t\t<Picture>\r\n");
     match &properties.picture_ref {
         Some(reference) => {
-            xml.push_str(&format!(
+            insert.push_str("\t\t\t<Picture>\r\n");
+            insert.push_str(&format!(
                 "\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n",
                 escape_xml_text(reference)
             ));
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+\t\t\t</Picture>\r\n",
+                xml_bool(properties.picture_load_transparent)
+            ));
         }
-        None => xml.push_str("\t\t\t\t<xr:Ref/>\r\n"),
+        None => insert.push_str("\t\t\t<Picture/>\r\n"),
     }
-    xml.push_str(&format!(
-        "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-\t\t\t</Picture>\r\n\
-\t\t\t<Category>{}</Category>\r\n\
-\t\t</Properties>\r\n\
-\t</CommandGroup>\r\n\
-</MetaDataObject>\r\n",
-        xml_bool(properties.picture_load_transparent),
+    insert.push_str(&format!(
+        "\t\t\t<Category>{}</Category>\r\n",
         properties.category
     ));
+    xml = xml.replace("\t\t</Properties>", &format!("{insert}\t\t</Properties>"));
     xml
 }
 
@@ -15230,8 +18705,8 @@ fn format_style_item_source_xml(
     properties: &StyleItemProperties,
 ) -> String {
     let mut xml = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 \t<StyleItem uuid=\"{}\">\r\n\
 \t\t<Properties>\r\n\
 \t\t\t<Name>{}</Name>\r\n",
@@ -15246,33 +18721,77 @@ fn format_style_item_source_xml(
             xml.push_str("\t\t\t\t<v8:item>\r\n");
             xml.push_str(&format!(
                 "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                escape_xml_text(lang)
+                escape_xml_element_text(lang)
             ));
             xml.push_str(&format!(
                 "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(content)
+                escape_xml_element_text(content)
             ));
             xml.push_str("\t\t\t\t</v8:item>\r\n");
         }
         xml.push_str("\t\t\t</Synonym>\r\n");
     }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&header.comment)
+        ));
+    }
     xml.push_str(&format!(
-        "\t\t\t<Comment>{}</Comment>\r\n\
-\t\t\t<Type>{}</Type>\r\n\
+        "\t\t\t<Type>{}</Type>\r\n\
 \t\t\t{}\r\n\
 \t\t</Properties>\r\n\
 \t</StyleItem>\r\n\
-</MetaDataObject>\r\n",
-        escape_xml_text(&header.comment),
-        properties.item_type,
-        properties.value_xml
+</MetaDataObject>",
+        properties.item_type, properties.value_xml
     ));
     xml
 }
 
-fn format_common_module_source_xml(header: &MetadataHeader, flags: &CommonModuleFlags) -> String {
-    let mut xml = format_metadata_source_xml("CommonModule", header);
-    let insert = format!(
+fn format_common_module_source_xml(
+    header: &MetadataHeader,
+    flags: &CommonModuleFlags,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{}\">\r\n\
+\t<CommonModule uuid=\"{}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>{}</Name>\r\n",
+        source_version.as_str(),
+        escape_xml_text(&header.uuid),
+        escape_xml_element_text(&header.name)
+    );
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_element_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_element_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&header.comment)
+        ));
+    }
+    xml.push_str(&format!(
         "\t\t\t<Global>{}</Global>\r\n\
 \t\t\t<ClientManagedApplication>{}</ClientManagedApplication>\r\n\
 \t\t\t<Server>{}</Server>\r\n\
@@ -15280,7 +18799,10 @@ fn format_common_module_source_xml(header: &MetadataHeader, flags: &CommonModule
 \t\t\t<ClientOrdinaryApplication>{}</ClientOrdinaryApplication>\r\n\
 \t\t\t<ServerCall>{}</ServerCall>\r\n\
 \t\t\t<Privileged>{}</Privileged>\r\n\
-\t\t\t<ReturnValuesReuse>{}</ReturnValuesReuse>\r\n",
+\t\t\t<ReturnValuesReuse>{}</ReturnValuesReuse>\r\n\
+\t\t</Properties>\r\n\
+\t</CommonModule>\r\n\
+</MetaDataObject>",
         xml_bool(flags.global),
         xml_bool(flags.client_managed_application),
         xml_bool(flags.server),
@@ -15289,6 +18811,31 @@ fn format_common_module_source_xml(header: &MetadataHeader, flags: &CommonModule
         xml_bool(flags.server_call),
         xml_bool(flags.privileged),
         return_values_reuse_xml(flags.return_values_reuse),
+    ));
+    xml
+}
+
+fn format_scheduled_job_source_xml(
+    header: &MetadataHeader,
+    scheduled_job: &ScheduledJobProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("ScheduledJob", header, source_version);
+    let insert = format!(
+        "\t\t\t<MethodName>{}</MethodName>\r\n\
+\t\t\t{}\r\n\
+\t\t\t{}\r\n\
+\t\t\t<Use>{}</Use>\r\n\
+\t\t\t<Predefined>{}</Predefined>\r\n\
+\t\t\t<RestartCountOnFailure>{}</RestartCountOnFailure>\r\n\
+\t\t\t<RestartIntervalOnFailure>{}</RestartIntervalOnFailure>\r\n",
+        escape_xml_element_text(&scheduled_job.method_name),
+        format_simple_property_xml("Description", &scheduled_job.description),
+        format_simple_property_xml("Key", &scheduled_job.key),
+        xml_bool(scheduled_job.use_job),
+        xml_bool(scheduled_job.predefined),
+        scheduled_job.restart_count_on_failure,
+        scheduled_job.restart_interval_on_failure
     );
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
@@ -15297,17 +18844,209 @@ fn format_common_module_source_xml(header: &MetadataHeader, flags: &CommonModule
     xml
 }
 
-fn format_constant_source_xml(header: &MetadataHeader, constant: &ConstantProperties) -> String {
-    let mut xml = format_metadata_source_xml("Constant", header).replace(
-        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
-        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
-    );
-    let insert = format!(
+fn format_event_subscription_source_xml(
+    header: &MetadataHeader,
+    event_subscription: &EventSubscriptionProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("EventSubscription", header, source_version);
+    let mut insert = String::from("\t\t\t<Source>\r\n");
+    let source_types = sorted_event_subscription_source_types(&event_subscription.source_types);
+    for source_type in source_types {
+        let reference = metadata_type_xml_name(source_type);
+        let tag = event_subscription_source_type_tag(&reference);
+        insert.push_str(&format!(
+            "\t\t\t\t<v8:{tag}>{}</v8:{tag}>\r\n",
+            escape_xml_element_text(&reference)
+        ));
+    }
+    insert.push_str("\t\t\t</Source>\r\n");
+    insert.push_str(&format!(
+        "\t\t\t<Event>{}</Event>\r\n\
+\t\t\t<Handler>{}</Handler>\r\n",
+        escape_xml_element_text(&event_subscription.event),
+        escape_xml_element_text(&event_subscription.handler)
+    ));
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn sorted_event_subscription_source_types(
+    source_types: &[ConstantValueType],
+) -> Vec<&ConstantValueType> {
+    let mut indexed = source_types.iter().enumerate().collect::<Vec<_>>();
+    let all_type_sets = indexed.iter().all(|(_, source_type)| {
+        event_subscription_source_type_tag(&metadata_type_xml_name(source_type)) == "TypeSet"
+    });
+    indexed.sort_by_key(|(index, source_type)| {
+        let reference = metadata_type_xml_name(source_type);
+        let tag = event_subscription_source_type_tag(&reference);
+        let tag_rank = if tag == "Type" { 0usize } else { 1usize };
+        let type_set_rank = if all_type_sets {
+            event_subscription_type_set_order(&reference).unwrap_or(usize::MAX)
+        } else {
+            usize::MAX
+        };
+        (tag_rank, type_set_rank, *index)
+    });
+    indexed
+        .into_iter()
+        .map(|(_, source_type)| source_type)
+        .collect()
+}
+
+fn event_subscription_type_set_order(reference: &str) -> Option<usize> {
+    match reference {
+        "cfg:BusinessProcessObject" => Some(10),
+        "cfg:ChartOfCalculationTypesObject" => Some(20),
+        "cfg:ChartOfAccountsObject" => Some(30),
+        "cfg:ChartOfCharacteristicTypesObject" => Some(40),
+        "cfg:ConstantValueManager" => Some(50),
+        "cfg:ExchangePlanObject" => Some(60),
+        "cfg:CatalogObject" => Some(70),
+        "cfg:TaskObject" => Some(80),
+        "cfg:DocumentObject" => Some(90),
+        "cfg:InformationRegisterRecordSet" => Some(200),
+        "cfg:AccountingRegisterRecordSet" => Some(210),
+        "cfg:AccumulationRegisterRecordSet" => Some(220),
+        "cfg:SequenceRecordSet" => Some(230),
+        "cfg:RecalculationRecordSet" => Some(240),
+        "cfg:CalculationRegisterRecordSet" => Some(250),
+        _ => None,
+    }
+}
+
+fn event_subscription_source_type_tag(reference: &str) -> &'static str {
+    if reference.starts_with("cfg:DefinedType.")
+        || (reference.starts_with("cfg:")
+            && !reference.contains('.')
+            && !reference.ends_with("Manager"))
+        || reference == "cfg:ConstantValueManager"
+    {
+        "TypeSet"
+    } else {
+        "Type"
+    }
+}
+
+fn format_simple_property_xml(name: &str, value: &str) -> String {
+    if value.is_empty() {
+        format!("<{name}/>")
+    } else {
+        format!("<{name}>{}</{name}>", escape_xml_element_text(value))
+    }
+}
+
+fn format_constant_bound_xml(name: &str, value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!(
+            "<{name} xsi:type=\"xs:string\">{}</{name}>",
+            escape_xml_element_text(value)
+        ),
+        None => format!("<{name} xsi:nil=\"true\"/>"),
+    }
+}
+
+fn format_choice_parameters_xml(parameters: &[ChoiceParameter]) -> String {
+    if parameters.is_empty() {
+        return "<ChoiceParameters/>".to_string();
+    }
+    let mut xml = "<ChoiceParameters>\r\n".to_string();
+    for parameter in parameters {
+        xml.push_str(&format!(
+            "\t\t\t\t<app:item name=\"{}\">\r\n\
+\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n\
+\t\t\t\t</app:item>\r\n",
+            escape_xml_text(&parameter.name),
+            escape_xml_element_text(&parameter.value_ref)
+        ));
+    }
+    xml.push_str("\t\t\t</ChoiceParameters>");
+    xml
+}
+
+fn format_constant_source_xml(
+    header: &MetadataHeader,
+    constant: &ConstantProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Constant", header, source_version);
+    if !constant.generated_types.is_empty() {
+        let mut internal = "\t\t<InternalInfo>\r\n".to_string();
+        for generated_type in &constant.generated_types {
+            internal.push_str(&format!(
+                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+                escape_xml_text(&generated_type.name),
+                escape_xml_text(generated_type.category),
+                escape_xml_text(&generated_type.type_id),
+                escape_xml_text(&generated_type.value_id)
+            ));
+        }
+        internal.push_str("\t\t</InternalInfo>\r\n");
+        if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+            xml.insert_str(index, &internal);
+        }
+    }
+    let mut insert = format!(
         "{}\
 \t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
         format_constant_type_xml(&constant.value_type),
         xml_bool(constant.use_standard_commands),
     );
+    match &constant.default_form {
+        Some(default_form) => insert.push_str(&format!(
+            "\t\t\t<DefaultForm>{}</DefaultForm>\r\n",
+            escape_xml_element_text(default_form)
+        )),
+        None => insert.push_str("\t\t\t<DefaultForm/>\r\n"),
+    }
+    push_localized_property(
+        &mut insert,
+        "\t\t\t",
+        "ExtendedPresentation",
+        &constant.extended_presentation,
+    );
+    push_localized_property(&mut insert, "\t\t\t", "Explanation", &constant.explanation);
+    insert.push_str(&format!(
+        "\t\t\t<PasswordMode>{}</PasswordMode>\r\n",
+        xml_bool(constant.password_mode)
+    ));
+    push_localized_property(&mut insert, "\t\t\t", "Format", &constant.format);
+    push_localized_property(&mut insert, "\t\t\t", "EditFormat", &constant.edit_format);
+    push_localized_property(&mut insert, "\t\t\t", "ToolTip", &constant.tooltip);
+    insert.push_str(&format!(
+        "\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
+\t\t\t{}\r\n\
+\t\t\t<MultiLine>false</MultiLine>\r\n\
+\t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
+\t\t\t{}\r\n\
+\t\t\t{}\r\n\
+\t\t\t<FillChecking>{}</FillChecking>\r\n\
+\t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
+\t\t\t<ChoiceParameterLinks/>\r\n\
+\t\t\t{}\r\n\
+\t\t\t<QuickChoice>Auto</QuickChoice>\r\n\
+\t\t\t<ChoiceForm/>\r\n\
+\t\t\t<LinkByType/>\r\n\
+\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
+\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<DataHistory>DontUse</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+        format_simple_property_xml("Mask", &constant.mask),
+        format_constant_bound_xml("MinValue", constant.min_value.as_deref()),
+        format_constant_bound_xml("MaxValue", constant.max_value.as_deref()),
+        constant.fill_checking,
+        format_choice_parameters_xml(&constant.choice_parameters),
+        constant.choice_history_on_input,
+        constant.data_lock_control_mode
+    ));
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
@@ -15318,11 +19057,28 @@ fn format_constant_source_xml(header: &MetadataHeader, constant: &ConstantProper
 fn format_defined_type_source_xml(
     header: &MetadataHeader,
     defined_type: &DefinedTypeProperties,
+    source_version: InfobaseConfigSourceVersion,
 ) -> String {
-    let mut xml = format_metadata_source_xml("DefinedType", header).replace(
-        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
-        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
-    );
+    let mut xml = format_full_metadata_source_xml("DefinedType", header, source_version);
+    if !defined_type.generated_types.is_empty() {
+        let mut internal = "\t\t<InternalInfo>\r\n".to_string();
+        for generated_type in &defined_type.generated_types {
+            internal.push_str(&format!(
+                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+                escape_xml_text(&generated_type.name),
+                escape_xml_text(generated_type.category),
+                escape_xml_text(&generated_type.type_id),
+                escape_xml_text(&generated_type.value_id)
+            ));
+        }
+        internal.push_str("\t\t</InternalInfo>\r\n");
+        if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+            xml.insert_str(index, &internal);
+        }
+    }
     let insert = format_metadata_types_xml(&defined_type.value_types);
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
@@ -15335,17 +19091,214 @@ fn format_typed_metadata_source_xml(
     kind: &str,
     header: &MetadataHeader,
     typed: &TypedMetadataProperties,
+    source_version: InfobaseConfigSourceVersion,
 ) -> String {
-    let mut xml = format_metadata_source_xml(kind, header).replace(
-        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"",
-        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\"",
-    );
+    let mut xml = format_full_metadata_source_xml(kind, header, source_version);
     let insert = format_metadata_types_xml(&typed.value_types);
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
     }
     xml
+}
+
+fn format_functional_options_parameter_source_xml(
+    header: &MetadataHeader,
+    properties: &FunctionalOptionsParameterProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml =
+        format_full_metadata_source_xml("FunctionalOptionsParameter", header, source_version);
+    let mut insert = String::new();
+    if properties.use_refs.is_empty() {
+        insert.push_str("\t\t\t<Use/>\r\n");
+    } else {
+        insert.push_str("\t\t\t<Use>\r\n");
+        for use_ref in &properties.use_refs {
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                escape_xml_element_text(use_ref)
+            ));
+        }
+        insert.push_str("\t\t\t</Use>\r\n");
+    }
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_language_source_xml(
+    header: &MetadataHeader,
+    language: &LanguageProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Language", header, source_version);
+    let insert = format!(
+        "\t\t\t<LanguageCode>{}</LanguageCode>\r\n",
+        escape_xml_element_text(&language.language_code)
+    );
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_document_numerator_source_xml(
+    header: &MetadataHeader,
+    properties: &DocumentNumeratorProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("DocumentNumerator", header, source_version);
+    let insert = format!(
+        "\t\t\t<NumberType>{}</NumberType>\r\n\
+\t\t\t<NumberLength>{}</NumberLength>\r\n\
+\t\t\t<NumberAllowedLength>{}</NumberAllowedLength>\r\n\
+\t\t\t<NumberPeriodicity>{}</NumberPeriodicity>\r\n\
+\t\t\t<CheckUnique>{}</CheckUnique>\r\n",
+        properties.number_type,
+        properties.number_length,
+        properties.number_allowed_length,
+        properties.number_periodicity,
+        xml_bool(properties.check_unique)
+    );
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_ws_reference_source_xml(
+    header: &MetadataHeader,
+    properties: &WSReferenceProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("WSReference", header, source_version);
+    let internal = format!(
+        "\t\t<InternalInfo>\r\n\
+\t\t\t<xr:GeneratedType name=\"WSReferenceManager.{}\" category=\"Manager\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n\
+\t\t</InternalInfo>\r\n",
+        escape_xml_text(&header.name),
+        escape_xml_text(&properties.manager_type_id),
+        escape_xml_text(&properties.manager_value_id)
+    );
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal);
+    }
+    let insert = format!(
+        "\t\t\t<LocationURL>{}</LocationURL>\r\n",
+        escape_xml_element_text(&properties.location_url)
+    );
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_integration_service_source_xml(
+    header: &MetadataHeader,
+    properties: &IntegrationServiceProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("IntegrationService", header, source_version);
+    let internal = format!(
+        "\t\t<InternalInfo>\r\n\
+\t\t\t<xr:GeneratedType name=\"IntegrationServiceManager.{}\" category=\"Manager\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n\
+\t\t</InternalInfo>\r\n",
+        escape_xml_text(&header.name),
+        escape_xml_text(&properties.manager_type_id),
+        escape_xml_text(&properties.manager_value_id)
+    );
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal);
+    }
+    let insert = if properties.external_address.is_empty() {
+        "\t\t\t<ExternalIntegrationServiceAddress/>\r\n".to_string()
+    } else {
+        format!(
+            "\t\t\t<ExternalIntegrationServiceAddress>{}</ExternalIntegrationServiceAddress>\r\n",
+            escape_xml_element_text(&properties.external_address)
+        )
+    };
+    if let Some(index) = xml.find("\t\t</Properties>\r\n") {
+        xml.insert_str(index, &insert);
+    }
+    if properties.channels.is_empty() {
+        return xml;
+    }
+    let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+    for channel in &properties.channels {
+        push_integration_service_channel_xml(&mut child_objects, &header.name, channel);
+    }
+    child_objects.push_str("\t\t</ChildObjects>\r\n");
+    let marker = "\t</IntegrationService>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &child_objects);
+    }
+    xml
+}
+
+fn push_integration_service_channel_xml(
+    xml: &mut String,
+    service_name: &str,
+    channel: &IntegrationServiceChannelProperties,
+) {
+    xml.push_str(&format!(
+        "\t\t\t<IntegrationServiceChannel uuid=\"{}\">\r\n\
+\t\t\t\t<InternalInfo>\r\n\
+\t\t\t\t\t<xr:GeneratedType name=\"IntegrationServiceChannelManager.{}.{}\" category=\"Manager\">\r\n\
+\t\t\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t\t\t</xr:GeneratedType>\r\n\
+\t\t\t\t</InternalInfo>\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&channel.header.uuid),
+        escape_xml_text(service_name),
+        escape_xml_text(&channel.header.name),
+        escape_xml_text(&channel.manager_type_id),
+        escape_xml_text(&channel.manager_value_id),
+        escape_xml_element_text(&channel.header.name)
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &channel.header.synonyms);
+    if channel.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&channel.header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t<ExternalIntegrationServiceChannelName>{}</ExternalIntegrationServiceChannelName>\r\n\
+\t\t\t\t\t<MessageDirection>{}</MessageDirection>\r\n",
+        escape_xml_element_text(&channel.external_name),
+        channel.message_direction
+    ));
+    if channel.receive_message_processing.is_empty() {
+        xml.push_str("\t\t\t\t\t<ReceiveMessageProcessing/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<ReceiveMessageProcessing>{}</ReceiveMessageProcessing>\r\n",
+            escape_xml_element_text(&channel.receive_message_processing)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Transactioned>{}</Transactioned>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t</IntegrationServiceChannel>\r\n",
+        xml_bool(channel.transactioned)
+    ));
 }
 
 fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
@@ -15357,25 +19310,6 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         ));
     }
 
-    if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
-        ConstantValueType::String {
-            length: Some(length),
-            allowed_length_flag,
-        } => Some((*length, *allowed_length_flag)),
-        _ => None,
-    }) {
-        xml.push_str("\t\t\t\t<StringQualifiers>\r\n");
-        xml.push_str(&format!(
-            "\t\t\t\t\t<v8:Length>{}</v8:Length>\r\n",
-            string.0
-        ));
-        xml.push_str(&format!(
-            "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
-            string_allowed_length_xml(string.1)
-        ));
-        xml.push_str("\t\t\t\t</StringQualifiers>\r\n");
-    }
-
     if let Some(number) = value_types.iter().find_map(|value_type| match value_type {
         ConstantValueType::Number {
             digits,
@@ -15384,7 +19318,7 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         } => Some((*digits, *fraction_digits, *allowed_sign_flag)),
         _ => None,
     }) {
-        xml.push_str("\t\t\t\t<NumberQualifiers>\r\n");
+        xml.push_str("\t\t\t\t<v8:NumberQualifiers>\r\n");
         xml.push_str(&format!(
             "\t\t\t\t\t<v8:Digits>{}</v8:Digits>\r\n",
             number.0
@@ -15397,7 +19331,43 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
             "\t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
             number_allowed_sign_xml(number.2)
         ));
-        xml.push_str("\t\t\t\t</NumberQualifiers>\r\n");
+        xml.push_str("\t\t\t\t</v8:NumberQualifiers>\r\n");
+    }
+
+    if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::String {
+            length,
+            allowed_length_flag,
+        } => Some((
+            length.unwrap_or(0),
+            length.map(|_| *allowed_length_flag).unwrap_or(1),
+        )),
+        _ => None,
+    }) {
+        xml.push_str("\t\t\t\t<v8:StringQualifiers>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:Length>{}</v8:Length>\r\n",
+            string.0
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            string_allowed_length_xml(string.1)
+        ));
+        xml.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
+    }
+
+    if let Some(date_fractions) = value_types.iter().find_map(|value_type| {
+        if let ConstantValueType::DateTime { date_fractions } = value_type {
+            Some(*date_fractions)
+        } else {
+            None
+        }
+    }) {
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:DateQualifiers>\r\n\
+\t\t\t\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
+\t\t\t\t</v8:DateQualifiers>\r\n"
+        ));
     }
 
     xml.push_str("\t\t\t</Type>\r\n");
@@ -15409,7 +19379,7 @@ fn metadata_type_xml_name(value_type: &ConstantValueType) -> String {
         ConstantValueType::Boolean => "xs:boolean".to_string(),
         ConstantValueType::String { .. } => "xs:string".to_string(),
         ConstantValueType::Number { .. } => "xs:decimal".to_string(),
-        ConstantValueType::DateTime => "xs:dateTime".to_string(),
+        ConstantValueType::DateTime { .. } => "xs:dateTime".to_string(),
         ConstantValueType::Reference { reference, .. } => reference.clone(),
     }
 }
@@ -15424,15 +19394,19 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
             allowed_length_flag,
         } => {
             let mut xml = "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n".to_string();
-            if let Some(length) = length {
-                xml.push_str("\t\t\t\t<StringQualifiers>\r\n");
-                xml.push_str(&format!("\t\t\t\t\t<v8:Length>{length}</v8:Length>\r\n"));
-                xml.push_str(&format!(
-                    "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
-                    string_allowed_length_xml(*allowed_length_flag)
-                ));
-                xml.push_str("\t\t\t\t</StringQualifiers>\r\n");
-            }
+            let allowed_length = if length.is_some() {
+                string_allowed_length_xml(*allowed_length_flag)
+            } else {
+                "Variable"
+            };
+            let length = length.unwrap_or(0);
+            xml.push_str("\t\t\t\t<v8:StringQualifiers>\r\n");
+            xml.push_str(&format!("\t\t\t\t\t<v8:Length>{length}</v8:Length>\r\n"));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+                allowed_length
+            ));
+            xml.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
             xml.push_str("\t\t\t</Type>\r\n");
             xml
         }
@@ -15443,28 +19417,43 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
         } => format!(
             "\t\t\t<Type>\r\n\
 \t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\
-\t\t\t\t<NumberQualifiers>\r\n\
+\t\t\t\t<v8:NumberQualifiers>\r\n\
 \t\t\t\t\t<v8:Digits>{digits}</v8:Digits>\r\n\
 \t\t\t\t\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
 \t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
-\t\t\t\t</NumberQualifiers>\r\n\
+\t\t\t\t</v8:NumberQualifiers>\r\n\
 \t\t\t</Type>\r\n",
             number_allowed_sign_xml(*allowed_sign_flag)
         ),
-        ConstantValueType::DateTime => {
-            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\t\t\t</Type>\r\n"
-                .to_string()
-        }
-        ConstantValueType::Reference { reference, .. } => format!(
-            "\t\t\t<Type>\r\n\t\t\t\t<v8:Type>{}</v8:Type>\r\n\t\t\t</Type>\r\n",
-            escape_xml_text(reference)
+        ConstantValueType::DateTime { date_fractions } => format!(
+            "\t\t\t<Type>\r\n\
+\t\t\t\t<v8:Type>xs:dateTime</v8:Type>\r\n\
+\t\t\t\t<v8:DateQualifiers>\r\n\
+\t\t\t\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
+\t\t\t\t</v8:DateQualifiers>\r\n\
+\t\t\t</Type>\r\n"
         ),
+        ConstantValueType::Reference { reference, .. } => {
+            let tag = constant_reference_type_tag(reference);
+            format!(
+                "\t\t\t<Type>\r\n\t\t\t\t<v8:{tag}>{}</v8:{tag}>\r\n\t\t\t</Type>\r\n",
+                escape_xml_text(reference)
+            )
+        }
+    }
+}
+
+fn constant_reference_type_tag(reference: &str) -> &'static str {
+    if reference.starts_with("cfg:DefinedType.") || reference == "cfg:ExchangePlanRef" {
+        "TypeSet"
+    } else {
+        "Type"
     }
 }
 
 fn string_allowed_length_xml(value: u8) -> &'static str {
     match value {
-        1 => "Fixed",
+        0 => "Fixed",
         _ => "Variable",
     }
 }
@@ -15503,6 +19492,7 @@ fn escape_xml_text(value: &str) -> String {
 }
 
 fn escape_xml_element_text(value: &str) -> String {
+    let value = value.replace("\r\n", "\n");
     let mut output = String::with_capacity(value.len());
     for ch in value.chars() {
         match ch {
@@ -15548,6 +19538,21 @@ fn fetch_rows(
         .with_context(|| format!("failed to assemble {table} row chunks for {database}"))
 }
 
+fn fetch_rows_direct_hex(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<Vec<ConfigRow>> {
+    let sql = build_fetch_rows_direct_hex_sql(database, table, selected_file_names);
+    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
+    parse_config_direct_rows(&stdout)
+        .with_context(|| format!("failed to parse direct {table} rows for {database}"))
+}
+
 fn fetch_binary_rows_bcp(
     sqlcmd: &Path,
     server: &str,
@@ -15560,6 +19565,18 @@ fn fetch_binary_rows_bcp(
 ) -> Result<Vec<BinaryConfigRow>> {
     let query =
         build_fetch_binary_rows_query(database, table, selected_file_names, use_range_filter);
+    fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)
+}
+
+fn fetch_binary_rows_bcp_query(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    query: &str,
+) -> Result<Vec<BinaryConfigRow>> {
     let output_path = std::env::temp_dir().join(format!(
         "ibcmd-rs-bcp-{}-{}.bcp",
         std::process::id(),
@@ -15639,6 +19656,29 @@ fn fetch_metadata_rows(
         .with_context(|| format!("failed to assemble {table} metadata rows for {database}"))
 }
 
+fn fetch_metadata_rows_bcp(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+) -> Result<Vec<ConfigRow>> {
+    let query = build_fetch_metadata_rows_bcp_query(database, table);
+    let rows =
+        fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)?;
+    Ok(rows.into_iter().map(config_row_from_binary).collect())
+}
+
+fn config_row_from_binary(row: BinaryConfigRow) -> ConfigRow {
+    ConfigRow {
+        file_name: row.file_name,
+        part_no: row.part_no,
+        data_size: row.data_size,
+        binary_hex: encode_hex_lower(&row.binary),
+    }
+}
+
 fn build_fetch_binary_rows_query(
     database: &str,
     table: &str,
@@ -15675,6 +19715,16 @@ fn build_fetch_binary_rows_query(
          ORDER BY FileName, PartNo",
         qualified_table = qualified_storage_table(database, table),
         filter = filter,
+    )
+}
+
+fn build_fetch_metadata_rows_bcp_query(database: &str, table: &str) -> String {
+    format!(
+        "SELECT FileName, PartNo, DataSize, BinaryData\n\
+         FROM {qualified_table}\n\
+         WHERE CHARINDEX(N'.', FileName) = 0\n\
+         ORDER BY FileName, PartNo",
+        qualified_table = qualified_storage_table(database, table),
     )
 }
 
@@ -15836,6 +19886,69 @@ fn build_fetch_rows_sql(
         qualified_table = qualified_storage_table(database, table),
         filter = filter,
     )
+}
+
+fn build_fetch_rows_direct_hex_sql(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> String {
+    let filter = if selected_file_names.is_empty() {
+        String::new()
+    } else {
+        let values = selected_file_names
+            .iter()
+            .map(|value| format!("N'{}'", quote_string(value)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("WHERE FileName IN ({values})\n")
+    };
+
+    format!(
+        "SET NOCOUNT ON;\n\
+         SELECT FileName AS file_name,\n\
+                PartNo AS part_no,\n\
+                DataSize AS data_size,\n\
+                CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
+         FROM {qualified_table}\n\
+         {filter}\
+         ORDER BY FileName, PartNo\n\
+         ;",
+        qualified_table = qualified_storage_table(database, table),
+        filter = filter,
+    )
+}
+
+fn parse_config_direct_rows(stdout: &str) -> Result<Vec<ConfigRow>> {
+    let mut rows = Vec::new();
+    for (line_index, line) in stdout.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if is_sqlcmd_header_or_separator(line) {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 4 {
+            bail!(
+                "unexpected sqlcmd direct row line {}: expected 4 tab-separated fields, got {}",
+                line_index + 1,
+                fields.len()
+            );
+        }
+        rows.push(ConfigRow {
+            file_name: fields[0].trim_end().to_string(),
+            part_no: fields[1].trim().parse().with_context(|| {
+                format!("invalid part_no on direct row line {}", line_index + 1)
+            })?,
+            data_size: fields[2].trim().parse().with_context(|| {
+                format!("invalid data_size on direct row line {}", line_index + 1)
+            })?,
+            binary_hex: fields[3].trim().to_ascii_lowercase(),
+        });
+    }
+    Ok(rows)
 }
 
 fn parse_config_chunk_rows(stdout: &str) -> Result<Vec<ConfigChunkRow>> {
@@ -16071,6 +20184,26 @@ fn read_i64_le(bytes: &[u8], offset: &mut usize) -> Result<i64> {
 const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
 const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 4096;
 const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 1024 * 1024 * 1024;
+const SQLCMD_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
+
+fn selected_file_names_from_args(
+    file_names: &[String],
+    file_name_lists: &[PathBuf],
+) -> Result<BTreeSet<String>> {
+    let mut combined = file_names.to_vec();
+    for list_path in file_name_lists {
+        let content = fs::read_to_string(list_path)
+            .with_context(|| format!("failed to read {}", list_path.display()))?;
+        combined.extend(
+            content
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_string),
+        );
+    }
+    Ok(expand_selected_file_names(&combined))
+}
 
 fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
     let mut selected = BTreeSet::new();
@@ -16116,7 +20249,7 @@ fn run_sql_capture_tsv(
             command.arg("-P").arg(password);
         }
     }
-    let output = command
+    command
         .arg("-s")
         .arg("\t")
         .arg("-w")
@@ -16124,11 +20257,27 @@ fn run_sql_capture_tsv(
         .arg("-y")
         .arg("0")
         .arg("-Y")
-        .arg("0")
-        .arg("-Q")
-        .arg(sql)
+        .arg("0");
+    let sql_file = if sql.chars().count() > SQLCMD_INLINE_QUERY_MAX_CHARS {
+        let path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-sqlcmd-{}-{}.sql",
+            std::process::id(),
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::write(&path, sql).with_context(|| format!("failed to write {}", path.display()))?;
+        command.arg("-i").arg(&path);
+        Some(path)
+    } else {
+        command.arg("-Q").arg(sql);
+        None
+    };
+    let output = command
         .output()
-        .with_context(|| format!("failed to run {}", sqlcmd.display()))?;
+        .with_context(|| format!("failed to run {}", sqlcmd.display()));
+    if let Some(path) = &sql_file {
+        let _ = fs::remove_file(path);
+    }
+    let output = output?;
     if !output.status.success() {
         bail!(
             "sqlcmd failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
@@ -16196,6 +20345,16 @@ fn inflate_raw_deflate(input: &[u8]) -> Result<Vec<u8>> {
         .read_to_end(&mut output)
         .context("failed to inflate raw deflate blob")?;
     Ok(output)
+}
+
+fn encode_hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 fn decode_hex(hex: &str) -> Result<Vec<u8>> {
@@ -16308,6 +20467,18 @@ mod tests {
     }
 
     #[test]
+    fn fetch_rows_direct_hex_sql_skips_chunk_cross_apply() {
+        let selected = BTreeSet::from(["aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()]);
+        let sql = build_fetch_rows_direct_hex_sql("TestDb", "Config", &selected);
+
+        assert!(sql.contains("FROM [TestDb].dbo.[Config]"));
+        assert!(sql.contains("CONVERT(varchar(max), BinaryData, 2) AS binary_hex"));
+        assert!(sql.contains("WHERE FileName IN (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa')"));
+        assert!(!sql.contains("CROSS APPLY"));
+        assert!(!sql.contains("sys.all_objects"));
+    }
+
+    #[test]
     fn fetch_binary_rows_query_can_use_range_filter() {
         let selected = BTreeSet::from([
             "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
@@ -16322,6 +20493,27 @@ mod tests {
         ));
         assert!(!sql.contains(" IN "));
         assert!(sql.contains("ORDER BY FileName, PartNo"));
+    }
+
+    #[test]
+    fn fetch_metadata_rows_bcp_query_filters_body_rows() {
+        let sql = build_fetch_metadata_rows_bcp_query("TestDb", "Config");
+
+        assert!(sql.contains("FROM [TestDb].dbo.[Config]"));
+        assert!(sql.contains("WHERE CHARINDEX(N'.', FileName) = 0"));
+        assert!(sql.contains("ORDER BY FileName, PartNo"));
+    }
+
+    #[test]
+    fn converts_binary_rows_to_config_rows() {
+        let row = config_row_from_binary(BinaryConfigRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            part_no: 0,
+            data_size: 3,
+            binary: vec![0xef, 0xbb, 0xbf],
+        });
+
+        assert_eq!(row.binary_hex, "efbbbf");
     }
 
     #[test]
@@ -16398,6 +20590,25 @@ mod tests {
         assert_eq!(rows[0].binary_hex, "AABB");
         assert_eq!(rows[1].chunk_index, 1);
         assert_eq!(rows[1].binary_hex, "CCDD");
+    }
+
+    #[test]
+    fn parses_config_direct_rows_from_sqlcmd_tsv() {
+        let rows = parse_config_direct_rows(
+            "file_name\tpart_no\tdata_size\tbinary_hex\r\n\
+             ---------\t-------\t---------\t----------\r\n\
+             first   \t0\t3\tAABBCC   \r\n\
+             second\t0\t1\tDD\r\n",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].file_name, "first");
+        assert_eq!(rows[0].part_no, 0);
+        assert_eq!(rows[0].data_size, 3);
+        assert_eq!(rows[0].binary_hex, "aabbcc");
+        assert_eq!(rows[1].file_name, "second");
+        assert_eq!(rows[1].binary_hex, "dd");
     }
 
     #[test]
@@ -17022,8 +21233,26 @@ mod tests {
         let splash_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let parent_configurations = b"\xEF\xBB\xBF{6,1,1,\"parent-cf\"}".to_vec();
         let parent_blob = deflate_for_test(&parent_configurations);
-        let home_page_work_area = b"\xEF\xBB\xBF<HomePageWorkArea/>".to_vec();
-        let home_page_work_area_blob = deflate_for_test(&home_page_work_area);
+        let home_page_work_area = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<HomePageWorkArea xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
+\t<WorkingAreaTemplate>TwoColumnsVariableWidth</WorkingAreaTemplate>\r\n\
+\t<LeftColumn>\r\n\
+\t\t<Item>\r\n\
+\t\t\t<Form>bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb</Form>\r\n\
+\t\t\t<Height>10</Height>\r\n\
+\t\t\t<Visibility>\r\n\
+\t\t\t\t<xr:Common>true</xr:Common>\r\n\
+\t\t\t</Visibility>\r\n\
+\t\t</Item>\r\n\
+\t</LeftColumn>\r\n\
+\t<RightColumn>\r\n\
+\t</RightColumn>\r\n\
+</HomePageWorkArea>"
+            .as_bytes()
+            .to_vec();
+        let home_page_work_area_blob = deflate_for_test(
+            b"{1,2,1,{0,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},10,{0,{0,{\"B\",1},0}}},0}",
+        );
         let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
         let mobile_signature_blob = deflate_for_test(&mobile_signature);
         let main_section_command_interface = deflate_for_test(
@@ -17032,8 +21261,24 @@ mod tests {
         let command_interface = deflate_for_test(
             b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
         );
-        let client_application_interface = b"\xEF\xBB\xBF<ClientApplicationInterface/>".to_vec();
-        let client_application_interface_blob = deflate_for_test(&client_application_interface);
+        let client_application_interface = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n\
+\t<top>\r\n\
+\t\t<group id=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">\r\n\
+\t\t\t<group>\r\n\
+\t\t\t\t<panel id=\"dddddddd-dddd-4ddd-bddd-dddddddddddd\">\r\n\
+\t\t\t\t\t<uuid>eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee</uuid>\r\n\
+\t\t\t\t</panel>\r\n\
+\t\t\t</group>\r\n\
+\t\t</group>\r\n\
+\t</top>\r\n\
+\t<panelDef id=\"eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee\"/>\r\n\
+</ClientApplicationInterface>"
+            .as_bytes()
+            .to_vec();
+        let client_application_interface_blob = deflate_for_test(
+            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},2,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
+        );
         let main_picture_blob = deflate_for_test(b"{1,{0,0,-1,-1},{{#base64:iVBORw0KGgo=}}}");
         let standalone_configuration_content = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<StandaloneContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n</StandaloneContent>\r\n".to_vec();
         let standalone_configuration_content_blob = deflate_for_test(b"\xEF\xBB\xBF{2,0}");
@@ -17269,6 +21514,166 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn maps_selected_configuration_ext_headers_without_module_group() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let rows = ["8", "9", "a", "b"]
+            .into_iter()
+            .map(|suffix| ConfigRow {
+                file_name: format!("{uuid}.{suffix}"),
+                part_no: 0,
+                data_size: 1,
+                binary_hex: String::new(),
+            })
+            .collect::<Vec<_>>();
+
+        let paths = source_asset_paths_with_indexes(
+            &rows,
+            &[],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(
+            paths
+                .get(&format!("{uuid}.8"))
+                .map(|asset| asset.primary_path.to_string_lossy().replace('\\', "/"))
+                .as_deref(),
+            Some("Ext/HomePageWorkArea.xml")
+        );
+        assert_eq!(
+            paths
+                .get(&format!("{uuid}.9"))
+                .map(|asset| asset.primary_path.to_string_lossy().replace('\\', "/"))
+                .as_deref(),
+            Some("Ext/MainSectionCommandInterface.xml")
+        );
+        assert_eq!(
+            paths
+                .get(&format!("{uuid}.a"))
+                .map(|asset| asset.primary_path.to_string_lossy().replace('\\', "/"))
+                .as_deref(),
+            Some("Ext/CommandInterface.xml")
+        );
+        assert_eq!(
+            paths
+                .get(&format!("{uuid}.b"))
+                .map(|asset| asset.primary_path.to_string_lossy().replace('\\', "/"))
+                .as_deref(),
+            Some("Ext/ClientApplicationInterface.xml")
+        );
+    }
+
+    #[test]
+    fn extracts_home_page_work_area_with_form_references() {
+        let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let body = deflate_for_test(
+            format!("{{1,2,1,{{0,{{0,{form_uuid}}},10,{{0,{{0,{{\"B\",1}},0}}}}}},0}}").as_bytes(),
+        );
+        let form_refs = BTreeMap::from([(
+            form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Products/Forms/ListForm.xml"),
+                kind: "Form",
+            },
+        )]);
+
+        let work_area = parse_home_page_work_area_blob(&body, &form_refs).unwrap();
+        let xml = format_home_page_work_area_xml(&work_area, InfobaseConfigSourceVersion::V2_20);
+
+        assert!(xml.contains("<WorkingAreaTemplate>TwoColumnsVariableWidth</WorkingAreaTemplate>"));
+        assert!(xml.contains("<Form>Catalog.Products.Form.ListForm</Form>"));
+        assert!(xml.contains("<Height>10</Height>"));
+        assert!(xml.contains("<xr:Common>true</xr:Common>"));
+    }
+
+    #[test]
+    fn extracts_client_application_interface_layout() {
+        let body = deflate_for_test(
+            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},2,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
+        );
+
+        let interface = parse_client_application_interface_blob(&body).unwrap();
+        let xml = format_client_application_interface_xml(&interface);
+
+        assert!(xml.contains("<top>"));
+        assert!(xml.contains("<group id=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
+        assert!(xml.contains("<panel id=\"dddddddd-dddd-4ddd-bddd-dddddddddddd\">"));
+        assert!(xml.contains("<uuid>eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee</uuid>"));
+        assert!(xml.contains("<panelDef id=\"eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee\"/>"));
+        assert!(!xml.contains("<left>"));
+    }
+
+    #[test]
+    fn extracts_command_interface_subsystems_order() {
+        let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let body =
+            deflate_for_test(format!("{{7,0,0,0,1,2,{first_uuid},{second_uuid},0,0}}").as_bytes());
+        let metadata_refs = BTreeMap::from([
+            (
+                first_uuid.to_string(),
+                MetadataCommandReference {
+                    kind: "Subsystem".to_string(),
+                    name: "Sales".to_string(),
+                },
+            ),
+            (
+                second_uuid.to_string(),
+                MetadataCommandReference {
+                    kind: "Subsystem".to_string(),
+                    name: "Purchases".to_string(),
+                },
+            ),
+        ]);
+
+        let command_interface =
+            parse_command_interface_blob(&body, &BTreeMap::new(), &metadata_refs).unwrap();
+        let xml = format_command_interface_xml(&command_interface);
+
+        assert!(xml.contains("<SubsystemsOrder>"));
+        assert!(xml.contains("<Subsystem>Subsystem.Sales</Subsystem>"));
+        assert!(xml.contains("<Subsystem>Subsystem.Purchases</Subsystem>"));
+        assert!(!xml.contains("<CommandsVisibility>"));
+    }
+
+    #[test]
+    fn extracts_command_interface_visibility_placement_order_and_groups() {
+        let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let group_uuid = "1af6d528-0b86-4fba-ab95-bd7475db03ba";
+        let body = deflate_for_test(
+            format!(
+                "{{7,1,1,{{0,{command_uuid}}},{{0,{{0,{{\"B\",1}},0}}}},1,1,{{0,{command_uuid}}},{group_uuid},1,1,1,{group_uuid},{{0,{command_uuid}}},0,1,1,{group_uuid},0}}"
+            )
+            .as_bytes(),
+        );
+        let command_refs = BTreeMap::from([(
+            command_uuid.to_string(),
+            "CommonCommand.OpenDashboard".to_string(),
+        )]);
+
+        let command_interface =
+            parse_command_interface_blob(&body, &command_refs, &BTreeMap::new()).unwrap();
+        let xml = format_command_interface_xml(&command_interface);
+
+        assert!(xml.contains("<CommandsVisibility>"));
+        assert!(xml.contains("<CommandsPlacement>"));
+        assert!(xml.contains("<Placement>Manual</Placement>"));
+        assert!(xml.contains("<CommandsOrder>"));
+        assert!(xml.contains("<GroupsOrder>"));
+        assert!(xml.contains("<Group>NavigationPanelImportant</Group>"));
+        assert!(
+            xml.find("<CommandsVisibility>").unwrap() < xml.find("<CommandsPlacement>").unwrap()
+        );
+        assert!(xml.find("<CommandsPlacement>").unwrap() < xml.find("<CommandsOrder>").unwrap());
     }
 
     #[test]
@@ -17522,7 +21927,7 @@ mod tests {
         let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
         let metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -18576,6 +22981,69 @@ mod tests {
     }
 
     #[test]
+    fn extracts_regular_form_attribute_types_from_body_tail() {
+        let reference_type_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let form_body = deflate_for_test(
+            format!(
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}},"",{{4,3,{{9,{{1}},0,"Комментарий",{{1,1,{{"ru","Комментарий"}}}},{{"Pattern",{{"S",25,0}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}},{{9,{{2}},0,"Количество",{{1,0}},{{"Pattern",{{"N",10,3,1}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}},{{9,{{3}},0,"Номенклатура",{{1,0}},{{"Pattern",{{"#",{reference_type_uuid}}}}},{{0}},{{0}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}}}}}}}}"##
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([(
+            reference_type_uuid.to_string(),
+            "cfg:CatalogRef.Номенклатура".to_string(),
+        )]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains(r#"<Attribute name="Комментарий" id="1">"#));
+        assert!(form_xml.contains("<Title>"));
+        assert!(form_xml.contains("<v8:content>Комментарий</v8:content>"));
+        assert!(
+            form_xml.find("<Title>").unwrap()
+                < form_xml.find("<v8:Type>xs:string</v8:Type>").unwrap()
+        );
+        assert!(form_xml.contains("<v8:Type>xs:string</v8:Type>"));
+        assert!(form_xml.contains("<v8:StringQualifiers>"));
+        assert!(form_xml.contains("<v8:Length>25</v8:Length>"));
+        assert!(form_xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
+        assert!(form_xml.contains(r#"<Attribute name="Количество" id="2">"#));
+        assert!(form_xml.contains("<v8:Type>xs:decimal</v8:Type>"));
+        assert!(form_xml.contains("<v8:NumberQualifiers>"));
+        assert!(form_xml.contains("<v8:Digits>10</v8:Digits>"));
+        assert!(form_xml.contains("<v8:FractionDigits>3</v8:FractionDigits>"));
+        assert!(form_xml.contains("<v8:AllowedSign>Nonnegative</v8:AllowedSign>"));
+        assert!(form_xml.contains(r#"<Attribute name="Номенклатура" id="3">"#));
+        assert!(form_xml.contains("<v8:Type>cfg:CatalogRef.Номенклатура</v8:Type>"));
+    }
+
+    #[test]
+    fn formats_composite_type_qualifiers_in_native_order() {
+        let xml = format_metadata_types_xml(&[
+            ConstantValueType::String {
+                length: Some(200),
+                allowed_length_flag: 1,
+            },
+            ConstantValueType::DateTime {
+                date_fractions: "DateTime",
+            },
+            ConstantValueType::Number {
+                digits: 9,
+                fraction_digits: 3,
+                allowed_sign_flag: 0,
+            },
+        ]);
+
+        assert!(
+            xml.find("<v8:NumberQualifiers>").unwrap() < xml.find("<v8:StringQualifiers>").unwrap()
+        );
+        assert!(
+            xml.find("<v8:StringQualifiers>").unwrap() < xml.find("<v8:DateQualifiers>").unwrap()
+        );
+        assert!(xml.contains("<v8:DateFractions>DateTime</v8:DateFractions>"));
+    }
+
+    #[test]
     fn extracts_form_child_items_from_layout_pairs() {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let external_command_uuid = "11111111-1111-4111-8111-111111111111";
@@ -18586,6 +23054,8 @@ mod tests {
         let attributes = vec![FormAttribute {
             id: "1".to_string(),
             name: "Список".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
             main_attribute: true,
             use_always: Vec::new(),
             settings: None,
@@ -20775,6 +25245,119 @@ mod tests {
     }
 
     #[test]
+    fn parses_common_command_parameter_type_pattern() {
+        let catalog_type_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let defined_type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let type_index = BTreeMap::from([
+            (
+                catalog_type_uuid.to_string(),
+                "cfg:CatalogRef.Products".to_string(),
+            ),
+            (
+                defined_type_uuid.to_string(),
+                "cfg:DefinedType.TradeOffer".to_string(),
+            ),
+        ]);
+
+        let types = parse_common_command_parameter_type_names(
+            &format!(
+                r##"{{"Pattern",{{"#",{catalog_type_uuid}}},{{"#",{defined_type_uuid}}},{{"S",25,0}}}}"##
+            ),
+            &type_index,
+        );
+
+        assert_eq!(
+            types,
+            vec![
+                "cfg:CatalogRef.Products".to_string(),
+                "cfg:DefinedType.TradeOffer".to_string(),
+                "xs:string".to_string()
+            ]
+        );
+
+        let mut xml = String::new();
+        format_common_command_parameter_type_xml(&mut xml, &types);
+        assert!(xml.contains("<v8:Type>cfg:CatalogRef.Products</v8:Type>"));
+        assert!(xml.contains("<v8:TypeSet>cfg:DefinedType.TradeOffer</v8:TypeSet>"));
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
+    }
+
+    #[test]
+    fn parses_common_command_load_report_settings_picture() {
+        let (reference, load_transparent) = parse_common_command_picture_value(
+            r#"{4,1,{0,283ecabd-aaed-41d1-ad46-6cca91c29120},"",-1,-1,1,0,""}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, Some("StdPicture.LoadReportSettings".to_string()));
+        assert!(load_transparent);
+        assert_eq!(
+            common_command_standard_picture_name("37cf7cc0-abad-4385-b597-6fd2d8dc085a"),
+            Some("StdPicture.Task")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("723765ab-0b92-4745-a621-1ba0f77c92c9"),
+            Some("StdPicture.EventLog")
+        );
+        let (group_reference, group_load_transparent) = parse_command_group_picture_value(
+            r#"{4,1,{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c},"",-1,-1,1,0,""}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            group_reference,
+            Some("StdPicture.InformationRegister".to_string())
+        );
+        assert!(group_load_transparent);
+    }
+
+    #[test]
+    fn parses_common_command_input_field_open_picture_and_shortcut() {
+        let (reference, load_transparent) =
+            parse_common_command_picture_value(r#"{4,1,{-7},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+                .unwrap();
+
+        assert_eq!(reference, Some("StdPicture.InputFieldOpen".to_string()));
+        assert!(load_transparent);
+        assert_eq!(
+            parse_common_command_shortcut_value("{0,120,0}"),
+            Some("F9".to_string())
+        );
+        assert_eq!(parse_common_command_shortcut_value("{0,0,0}"), None);
+    }
+
+    #[test]
+    fn formats_common_command_tooltip_text_like_native() {
+        let mut xml = String::new();
+        push_common_command_tooltip_xml(
+            &mut xml,
+            &[(
+                "ru".to_string(),
+                "Открывает протокол \"Зерно\"\r\nВторая строка".to_string(),
+            )],
+        );
+
+        assert!(
+            xml.contains("<v8:content>Открывает протокол \"Зерно\"\nВторая строка</v8:content>")
+        );
+        assert!(!xml.contains("&quot;"));
+        assert!(!xml.contains("Зерно\"\r\nВторая"));
+    }
+
+    #[test]
+    fn recognizes_common_command_builtin_groups() {
+        assert_eq!(
+            common_command_group_name("1af6d528-0b86-4fba-ab95-bd7475db03ba"),
+            Some("NavigationPanelImportant")
+        );
+        assert_eq!(
+            common_command_group_name("8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8"),
+            Some("FormNavigationPanelSeeAlso")
+        );
+    }
+
+    #[test]
     fn writes_command_group_metadata_xml_to_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -20813,7 +25396,11 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.metadata_xml_rows, 2);
-        let xml = fs::read_to_string(root.join("CommandGroups/Admin.xml")).unwrap();
+        let bytes = fs::read(root.join("CommandGroups/Admin.xml")).unwrap();
+        assert!(bytes.starts_with(&[0xef, 0xbb, 0xbf]));
+        assert!(!bytes.ends_with(b"\r\n"));
+        let xml = String::from_utf8(bytes).unwrap();
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
         assert!(xml.contains(r#"<CommandGroup uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">"#));
         assert!(xml.contains("<Representation>Picture</Representation>"));
         assert!(xml.contains("<xr:Ref>CommonPicture.AdminPicture</xr:Ref>"));
@@ -20830,6 +25417,85 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn formats_style_item_native_color_and_font_attrs() {
+        assert_eq!(
+            parse_style_color_value(
+                r##"{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{3,0,{4625920}}}"##
+            )
+            .as_deref(),
+            Some("#009646")
+        );
+        assert_eq!(
+            parse_style_color_value(r##"{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{3,2,{27}}}"##)
+                .as_deref(),
+            Some("web:DarkGreen")
+        );
+        assert_eq!(
+            parse_style_color_value(r##"{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{3,3,{-3}}}"##)
+                .as_deref(),
+            Some("style:FormTextColor")
+        );
+        assert_eq!(
+            parse_style_color_value(
+                r##"{"#",9cd510c7-abfc-11d4-9434-004095e12fc7,2,{3,3,{-11}}}"##
+            )
+            .as_deref(),
+            Some("style:FieldTextColor")
+        );
+
+        let font_xml = parse_style_font_value_xml(
+            r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,2,60,{-31},700,0,0,0,1,100},0}"##,
+        );
+
+        assert_eq!(
+            font_xml,
+            r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,0,575,140,0,0,0,400,0,0,0,0,0,0,0,0,"Arial",1,100},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" faceName="Arial" height="14" bold="false" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,1,62,{0},100,700,0,0,0,1,100},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" ref="sys:DefaultGUIFont" height="10" bold="true" italic="false" underline="false" strikeout="false" kind="WindowsFont"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,1,60,{0},400,0,1,0,1,100},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" ref="sys:DefaultGUIFont" bold="false" italic="false" underline="true" strikeout="false" kind="WindowsFont"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,1,0,{0},1,100},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" ref="sys:DefaultGUIFont" kind="WindowsFont"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,2,574,{-31},120,400,0,0,0,1,90},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont" height="12" bold="false" italic="false" underline="false" strikeout="false" kind="StyleItem" scale="90"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,2,2,{-31},120,1,100},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont" height="12" kind="StyleItem"/>"#
+        );
+        assert_eq!(
+            parse_style_font_value_xml(
+                r##"{"#",9cd510c8-abfc-11d4-9434-004095e12fc7,1,{7,2,20,{-31},700,1,1,100},0}"##
+            ),
+            r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont" bold="true" underline="true" kind="StyleItem"/>"#
+        );
     }
 
     #[test]
@@ -20872,12 +25538,18 @@ mod tests {
 
         assert_eq!(dumped.metadata_xml_rows, 2);
         let color_xml = fs::read_to_string(root.join("StyleItems/DoneColor.xml")).unwrap();
+        let color_bytes = fs::read(root.join("StyleItems/DoneColor.xml")).unwrap();
+        assert!(color_bytes.starts_with(b"\xEF\xBB\xBF<?xml"));
+        assert!(!color_bytes.ends_with(b"\r\n"));
         assert!(color_xml.contains("<Type>Color</Type>"));
         assert!(color_xml.contains(r#"<Value xsi:type="v8ui:Color">web:DarkSlateGray</Value>"#));
+        assert!(color_xml.contains("xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\""));
+        assert!(color_xml.contains("\t\t\t<Comment/>\r\n"));
         let font_xml = fs::read_to_string(root.join("StyleItems/ImportantFont.xml")).unwrap();
         assert!(font_xml.contains("<Type>Font</Type>"));
-        assert!(font_xml.contains(r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont""#));
-        assert!(font_xml.contains(r#"bold="true""#));
+        assert!(font_xml.contains(
+            r#"<Value xsi:type="v8ui:Font" ref="style:NormalTextFont" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#
+        ));
         let color_row = dumped
             .rows
             .iter()
@@ -21078,8 +25750,11 @@ mod tests {
 
         assert_eq!(dumped.metadata_xml_rows, 1);
         assert_eq!(dumped.source_asset_rows, 1);
-        let xml =
-            fs::read_to_string(root.join("ScheduledJobs/LoadRates/Ext/Schedule.xml")).unwrap();
+        let bytes = fs::read(root.join("ScheduledJobs/LoadRates/Ext/Schedule.xml")).unwrap();
+        assert!(bytes.starts_with(b"\xEF\xBB\xBF"));
+        assert!(!bytes.ends_with(b"\r\n"));
+        let xml = String::from_utf8(bytes).unwrap();
+        assert!(xml.contains(r#"version="2.20""#));
         assert!(xml.contains("BeginTime=\"08:00:00\""));
         assert!(xml.contains("EndTime=\"17:00:00\""));
         assert!(xml.contains("RepeatPeriodInDay=\"60\""));
@@ -21096,6 +25771,196 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_scheduled_job_metadata_properties() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let module_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"LoadRates\",{{1,\"en\",\"Load rates\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\"LoadRatesKey\",\"Load rates description\",1,1,{module_uuid},\"Run\",3,10}},0}}"
+            )
+            .as_bytes(),
+        );
+        let extracted = extract_metadata_source_xml_with_refs(
+            &metadata,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                module_uuid.to_string(),
+                "CommonModule.RatesServer".to_string(),
+            )]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("ScheduledJobs").join("LoadRates.xml")
+        );
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(xml.contains("<Comment/>"));
+        assert!(xml.contains("<MethodName>CommonModule.RatesServer.Run</MethodName>"));
+        assert!(xml.contains("<Description>Load rates description</Description>"));
+        assert!(xml.contains("<Key>LoadRatesKey</Key>"));
+        assert!(xml.contains("<Use>true</Use>"));
+        assert!(xml.contains("<Predefined>true</Predefined>"));
+        assert!(xml.contains("<RestartCountOnFailure>3</RestartCountOnFailure>"));
+        assert!(xml.contains("<RestartIntervalOnFailure>10</RestartIntervalOnFailure>"));
+        assert!(!xml.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn extracts_event_subscription_metadata_properties() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let module_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{uuid}}},\"BeforeProductWrite\",{{1,\"en\",\"Before product write\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{type_uuid}}}}},\"BeforeWrite_ПередЗаписью\",{module_uuid},\"BeforeProductWrite\"}},0}}"
+            )
+            .as_bytes(),
+        );
+        let extracted = extract_metadata_source_xml_with_refs(
+            &metadata,
+            uuid,
+            &BTreeMap::from([(
+                type_uuid.to_string(),
+                "cfg:CatalogObject.Products".to_string(),
+            )]),
+            &BTreeMap::from([(
+                module_uuid.to_string(),
+                "CommonModule.ProductsServer".to_string(),
+            )]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("EventSubscriptions").join("BeforeProductWrite.xml")
+        );
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(xml.contains("<Comment/>"));
+        assert!(xml.contains("<v8:Type>cfg:CatalogObject.Products</v8:Type>"));
+        assert!(xml.contains("<Event>BeforeWrite</Event>"));
+        assert!(xml.contains("<Handler>CommonModule.ProductsServer.BeforeProductWrite</Handler>"));
+        assert!(!xml.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn formats_event_subscription_type_sets() {
+        assert_eq!(
+            builtin_type_reference("857c4a91-e5f4-4fac-86ec-787626f1c108"),
+            Some("cfg:ExchangePlanObject")
+        );
+        assert_eq!(
+            event_subscription_source_type_tag("cfg:DefinedType.AttachedFileObject"),
+            "TypeSet"
+        );
+        assert_eq!(
+            event_subscription_source_type_tag("cfg:ExchangePlanObject"),
+            "TypeSet"
+        );
+        assert_eq!(
+            event_subscription_source_type_tag("cfg:DocumentManager"),
+            "Type"
+        );
+        assert_eq!(
+            event_subscription_source_type_tag("cfg:ConstantValueManager"),
+            "TypeSet"
+        );
+        assert_eq!(
+            event_subscription_source_type_tag("cfg:CatalogObject.Products"),
+            "Type"
+        );
+    }
+
+    #[test]
+    fn sorts_event_subscription_type_sets_like_platform() {
+        let source_types = vec![
+            ConstantValueType::Reference {
+                reference: "cfg:InformationRegisterRecordSet".to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: "cfg:SequenceRecordSet".to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: "cfg:AccountingRegisterRecordSet".to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: "cfg:AccumulationRegisterRecordSet".to_string(),
+            },
+        ];
+        let actual = sorted_event_subscription_source_types(&source_types)
+            .into_iter()
+            .map(metadata_type_xml_name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                "cfg:InformationRegisterRecordSet",
+                "cfg:AccountingRegisterRecordSet",
+                "cfg:AccumulationRegisterRecordSet",
+                "cfg:SequenceRecordSet"
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_event_subscription_specific_types_before_type_sets() {
+        let source_types = vec![
+            ConstantValueType::Reference {
+                reference: "cfg:CatalogObject.Users".to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: "cfg:ExchangePlanObject".to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: "cfg:CatalogObject.ExternalUsers".to_string(),
+            },
+        ];
+        let actual = sorted_event_subscription_source_types(&source_types)
+            .into_iter()
+            .map(metadata_type_xml_name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            actual,
+            vec![
+                "cfg:CatalogObject.Users",
+                "cfg:CatalogObject.ExternalUsers",
+                "cfg:ExchangePlanObject"
+            ]
+        );
+    }
+
+    #[test]
+    fn formats_scheduled_job_detailed_daily_schedules() {
+        let schedule = deflate_for_test(
+            b"{20260101000000,20260131000000,00010101000500,00010101000000,00010101000000,0,0,0,7,1,2,3,4,5,6,7,0,0,1,1,1,1,1,{00010101000000,00010101000000,00010101000500,00010101000000,00010101000000,0,0,0,0,0,0,0,1,0,0}}",
+        );
+        let xml = extract_schedule_xml(&schedule).unwrap();
+
+        assert!(xml.contains("<ent:Months>1</ent:Months>"));
+        assert!(xml.contains(
+            r#"<ent:DetailedDailySchedules BeginDate="0001-01-01" EndDate="0001-01-01" BeginTime="00:05:00" EndTime="00:00:00" CompletionTime="00:00:00" CompletionInterval="0" RepeatPeriodInDay="0" RepeatPause="0" WeekDayInMonth="0" DayInMonth="0" WeeksPeriod="1" DaysRepeatPeriod="0">"#
+        ));
+        assert!(xml.contains("\t\t\t<ent:WeekDays/>\r\n\t\t\t<ent:Months/>"));
     }
 
     #[test]
@@ -21522,6 +26387,12 @@ mod tests {
             fs::read_to_string(root.join("Catalogs/Products/Templates/Print/Ext/Template.xml"))
                 .unwrap();
         assert!(owned_xml.contains("<Template uuid=\"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb\">"));
+        assert!(owned_xml.starts_with('\u{feff}'));
+        assert!(owned_xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(owned_xml.contains(r#"version="2.20""#));
+        assert!(owned_xml.contains("<Comment/>"));
+        assert!(!owned_xml.contains("<Comment></Comment>"));
+        assert!(!owned_xml.ends_with("\r\n"));
         assert!(owned_xml.contains("<TemplateType>SpreadsheetDocument</TemplateType>"));
         assert!(template_body.contains("<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\""));
         assert!(template_body.contains("<v8:content>Hello [Name]</v8:content>"));
@@ -21529,6 +26400,11 @@ mod tests {
         assert!(
             common_xml.contains("<CommonTemplate uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">")
         );
+        assert!(common_xml.starts_with('\u{feff}'));
+        assert!(common_xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(common_xml.contains("<Comment/>"));
+        assert!(!common_xml.contains("<Comment></Comment>"));
+        assert!(!common_xml.ends_with("\r\n"));
         assert!(common_xml.contains("<TemplateType>TextDocument</TemplateType>"));
         assert_eq!(common_body, b"\xef\xbb\xbfPlain text");
         let template_row = dumped
@@ -21563,6 +26439,29 @@ mod tests {
     }
 
     #[test]
+    fn formats_template_metadata_xml_with_source_version() {
+        let xml = format_template_source_xml(
+            "CommonTemplate",
+            &MetadataHeader {
+                uuid: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
+                name: "Shared".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            "DataCompositionSchema",
+            InfobaseConfigSourceVersion::V2_21,
+        );
+
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains("<Comment/>"));
+        assert!(xml.contains("<TemplateType>DataCompositionSchema</TemplateType>"));
+        assert!(!xml.ends_with("\r\n"));
+    }
+
+    #[test]
     fn detects_data_composition_appearance_template_body() {
         let body = deflate_for_test(
             br#"<?xml version="1.0" encoding="UTF-8"?>
@@ -21579,6 +26478,61 @@ mod tests {
         let (path, kind) = template_body_source_asset("DataCompositionAppearanceTemplate").unwrap();
         assert_eq!(path, "Template.xml");
         assert!(matches!(kind, SourceAssetKind::InflatedBinary));
+    }
+
+    #[test]
+    fn normalizes_data_composition_schema_template_body_container() {
+        let raw = concat!(
+            "\0\0\0\0\0\0\0\0",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+            "\t\t<field xsi:type=\"DataSetFieldField\">\r\n",
+            "\t\t\t<title xmlns:d5p1=\"http://v8.1c.ru/8.1/data/core\" xsi:type=\"d5p1:LocalStringType\">\r\n",
+            "\t\t\t\t<d5p1:item><d5p1:lang>ru</d5p1:lang><d5p1:content>Сумма</d5p1:content></d5p1:item>\r\n",
+            "\t\t\t</title>\r\n",
+            "\t\t\t<role><dimension xmlns=\"http://v8.1c.ru/8.1/data-composition-system/common\">true</dimension></role>\r\n",
+            "\t\t</field>\r\n",
+            "\t\t<settingsVariant>\r\n",
+            "\t\t\t<name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Основной</name>\r\n",
+            "\t\t\t<presentation xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xsi:type=\"xs:string\">Основной</presentation>\r\n",
+            "\t\t</settingsVariant>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<selection><item xsi:type=\"SelectedItemField\"><field>Сумма</field></item></selection>\r\n",
+            "\t<filter><item xsi:type=\"FilterItemComparison\"><left xsi:type=\"dcscor:Field\">Организация</left></item></filter>\r\n",
+            "</Settings>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes()).unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.starts_with(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<DataCompositionSchema "
+        ));
+        assert!(
+            xml.contains(r#"xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#)
+        );
+        assert!(!xml.contains("<SchemaFile"));
+        assert!(!xml.contains("dataCompositionSchema"));
+        assert!(xml.contains(r#"<title xsi:type="v8:LocalStringType">"#));
+        assert!(
+            xml.contains("<v8:item><v8:lang>ru</v8:lang><v8:content>Сумма</v8:content></v8:item>")
+        );
+        assert!(xml.contains("<role><dcscom:dimension>true</dcscom:dimension></role>"));
+        assert!(xml.contains("<dcsset:name>Основной</dcsset:name>"));
+        assert!(xml.contains("<dcsset:settings xmlns:style="));
+        assert!(xml.contains(r#"<dcsset:item xsi:type="dcsset:SelectedItemField">"#));
+        assert!(xml.contains(r#"<dcsset:left xsi:type="dcscor:Field">Организация</dcsset:left>"#));
+        assert!(xml.ends_with("</DataCompositionSchema>"));
+
+        let (path, kind) = template_body_source_asset("DataCompositionSchema").unwrap();
+        assert_eq!(path, "Template.xml");
+        assert!(matches!(kind, SourceAssetKind::DataCompositionSchema));
     }
 
     #[test]
@@ -22695,7 +27649,7 @@ mod tests {
 {{1c87578f-9e09-4ec0-a991-5629c87b1588,{1,{1,"#Если &Allowed #Тогда ""OK""",0}}},
 {287b74b8-3a66-4a76-ba27-4f1f6a93770e,{1,{1,"ГДЕ Owner = &User",0}}},
 {24abfe06-289a-48c5-8bb4-032c733e45c5,{2,{1,"",0},{1,"ГДЕ ЛОЖЬ",1,{{0},{0,@field_uuid@}}}}}}}}},
-{1,{"OnlyAllowed","// Template & ""quoted"""}},4294967295,1,0,4294967295}"##
+{1,{"OnlyAllowed","// Template & ""quoted"""}},1,1,0,4294967295}"##
             .replace("@catalog_uuid@", catalog_uuid)
             .replace("@configuration_uuid@", configuration_uuid)
             .replace("@operation_uuid@", operation_uuid)
@@ -22744,6 +27698,8 @@ mod tests {
 
         assert_eq!(dumped.source_asset_rows, 1);
         let xml = fs::read_to_string(root.join("Roles/Editor/Ext/Rights.xml")).unwrap();
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(!xml.ends_with("\r\n"));
         assert!(xml.contains(r#"<Rights xmlns="http://v8.1c.ru/8.2/roles""#));
         assert!(
             xml.find("<name>InformationRegister.Prices</name>").unwrap()
@@ -22773,8 +27729,7 @@ mod tests {
         assert!(xml.contains("<name>TotalsControl</name>"));
         assert!(xml.contains("<field>ВерсияОбъекта</field>"));
         assert!(xml.contains("ГДЕ ЛОЖЬ"));
-        assert!(xml.contains("<name>Delete</name>"));
-        assert!(xml.contains("<value>false</value>"));
+        assert!(!xml.contains("<name>Delete</name>"));
         assert!(xml.contains("<name>Insert</name>"));
         assert!(xml.contains("<name>View</name>"));
         assert!(xml.contains("<restrictionTemplate>"));
@@ -22791,6 +27746,44 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn format_role_rights_omits_false_rights_without_restrictions() {
+        let xml = format_role_rights_xml(&RoleRights {
+            set_for_new_objects: false,
+            objects: vec![RoleObjectRights {
+                name: "Document.Invoice".to_string(),
+                rights: vec![
+                    RoleRight {
+                        name: "Read".to_string(),
+                        value: true,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "Update".to_string(),
+                        value: false,
+                        restriction_by_condition: Some(RoleRightRestriction {
+                            field: None,
+                            condition: "ГДЕ\r\nЛОЖЬ".to_string(),
+                        }),
+                    },
+                    RoleRight {
+                        name: "Edit".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                ],
+            }],
+            restriction_templates: Vec::new(),
+        });
+
+        assert!(xml.contains("<name>Read</name>"));
+        assert!(xml.contains("<name>Update</name>"));
+        assert!(xml.contains("<value>false</value>"));
+        assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
+        assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
+        assert!(!xml.contains("<name>Edit</name>"));
     }
 
     #[test]
@@ -22897,6 +27890,101 @@ mod tests {
     }
 
     #[test]
+    fn writes_subsystem_command_interface_order_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let subsystem_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let document_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let navigation_panel_ordinary_uuid = "77ea1b8f-dd79-4717-9dba-5628e7f348cf";
+        let subsystem_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let document_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let command_interface = deflate_for_test(
+            format!(
+                "{{7,0,0,1,2,{navigation_panel_ordinary_uuid},\r\n{{0,{catalog_uuid}}},{navigation_panel_ordinary_uuid},\r\n{{0,{document_uuid}}},0,1,1,{navigation_panel_ordinary_uuid},0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: subsystem_uuid.to_string(),
+                part_no: 0,
+                data_size: subsystem_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&subsystem_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{subsystem_uuid}.1"),
+                part_no: 0,
+                data_size: command_interface.len() as i64,
+                binary_hex: encode_hex_for_test(&command_interface),
+            },
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: document_uuid.to_string(),
+                part_no: 0,
+                data_size: document_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&document_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let path = root.join("Subsystems/Sales/Ext/CommandInterface.xml");
+        let bytes = fs::read(&path).unwrap();
+        assert!(bytes.starts_with(&[0xef, 0xbb, 0xbf]));
+        assert!(!bytes.ends_with(b"\r\n"));
+        let xml = String::from_utf8(bytes).unwrap();
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains("<CommandsOrder>"));
+        assert!(xml.contains(r#"<Command name="Catalog.Customers.StandardCommand.OpenList">"#));
+        assert!(xml.contains(r#"<Command name="Document.Invoice.StandardCommand.OpenList">"#));
+        assert_eq!(
+            xml.matches("<CommandGroup>NavigationPanelOrdinary</CommandGroup>")
+                .count(),
+            2
+        );
+        assert!(xml.contains("<GroupsOrder>"));
+        assert!(xml.contains("<Group>NavigationPanelOrdinary</Group>"));
+        assert!(!xml.contains("<CommandsVisibility>"));
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{subsystem_uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Subsystems/Sales/Ext/CommandInterface.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn writes_exchange_plan_content_to_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -22975,7 +28063,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_config_dump_info_to_source_layout() {
+    fn skips_config_dump_info_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
             uuid::Uuid::new_v4().hyphenated()
@@ -22993,20 +28081,14 @@ mod tests {
 
         let dumped = dump_table_rows(&root, "Config", vec![row], false, false, true).unwrap();
 
-        assert_eq!(dumped.source_asset_rows, 1);
-        let xml = fs::read_to_string(root.join("ConfigDumpInfo.xml")).unwrap();
-        assert!(xml.contains("<ConfigDumpInfo"));
-        assert!(xml.contains(r#"format="Hierarchical""#));
-        assert!(xml.contains("<ConfigVersions/>"));
+        assert_eq!(dumped.source_asset_rows, 0);
+        assert!(!root.join("ConfigDumpInfo.xml").exists());
         let versions_row = dumped
             .rows
             .iter()
             .find(|row| row.file_name == "versions")
             .unwrap();
-        assert_eq!(
-            versions_row.source_asset_path.as_deref(),
-            Some("ConfigDumpInfo.xml")
-        );
+        assert_eq!(versions_row.source_asset_path.as_deref(), None);
 
         let _ = fs::remove_dir_all(root);
     }
@@ -23326,6 +28408,214 @@ mod tests {
     }
 
     #[test]
+    fn extracts_enum_xml_with_values_and_native_envelope() {
+        let enum_uuid = "11111111-1111-4111-8111-111111111111";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let value_open_uuid = "55555555-5555-4555-8555-555555555551";
+        let value_closed_uuid = "66666666-6666-4666-8666-666666666661";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let enum_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,{ref_type_id},{ref_value_id},{manager_type_id},{manager_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"enum comment\",0,0,{zero_uuid},0}}\r\n}},0,{list_type_id},{list_value_id},{zero_uuid},{zero_uuid},2,1,{zero_uuid},{zero_uuid},{{1,\"en\",\"Statuses\"}},{{0}},{{0}},{{0,{{0}}}},0}},2,\r\n{{aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0}},{{bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0}},{{cccccccc-cccc-4ccc-cccc-cccccccccccc,0}},\r\n{{dddddddd-dddd-4ddd-dddd-ddddddddddddd,2,\r\n{{{{0,{{3,{{1,0,{value_open_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}},0}},\r\n{{{{0,{{3,{{1,0,{value_closed_uuid}}},\"Closed\",{{1,\"en\",\"Closed\"}},\"\"}}}},0}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &enum_blob,
+            enum_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(extracted.relative_path, PathBuf::from("Enums/Status.xml"));
+        assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(!xml.contains("xmlns:pal="));
+        assert!(xml.contains(r#"<Enum uuid="11111111-1111-4111-8111-111111111111">"#));
+        assert!(xml.contains(r#"<xr:GeneratedType name="EnumRef.Status" category="Ref">"#));
+        assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="EnumManager.Status" category="Manager">"#));
+        assert!(xml.contains(r#"<xr:GeneratedType name="EnumList.Status" category="List">"#));
+        assert!(xml.contains("<Comment>enum comment</Comment>"));
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Order">"#));
+        assert!(xml.contains(r#"<xr:StandardAttribute name="Ref">"#));
+        assert!(xml.contains("<Characteristics/>"));
+        assert!(xml.contains("<QuickChoice>true</QuickChoice>"));
+        assert!(xml.contains("<ChoiceMode>BothWays</ChoiceMode>"));
+        assert!(xml.contains("<DefaultListForm/>"));
+        assert!(xml.contains("<DefaultChoiceForm/>"));
+        assert!(xml.contains("<ListPresentation>"));
+        assert!(xml.contains("<v8:content>Statuses</v8:content>"));
+        assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+        assert!(xml.contains(r#"<EnumValue uuid="55555555-5555-4555-8555-555555555551">"#));
+        assert!(xml.contains("<Name>Open</Name>"));
+        assert!(!xml.contains("<Color>auto</Color>"));
+        assert!(xml.contains(r#"<EnumValue uuid="66666666-6666-4666-8666-666666666661">"#));
+        assert!(xml.contains("<Name>Closed</Name>"));
+        assert!(xml.contains("<Comment/>"));
+        assert!(!xml.ends_with("\r\n"));
+
+        let v21 = extract_metadata_source_xml_with_refs(
+            &enum_blob,
+            enum_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let v21_xml = String::from_utf8(v21.xml).unwrap();
+        assert!(v21_xml.contains(r#"version="2.21""#));
+        assert!(v21_xml.contains(r#"xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette""#));
+        assert!(v21_xml.contains("<Color>auto</Color>"));
+    }
+
+    #[test]
+    fn extracts_enum_child_form_and_template_refs_from_current_indexes() {
+        let enum_uuid = "11111111-1111-4111-8111-111111111111";
+        let choice_form_uuid = "77777777-7777-4777-8777-777777777771";
+        let list_form_uuid = "77777777-7777-4777-8777-777777777772";
+        let print_template_uuid = "88888888-8888-4888-8888-888888888881";
+        let settings_template_uuid = "88888888-8888-4888-8888-888888888882";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let form_list_marker = FORM_LIST_MARKERS[0];
+        let enum_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"\",0,0,{zero_uuid},0}}\r\n}},0,44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,{zero_uuid},{zero_uuid},2,1,{zero_uuid},{zero_uuid},{{0}},{{0}},{{0}},{{0,{{0}}}},0}},2,\r\n{{aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0}},{{bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0}},{{cccccccc-cccc-4ccc-cccc-cccccccccccc,0}},\r\n{{dddddddd-dddd-4ddd-dddd-ddddddddddddd,1,\r\n{{{{0,{{3,{{1,0,55555555-5555-4555-8555-555555555551}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}},0}}}},\r\n{{{form_list_marker},1,{choice_form_uuid}}},{print_template_uuid},{{{form_list_marker},2,{list_form_uuid},{choice_form_uuid}}},{settings_template_uuid}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let choice_form_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{choice_form_uuid}}},\"ChoiceForm\",{{1,\"en\",\"Choice form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let list_form_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{list_form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        let print_template_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,4,\r\n{{3,\r\n{{1,0,{print_template_uuid}}},\"Print\",{{1,\"en\",\"Print\"}},\"\"}}\r\n,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let settings_template_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,4,\r\n{{3,\r\n{{1,0,{settings_template_uuid}}},\"Settings\",{{1,\"en\",\"Settings\"}},\"\"}}\r\n,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let row = |file_name: &str, data: &[u8]| ConfigRow {
+            file_name: file_name.to_string(),
+            part_no: 0,
+            data_size: data.len() as i64,
+            binary_hex: encode_hex_for_test(data),
+        };
+        let rows = vec![
+            row(enum_uuid, &enum_blob),
+            row(choice_form_uuid, &choice_form_blob),
+            row(list_form_uuid, &list_form_blob),
+            row(print_template_uuid, &print_template_blob),
+            row(settings_template_uuid, &settings_template_blob),
+        ];
+        let mut form_refs = build_form_source_reference_index(&rows);
+        let mut template_refs = build_template_source_reference_index(&rows);
+        form_refs.insert(
+            "77777777-7777-4777-8777-777777777773".to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Enums/Status/Forms/ExtraForm.xml"),
+                kind: "Form",
+            },
+        );
+        template_refs.insert(
+            "88888888-8888-4888-8888-888888888883".to_string(),
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Enums/Status/Templates/ExtraTemplate.xml"),
+                kind: "Template",
+                template_type: "TextDocument",
+            },
+        );
+
+        assert_eq!(
+            form_refs
+                .get(choice_form_uuid)
+                .map(|form_ref| form_ref.relative_path.as_path()),
+            Some(Path::new("Enums/Status/Forms/ChoiceForm.xml"))
+        );
+        assert_eq!(
+            form_refs
+                .get(list_form_uuid)
+                .map(|form_ref| form_ref.relative_path.as_path()),
+            Some(Path::new("Enums/Status/Forms/ListForm.xml"))
+        );
+        assert_eq!(
+            template_refs
+                .get(print_template_uuid)
+                .map(|template_ref| template_ref.relative_path.as_path()),
+            Some(Path::new("Enums/Status/Templates/Print.xml"))
+        );
+        assert_eq!(
+            template_refs
+                .get(settings_template_uuid)
+                .map(|template_ref| template_ref.relative_path.as_path()),
+            Some(Path::new("Enums/Status/Templates/Settings.xml"))
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &enum_blob,
+            enum_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &template_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<EnumValue uuid=\"55555555-5555-4555-8555-555555555551\">"));
+        assert!(xml.contains("<Form>ChoiceForm</Form>"));
+        assert!(xml.contains("<Form>ListForm</Form>"));
+        assert!(xml.contains("<Form>ExtraForm</Form>"));
+        assert!(xml.contains("<Template>Print</Template>"));
+        assert!(xml.contains("<Template>Settings</Template>"));
+        assert!(xml.contains("<Template>ExtraTemplate</Template>"));
+        let enum_value_pos = xml.find("<EnumValue ").unwrap();
+        let choice_form_pos = xml.find("<Form>ChoiceForm</Form>").unwrap();
+        let list_form_pos = xml.find("<Form>ListForm</Form>").unwrap();
+        let extra_form_pos = xml.find("<Form>ExtraForm</Form>").unwrap();
+        let print_template_pos = xml.find("<Template>Print</Template>").unwrap();
+        let settings_template_pos = xml.find("<Template>Settings</Template>").unwrap();
+        let extra_template_pos = xml.find("<Template>ExtraTemplate</Template>").unwrap();
+        assert!(enum_value_pos < choice_form_pos);
+        assert!(choice_form_pos < list_form_pos);
+        assert!(list_form_pos < extra_form_pos);
+        assert!(extra_form_pos < print_template_pos);
+        assert!(print_template_pos < settings_template_pos);
+        assert!(settings_template_pos < extra_template_pos);
+        assert_eq!(xml.matches("<Form>ChoiceForm</Form>").count(), 1);
+    }
+
+    #[test]
     fn ignores_report_and_indexes_task_rows_in_generated_type_index() {
         let report_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let report_object_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
@@ -23391,11 +28681,16 @@ mod tests {
         )
         .unwrap();
         let properties = parse_common_module_xml_properties(&extracted.xml).unwrap();
+        let xml_text = String::from_utf8(extracted.xml.clone()).unwrap();
 
         assert_eq!(
             extracted.relative_path,
             PathBuf::from("CommonModules").join("SalesModule.xml")
         );
+        assert!(xml_text.starts_with('\u{feff}'));
+        assert!(xml_text.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(xml_text.contains(r#"version="2.20""#));
+        assert!(!xml_text.ends_with("\r\n"));
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "SalesModule");
         assert_eq!(properties.comment, "Module comment");
@@ -23411,6 +28706,113 @@ mod tests {
             properties.return_values_reuse,
             ReturnValuesReuse::DuringSession
         );
+
+        let empty_comment_xml = format_common_module_source_xml(
+            &MetadataHeader {
+                uuid: uuid.to_string(),
+                name: "EmptyCommentModule".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            &CommonModuleFlags {
+                global: false,
+                client_managed_application: false,
+                server: true,
+                external_connection: true,
+                client_ordinary_application: true,
+                server_call: false,
+                privileged: false,
+                return_values_reuse: ReturnValuesReuseValue::DontUse,
+            },
+            InfobaseConfigSourceVersion::V2_20,
+        );
+        assert!(empty_comment_xml.contains("<Comment/>"));
+        assert!(!empty_comment_xml.contains("<Comment></Comment>"));
+        let v21_xml = format_common_module_source_xml(
+            &MetadataHeader {
+                uuid: uuid.to_string(),
+                name: "VersionedModule".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            &CommonModuleFlags {
+                global: false,
+                client_managed_application: false,
+                server: true,
+                external_connection: true,
+                client_ordinary_application: true,
+                server_call: false,
+                privileged: false,
+                return_values_reuse: ReturnValuesReuseValue::DontUse,
+            },
+            InfobaseConfigSourceVersion::V2_21,
+        );
+        assert!(v21_xml.contains(r#"version="2.21""#));
+        assert!(!v21_xml.contains(r#"version="2.20""#));
+    }
+
+    #[test]
+    fn normalizes_source_version_in_xml_bytes() {
+        assert_eq!(
+            String::from_utf8(normalize_source_xml_version_bytes(
+                br#"<Object version="2.20"/>"#,
+                InfobaseConfigSourceVersion::V2_21
+            ))
+            .unwrap(),
+            r#"<Object version="2.21"/>"#
+        );
+        assert_eq!(
+            String::from_utf8(normalize_source_xml_version_bytes(
+                br#"<Object version="2.21"/>"#,
+                InfobaseConfigSourceVersion::V2_20
+            ))
+            .unwrap(),
+            r#"<Object version="2.20"/>"#
+        );
+    }
+
+    #[test]
+    fn extracts_role_xml_with_native_envelope() {
+        let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let blob = deflate_for_test(
+            format!(
+                "\u{feff}{{1,\r\n{{6,\r\n{{3,\r\n{{1,0,{uuid}}},\"Admin\",{{1,\"ru\",\"Администратор\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(extracted.relative_path, PathBuf::from("Roles/Admin.xml"));
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains("<Comment/>"));
+        assert!(!xml.contains("<Comment></Comment>"));
+        assert!(!xml.ends_with("\r\n"));
+
+        let v21 = format_full_metadata_source_xml(
+            "Role",
+            &MetadataHeader {
+                uuid: uuid.to_string(),
+                name: "Admin".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            InfobaseConfigSourceVersion::V2_21,
+        );
+        assert!(v21.contains(r#"version="2.21""#));
     }
 
     #[test]
@@ -23446,7 +28848,7 @@ mod tests {
         let uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
         let blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
+                "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}},0,\r\n{{0}},\r\n{{1,\"en\",\"Use feature tip\"}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,1,\r\n{{0}},1,0}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -23470,48 +28872,113 @@ mod tests {
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "UseFeature");
         assert_eq!(properties.comment, "Feature flag");
-        assert!(String::from_utf8_lossy(&extracted.xml).contains("xs:boolean"));
-        assert!(String::from_utf8_lossy(&extracted.xml).contains("<UseStandardCommands>true"));
+        let xml = String::from_utf8_lossy(&extracted.xml);
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="ConstantManager.UseFeature" category="Manager">"#
+        ));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="ConstantValueManager.UseFeature" category="ValueManager">"#
+        ));
+        assert!(xml.contains("xs:boolean"));
+        assert!(xml.contains("<UseStandardCommands>true"));
+        assert!(xml.contains("<ToolTip>"));
+        assert!(xml.contains("<v8:content>Use feature tip</v8:content>"));
+        assert!(xml.contains("<DefaultForm/>"));
+        assert!(xml.contains("<DataLockControlMode>Managed</DataLockControlMode>"));
+        assert!(xml.contains("<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"));
+        assert!(!xml.ends_with("\r\n"));
         assert!(!repacked.blob.is_empty());
+
+        let constant = parse_constant_properties_from_text(
+            &String::from_utf8(inflate_raw_deflate(&blob).unwrap()).unwrap(),
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let v21_xml = format_constant_source_xml(
+            &MetadataHeader {
+                uuid: uuid.to_string(),
+                name: "UseFeature".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            &constant,
+            InfobaseConfigSourceVersion::V2_21,
+        );
+        assert!(v21_xml.contains(r#"version="2.21""#));
+        assert!(!v21_xml.contains(r#"version="2.20""#));
+    }
+
+    #[test]
+    fn parses_constant_choice_parameters_as_design_time_refs() {
+        let object_refs = BTreeMap::from([(
+            "9fe5bd6a-0dc3-492a-8124-5d8374b7dc0f".to_string(),
+            "Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес".to_string(),
+        )]);
+        let parameters = parse_constant_choice_parameters(
+            Some(
+                r##"{0,1,"Отбор.ТипИзмеряемойВеличины", {"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,e9aecab4-da2b-4a51-b13c-fb8ca3924bce,9fe5bd6a-0dc3-492a-8124-5d8374b7dc0f}}}"##,
+            ),
+            &object_refs,
+        );
+
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name, "Отбор.ТипИзмеряемойВеличины");
+        assert_eq!(
+            format_choice_parameters_xml(&parameters),
+            "<ChoiceParameters>\r\n\t\t\t\t<app:item name=\"Отбор.ТипИзмеряемойВеличины\">\r\n\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес</app:value>\r\n\t\t\t\t</app:item>\r\n\t\t\t</ChoiceParameters>"
+        );
     }
 
     #[test]
     fn extracts_constant_xml_with_builtin_uuid_types() {
-        for (uuid, name, type_uuid, expected_type) in [
+        for (uuid, name, type_uuid, expected_tag, expected_type) in [
             (
                 "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
                 "StoredValue",
                 "e199ca70-93cf-46ce-a54b-6edc88c3a296",
+                "v8:Type",
                 "v8:ValueStorage",
             ),
             (
                 "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
                 "VersionUuid",
                 "fc01b5df-97fe-449b-83d4-218a090e681e",
+                "v8:Type",
                 "v8:UUID",
             ),
             (
                 "cccccccc-cccc-4ccc-cccc-cccccccccccc",
                 "FixedStructureValue",
                 "3ee983d7-ace7-40f9-bb7e-2e916fcddd56",
+                "v8:Type",
                 "v8:FixedStructure",
             ),
             (
                 "dddddddd-dddd-4ddd-dddd-dddddddddddd",
                 "FixedArrayValue",
                 "4500381b-db30-4a10-9db4-990038032acf",
+                "v8:Type",
                 "v8:FixedArray",
             ),
             (
                 "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
                 "FixedMapValue",
                 "220455ea-6c85-4513-996f-bbe79ed07774",
+                "v8:Type",
                 "v8:FixedMap",
             ),
             (
                 "ffffffff-ffff-4fff-ffff-ffffffffffff",
                 "ExchangePlanNode",
                 "0a52f9de-73ea-4507-81e8-66217bead73a",
+                "v8:TypeSet",
                 "cfg:ExchangePlanRef",
             ),
         ] {
@@ -23536,7 +29003,7 @@ mod tests {
                 extracted.relative_path,
                 PathBuf::from("Constants").join(format!("{name}.xml"))
             );
-            assert!(xml.contains(&format!("<v8:Type>{expected_type}</v8:Type>")));
+            assert!(xml.contains(&format!("<{expected_tag}>{expected_type}</{expected_tag}>")));
         }
     }
 
@@ -23607,7 +29074,7 @@ mod tests {
         assert_eq!(properties.uuid, uuid);
         assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
         assert!(xml.contains("<v8:Length>50</v8:Length>"));
-        assert!(xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"));
+        assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
         assert!(!repacked.blob.is_empty());
     }
 
@@ -23615,23 +29082,36 @@ mod tests {
     fn extracts_functional_option_xml_from_metadata_blob() {
         let uuid = "44444444-4444-4444-8444-444444444444";
         let location_uuid = "55555555-5555-4555-8555-555555555555";
+        let content_uuid = "66666666-5555-4555-8555-555555555555";
         let blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{location_uuid},\r\n{{0,0}},1}},0}}"
+                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"Feature flag\",0,0,00000000-0000-0000-0000-000000000000,0}},{location_uuid},\r\n{{0,1,\r\n{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{content_uuid}}}}}}},1}},0}}"
             )
             .as_bytes(),
         );
 
-        let extracted = extract_metadata_source_xml(
+        let refs = BTreeMap::from([
+            (location_uuid.to_string(), "Constant.UseFeature".to_string()),
+            (
+                content_uuid.to_string(),
+                "Document.Order.Attribute.UseFeature".to_string(),
+            ),
+        ]);
+        let extracted = extract_metadata_source_xml_with_refs(
             &blob,
             uuid,
             &BTreeMap::new(),
+            &refs,
+            &refs,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
         let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
         let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
 
         assert_eq!(
             extracted.relative_path,
@@ -23641,7 +29121,406 @@ mod tests {
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "UseFeature");
         assert_eq!(properties.comment, "Feature flag");
+        assert!(xml.contains("<Location>Constant.UseFeature</Location>"));
+        assert!(xml.contains("<PrivilegedGetMode>true</PrivilegedGetMode>"));
+        assert!(xml.contains("<xr:Object>Document.Order.Attribute.UseFeature</xr:Object>"));
         assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn resolves_code27_tabular_section_attribute_reference() {
+        let tabular_uuid = "11111111-2222-4222-8222-111111111111";
+        let attribute_uuid = "33333333-4444-4444-8444-333333333333";
+        let text = format!(
+            "{{11,\r\n{{0,\r\n{{3,\r\n{{1,0,{tabular_uuid}}},\"Items\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}},\r\n{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\r\n{{0,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Amount\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Amount".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "DataProcessor",
+            "SalesAssistant",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "DataProcessor.SalesAssistant.TabularSection.Items.Attribute.Amount"
+        );
+    }
+
+    #[test]
+    fn functional_option_refs_prefer_nested_subsystem_reference() {
+        let option_uuid = "11111111-1111-4111-8111-111111111111";
+        let subsystem_uuid = "22222222-2222-4222-8222-222222222222";
+        let option_text = format!(
+            "{{1,{{2,{{3,{{1,0,{option_uuid}}},\"UseNested\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},00000000-0000-0000-0000-000000000000,{{0,1,{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{subsystem_uuid}}}}}}},1}},0}}"
+        );
+        let rows = vec![MetadataTextRow {
+            file_name: option_uuid.to_string(),
+            text: option_text,
+            object_code: Some(2),
+            header: Some(MetadataHeader {
+                uuid: option_uuid.to_string(),
+                name: "UseNested".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("FunctionalOption".to_string()),
+            folder: Some("FunctionalOptions"),
+        }];
+        let refs = build_functional_option_reference_index_from_texts(
+            &rows,
+            &BTreeMap::from([(subsystem_uuid.to_string(), "Subsystem.Child".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                subsystem_uuid.to_string(),
+                SubsystemSourceReference {
+                    relative_path: PathBuf::from("Subsystems/Parent/Subsystems/Child.xml"),
+                },
+            )]),
+        );
+
+        assert_eq!(
+            refs.get(subsystem_uuid).map(String::as_str),
+            Some("Subsystem.Parent.Subsystem.Child")
+        );
+    }
+
+    #[test]
+    fn resolves_register_resource_reference_from_resource_list_marker() {
+        let resource_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{b64d9a41-1642-11d6-a3c7-0050bae0a776,1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{resource_uuid}}},\"Amount\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{resource_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: resource_uuid.to_string(),
+            name: "Amount".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "AccumulationRegister",
+            "Sales",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, "AccumulationRegister.Sales.Resource.Amount");
+    }
+
+    #[test]
+    fn resolves_register_code8_reference_as_dimension() {
+        let dimension_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{b64d9a43-1642-11d6-a3c7-0050bae0a776,1,\r\n{{8,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{dimension_uuid}}},\"Contract\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{dimension_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: dimension_uuid.to_string(),
+            name: "Contract".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "AccumulationRegister",
+            "Sales",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, "AccumulationRegister.Sales.Dimension.Contract");
+    }
+
+    #[test]
+    fn resolves_dataprocessor_code27_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Warehouse\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Warehouse".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "DataProcessor",
+            "TopologyGenerator",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "DataProcessor.TopologyGenerator.Attribute.Warehouse"
+        );
+    }
+
+    #[test]
+    fn resolves_dataprocessor_code27_attribute_after_tabular_section_as_attribute() {
+        let owner_uuid = "55555555-6666-4666-8666-555555555555";
+        let owner_inner_uuid = "77777777-8888-4888-8888-777777777777";
+        let tabular_uuid = "11111111-2222-4222-8222-111111111111";
+        let attribute_uuid = "33333333-4444-4444-8444-333333333333";
+        let text = format!(
+            "{{11,\r\n{{0,\r\n{{3,\r\n{{1,0,{tabular_uuid}}},\"Items\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n{{3,\r\n{{1,0,{owner_inner_uuid}}},\"TopologyGenerator\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Warehouse\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Warehouse".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "DataProcessor",
+            "TopologyGenerator",
+            owner_uuid,
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "DataProcessor.TopologyGenerator.Attribute.Warehouse"
+        );
+    }
+
+    #[test]
+    fn resolves_task_code27_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"StartDate\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "StartDate".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "Task",
+            "ExecutorTask",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, "Task.ExecutorTask.Attribute.StartDate");
+    }
+
+    #[test]
+    fn resolves_exchange_plan_code4_code27_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{4,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"ExchangeOrders\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "ExchangeOrders".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "ExchangePlan",
+            "SiteExchange",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "ExchangePlan.SiteExchange.Attribute.ExchangeOrders"
+        );
+    }
+
+    #[test]
+    fn resolves_register_code4_code27_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{4,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"PaymentRequest\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "PaymentRequest".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "AccumulationRegister",
+            "SupplierSettlements",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "AccumulationRegister.SupplierSettlements.Attribute.PaymentRequest"
+        );
+    }
+
+    #[test]
+    fn resolves_report_code27_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Organization\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Organization".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "Report",
+            "PurchaseBook",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, "Report.PurchaseBook.Attribute.Organization");
+    }
+
+    #[test]
+    fn resolves_business_process_code3_code27_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{3,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Subject\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Subject".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "BusinessProcess",
+            "PurchaseApproval",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "BusinessProcess.PurchaseApproval.Attribute.Subject"
+        );
+    }
+
+    #[test]
+    fn resolves_business_process_code8_tabular_attribute_reference() {
+        let tabular_uuid = "11111111-2222-4222-8222-111111111111";
+        let attribute_uuid = "33333333-4444-4444-8444-333333333333";
+        let text = format!(
+            "{{11,\r\n{{0,\r\n{{3,\r\n{{1,0,{tabular_uuid}}},\"Approvals\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}},\r\n{{8,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Reviewer\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Reviewer".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "BusinessProcess",
+            "PurchaseApproval",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "BusinessProcess.PurchaseApproval.TabularSection.Approvals.Attribute.Reviewer"
+        );
     }
 
     #[test]
@@ -23834,6 +29713,228 @@ mod tests {
     }
 
     #[test]
+    fn selected_export_skips_broad_indexes_only_for_self_contained_metadata() {
+        let self_contained = vec![MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            text: String::new(),
+            object_code: Some(3),
+            header: None,
+            kind: Some("DocumentNumerator".to_string()),
+            folder: Some("DocumentNumerators"),
+        }];
+        let referencing = vec![MetadataTextRow {
+            file_name: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_string(),
+            text: String::new(),
+            object_code: Some(2),
+            header: None,
+            kind: Some("FunctionalOption".to_string()),
+            folder: Some("FunctionalOptions"),
+        }];
+        let ws_reference = vec![MetadataTextRow {
+            file_name: "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_string(),
+            text: String::new(),
+            object_code: Some(2),
+            header: None,
+            kind: Some("WSReference".to_string()),
+            folder: Some("WSReferences"),
+        }];
+        let integration_service = vec![MetadataTextRow {
+            file_name: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".to_string(),
+            text: String::new(),
+            object_code: Some(0),
+            header: None,
+            kind: Some("IntegrationService".to_string()),
+            folder: Some("IntegrationServices"),
+        }];
+
+        assert!(!selected_export_needs_broad_metadata_indexes(
+            false,
+            &BTreeSet::from(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string()]),
+            &self_contained,
+        ));
+        assert!(selected_export_needs_broad_metadata_indexes(
+            false,
+            &BTreeSet::from(["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_string()]),
+            &referencing,
+        ));
+        assert!(selected_export_needs_broad_metadata_indexes(
+            false,
+            &BTreeSet::from(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0".to_string()]),
+            &self_contained,
+        ));
+        assert!(!selected_export_needs_broad_metadata_indexes(
+            false,
+            &BTreeSet::from([
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_string(),
+                "cccccccc-cccc-4ccc-8ccc-cccccccccccc.0".to_string(),
+            ]),
+            &ws_reference,
+        ));
+        assert!(selected_export_needs_broad_metadata_indexes(
+            false,
+            &BTreeSet::from(["cccccccc-cccc-4ccc-8ccc-cccccccccccc.0".to_string()]),
+            &[],
+        ));
+        assert!(!selected_export_needs_broad_metadata_indexes(
+            true,
+            &BTreeSet::from([
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd".to_string(),
+                "dddddddd-dddd-4ddd-8ddd-dddddddddddd.0".to_string(),
+            ]),
+            &integration_service,
+        ));
+        assert!(selected_export_needs_broad_metadata_indexes(
+            false,
+            &BTreeSet::from(["dddddddd-dddd-4ddd-8ddd-dddddddddddd.0".to_string()]),
+            &integration_service,
+        ));
+    }
+
+    #[test]
+    fn selected_configuration_source_assets_request_only_required_indexes() {
+        let client_only = selected_configuration_source_asset_index_needs(&BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.b".to_string(),
+        ]))
+        .expect("configuration client interface selection");
+        assert!(!client_only.needs_broad_metadata());
+
+        let versions_only = selected_configuration_source_asset_index_needs(&BTreeSet::from([
+            "versions".to_string(),
+        ]))
+        .expect("versions selection");
+        assert!(!versions_only.needs_broad_metadata());
+        assert!(!versions_only.metadata_refs);
+
+        let home_page = selected_configuration_source_asset_index_needs(&BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.8".to_string(),
+        ]))
+        .expect("configuration home page selection");
+        assert!(home_page.form_refs);
+        assert!(!home_page.command_refs);
+        assert!(!home_page.object_refs);
+
+        let command_interface = selected_configuration_source_asset_index_needs(&BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.9".to_string(),
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.a".to_string(),
+        ]))
+        .expect("configuration command interface selection");
+        assert!(command_interface.command_refs);
+        assert!(command_interface.metadata_refs);
+        assert!(!command_interface.form_refs);
+        assert!(!command_interface.type_index);
+
+        let subsystems_order = selected_configuration_source_asset_index_needs(&BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.a".to_string(),
+        ]))
+        .expect("configuration subsystems order selection");
+        assert!(subsystems_order.metadata_refs);
+        assert!(!subsystems_order.command_refs);
+        assert!(!subsystems_order.needs_broad_metadata());
+
+        assert!(
+            selected_configuration_source_asset_index_needs(&BTreeSet::from([
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.f".to_string(),
+            ]))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn selected_enum_metadata_requests_only_child_reference_indexes() {
+        let enum_metadata = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            text: String::new(),
+            object_code: Some(20),
+            header: Some(MetadataHeader {
+                uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                name: "Status".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("Enum".to_string()),
+            folder: Some("Enums"),
+        };
+
+        let needs = selected_metadata_source_reference_index_needs(&[enum_metadata])
+            .expect("enum selected metadata needs");
+
+        assert!(needs.needs_broad_metadata());
+        assert!(needs.form_refs);
+        assert!(needs.template_refs);
+        assert!(!needs.object_refs);
+        assert!(!needs.field_refs);
+        assert!(!needs.functional_option_refs);
+        assert!(!needs.command_refs);
+        assert!(!needs.type_index);
+    }
+
+    #[test]
+    fn extracts_direct_metadata_references_from_selected_configuration_body_rows() {
+        let first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let body = deflate_for_test(format!("{{7,0,0,0,1,2,{first},{second},0}}").as_bytes());
+        let rows = vec![
+            ConfigRow {
+                file_name: "cccccccc-cccc-4ccc-8ccc-cccccccccccc.a".to_string(),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_lower(&body),
+            },
+            ConfigRow {
+                file_name: "cccccccc-cccc-4ccc-8ccc-cccccccccccc.9".to_string(),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_lower(&body),
+            },
+        ];
+
+        let refs = selected_configuration_direct_metadata_reference_file_names(&rows);
+
+        assert_eq!(
+            refs,
+            BTreeSet::from([first.to_string(), second.to_string()])
+        );
+    }
+
+    #[test]
+    fn extracts_integration_service_channels_to_metadata_xml() {
+        let uuid = "c512a1cd-1240-4e46-8bad-8b7b27c5c25a";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"MessageExchange\",{{1,\"en\",\"Message exchange\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},5362f1d1-1f56-4a61-a52e-6519a060293e,ad884943-3c3a-4073-ab34-ed12a0d67556,\"\"}},1,\r\n{{acb7e81f-0637-4ebd-88ff-954ba075ae51,1,\r\n{{\r\n{{1,\r\n{{3,\r\n{{1,0,1ef0581c-b1d8-4115-87f1-7856f6c06bb6}},\"input\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},71313d47-3c6e-464a-8776-f7eb0626fd6b,bb1ff475-725d-46cb-8cbc-9ff08970cccc,\"external.input\",\"HandleInput\",1,0}},0}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("IntegrationServices").join("MessageExchange.xml")
+        );
+        assert!(xml.contains("<ExternalIntegrationServiceAddress/>"));
+        assert!(
+            xml.contains(
+                "<IntegrationServiceChannel uuid=\"1ef0581c-b1d8-4115-87f1-7856f6c06bb6\">"
+            )
+        );
+        assert!(xml.contains("IntegrationServiceChannelManager.MessageExchange.input"));
+        assert!(xml.contains("<ExternalIntegrationServiceChannelName>external.input</ExternalIntegrationServiceChannelName>"));
+        assert!(xml.contains("<MessageDirection>Receive</MessageDirection>"));
+        assert!(xml.contains("<ReceiveMessageProcessing>HandleInput</ReceiveMessageProcessing>"));
+        assert!(xml.contains("<Transactioned>false</Transactioned>"));
+    }
+
+    #[test]
     fn writes_ws_reference_body_asset_to_source_layout() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -24002,10 +30103,20 @@ mod tests {
         assert_eq!(properties.kind, "DefinedType");
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "OwnerType");
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
+        assert!(
+            xml.contains(
+                r#"<xr:GeneratedType name="DefinedType.OwnerType" category="DefinedType">"#
+            )
+        );
+        assert!(xml.contains("<xr:TypeId>11111111-1111-4111-8111-111111111111</xr:TypeId>"));
+        assert!(xml.contains("<xr:ValueId>22222222-2222-4222-8222-222222222222</xr:ValueId>"));
         assert!(xml.contains("<v8:Type>xs:boolean</v8:Type>"));
         assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
+        assert!(xml.contains("<v8:StringQualifiers>"));
         assert!(xml.contains("<v8:Length>80</v8:Length>"));
-        assert!(xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"));
+        assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
         assert!(!repacked.blob.is_empty());
     }
 
@@ -24353,9 +30464,11 @@ mod tests {
             catalog_uuid,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
             &form_refs,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
         let xml = String::from_utf8(extracted.xml).unwrap();

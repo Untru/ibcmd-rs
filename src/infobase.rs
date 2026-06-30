@@ -8,8 +8,8 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::cli::{
-    InfobaseConfigExportArgs, InfobaseConfigFormat, InfobaseConfigImportArgs, MssqlDumpConfigArgs,
-    MssqlStageSourceObjectsArgs,
+    InfobaseConfigExportArgs, InfobaseConfigFormat, InfobaseConfigImportArgs,
+    InfobaseConfigSourceVersion, MssqlDumpConfigArgs, MssqlStageSourceObjectsArgs,
 };
 
 #[derive(Debug, Serialize)]
@@ -17,6 +17,7 @@ pub struct InfobaseConfigExportReport {
     pub operation: &'static str,
     pub backend: &'static str,
     pub format: &'static str,
+    pub source_version: &'static str,
     pub dbms: String,
     pub db_server: String,
     pub db_name: String,
@@ -37,6 +38,7 @@ pub struct InfobaseConfigImportReport {
     pub operation: &'static str,
     pub backend: &'static str,
     pub format: &'static str,
+    pub source_version: &'static str,
     pub dbms: String,
     pub db_server: String,
     pub db_name: String,
@@ -56,12 +58,14 @@ struct ConnectionConfig {
     db_pwd: Option<String>,
     password_source: Option<String>,
     format: InfobaseConfigFormat,
+    source_version: InfobaseConfigSourceVersion,
 }
 
 pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigExportReport> {
     let config = resolve_connection(
         args.settings.as_deref(),
         args.format,
+        args.source_version,
         args.dbms.as_deref(),
         args.db_server.as_deref(),
         args.db_name.as_deref(),
@@ -84,11 +88,14 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         overwrite: false,
         include_config_save: false,
         file_names: Vec::new(),
+        file_name_lists: Vec::new(),
         inflate: false,
         extract_module_text: true,
         extract_metadata_xml: true,
+        no_binary_rows: true,
         write_binary_rows: false,
         write_manifest: false,
+        source_version: config.source_version,
     };
     let dump = crate::mssql_dump::dump_config(&dump_args)?;
 
@@ -98,6 +105,7 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         operation: "infobase config export",
         backend: "mssql-config-direct",
         format: format_name(config.format),
+        source_version: config.source_version.as_str(),
         dbms: config.dbms,
         db_server: config.db_server,
         db_name: config.db_name,
@@ -118,6 +126,7 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
     let config = resolve_connection(
         args.settings.as_deref(),
         args.format,
+        args.source_version,
         args.dbms.as_deref(),
         args.db_server.as_deref(),
         args.db_name.as_deref(),
@@ -144,6 +153,7 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
         operation: "infobase config import",
         backend: "mssql-configsave-stage",
         format: format_name(config.format),
+        source_version: config.source_version.as_str(),
         dbms: config.dbms,
         db_server: config.db_server,
         db_name: config.db_name,
@@ -158,6 +168,7 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
 fn resolve_connection(
     settings_path: Option<&Path>,
     cli_format: Option<InfobaseConfigFormat>,
+    cli_source_version: Option<InfobaseConfigSourceVersion>,
     cli_dbms: Option<&str>,
     cli_db_server: Option<&str>,
     cli_db_name: Option<&str>,
@@ -173,6 +184,9 @@ fn resolve_connection(
     let format = cli_format
         .or_else(|| settings_format(&settings))
         .unwrap_or(InfobaseConfigFormat::Xml);
+    let source_version = cli_source_version
+        .or_else(|| settings_source_version(&settings))
+        .unwrap_or(InfobaseConfigSourceVersion::V2_20);
     let dbms = first_value(cli_dbms, settings_value(&settings, "dbms-type"))
         .unwrap_or_else(|| "MSSQLServer".to_string());
     let db_server = first_value(cli_db_server, settings_value(&settings, "dbms-server"))
@@ -193,6 +207,7 @@ fn resolve_connection(
         db_pwd,
         password_source,
         format,
+        source_version,
     })
 }
 
@@ -220,6 +235,22 @@ fn settings_format(settings: &Option<Value>) -> Option<InfobaseConfigFormat> {
     parse_format(&value)
 }
 
+fn settings_source_version(settings: &Option<Value>) -> Option<InfobaseConfigSourceVersion> {
+    let value = settings_string_at(settings, &["ibcmd-rs", "source-version"])
+        .or_else(|| settings_string_at(settings, &["ibcmd-rs", "xml-version"]))
+        .or_else(|| settings_string_at(settings, &["ibcmd-rs", "xcf-version"]))
+        .or_else(|| settings_string_at(settings, &["ibcmd-rs", "platform-version"]))
+        .or_else(|| settings_string_at(settings, &["source-version"]))
+        .or_else(|| settings_string_at(settings, &["xml-version"]))
+        .or_else(|| settings_string_at(settings, &["xcf-version"]))
+        .or_else(|| settings_string_at(settings, &["platform-version"]))
+        .or_else(|| settings_value(settings, "source-version"))
+        .or_else(|| settings_value(settings, "xml-version"))
+        .or_else(|| settings_value(settings, "xcf-version"))
+        .or_else(|| settings_value(settings, "platform-version"))?;
+    parse_source_version(&value)
+}
+
 fn settings_string_at(settings: &Option<Value>, path: &[&str]) -> Option<String> {
     let mut current = settings.as_ref()?;
     for segment in path {
@@ -234,6 +265,17 @@ fn settings_string_at(settings: &Option<Value>, path: &[&str]) -> Option<String>
 fn parse_format(value: &str) -> Option<InfobaseConfigFormat> {
     match value.trim().to_ascii_lowercase().as_str() {
         "xml" | "ibcmd-xml" | "source-tree" => Some(InfobaseConfigFormat::Xml),
+        _ => None,
+    }
+}
+
+fn parse_source_version(value: &str) -> Option<InfobaseConfigSourceVersion> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "2.20" | "20" | "8.3" | "8.3.27" => Some(InfobaseConfigSourceVersion::V2_20),
+        "2.21" | "21" | "8.5" | "8.5.1" => Some(InfobaseConfigSourceVersion::V2_21),
+        _ if normalized.starts_with("8.3.27.") => Some(InfobaseConfigSourceVersion::V2_20),
+        _ if normalized.starts_with("8.5.1.") => Some(InfobaseConfigSourceVersion::V2_21),
         _ => None,
     }
 }
@@ -363,12 +405,19 @@ mod tests {
     fn reads_format_from_top_level_settings() {
         let settings: Option<Value> = Some(serde_json::json!({
             "format": "ibcmd-xml",
+            "ibcmd-rs": {
+                "source-version": "8.5.1"
+            },
             "vrunner": {
                 "dbms-base": "servicedesk"
             }
         }));
 
         assert_eq!(settings_format(&settings), Some(InfobaseConfigFormat::Xml));
+        assert_eq!(
+            settings_source_version(&settings),
+            Some(InfobaseConfigSourceVersion::V2_21)
+        );
         assert_eq!(
             settings_value(&settings, "dbms-base"),
             Some("servicedesk".to_string())

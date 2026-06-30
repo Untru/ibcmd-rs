@@ -24,10 +24,12 @@ const BLOCK_HEADER_SIZE: usize = 31;
 const ELEM_ADDR_SIZE: usize = 12;
 const ELEM_HEADER_PREFIX_SIZE: usize = 20;
 const DEFAULT_INFO: &[u8] = b"\xEF\xBB\xBF{3,1,0,\"\",0}";
+// Platform-level 1C standard pictures and form type IDs, not database metadata UUIDs.
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9";
 const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
+const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
 const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
 
 #[derive(Debug, Serialize)]
@@ -8027,6 +8029,7 @@ fn patch_form_layout_properties(
     Ok(())
 }
 
+// Platform-level 1C form property and standard command IDs, not DB object IDs.
 const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
@@ -15313,6 +15316,10 @@ enum CommonCommandPicture {
         uuid: String,
         load_transparent: bool,
     },
+    StdPictureCode {
+        code: i32,
+        load_transparent: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -16703,14 +16710,25 @@ fn parse_common_command_picture(
     if reference.is_empty() {
         return Ok(CommonCommandPicture::Empty);
     }
-    if reference == "StdPicture.User" {
+    if let Some(code) = common_command_standard_picture_code(&reference) {
+        let load_transparent = parse_required_metadata_bool(
+            "CommonCommand",
+            "Picture/LoadTransparent",
+            load_transparent,
+        )?;
+        return Ok(CommonCommandPicture::StdPictureCode {
+            code,
+            load_transparent,
+        });
+    }
+    if let Some(uuid) = common_command_standard_picture_uuid(&reference) {
         let load_transparent = parse_required_metadata_bool(
             "CommonCommand",
             "Picture/LoadTransparent",
             load_transparent,
         )?;
         return Ok(CommonCommandPicture::CommonPicture {
-            uuid: STD_PICTURE_USER_UUID.to_string(),
+            uuid: uuid.to_string(),
             load_transparent,
         });
     }
@@ -16738,6 +16756,30 @@ fn parse_common_command_picture(
         uuid,
         load_transparent,
     })
+}
+
+fn common_command_standard_picture_code(reference: &str) -> Option<i32> {
+    match reference.trim() {
+        "StdPicture.InputFieldOpen" => Some(-7),
+        _ => None,
+    }
+}
+
+fn common_command_standard_picture_uuid(reference: &str) -> Option<&'static str> {
+    match reference.trim() {
+        "StdPicture.User" => Some(STD_PICTURE_USER_UUID),
+        "StdPicture.LoadReportSettings" => Some(STD_PICTURE_LOAD_REPORT_SETTINGS_UUID),
+        "StdPicture.Task" => Some("37cf7cc0-abad-4385-b597-6fd2d8dc085a"),
+        "StdPicture.ChooseValue" => Some("2f130057-bb2a-4e22-bba5-e108fac26940"),
+        "StdPicture.DataHistory" => Some("e8a49985-fef7-45a9-b6bb-ddd2b9028172"),
+        "StdPicture.BusinessProcessObject" => Some("a24cff7f-a1a5-4403-af82-a7b31852cde9"),
+        "StdPicture.CloneListItem" => Some("448d6f55-d885-496c-870d-d1bd78374745"),
+        "StdPicture.EventLog" => Some("723765ab-0b92-4745-a621-1ba0f77c92c9"),
+        "StdPicture.CreateInitialImage" => Some("4d2570b5-205f-413c-b4cc-b2097f61684f"),
+        "StdPicture.Write" => Some("894cf65b-4109-4533-a1d7-c87b1fcc80a3"),
+        "StdPicture.Delete" => Some("08a45a70-c221-4339-b3b1-9f11cb22147d"),
+        _ => None,
+    }
 }
 
 fn parse_command_group_picture(
@@ -16927,12 +16969,14 @@ fn common_command_group_uuid(reference: &str) -> Option<String> {
     match reference.trim() {
         "NavigationPanelOrdinary" => Some("77ea1b8f-dd79-4717-9dba-5628e7f348cf".to_string()),
         "NavigationPanelSeeAlso" => Some("bc80566a-86a5-4e87-acd4-872239385a2e".to_string()),
+        "NavigationPanelImportant" => Some("1af6d528-0b86-4fba-ab95-bd7475db03ba".to_string()),
         "ActionsPanelCreate" => Some("4f499c31-050b-47c5-aa84-d0366c0a0da8".to_string()),
         "ActionsPanelReports" => Some("5b360bff-01a1-49b6-93d2-26e7e8e3a038".to_string()),
         "ActionsPanelTools" => Some("aabb34e1-98c1-4bd0-bf7f-243f95437b44".to_string()),
         "FormCommandBarCreateBasedOn" => Some("dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0".to_string()),
         "FormCommandBarImportant" => Some("cb50f5c0-8013-4262-93a2-f0db379d6b6b".to_string()),
         "FormNavigationPanelGoTo" => Some("eacad741-96b9-4b3a-bf79-dde9ecead1a1".to_string()),
+        "FormNavigationPanelSeeAlso" => Some("8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8".to_string()),
         "FormNavigationPanelImportant" => Some("dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2".to_string()),
         _ => None,
     }
@@ -17017,6 +17061,13 @@ fn format_common_command_picture(picture: &CommonCommandPicture) -> String {
             load_transparent,
         } => format!(
             r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
+            bool_flag(*load_transparent)
+        ),
+        CommonCommandPicture::StdPictureCode {
+            code,
+            load_transparent,
+        } => format!(
+            r#"{{4,1,{{{code}}},"",-1,-1,{},0,""}}"#,
             bool_flag(*load_transparent)
         ),
     }
@@ -26563,6 +26614,97 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             inflated.contains("{4,1,{0,6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f},\"\",-1,-1,0,0,\"\"}")
         );
         assert!(!inflated.contains("StdPicture.User"));
+    }
+
+    #[test]
+    fn packs_common_command_load_report_settings_picture_reference() {
+        let mut active = b"\xEF\xBB\xBF".to_vec();
+        active.extend_from_slice(
+            br#"{1,
+{2,
+{1,
+{2,dddddddd-dddd-4ddd-dddd-dddddddddddd,078a6af8-d22c-4248-9c33-7e90075a3d2c},
+{9,
+{4,0,{0},"",-1,-1,1,0,""},3,
+{0},1,
+{0,0,0},0,
+{1,77ea1b8f-dd79-4717-9dba-5628e7f348cf},
+{"Pattern"},
+{3,
+{1,0,dddddddd-dddd-4ddd-dddd-dddddddddddd},"OldCommand",
+{1,"ru","Old synonym"},"",0,0,00000000-0000-0000-0000-000000000000,0},0,0,0}
+}
+},0}"#,
+        );
+        let base_blob = deflate_raw(&active).unwrap();
+        let xml = r#"
+<MetaDataObject xmlns:v8="urn:v8" xmlns:xr="urn:xr">
+  <CommonCommand uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties>
+      <Name>NewCommand</Name>
+      <Synonym/>
+      <Comment/>
+      <Group>FormCommandBarImportant</Group>
+      <Representation>Picture</Representation>
+      <ToolTip/>
+      <Picture>
+        <xr:Ref>StdPicture.LoadReportSettings</xr:Ref>
+        <xr:LoadTransparent>true</xr:LoadTransparent>
+      </Picture>
+      <Shortcut/>
+      <IncludeHelpInContents>false</IncludeHelpInContents>
+      <CommandParameterType/>
+      <ParameterUseMode>Single</ParameterUseMode>
+      <ModifiesData>false</ModifiesData>
+      <OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
+    </Properties>
+  </CommonCommand>
+</MetaDataObject>
+"#
+        .as_bytes();
+
+        let packed = super::pack_simple_metadata_blob_from_xml(&base_blob, xml).unwrap();
+        let inflated = String::from_utf8(inflate_raw(&packed.blob).unwrap()).unwrap();
+        assert!(inflated.contains(super::STD_PICTURE_LOAD_REPORT_SETTINGS_UUID));
+        assert!(
+            inflated.contains("{4,1,{0,283ecabd-aaed-41d1-ad46-6cca91c29120},\"\",-1,-1,1,0,\"\"}")
+        );
+        assert!(!inflated.contains("StdPicture.LoadReportSettings"));
+    }
+
+    #[test]
+    fn resolves_common_command_builtin_group_uuids() {
+        assert_eq!(
+            super::common_command_group_uuid("NavigationPanelImportant").as_deref(),
+            Some("1af6d528-0b86-4fba-ab95-bd7475db03ba")
+        );
+        assert_eq!(
+            super::common_command_group_uuid("FormNavigationPanelSeeAlso").as_deref(),
+            Some("8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8")
+        );
+    }
+
+    #[test]
+    fn resolves_common_command_standard_picture_uuids() {
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.Task"),
+            Some("37cf7cc0-abad-4385-b597-6fd2d8dc085a")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.EventLog"),
+            Some("723765ab-0b92-4745-a621-1ba0f77c92c9")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_code("StdPicture.InputFieldOpen"),
+            Some(-7)
+        );
+        assert_eq!(
+            super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
+                code: -7,
+                load_transparent: true
+            }),
+            r#"{4,1,{-7},"",-1,-1,1,0,""}"#
+        );
     }
 
     #[test]

@@ -206,6 +206,25 @@ pub enum InfobaseConfigFormat {
     Xml,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum InfobaseConfigSourceVersion {
+    /// Source XML version used by 1C 8.3.27.
+    #[value(name = "2.20", alias = "20", alias = "8.3", alias = "8.3.27")]
+    V2_20,
+    /// Source XML version used by 1C 8.5.1.
+    #[value(name = "2.21", alias = "21", alias = "8.5", alias = "8.5.1")]
+    V2_21,
+}
+
+impl InfobaseConfigSourceVersion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V2_20 => "2.20",
+            Self::V2_21 => "2.21",
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct InfobaseConfigExportArgs {
     /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
@@ -214,6 +233,9 @@ pub struct InfobaseConfigExportArgs {
     /// Source format. Can also be set in settings as format/config-format.
     #[arg(long)]
     pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. 2.20 matches 1C 8.3.27, 2.21 matches 1C 8.5.1. Can also be set in settings.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
     /// DBMS type. Currently MSSQLServer is supported by the direct exporter.
     #[arg(long)]
     pub dbms: Option<String>,
@@ -259,6 +281,9 @@ pub struct InfobaseConfigImportArgs {
     /// Source format. Can also be set in settings as format/config-format.
     #[arg(long)]
     pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. Accepted for CLI/settings symmetry with export.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
     /// DBMS type. Currently MSSQLServer is supported by the direct importer.
     #[arg(long)]
     pub dbms: Option<String>,
@@ -490,6 +515,9 @@ pub struct MssqlDumpConfigArgs {
     /// Dump only selected Config/ConfigSave FileName values. Can be repeated.
     #[arg(long = "file-name")]
     pub file_names: Vec<String>,
+    /// Read selected Config/ConfigSave FileName values from a text file. Can be repeated.
+    #[arg(long = "file-name-list")]
+    pub file_name_lists: Vec<PathBuf>,
     /// Try to inflate raw deflate blobs and write readable *.txt files.
     #[arg(long)]
     pub inflate: bool,
@@ -499,6 +527,12 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Source XML version for reconstructed source files.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Do not write raw Config/ConfigSave BinaryData rows. Useful for source parity and faster runs.
+    #[arg(long)]
+    pub no_binary_rows: bool,
     /// Write raw Config/ConfigSave BinaryData rows under <table>/*.bin.
     #[arg(long, default_value_t = true, hide = true)]
     pub write_binary_rows: bool,
@@ -3102,11 +3136,12 @@ mod tests {
             "export",
             "--db-server=localhost",
             "--db-name=servicedesk",
-            "--db-user=sa",
-            "--db-pwd=secret",
+            "--db-user=test-sql-user",
+            "--db-pwd=dummy-value-for-parser-test",
             "--user=ws",
-            "--password=4677473",
+            "--password=dummy-infobase-value-for-parser-test",
             "--format=ibcmd-xml",
+            "--source-version=2.21",
             "--force",
             r"C:\repo\src\cf",
         ]);
@@ -3117,11 +3152,18 @@ mod tests {
                     InfobaseConfigCommands::Export(args) => {
                         assert_eq!(args.db_server.as_deref(), Some("localhost"));
                         assert_eq!(args.db_name.as_deref(), Some("servicedesk"));
-                        assert_eq!(args.db_user.as_deref(), Some("sa"));
-                        assert_eq!(args.db_pwd.as_deref(), Some("secret"));
+                        assert_eq!(args.db_user.as_deref(), Some("test-sql-user"));
+                        assert_eq!(args.db_pwd.as_deref(), Some("dummy-value-for-parser-test"));
                         assert_eq!(args.user.as_deref(), Some("ws"));
-                        assert_eq!(args.password.as_deref(), Some("4677473"));
+                        assert_eq!(
+                            args.password.as_deref(),
+                            Some("dummy-infobase-value-for-parser-test")
+                        );
                         assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
+                        assert_eq!(
+                            args.source_version,
+                            Some(InfobaseConfigSourceVersion::V2_21)
+                        );
                         assert!(args.overwrite);
                         assert_eq!(args.output_dir, PathBuf::from(r"C:\repo\src\cf"));
                     }
@@ -3142,13 +3184,14 @@ mod tests {
             "--settings",
             r"C:\repo\autumn-properties.json",
             "--format=xml",
+            "--source-version=8.3.27",
             "--replace-config-save",
             "--allow-non-lab",
             "--batch-size=3",
             "-u",
             "ws",
             "-P",
-            "4677473",
+            "dummy-infobase-value-for-parser-test",
             "--path-prefix",
             "CommonModules",
             r"C:\repo\src\cf",
@@ -3163,11 +3206,18 @@ mod tests {
                             Some(PathBuf::from(r"C:\repo\autumn-properties.json"))
                         );
                         assert_eq!(args.format, Some(InfobaseConfigFormat::Xml));
+                        assert_eq!(
+                            args.source_version,
+                            Some(InfobaseConfigSourceVersion::V2_20)
+                        );
                         assert!(args.replace_config_save);
                         assert!(args.allow_non_lab);
                         assert_eq!(args.batch_size, Some(3));
                         assert_eq!(args.user.as_deref(), Some("ws"));
-                        assert_eq!(args.password.as_deref(), Some("4677473"));
+                        assert_eq!(
+                            args.password.as_deref(),
+                            Some("dummy-infobase-value-for-parser-test")
+                        );
                         assert_eq!(args.path_prefix, vec!["CommonModules"]);
                         assert_eq!(args.source_dir, PathBuf::from(r"C:\repo\src\cf"));
                     }
@@ -3186,34 +3236,45 @@ mod tests {
             "--database",
             "TestDb",
             "--sql-user",
-            "sa",
+            "test-sql-user",
             "--sql-pwd",
-            "secret",
+            "dummy-sql-value-for-parser-test",
             "--file-name",
             "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "--file-name-list",
+            r"C:\dump\selected.txt",
             "-o",
             r"C:\dump",
             "--include-config-save",
             "--inflate",
             "--extract-module-text",
             "--extract-metadata-xml",
+            "--no-binary-rows",
             "--overwrite",
         ]);
 
         match cli.command {
             Commands::MssqlDumpConfig(args) => {
                 assert_eq!(args.database, "TestDb");
-                assert_eq!(args.sql_user.as_deref(), Some("sa"));
-                assert_eq!(args.sql_pwd.as_deref(), Some("secret"));
+                assert_eq!(args.sql_user.as_deref(), Some("test-sql-user"));
+                assert_eq!(
+                    args.sql_pwd.as_deref(),
+                    Some("dummy-sql-value-for-parser-test")
+                );
                 assert_eq!(
                     args.file_names,
                     vec!["aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()]
+                );
+                assert_eq!(
+                    args.file_name_lists,
+                    vec![PathBuf::from(r"C:\dump\selected.txt")]
                 );
                 assert_eq!(args.output_dir, PathBuf::from(r"C:\dump"));
                 assert!(args.include_config_save);
                 assert!(args.inflate);
                 assert!(args.extract_module_text);
                 assert!(args.extract_metadata_xml);
+                assert!(args.no_binary_rows);
                 assert!(args.overwrite);
             }
             other => panic!("unexpected command: {other:?}"),
