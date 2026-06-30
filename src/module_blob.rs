@@ -3508,6 +3508,7 @@ fn spreadsheet_direct_color_code(value: &str) -> Option<u32> {
 fn spreadsheet_system_style_code(value: &str) -> Option<i32> {
     match value {
         "style:FieldBackColor" => Some(-10),
+        "style:FieldSelectionBackColor" => Some(-21),
         "style:ButtonBackColor" => Some(-7),
         "style:ButtonTextColor" => Some(-15),
         "style:ReportLineColor" => Some(-28),
@@ -21712,6 +21713,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("{3,3,{-7}}"));
         assert!(text.contains("{3,3,{-15}}"));
         assert!(text.contains("{2,{1024,0},{3200,72,1,2}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_field_selection_back_color_style() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<format>
+		<backColor>style:FieldSelectionBackColor</backColor>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{3,3,{-21}}"));
+        assert!(text.contains("{1,{2048,0}}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
