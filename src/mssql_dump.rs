@@ -15724,6 +15724,7 @@ struct CommonAttributeProperties {
 struct CommonAttributeContentItem {
     metadata: String,
     use_mode: &'static str,
+    conditional_separation: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -18723,6 +18724,9 @@ fn parse_common_attribute_content(
                 use_mode: settings
                     .and_then(|field| parse_common_attribute_content_use(field))
                     .unwrap_or_else(|| parse_common_attribute_content_use(field).unwrap_or("Use")),
+                conditional_separation: settings.and_then(|field| {
+                    parse_common_attribute_content_conditional_separation(field, object_refs)
+                }),
             });
             index += if settings.is_some() { 2 } else { 1 };
         } else {
@@ -18743,6 +18747,17 @@ fn parse_common_attribute_content_use(field: &str) -> Option<&'static str> {
     fields
         .get(1)
         .and_then(|field| common_attribute_content_use_xml(field.trim()))
+}
+
+fn parse_common_attribute_content_conditional_separation(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    let uuid = fields
+        .get(2)
+        .and_then(|field| parse_non_zero_uuid(field.trim()))?;
+    object_refs.get(&uuid).cloned()
 }
 
 fn common_attribute_content_use_xml(value: &str) -> Option<&'static str> {
@@ -22891,12 +22906,19 @@ fn format_common_attribute_source_xml(
             insert.push_str(&format!(
                 "\t\t\t\t<xr:Item>\r\n\
 \t\t\t\t\t<xr:Metadata>{}</xr:Metadata>\r\n\
-\t\t\t\t\t<xr:Use>{}</xr:Use>\r\n\
-\t\t\t\t\t<xr:ConditionalSeparation/>\r\n\
-\t\t\t\t</xr:Item>\r\n",
+\t\t\t\t\t<xr:Use>{}</xr:Use>\r\n",
                 escape_xml_element_text(&item.metadata),
                 escape_xml_text(item.use_mode)
             ));
+            if let Some(conditional_separation) = &item.conditional_separation {
+                insert.push_str(&format!(
+                    "\t\t\t\t\t<xr:ConditionalSeparation>{}</xr:ConditionalSeparation>\r\n",
+                    escape_xml_element_text(conditional_separation)
+                ));
+            } else {
+                insert.push_str("\t\t\t\t\t<xr:ConditionalSeparation/>\r\n");
+            }
+            insert.push_str("\t\t\t\t</xr:Item>\r\n");
         }
         insert.push_str("\t\t\t</Content>\r\n");
     }
@@ -35339,6 +35361,76 @@ mod tests {
             assert!(xml.contains("<xr:Metadata>Document.Invoice</xr:Metadata>"));
             assert!(xml.contains("<xr:Use>DontUse</xr:Use>"));
             assert!(!xml.contains("<Use>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_common_attribute_xml_with_conditional_separation_refs() {
+        let uuid = "33333333-3333-4333-8333-333333333333";
+        let catalog_uuid = "44444444-4444-4444-8444-444444444444";
+        let conditional_uuid = "55555555-5555-4555-8555-555555555555";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let plain = r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"ConditionalScope",
+{1,"en","Conditional scope"},"",0,0,@ZERO_UUID@,0},
+{"Pattern",
+{"S",20,1}
+}
+}
+},
+{3,1,@CATALOG_UUID@,
+{2,1,@CONDITIONAL_UUID@}
+},0,1,1,1,
+{1,@ZERO_UUID@},
+{1,@ZERO_UUID@},
+{1,@ZERO_UUID@},0,0,0,0,1},0}"#
+            .replace("@UUID@", uuid)
+            .replace("@CATALOG_UUID@", catalog_uuid)
+            .replace("@CONDITIONAL_UUID@", conditional_uuid)
+            .replace("@ZERO_UUID@", zero_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs = BTreeMap::from([
+            (catalog_uuid.to_string(), "Catalog.Products".to_string()),
+            (
+                conditional_uuid.to_string(),
+                "CommonAttribute.DataArea".to_string(),
+            ),
+        ]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("CommonAttributes").join("ConditionalScope.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<xr:Metadata>Catalog.Products</xr:Metadata>"));
+            assert!(xml.contains("<xr:Use>Use</xr:Use>"));
+            assert!(xml.contains(
+                "<xr:ConditionalSeparation>CommonAttribute.DataArea</xr:ConditionalSeparation>"
+            ));
+            assert!(!xml.contains(conditional_uuid));
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
