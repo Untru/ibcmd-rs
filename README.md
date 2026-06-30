@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 32 | Native dump performance / Form.xml CPU | consolidated form child-item support index traversal; full source-layout after-run completed without `ConfigDumpInfo.xml`, with `source_asset_form_child_items_cpu_ms` reduced from 68,886 to 40,598 and `source_asset_form_xml_cpu_ms` from 118,673 to 102,296 |
+| 32 | Form.xml | wrapper `55` table `RestoreCurrentRow` extracts and packs through property-bag key `12` |
+| 32 | Object metadata XML | Document owner `<IncludeHelpInContents>` is emitted after default/auxiliary form properties |
+| 32 | ExchangePlan metadata XML | code-4/code-27 child attributes are emitted with value types and property tails |
+| 32 | Configuration.xml | localized root information fields are emitted (`BriefInformation`, `DetailedInformation`, copyright and information addresses) |
+| 32 | Source staging readiness | unsupported `AdditionalIndexes.xml` families now report a precise base-blob blocker instead of being silently omitted |
 | 31 | Native dump performance / Form.xml CPU | full source-layout after-run completed without `ConfigDumpInfo.xml`; `InputField` option-bag parsing is cached per form item, reducing `source_asset_form_child_items_cpu_ms` from 70,750 to 68,886 and `source_asset_form_cpu_ms` from 124,212 to 123,507 |
 | 31 | Role Rights.xml | Task child refs now map and pack as `Task.<name>.AddressingAttribute.<child>` instead of ordinary attributes |
 | 31 | Form.xml | wrapper `55` table `ChoiceFoldersAndItems` extracts and packs through existing typed table slot |
@@ -175,6 +181,7 @@ counted as parity debt.
 (name/synonym/comment/uuid), source XML version selection, selected root child
 object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`) and
 selected root refs such as default roles/style/language/settings storages;
+localized root information fields are also covered;
 deeper root properties remain tracked under Issue #22.
 
 ## Commands

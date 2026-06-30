@@ -30,7 +30,7 @@ The full JSON report is retained at
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
-round 31 incremental verified fixes listed below.
+round 32 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -181,6 +181,12 @@ Verification history:
 | Round 31 Configuration.xml slice | unit-level metadata XML verification | root settings-storage refs (`CommonSettingsStorage`, report settings/variants storage, form data settings storage) are emitted from UUID-backed metadata fields |
 | Round 31 DCS template slice | unit-level template body verification | generated type id lookup is case-insensitive for DataCompositionSchema template bodies |
 | Round 31 source staging readiness slice | unit-level readiness/row-generation verification | WebService `Ext/Module.bsl` is covered as a base-free source staging body |
+| Round 32 native dump performance slice | real full source-layout timing plus unit-level form verification | form child-item support indexes are built in one traversal; after-run completed without `ConfigDumpInfo.xml`, with `source_asset_form_child_items_cpu_ms` reduced from 68,886 to 40,598 and `source_asset_form_xml_cpu_ms` from 118,673 to 102,296 |
+| Round 32 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `RestoreCurrentRow` extracts and packs through property-bag key `12` |
+| Round 32 object metadata slice | unit-level metadata XML verification | Document owner `<IncludeHelpInContents>` is emitted after default/auxiliary form properties |
+| Round 32 ExchangePlan metadata slice | unit-level metadata XML verification | ExchangePlan code-4/code-27 child attributes are emitted with value types and property tails |
+| Round 32 Configuration.xml slice | unit-level metadata XML verification | localized root information fields are emitted: `BriefInformation`, `DetailedInformation`, `Copyright`, `VendorInformationAddress`, and `ConfigurationInformationAddress` |
+| Round 32 source staging readiness slice | unit-level readiness audit verification | unsupported `AdditionalIndexes.xml` families now report a precise `requires_base_blob` blocker instead of being silently omitted |
 
 Performance note for selected extraction:
 
@@ -201,6 +207,7 @@ Performance note for selected extraction:
 - Round 29 #19 ExchangePlan content follow-up: source-layout extraction now builds metadata object/type indexes when source assets are extracted without metadata XML, and `ExchangePlanContent` parsing reports precise unsupported ids. A selected repro for `ExchangePlans\Полный\Ext\Content.xml` now stops at `ExchangePlanContent item 0 references unsupported metadata id ff76e85a-6d29-41d3-a83e-f4a34139c6b2`; the id is a direct Constant row named `ВыгружатьВнутренниеШтрихкодыШтучныхТоваров`. Artifacts are under `E:\ibcmd_lab\perf\issue-19-exchange-content-v1-*`. No `ConfigDumpInfo.xml` was generated.
 - Round 30 #19 ExchangePlan content follow-up: selected ExchangePlan owner metadata now requests `object_refs`, so the Constant referenced from `ExchangePlans\Полный\Ext\Content.xml` resolves. The selected repro passed, and a full release source-layout run completed under `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source`, writing 13,428 files from 40,576 rows / 10,277 source assets without `ConfigDumpInfo.xml`. Full timing: `prepare_indexes_ms=17461`, `prepare_object_refs_ms=10621`, `fetch_rows_ms=5043`, `process_rows_wall_ms=15598`, `source_asset_cpu_ms=191976`, `source_asset_form_cpu_ms=124212`.
 - Round 31 #19 form CPU follow-up: `InputField` extended option bags are cached per form child item instead of reparsed for each option probe. The full source-layout after-run completed under `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after` without `ConfigDumpInfo.xml`; `source_asset_form_child_items_cpu_ms` changed from 70,750 to 68,886 and `source_asset_form_cpu_ms` from 124,212 to 123,507.
+- Round 32 #19 form CPU follow-up: form child-item support indexes for table names, table columns, child item names, and `UserSettingsGroup` resolution are now built in one traversal. The full source-layout after-run completed under `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after` without `ConfigDumpInfo.xml`; `source_asset_form_child_items_cpu_ms` changed from 68,886 to 40,598, `source_asset_form_xml_cpu_ms` changed from 118,673 to 102,296, and `source_asset_form_cpu_ms` changed from 123,507 to 106,971.
 - Scope decision: `ConfigDumpInfo.xml` is intentionally not generated. The native file is derived from the `versions` row, but it is not needed for our export/import target and should not be treated as remaining work.
 
 Diff by file kind:
@@ -269,6 +276,7 @@ Note: `Configuration.xml` currently covers the root metadata header
 (uuid/name/synonym/comment), source XML version selection, and selected root
 child object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`),
 plus selected root refs such as default roles/style/language/settings storages.
+Localized root information fields are also covered.
 Deeper root properties are still tracked as Issue #22 follow-up work.
 
 ## Delegation History
@@ -399,5 +407,11 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #21 | WebService module base-free source staging coverage | merged to `master` in round 31 |
 | #22 | Configuration.xml root settings-storage refs | merged to `master` in round 31 |
 | #23 | shared V8 container parser/builder extraction | closed in round 22; kept as the required dependency for future Config/ConfigSave container work |
+| #15 | Document owner `IncludeHelpInContents` metadata XML | merged to `master` in round 32 |
+| #16 | Form.xml wrapper `55` table `RestoreCurrentRow` extraction and packing | merged to `master` in round 32 |
+| #18 | ExchangePlan child attributes with value types and property tails | merged to `master` in round 32 |
+| #19 | form child-item support-index performance optimization and after-run timing | merged to `master` in round 32 |
+| #21 | precise unmapped `AdditionalIndexes.xml` base-free staging blocker audit | merged to `master` in round 32 |
+| #22 | Configuration.xml localized root information fields | merged to `master` in round 32 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
