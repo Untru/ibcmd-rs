@@ -16334,7 +16334,7 @@ struct CatalogProperties {
     hierarchical: bool,
     level_count: u32,
     folders_on_top: bool,
-    owners_empty: bool,
+    owners: Option<Vec<String>>,
     subordination_use: Option<&'static str>,
     use_standard_commands: bool,
     code_length: u32,
@@ -17389,8 +17389,14 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Role" {
         format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     } else if kind == "Catalog" {
-        let catalog =
-            parse_catalog_properties_from_text(text, uuid, type_index, form_refs, template_refs)?;
+        let catalog = parse_catalog_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            form_refs,
+            template_refs,
+        )?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if kind == "Report" {
         let report = parse_report_properties_from_text(
@@ -18716,6 +18722,7 @@ fn parse_catalog_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<CatalogProperties> {
@@ -18768,7 +18775,7 @@ fn parse_catalog_properties_from_text(
     let hierarchical = parse_catalog_hierarchical_flag(fields.get(9).copied()).unwrap_or(false);
     let level_count = parse_1c_u32_field(fields.get(10).copied()).unwrap_or(2);
     let folders_on_top = parse_1c_bool_field(fields.get(11).copied()).unwrap_or(true);
-    let owners_empty = parse_catalog_owners_empty(fields.get(12).copied());
+    let owners = parse_catalog_owners(fields.get(12).copied(), object_refs);
     let subordination_use =
         catalog_subordination_use_xml(parse_1c_u32_field(fields.get(13).copied()).unwrap_or(1));
     let check_unique = parse_1c_bool_field(fields.get(14).copied()).unwrap_or(false);
@@ -18788,7 +18795,7 @@ fn parse_catalog_properties_from_text(
         hierarchical,
         level_count,
         folders_on_top,
-        owners_empty,
+        owners,
         subordination_use,
         use_standard_commands,
         code_length,
@@ -19385,16 +19392,45 @@ fn parse_catalog_hierarchical_flag(header_field: Option<&str>) -> Option<bool> {
     parse_1c_bool_field(header.get(5).copied())
 }
 
-fn parse_catalog_owners_empty(field: Option<&str>) -> bool {
-    field
-        .map(|value| {
-            value
-                .chars()
-                .filter(|ch| !ch.is_whitespace())
-                .collect::<String>()
-                == "{0,0}"
-        })
-        .unwrap_or(false)
+fn parse_catalog_owners(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let field = field?;
+    if field
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>()
+        == "{0,0}"
+    {
+        return Some(Vec::new());
+    }
+
+    let mut owners = Vec::new();
+    let mut seen = BTreeSet::new();
+    collect_catalog_owner_refs(field, object_refs, &mut seen, &mut owners);
+    (!owners.is_empty()).then_some(owners)
+}
+
+fn collect_catalog_owner_refs(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    seen: &mut BTreeSet<String>,
+    owners: &mut Vec<String>,
+) {
+    if let Some(uuid) = parse_non_zero_uuid(field.trim())
+        && seen.insert(uuid.clone())
+        && let Some(reference) = object_refs.get(&uuid)
+    {
+        owners.push(reference.clone());
+    }
+
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return;
+    };
+    for nested in fields {
+        collect_catalog_owner_refs(nested, object_refs, seen, owners);
+    }
 }
 
 fn parse_catalog_form_ref(
@@ -22744,8 +22780,19 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         xml_bool(catalog.folders_on_top),
         xml_bool(catalog.use_standard_commands),
     ));
-    if catalog.owners_empty {
-        xml.push_str("\t\t\t<Owners/>\r\n");
+    if let Some(owners) = &catalog.owners {
+        if owners.is_empty() {
+            xml.push_str("\t\t\t<Owners/>\r\n");
+        } else {
+            xml.push_str("\t\t\t<Owners>\r\n");
+            for owner in owners {
+                xml.push_str(&format!(
+                    "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                    escape_xml_element_text(owner)
+                ));
+            }
+            xml.push_str("\t\t\t</Owners>\r\n");
+        }
     }
     if let Some(value) = catalog.subordination_use {
         xml.push_str(&format!(
@@ -42333,6 +42380,70 @@ mod tests {
         assert_eq!(
             index.get(manager_type_id).map(String::as_str),
             Some("cfg:CatalogManager.Products")
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_owners_to_metadata_xml() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let owner_catalog_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let owner_person_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"BankAccounts\",{{1,\"en\",\"Bank accounts\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{2,{owner_catalog_uuid},{owner_person_uuid}}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (
+                owner_catalog_uuid.to_string(),
+                "Catalog.Counterparties".to_string(),
+            ),
+            (
+                owner_person_uuid.to_string(),
+                "Catalog.Individuals".to_string(),
+            ),
+        ]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<Owners>"));
+        assert!(
+            xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Catalog.Counterparties</xr:Item>"#)
+        );
+        assert!(
+            xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Catalog.Individuals</xr:Item>"#)
+        );
+        assert!(
+            xml.find("<Owners>").unwrap() < xml.find("<SubordinationUse>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<UseStandardCommands>").unwrap() < xml.find("<Owners>").unwrap(),
+            "{xml}"
         );
     }
 
