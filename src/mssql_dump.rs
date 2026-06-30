@@ -14272,6 +14272,10 @@ struct FunctionalOptionProperties {
     content: Vec<String>,
 }
 
+struct SubsystemProperties {
+    include_in_command_interface: bool,
+}
+
 struct CommonModuleFlags {
     global: bool,
     client_managed_application: bool,
@@ -15068,6 +15072,9 @@ fn extract_metadata_source_xml_from_text_row(
             parse_functional_options_parameter_properties_from_text(text, uuid, object_refs)?;
         format_functional_options_parameter_source_xml(&header, &properties, source_version)
             .into_bytes()
+    } else if kind == "Subsystem" {
+        let subsystem = parse_subsystem_properties_from_text(text, uuid)?;
+        format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
         format_language_source_xml(&header, &language, source_version).into_bytes()
@@ -15353,6 +15360,18 @@ fn parse_functional_option_properties_from_text(
         location,
         privileged_get_mode: parse_1c_bool_field(fields.get(4).copied()).unwrap_or(false),
         content,
+    })
+}
+
+fn parse_subsystem_properties_from_text(text: &str, uuid: &str) -> Option<SubsystemProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("22")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+    Some(SubsystemProperties {
+        include_in_command_interface: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true),
     })
 }
 
@@ -17894,6 +17913,24 @@ fn format_metadata_source_xml(kind: &str, header: &MetadataHeader) -> String {
         name = escape_xml_text(&header.name),
         comment = escape_xml_text(&header.comment),
     )
+}
+
+fn format_subsystem_source_xml(
+    header: &MetadataHeader,
+    subsystem: &SubsystemProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Subsystem", header, source_version);
+    if let Some(offset) = xml.find("\t\t</Properties>") {
+        xml.insert_str(
+            offset,
+            &format!(
+                "\t\t\t<IncludeInCommandInterface>{}</IncludeInCommandInterface>\r\n",
+                xml_bool(subsystem.include_in_command_interface)
+            ),
+        );
+    }
+    xml
 }
 
 fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
@@ -28688,6 +28725,65 @@ mod tests {
             .relative_path,
             PathBuf::from("Catalogs").join("Products.xml")
         );
+    }
+
+    #[test]
+    fn extracts_subsystem_include_in_command_interface_to_metadata_xml() {
+        let true_uuid = "11111111-1111-4111-8111-111111111111";
+        let true_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{true_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"subsystem comment\"}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let false_uuid = "22222222-2222-4222-8222-222222222222";
+        let false_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{false_uuid}}},\"Hidden\",{{1,\"en\",\"Hidden\"}},\"\"}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &true_blob,
+            true_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Subsystems/Admin.xml")
+        );
+        assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(xml.contains("<Comment>subsystem comment</Comment>"));
+        assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
+        assert!(
+            xml.find("<Comment>subsystem comment</Comment>").unwrap()
+                < xml
+                    .find("<IncludeInCommandInterface>true</IncludeInCommandInterface>")
+                    .unwrap()
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &false_blob,
+            false_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Subsystems/Hidden.xml")
+        );
+        assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
     }
 
     #[test]
