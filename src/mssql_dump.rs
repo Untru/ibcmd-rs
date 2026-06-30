@@ -14064,7 +14064,10 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
         if mask.is_empty() {
             xml.push_str("\t\t<mask/>\r\n");
         } else {
-            xml.push_str(&format!("\t\t<mask>{}</mask>\r\n", escape_xml_text(mask)));
+            xml.push_str(&format!(
+                "\t\t<mask>{}</mask>\r\n",
+                escape_xml_element_text(mask)
+            ));
         }
     }
     push_moxel_format_usize(xml, "picIndex", format.pic_index);
@@ -14132,7 +14135,7 @@ fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<&str>) {
     if let Some(value) = value {
         xml.push_str(&format!(
             "\t\t<{tag}>{}</{tag}>\r\n",
-            escape_xml_text(value)
+            escape_xml_element_text(value)
         ));
     }
 }
@@ -14264,7 +14267,7 @@ fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
     xml.push_str("\t<namedItem xsi:type=\"NamedItemCells\">\r\n");
     xml.push_str(&format!(
         "\t\t<name>{}</name>\r\n",
-        escape_xml_text(&area.name)
+        escape_xml_element_text(&area.name)
     ));
     xml.push_str("\t\t<area>\r\n");
     xml.push_str(&format!("\t\t\t<type>{}</type>\r\n", area.area_type));
@@ -14353,7 +14356,7 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
             xml.push_str("\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n");
             xml.push_str(&format!(
                 "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                escape_xml_text(text)
+                escape_xml_element_text(text)
             ));
             xml.push_str("\t\t\t\t\t\t</v8:item>\r\n");
             xml.push_str("\t\t\t\t\t</tl>\r\n");
@@ -14363,13 +14366,13 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
         if let Some(parameter) = &cell.parameter {
             xml.push_str(&format!(
                 "\t\t\t\t\t<parameter>{}</parameter>\r\n",
-                escape_xml_text(parameter)
+                escape_xml_element_text(parameter)
             ));
         }
         if let Some(detail_parameter) = &cell.detail_parameter {
             xml.push_str(&format!(
                 "\t\t\t\t\t<detailParameter>{}</detailParameter>\r\n",
-                escape_xml_text(detail_parameter)
+                escape_xml_element_text(detail_parameter)
             ));
         }
         xml.push_str("\t\t\t\t</c>\r\n");
@@ -29314,10 +29317,34 @@ mod tests {
             )
             .as_bytes(),
         );
-        let owned_template_body = deflate_for_test(
-            "MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{8,1,2,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{0},{0},0,0,0,2,0,{16,0,{1,1,{\"ru\",\"Hello [Name]\"}},0},2,{0,1}}"
-                .as_bytes(),
-        );
+        let owned_template_body = pack_moxel_spreadsheet_blob_from_xml(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<i>2</i>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello &quot;Name&quot; &amp; &lt;Tag&gt;</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#,
+        )
+        .unwrap()
+        .blob;
         let common_template_metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{4,\r\n{{3,\r\n{{1,0,{common_template_uuid}}},\"SharedText\",{{1,\"en\",\"Shared text\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},4}},0}}"
@@ -29379,7 +29406,10 @@ mod tests {
         assert!(!owned_xml.ends_with("\r\n"));
         assert!(owned_xml.contains("<TemplateType>SpreadsheetDocument</TemplateType>"));
         assert!(template_body.contains("<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\""));
-        assert!(template_body.contains("<v8:content>Hello [Name]</v8:content>"));
+        assert!(
+            template_body.contains("<v8:content>Hello \"Name\" &amp; &lt;Tag&gt;</v8:content>")
+        );
+        assert!(!template_body.contains("&quot;Name&quot;"));
         assert!(template_body.contains("<i>2</i>"));
         assert!(
             common_xml.contains("<CommonTemplate uuid=\"cccccccc-cccc-4ccc-cccc-cccccccccccc\">")
@@ -29919,9 +29949,8 @@ mod tests {
             extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
 
         assert_eq!(extracted, extracted_again);
-        assert!(
-            extracted.contains("CatalogRef &quot;ReportsKinds&quot; -&amp;nbsp;the report type")
-        );
+        assert!(extracted.contains("CatalogRef \"ReportsKinds\" -&amp;nbsp;the report type"));
+        assert!(!extracted.contains("&quot;ReportsKinds&quot;"));
     }
 
     #[test]
