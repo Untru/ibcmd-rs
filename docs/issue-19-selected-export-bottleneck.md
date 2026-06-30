@@ -534,3 +534,74 @@ Artifacts:
 - `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-selected-forms-after`
 - `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after-report.json`
 - `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after`
+
+## Round 32 Form child-item pre-pass consolidation
+
+Round 31 left `extract_form_child_items` as the largest avoidable Form.xml
+sub-counter:
+
+| Metric | Round 31 after |
+|---|---:|
+| `source_asset_form_xml_cpu_ms` | 118,673 |
+| `source_asset_form_child_items_cpu_ms` | 68,886 |
+| `source_asset_form_properties_cpu_ms` | 5,110 |
+| `source_asset_form_items_cpu_ms` | 3,187 |
+
+The next low-risk cost was not another property parser, but repeated recursive
+pre-passes over the same form layout tree before child-item parsing. The old
+path separately walked and split nested child bodies to build table names,
+table column names, child item names, and table user-settings groups, then
+walked the tree again for actual child extraction.
+
+The extractor now builds those support indexes through one combined
+child-item-index traversal:
+
+- table id -> table name;
+- table id -> column id -> column name;
+- child item id -> child item name;
+- table id -> resolved `UserSettingsGroup` name.
+
+The output path remains unchanged: `parse_form_child_item_pairs` still owns the
+actual child-item structure and formatting. Existing focused child-item tests
+cover the affected behavior, including table service children and wrapper `55`
+user-settings groups.
+
+Full source-layout repro after the change:
+
+```powershell
+E:\ibcmd_lab\worktrees\issue-19-source-layout-perf-v2\target\release\ibcmd-rs.exe `
+  mssql-dump-config `
+  --server localhost `
+  --database ut_ibcmd `
+  --output-dir E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after `
+  --overwrite `
+  --no-binary-rows
+```
+
+Result: completed successfully, wrote 10,277 source assets from 40,576 rows,
+and did not generate `ConfigDumpInfo.xml`.
+
+| Metric | Round 31 after | Round 32 after |
+|---|---:|---:|
+| `process_rows_wall_ms` | 16,298 | 16,055 |
+| `source_asset_cpu_ms` | 198,884 | 187,772 |
+| `source_asset_form_cpu_ms` | 123,507 | 106,971 |
+| `source_asset_form_xml_cpu_ms` | 118,673 | 102,296 |
+| `source_asset_form_child_items_cpu_ms` | 68,886 | 40,598 |
+| `source_asset_form_format_cpu_ms` | 1,693 | 2,149 |
+| `source_asset_inflated_cpu_ms` | 37,151 | 40,128 |
+| `source_asset_moxel_cpu_ms` | 20,253 | 21,260 |
+
+Interpretation: consolidating the pre-passes removed about 28.3 seconds from
+the child-item CPU counter in this run. `source_asset_form_child_items_cpu_ms`
+is still the largest Form.xml sub-counter, but it is now roughly tied with
+inflated source assets. The next form-specific optimization should focus on the
+remaining recursive child discovery path itself, especially
+`parse_form_child_item_pairs` candidate scanning and the table/input service
+child scans that can still parse nested bodies more than once.
+
+Artifacts:
+
+- `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after-report.json`
+- `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after.log`
+- `E:\ibcmd_lab\perf\issue-19-source-layout-perf-v2-full-source-after`
