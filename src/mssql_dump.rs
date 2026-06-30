@@ -2746,6 +2746,7 @@ fn normalize_data_composition_schema_template_xml(
 fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<String, String>) {
     const OPEN: &str = "<v8:TypeId>";
     const CLOSE: &str = "</v8:TypeId>";
+    const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
     const CFG_PREFIX: &str = "cfg:";
     const DCS_CFG_PREFIX: &str = "d5p1";
     const CURRENT_CONFIG_NS: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
@@ -2760,15 +2761,21 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
         };
         let value_end = value_start + relative_end;
         let type_id = xml[value_start..value_end].trim();
-        let replacement = type_index
-            .get(type_id)
-            .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
-            .map(|reference| {
-                format!(
-                    "<v8:Type xmlns:{DCS_CFG_PREFIX}=\"{CURRENT_CONFIG_NS}\">{DCS_CFG_PREFIX}:{}</v8:Type>",
-                    escape_xml_text(reference)
-                )
-            });
+        let replacement = if type_id.eq_ignore_ascii_case(ANY_IB_REF_TYPE_ID) {
+            Some(format!(
+                "<v8:TypeSet xmlns:{DCS_CFG_PREFIX}=\"{CURRENT_CONFIG_NS}\">{DCS_CFG_PREFIX}:AnyIBRef</v8:TypeSet>"
+            ))
+        } else {
+            type_index
+                .get(type_id)
+                .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
+                .map(|reference| {
+                    format!(
+                        "<v8:Type xmlns:{DCS_CFG_PREFIX}=\"{CURRENT_CONFIG_NS}\">{DCS_CFG_PREFIX}:{}</v8:Type>",
+                        escape_xml_text(reference)
+                    )
+                })
+        };
         if let Some(replacement) = replacement {
             rewritten.push_str(&xml[cursor..start]);
             rewritten.push_str(&replacement);
@@ -3137,17 +3144,45 @@ fn canonical_data_composition_attr_value(
     match suffix {
         "LocalStringType" => "v8:LocalStringType".to_string(),
         "Field" => "dcscor:Field".to_string(),
-        "SettingsParameterValue"
-        | "SelectedItemField"
-        | "FilterItemComparison"
-        | "StructureItemGroup"
-        | "OrderItemAuto"
-        | "SelectedItemAuto" => format!("dcsset:{suffix}"),
+        _ if is_dcs_settings_xsi_type(suffix) => format!("dcsset:{suffix}"),
         _ if element_namespace == Some(DCS_SETTINGS_NS) && !value.contains(':') => {
             format!("dcsset:{value}")
         }
         _ => value.to_string(),
     }
+}
+
+fn is_dcs_settings_xsi_type(value: &str) -> bool {
+    matches!(
+        value,
+        "DataCompositionAttributesPlacement"
+            | "DataCompositionChartLegendPlacement"
+            | "DataCompositionFixation"
+            | "DataCompositionGroupFieldsPlacement"
+            | "DataCompositionGroupPlacement"
+            | "DataCompositionGroupTemplateType"
+            | "DataCompositionGroupUseVariant"
+            | "DataCompositionPictureOutputType"
+            | "DataCompositionResourcesAutoPosition"
+            | "DataCompositionResourcesPlacement"
+            | "DataCompositionTextOutputType"
+            | "FilterItemComparison"
+            | "FilterItemGroup"
+            | "GroupItemAuto"
+            | "GroupItemField"
+            | "OrderItemAuto"
+            | "OrderItemField"
+            | "SelectedItemAuto"
+            | "SelectedItemField"
+            | "SelectedItemFolder"
+            | "SettingsParameterValue"
+            | "StructureItemChart"
+            | "StructureItemGroup"
+            | "StructureItemNestedObject"
+            | "StructureItemTable"
+            | "UserFieldCase"
+            | "UserFieldExpression"
+    )
 }
 
 fn write_source_asset(
@@ -29742,6 +29777,9 @@ mod tests {
             "\t\t<field xsi:type=\"DataSetFieldField\">\r\n",
             "\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">22222222-2222-4222-8222-222222222222</TypeId></valueType>\r\n",
             "\t\t</field>\r\n",
+            "\t\t<field xsi:type=\"DataSetFieldField\">\r\n",
+            "\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">280f5f0e-9c8a-49cc-bf6d-4d296cc17a63</TypeId></valueType>\r\n",
+            "\t\t</field>\r\n",
             "\t\t<settingsVariant>\r\n",
             "\t\t\t<name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Основной</name>\r\n",
             "\t\t\t<presentation xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xsi:type=\"xs:string\">Основной</presentation>\r\n",
@@ -29752,6 +29790,7 @@ mod tests {
             "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
             "\t<selection><item xsi:type=\"SelectedItemField\"><field>Сумма</field></item></selection>\r\n",
             "\t<filter><item xsi:type=\"FilterItemComparison\"><left xsi:type=\"dcscor:Field\">Организация</left></item></filter>\r\n",
+            "\t<outputParameters><dcscor:item xsi:type=\"SettingsParameterValue\"><dcscor:parameter>ВыводитьЗаголовок</dcscor:parameter><dcscor:value xsi:type=\"DataCompositionTextOutputType\">Output</dcscor:value></dcscor:item></outputParameters>\r\n",
             "</Settings>"
         );
 
@@ -29783,10 +29822,16 @@ mod tests {
             )
         );
         assert!(xml.contains("<v8:TypeId>22222222-2222-4222-8222-222222222222</v8:TypeId>"));
+        assert!(xml.contains(
+            r#"<v8:TypeSet xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d5p1:AnyIBRef</v8:TypeSet>"#
+        ));
         assert!(xml.contains("<dcsset:name>Основной</dcsset:name>"));
         assert!(xml.contains("<dcsset:settings xmlns:style="));
         assert!(xml.contains(r#"<dcsset:item xsi:type="dcsset:SelectedItemField">"#));
         assert!(xml.contains(r#"<dcsset:left xsi:type="dcscor:Field">Организация</dcsset:left>"#));
+        assert!(xml.contains(
+            r#"<dcscor:value xsi:type="dcsset:DataCompositionTextOutputType">Output</dcscor:value>"#
+        ));
         assert!(xml.ends_with("</DataCompositionSchema>"));
 
         let (path, kind) = template_body_source_asset("DataCompositionSchema").unwrap();
