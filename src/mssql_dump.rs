@@ -16179,6 +16179,7 @@ struct MetadataChildProperties {
     quick_choice: Option<&'static str>,
     create_on_input: Option<&'static str>,
     choice_form_empty: bool,
+    link_by_type_empty: bool,
     choice_history_on_input: Option<&'static str>,
     use_mode: Option<&'static str>,
     indexing: Option<&'static str>,
@@ -18242,6 +18243,9 @@ fn parse_metadata_child_properties(
             .and_then(|field| metadata_create_on_input_xml(field.trim())),
         choice_form_empty: metadata_child_choice_form_is_empty(
             fields.get(header_index + 19).copied(),
+        ),
+        link_by_type_empty: metadata_child_collection_is_empty(
+            fields.get(header_index + 20).copied(),
         ),
         choice_history_on_input: fields
             .get(header_index + 21)
@@ -23866,6 +23870,9 @@ fn push_metadata_child_properties_xml(
     }
     if properties.choice_form_empty {
         xml.push_str(&format!("{indent}<ChoiceForm/>\r\n"));
+    }
+    if properties.link_by_type_empty {
+        xml.push_str(&format!("{indent}<LinkByType/>\r\n"));
     }
     if let Some(choice_history_on_input) = properties.choice_history_on_input {
         xml.push_str(&format!(
@@ -41350,6 +41357,8 @@ mod tests {
             attribute_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"),
             "{xml}"
         );
+        assert!(attribute_xml.contains("<ChoiceForm/>"), "{xml}");
+        assert!(attribute_xml.contains("<LinkByType/>"), "{xml}");
         assert!(
             attribute_xml.contains("<DataHistory>DontUse</DataHistory>"),
             "{xml}"
@@ -41361,6 +41370,16 @@ mod tests {
         assert!(
             attribute_xml.find("<FillValue").unwrap()
                 < attribute_xml.find("<FillChecking>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceForm/>").unwrap()
+                < attribute_xml.find("<LinkByType/>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<LinkByType/>").unwrap()
+                < attribute_xml.find("<ChoiceHistoryOnInput>").unwrap(),
             "{xml}"
         );
     }
