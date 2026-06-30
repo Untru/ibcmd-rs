@@ -16715,7 +16715,17 @@ struct CommonAttributeProperties {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct CommonAttributePropertyDetails;
+struct CommonAttributePropertyDetails {
+    fill_value: Option<CommonAttributeFillValue>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum CommonAttributeFillValue {
+    Nil,
+    Boolean(bool),
+    Decimal(String),
+    String(String),
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct CommonAttributeSeparationProperties {
@@ -20304,7 +20314,38 @@ fn parse_common_attribute_properties_from_text(
 fn parse_common_attribute_property_details(
     fields: &[&str],
 ) -> Option<CommonAttributePropertyDetails> {
-    (fields.len() > 3).then_some(CommonAttributePropertyDetails)
+    let typed_fields = fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+        .unwrap_or_default();
+    let fill_value = typed_fields
+        .get(19)
+        .and_then(|field| parse_common_attribute_fill_value(field));
+    (fields.len() > 3 || fill_value.is_some())
+        .then_some(CommonAttributePropertyDetails { fill_value })
+}
+
+fn parse_common_attribute_fill_value(field: &str) -> Option<CommonAttributeFillValue> {
+    let value = field.trim();
+    if matches!(value, "{0}" | "00000000-0000-0000-0000-000000000000") {
+        return Some(CommonAttributeFillValue::Nil);
+    }
+    let fields = split_1c_braced_fields(value, 0)?;
+    match fields.first().map(|field| field.trim())? {
+        r#""U""# => Some(CommonAttributeFillValue::Nil),
+        r#""B""# => fields
+            .get(1)
+            .and_then(|field| parse_1c_bool_flag(field.trim()))
+            .map(CommonAttributeFillValue::Boolean),
+        r#""N""# => fields
+            .get(1)
+            .map(|field| CommonAttributeFillValue::Decimal(field.trim().to_string())),
+        r#""S""# => fields
+            .get(1)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .map(CommonAttributeFillValue::String),
+        _ => None,
+    }
 }
 
 fn parse_common_attribute_separation_properties(
@@ -25101,8 +25142,11 @@ fn format_common_attribute_source_xml(
     };
     let mut xml =
         format_typed_metadata_source_xml("CommonAttribute", header, &typed, source_version);
-    if common_attribute.property_details.is_some() {
-        insert_metadata_properties_xml(&mut xml, format_common_attribute_property_details_xml());
+    if let Some(details) = &common_attribute.property_details {
+        insert_metadata_properties_xml(
+            &mut xml,
+            &format_common_attribute_property_details_xml(details),
+        );
     }
     let mut insert = String::new();
     if common_attribute.content.is_empty() {
@@ -25146,8 +25190,10 @@ fn format_common_attribute_source_xml(
     xml
 }
 
-fn format_common_attribute_property_details_xml() -> &'static str {
-    "\t\t\t<PasswordMode>false</PasswordMode>\r\n\
+fn format_common_attribute_property_details_xml(
+    details: &CommonAttributePropertyDetails,
+) -> String {
+    let mut xml = "\t\t\t<PasswordMode>false</PasswordMode>\r\n\
 \t\t\t<Format/>\r\n\
 \t\t\t<EditFormat/>\r\n\
 \t\t\t<ToolTip/>\r\n\
@@ -25158,7 +25204,14 @@ fn format_common_attribute_property_details_xml() -> &'static str {
 \t\t\t<MinValue xsi:nil=\"true\"/>\r\n\
 \t\t\t<MaxValue xsi:nil=\"true\"/>\r\n\
 \t\t\t<FillFromFillingValue>false</FillFromFillingValue>\r\n\
-\t\t\t<FillChecking>DontCheck</FillChecking>\r\n\
+\t\t\t"
+        .to_string();
+    if let Some(fill_value) = &details.fill_value {
+        xml.push_str(&format_common_attribute_fill_value_xml(fill_value));
+        xml.push_str("\r\n\t\t\t");
+    }
+    xml.push_str(
+        "<FillChecking>DontCheck</FillChecking>\r\n\
 \t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
 \t\t\t<ChoiceParameterLinks/>\r\n\
 \t\t\t<ChoiceParameters/>\r\n\
@@ -25166,7 +25219,30 @@ fn format_common_attribute_property_details_xml() -> &'static str {
 \t\t\t<CreateOnInput>Auto</CreateOnInput>\r\n\
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
-\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n"
+\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n",
+    );
+    xml
+}
+
+fn format_common_attribute_fill_value_xml(value: &CommonAttributeFillValue) -> String {
+    match value {
+        CommonAttributeFillValue::Nil => "<FillValue xsi:nil=\"true\"/>".to_string(),
+        CommonAttributeFillValue::Boolean(value) => format!(
+            "<FillValue xsi:type=\"xs:boolean\">{}</FillValue>",
+            xml_bool(*value)
+        ),
+        CommonAttributeFillValue::Decimal(value) => format!(
+            "<FillValue xsi:type=\"xs:decimal\">{}</FillValue>",
+            escape_xml_element_text(value)
+        ),
+        CommonAttributeFillValue::String(value) if value.is_empty() => {
+            "<FillValue xsi:type=\"xs:string\"/>".to_string()
+        }
+        CommonAttributeFillValue::String(value) => format!(
+            "<FillValue xsi:type=\"xs:string\">{}</FillValue>",
+            escape_xml_element_text(value)
+        ),
+    }
 }
 
 fn format_common_attribute_separation_xml(
@@ -38912,6 +38988,96 @@ mod tests {
             assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
             assert!(xml.contains("<Content/>"));
             assert!(xml.contains("<AutoUse>Use</AutoUse>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_common_attribute_property_fill_values_from_native_tail() {
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let cases = [
+            (
+                "33333333-3333-4333-8333-333333333331",
+                "StringFill",
+                r#"{"S"}"#,
+                r#"{"S",""}"#,
+                r#"<FillValue xsi:type="xs:string"/>"#,
+            ),
+            (
+                "33333333-3333-4333-8333-333333333332",
+                "NilFill",
+                r#"{"S"}"#,
+                r#"{"U"}"#,
+                r#"<FillValue xsi:nil="true"/>"#,
+            ),
+            (
+                "33333333-3333-4333-8333-333333333333",
+                "DecimalFill",
+                r#"{"N",7,0,1}"#,
+                r#"{"N",0}"#,
+                r#"<FillValue xsi:type="xs:decimal">0</FillValue>"#,
+            ),
+        ];
+
+        for (uuid, name, type_pattern, fill_value, expected_fill_xml) in cases {
+            let plain = r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"@NAME@",
+{1,"en","@NAME@"},"",0,0,@ZERO_UUID@,0},
+{"Pattern",
+@TYPE_PATTERN@
+}
+},0,
+{0},
+{0},0,"",0,
+{"U"},
+{"U"},0,@ZERO_UUID@,2,0,
+{5006,0},
+{3,0,0},
+{0,0},0,
+{0},
+@FILL_VALUE@,0,0,0},
+{0,0}},0}"#
+                .replace("@UUID@", uuid)
+                .replace("@NAME@", name)
+                .replace("@ZERO_UUID@", zero_uuid)
+                .replace("@TYPE_PATTERN@", type_pattern)
+                .replace("@FILL_VALUE@", fill_value);
+            let blob = deflate_for_test(plain.as_bytes());
+
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                InfobaseConfigSourceVersion::V2_20,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("CommonAttributes").join(format!("{name}.xml"))
+            );
+            assert!(xml.contains(expected_fill_xml), "{xml}");
+            assert!(
+                xml.find("<FillFromFillingValue>false</FillFromFillingValue>")
+                    .unwrap()
+                    < xml.find("<FillValue").unwrap(),
+                "{xml}"
+            );
+            assert!(
+                xml.find("<FillValue").unwrap()
+                    < xml.find("<FillChecking>DontCheck</FillChecking>").unwrap(),
+                "{xml}"
+            );
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
