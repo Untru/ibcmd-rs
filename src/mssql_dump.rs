@@ -9810,7 +9810,11 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
-        skip_on_input: if tag == "Button" && form_button_layout_is_extended(&fields) {
+        skip_on_input: if tag == "Table" {
+            fields
+                .get(12)
+                .and_then(|field| parse_form_input_field_skip_on_input(field))
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(29)
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
@@ -25762,6 +25766,7 @@ mod tests {
         assert_eq!(item.tag, "Table");
         assert_eq!(item.data_path.as_deref(), Some("Rows"));
         assert_eq!(item.table_representation, Some("List"));
+        assert_eq!(item.skip_on_input, Some(false));
         assert_eq!(item.height_in_table_rows.as_deref(), Some("6"));
         assert_eq!(item.row_selection_mode, Some("Cell"));
         assert_eq!(item.enable_start_drag, Some(true));
@@ -25789,10 +25794,12 @@ mod tests {
         assert_eq!(item.tag, "Table");
         assert_eq!(item.name, "Rows");
         assert_eq!(item.data_path.as_deref(), Some("Rows"));
+        assert_eq!(item.skip_on_input, Some(false));
         assert_eq!(item.auto_refresh, Some(false));
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
 
         let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
         assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
     }
