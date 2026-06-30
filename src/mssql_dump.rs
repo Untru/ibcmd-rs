@@ -15410,6 +15410,7 @@ struct ExchangePlanProperties {
 struct RegisterProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    register_type: Option<&'static str>,
     include_help_in_contents: Option<bool>,
     default_record_form: Option<String>,
     default_list_form: Option<String>,
@@ -17000,6 +17001,7 @@ fn parse_register_properties_from_text(
         );
     }
     let use_standard_commands = parse_register_use_standard_commands(kind, &fields, uuid);
+    let register_type = parse_register_type(kind, &fields, uuid);
     let include_help_in_contents = parse_register_include_help_in_contents(kind);
     let form_refs = parse_register_form_refs(kind, &fields, uuid, form_refs);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
@@ -17012,6 +17014,7 @@ fn parse_register_properties_from_text(
     Some(RegisterProperties {
         generated_types,
         use_standard_commands,
+        register_type,
         include_help_in_contents,
         default_record_form: form_refs.0,
         default_list_form: form_refs.1,
@@ -17044,6 +17047,23 @@ fn parse_register_form_refs(
         None,
         None,
     )
+}
+
+fn parse_register_type(kind: &str, fields: &[&str], uuid: &str) -> Option<&'static str> {
+    if kind != "AccumulationRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    let value = parse_1c_u32_field(fields.get(header_index + 4).copied())?;
+    accumulation_register_type_xml(value)
+}
+
+fn accumulation_register_type_xml(value: u32) -> Option<&'static str> {
+    match value {
+        0 => Some("Balance"),
+        1 => Some("Turnover"),
+        _ => None,
+    }
 }
 
 fn parse_register_use_standard_commands(kind: &str, fields: &[&str], uuid: &str) -> bool {
@@ -20852,6 +20872,11 @@ fn format_register_source_xml(
             "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
             xml_bool(register.use_standard_commands)
         );
+        if let Some(register_type) = register.register_type {
+            properties.push_str(&format!(
+                "\t\t\t<RegisterType>{register_type}</RegisterType>\r\n"
+            ));
+        }
         if let Some(include_help_in_contents) = register.include_help_in_contents {
             properties.push_str(&format!(
                 "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
@@ -33837,6 +33862,59 @@ mod tests {
                 .unwrap()
                 < xml.find("\t\t</Properties>").unwrap()
         );
+    }
+
+    #[test]
+    fn extracts_accumulation_register_type_from_metadata_body() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+
+        for (type_value, expected_type) in [(0, "Balance"), (1, "Turnover")] {
+            let blob = deflate_for_test(
+                format!(
+                    "{{1,\r\n{{28,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\r\n\
+{{3,\r\n{{1,0,{register_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1,{zero_uuid},{zero_uuid},{type_value}\r\n}}\r\n}}"
+                )
+                .as_bytes(),
+            );
+
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                register_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                InfobaseConfigSourceVersion::V2_21,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("AccumulationRegisters/Sales.xml")
+            );
+            assert!(xml.contains(&format!("<RegisterType>{expected_type}</RegisterType>")));
+            assert!(
+                xml.find("<UseStandardCommands>true</UseStandardCommands>")
+                    .unwrap()
+                    < xml.find("<RegisterType>").unwrap()
+            );
+            assert!(
+                xml.find("<RegisterType>").unwrap()
+                    < xml
+                        .find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                        .unwrap()
+            );
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
     }
 
     #[test]
