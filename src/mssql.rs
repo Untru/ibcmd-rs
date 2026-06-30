@@ -47,7 +47,7 @@ use crate::module_blob::{
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
-    pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_help_blob_from_parts, pack_module_blob_bytes, pack_module_blob_container_bytes,
     pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
     pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml_with_source,
     pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
@@ -857,8 +857,7 @@ fn source_bootstrap_readiness_report(
             true,
             &metadata_reason,
         ));
-        let body_path = infer_common_module_text_path(xml_path);
-        if body_path.exists() {
+        if let Some(body_path) = source_module_body_path(infer_common_module_text_path(xml_path)) {
             rows.push(bootstrap_row_report(
                 "common_module",
                 "CommonModule",
@@ -1153,16 +1152,13 @@ fn metadata_body_bootstrap_rows(
         } else {
             infer_object_module_body_path(xml_path, file_name)
         };
-        rows.extend(optional_body_bootstrap_row(
+        rows.extend(optional_module_body_bootstrap_row(
             source_root,
             properties,
             object_path,
             body_path,
             suffix,
             "module_body",
-            BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            false,
-            module_body_base_free_reason(),
         ));
     }
 
@@ -1224,7 +1220,7 @@ fn metadata_body_bootstrap_rows(
 }
 
 fn module_body_base_free_reason() -> &'static str {
-    "module body packer builds a V8 container from source BSL and synthesizes default module info without reading the active Config row"
+    "module body packer builds a V8 container from source BSL, or validates and deflates an exported module .bin V8 container, without reading the active Config row"
 }
 
 fn template_bootstrap_rows(
@@ -1555,6 +1551,41 @@ fn optional_body_bootstrap_row(
             reason,
         )
     })
+}
+
+fn optional_module_body_bootstrap_row(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    bsl_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+) -> Option<MssqlSourceBootstrapRowReport> {
+    source_module_body_path(bsl_path).map(|body_path| {
+        bootstrap_row_report(
+            "metadata_object",
+            &properties.kind,
+            object_path,
+            source_relative_path(source_root, &body_path),
+            format!("{}.{}", properties.uuid, suffix),
+            row_kind,
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            false,
+            module_body_base_free_reason(),
+        )
+    })
+}
+
+fn source_module_body_path(bsl_path: PathBuf) -> Option<PathBuf> {
+    if bsl_path.exists() {
+        return Some(bsl_path);
+    }
+    let bin_path = module_binary_body_path(&bsl_path);
+    bin_path.exists().then_some(bin_path)
+}
+
+fn module_binary_body_path(bsl_path: &Path) -> PathBuf {
+    bsl_path.with_extension("bin")
 }
 
 fn bootstrap_row_report(
@@ -4159,13 +4190,11 @@ fn prepare_object_module_body_rows(
         } else {
             infer_object_module_body_path(xml_path, file_name)
         };
-        if !body_path.exists() {
+        let Some(body_path) = source_module_body_path(body_path) else {
             continue;
-        }
+        };
         let body_id = format!("{}.{}", properties.uuid, suffix);
-        let text = fs::read(&body_path)
-            .with_context(|| format!("failed to read module body {}", body_path.display()))?;
-        let packed = pack_module_blob_bytes(&text, None, None)
+        let packed = pack_module_body_source(&body_path)
             .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
         rows.push(PreparedMetadataBodyStage {
             body_id,
@@ -4175,6 +4204,16 @@ fn prepare_object_module_body_rows(
         });
     }
     Ok(rows)
+}
+
+fn pack_module_body_source(path: &Path) -> Result<crate::module_blob::PackedModuleBlob> {
+    let bytes = fs::read(path)
+        .with_context(|| format!("failed to read module body source {}", path.display()))?;
+    if path.extension().and_then(|extension| extension.to_str()) == Some("bin") {
+        pack_module_blob_container_bytes(&bytes)
+    } else {
+        pack_module_blob_bytes(&bytes, None, None)
+    }
 }
 
 fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static str)] {
@@ -4238,13 +4277,7 @@ fn prepare_nested_command_module_body_rows(
     let mut rows = Vec::with_capacity(sources.len());
     for source in sources {
         let body_id = format!("{}.2", source.command_id);
-        let text = fs::read(&source.body_path).with_context(|| {
-            format!(
-                "failed to read nested command module body {}",
-                source.body_path.display()
-            )
-        })?;
-        let packed = pack_module_blob_bytes(&text, None, None).with_context(|| {
+        let packed = pack_module_body_source(&source.body_path).with_context(|| {
             format!(
                 "failed to pack nested command module body {}",
                 source.body_path.display()
@@ -4286,10 +4319,11 @@ fn nested_command_module_sources(
             continue;
         }
         let command_name = entry.file_name().to_string_lossy().to_string();
-        let body_path = entry.path().join("Ext").join("CommandModule.bsl");
-        if !body_path.exists() {
+        let Some(body_path) =
+            source_module_body_path(entry.path().join("Ext").join("CommandModule.bsl"))
+        else {
             continue;
-        }
+        };
         let command_id = command_ids.get(&command_name).cloned().ok_or_else(|| {
             anyhow!(
                 "nested command module {} has no matching Command named {} in {}",
@@ -4485,14 +4519,22 @@ fn prepare_common_module_object_stage(
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
     let properties = parse_common_module_xml_properties(&xml)?;
     let module_id = properties.uuid.clone();
-    let text_path = text_path.unwrap_or_else(|| infer_common_module_text_path(&xml_path));
-    let text = fs::read(&text_path)
-        .with_context(|| format!("failed to read BSL text {}", text_path.display()))?;
+    let text_path = match text_path {
+        Some(path) => path,
+        None => {
+            source_module_body_path(infer_common_module_text_path(&xml_path)).ok_or_else(|| {
+                anyhow!(
+                    "CommonModule body source not found: {}",
+                    infer_common_module_text_path(&xml_path).display()
+                )
+            })?
+        }
+    };
 
     let base_metadata_blob = fetch_config_blob(sqlcmd, server, database, &module_id)?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     let module_body_id = format!("{module_id}.0");
-    let packed_module = pack_module_blob_bytes(&text, None, None)?;
+    let packed_module = pack_module_body_source(&text_path)?;
 
     Ok(PreparedCommonModuleObjectStage {
         module_id,
@@ -4503,7 +4545,7 @@ fn prepare_common_module_object_stage(
         metadata_plain_bytes: packed_metadata.plain_bytes,
         metadata_blob: packed_metadata.blob,
         metadata_blob_sha256: packed_metadata.output_sha256,
-        text_bytes: text.len(),
+        text_bytes: packed_module.text_bytes,
         module_blob: packed_module.blob,
         module_blob_sha256: packed_module.output_sha256,
     })
@@ -6375,6 +6417,7 @@ mod tests {
         raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
     use crate::source::{SourceFile, SourceKind, SourceManifest};
+    use crate::v8_container::{V8Element, build_v8_container, make_v8_element_header};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -6408,6 +6451,24 @@ mod tests {
             privileged: false,
             return_values_reuse: ReturnValuesReuse::DontUse,
         }
+    }
+
+    fn binary_module_container_for_test(storage_version: u32) -> Vec<u8> {
+        let mut inner = build_v8_container(&[
+            V8Element {
+                name: "info".to_string(),
+                header: make_v8_element_header("info"),
+                data: b"\xEF\xBB\xBF{3,1,0,\"\",0}".to_vec(),
+            },
+            V8Element {
+                name: "image".to_string(),
+                header: make_v8_element_header("image"),
+                data: b"compiled-module-image".to_vec(),
+            },
+        ])
+        .unwrap();
+        inner[8..12].copy_from_slice(&storage_version.to_le_bytes());
+        inner
     }
 
     fn sample_schedule_xml() -> &'static [u8] {
@@ -8315,6 +8376,100 @@ mod tests {
         assert_eq!(
             module_blob_text_sha256(&rows[0].blob).unwrap(),
             hex_sha256(text)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_common_module_binary_container_readiness_without_base_fetch() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-common-module-bin-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let module_xml = root.join("CommonModules").join("BinaryModule.xml");
+        let module_ext = root.join("CommonModules").join("BinaryModule").join("Ext");
+        fs::create_dir_all(&module_ext).unwrap();
+        fs::write(
+            &module_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonModule uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+    <Properties>
+      <Name>BinaryModule</Name>
+      <Global>false</Global>
+      <ClientManagedApplication>false</ClientManagedApplication>
+      <Server>true</Server>
+      <ExternalConnection>false</ExternalConnection>
+      <ClientOrdinaryApplication>false</ClientOrdinaryApplication>
+      <ServerCall>false</ServerCall>
+      <Privileged>false</Privileged>
+      <ReturnValuesReuse>DontUse</ReturnValuesReuse>
+    </Properties>
+  </CommonModule>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            module_ext.join("Module.bin"),
+            binary_module_container_for_test(2),
+        )
+        .unwrap();
+
+        let report =
+            super::source_bootstrap_readiness_report(&root, &[], std::slice::from_ref(&module_xml))
+                .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "common_module_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(row.source_path, "CommonModules/BinaryModule/Ext/Module.bin");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains(".bin V8 container"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_binary_object_module_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-object-module-bin-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let processor_xml = root.join("DataProcessors").join("BinaryProcessor.xml");
+        let body_path = root
+            .join("DataProcessors")
+            .join("BinaryProcessor")
+            .join("Ext")
+            .join("ObjectModule.bin");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&processor_xml, b"<DataProcessor/>").unwrap();
+        let container = binary_module_container_for_test(2);
+        fs::write(&body_path, &container).unwrap();
+        let properties = test_simple_metadata_properties(
+            "DataProcessor",
+            "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+            "BinaryProcessor",
+        );
+
+        let rows = super::prepare_object_module_body_rows(
+            PathBuf::from("missing-sqlcmd-for-object-module-bin-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &processor_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "cccccccc-cccc-4ccc-cccc-cccccccccccc.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(&container)
         );
 
         let _ = fs::remove_dir_all(root);
