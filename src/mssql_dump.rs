@@ -14368,6 +14368,15 @@ struct ExchangePlanProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
 
+struct RegisterProperties {
+    child_objects: Vec<RegisterChildObject>,
+}
+
+struct RegisterChildObject {
+    tag: &'static str,
+    header: MetadataHeader,
+}
+
 struct CommonModuleFlags {
     global: bool,
     client_managed_application: bool,
@@ -15235,6 +15244,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "ExchangePlan" {
         let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid)?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
+    } else if metadata_kind_uses_register_resources(kind) {
+        let register = parse_register_properties_from_text(kind, text, uuid)?;
+        format_register_source_xml(kind, &header, &register, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
         format_language_source_xml(&header, &language, source_version).into_bytes()
@@ -15612,6 +15624,58 @@ fn parse_exchange_plan_properties_from_text(
     );
 
     Some(ExchangePlanProperties { generated_types })
+}
+
+fn parse_register_properties_from_text(
+    kind: &str,
+    text: &str,
+    uuid: &str,
+) -> Option<RegisterProperties> {
+    if !metadata_kind_uses_register_resources(kind) {
+        return None;
+    }
+    let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
+        .into_iter()
+        .filter_map(|(header, marker_start)| {
+            register_child_object_tag(kind, text, marker_start)
+                .map(|tag| RegisterChildObject { tag, header })
+        })
+        .collect();
+    Some(RegisterProperties { child_objects })
+}
+
+fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Option<&'static str> {
+    if !metadata_kind_uses_register_resources(kind) {
+        return None;
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 5)
+        && is_offset_inside_register_resource_list(text, marker_start)
+    {
+        return Some("Resource");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some("Attribute");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 5) {
+        return Some("Attribute");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 6) {
+        return Some("Attribute");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 8)
+        && is_offset_inside_register_dimension_list(text, marker_start)
+    {
+        return Some("Dimension");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 8) {
+        return Some("Resource");
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 10) {
+        return Some("Dimension");
+    }
+    None
 }
 
 fn parse_catalog_properties_from_text(
@@ -18583,6 +18647,24 @@ fn format_exchange_plan_source_xml(
     xml
 }
 
+fn format_register_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    register: &RegisterProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml(kind, header, source_version);
+    if register.child_objects.is_empty() {
+        return xml;
+    }
+    let mut child_objects = String::new();
+    for child in &register.child_objects {
+        push_metadata_header_child_object_xml(&mut child_objects, child.tag, &child.header);
+    }
+    insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
+    xml
+}
+
 fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
@@ -19499,49 +19581,49 @@ fn insert_metadata_child_commands_xml(
     if commands.is_empty() {
         return;
     }
+    let mut child_objects = String::new();
+    for command in commands {
+        push_metadata_header_child_object_xml(&mut child_objects, "Command", command);
+    }
+    insert_metadata_child_objects_xml(xml, owner_kind, &child_objects);
+}
+
+fn insert_metadata_child_objects_xml(xml: &mut String, owner_kind: &str, child_objects: &str) {
+    if child_objects.is_empty() {
+        return;
+    }
+    if let Some(index) = xml.rfind("\t\t</ChildObjects>") {
+        xml.insert_str(index, child_objects);
+        return;
+    }
     let marker = format!("\t</{owner_kind}>");
     let Some(index) = xml.find(&marker) else {
         return;
     };
-    let mut child_objects = String::from("\t\t<ChildObjects>\r\n");
-    for command in commands {
-        child_objects.push_str(&format!(
-            "\t\t\t<Command uuid=\"{}\">\r\n\
+    xml.insert_str(
+        index,
+        &format!("\t\t<ChildObjects>\r\n{child_objects}\t\t</ChildObjects>\r\n"),
+    );
+}
+
+fn push_metadata_header_child_object_xml(xml: &mut String, tag: &str, header: &MetadataHeader) {
+    xml.push_str(&format!(
+        "\t\t\t<{tag} uuid=\"{}\">\r\n\
 \t\t\t\t<Properties>\r\n\
 \t\t\t\t\t<Name>{}</Name>\r\n",
-            escape_xml_text(&command.uuid),
-            escape_xml_text(&command.name),
+        escape_xml_text(&header.uuid),
+        escape_xml_element_text(&header.name),
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &header.synonyms);
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&header.comment)
         ));
-        if command.synonyms.is_empty() {
-            child_objects.push_str("\t\t\t\t\t<Synonym/>\r\n");
-        } else {
-            child_objects.push_str("\t\t\t\t\t<Synonym>\r\n");
-            for (lang, content) in &command.synonyms {
-                child_objects.push_str("\t\t\t\t\t\t<v8:item>\r\n");
-                child_objects.push_str(&format!(
-                    "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
-                    escape_xml_text(lang)
-                ));
-                child_objects.push_str(&format!(
-                    "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
-                    escape_xml_text(content)
-                ));
-                child_objects.push_str("\t\t\t\t\t\t</v8:item>\r\n");
-            }
-            child_objects.push_str("\t\t\t\t\t</Synonym>\r\n");
-        }
-        if command.comment.is_empty() {
-            child_objects.push_str("\t\t\t\t\t<Comment/>\r\n");
-        } else {
-            child_objects.push_str(&format!(
-                "\t\t\t\t\t<Comment>{}</Comment>\r\n",
-                escape_xml_text(&command.comment)
-            ));
-        }
-        child_objects.push_str("\t\t\t\t</Properties>\r\n\t\t\t</Command>\r\n");
     }
-    child_objects.push_str("\t\t</ChildObjects>\r\n");
-    xml.insert_str(index, &child_objects);
+    xml.push_str(&format!("\t\t\t\t</Properties>\r\n\t\t\t</{tag}>\r\n"));
 }
 
 fn format_common_command_source_xml_native(
@@ -29813,6 +29895,93 @@ mod tests {
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
         assert!(xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap());
+    }
+
+    #[test]
+    fn extracts_register_dimension_resource_and_attribute_child_objects() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let dimension_uuid = "22222222-2222-4222-8222-222222222222";
+        let resource_uuid = "33333333-3333-4333-8333-333333333333";
+        let attribute_uuid = "44444444-4444-4444-8444-444444444444";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{28,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},\
+{{b64d9a43-1642-11d6-a3c7-0050bae0a776,1,\r\n{{8,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{dimension_uuid}}},\"Contract\",{{1,\"en\",\"Contract\"}},\"dimension comment\"}}\r\n}}\r\n}}\r\n}}\r\n}},\
+{{b64d9a41-1642-11d6-a3c7-0050bae0a776,1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{resource_uuid}}},\"Amount\",{{1,\"en\",\"Amount\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}},\
+{{4,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"PaymentRequest\",{{1,\"en\",\"Payment request\"}},\"\"}}\r\n}}\r\n}}\r\n}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                register_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("AccumulationRegisters/Sales.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains(r#"<Dimension uuid="22222222-2222-4222-8222-222222222222">"#));
+            assert!(xml.contains("<Name>Contract</Name>"));
+            assert!(xml.contains("<Comment>dimension comment</Comment>"));
+            assert!(xml.contains(r#"<Resource uuid="33333333-3333-4333-8333-333333333333">"#));
+            assert!(xml.contains(r#"<Attribute uuid="44444444-4444-4444-8444-444444444444">"#));
+            assert!(xml.find("\t\t</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
+            assert_eq!(xml.matches("<ChildObjects>").count(), 1);
+        }
+    }
+
+    #[test]
+    fn appends_register_commands_to_existing_child_objects_block() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let resource_uuid = "22222222-2222-4222-8222-222222222222";
+        let command_uuid = "33333333-3333-4333-8333-333333333333";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaad,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaae,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaf,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8,\r\n{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Rates\",{{1,\"en\",\"Rates\"}},\"\"}}\r\n}},\
+{{b64d9a41-1642-11d6-a3c7-0050bae0a776,1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{resource_uuid}}},\"Value\",{{1,\"en\",\"Value\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}},\
+{{9,\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Import\",{{1,\"en\",\"Import\"}},\"\"}}\r\n}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("InformationRegisters/Rates.xml")
+        );
+        assert_eq!(xml.matches("<ChildObjects>").count(), 1);
+        assert!(xml.contains(r#"<Resource uuid="22222222-2222-4222-8222-222222222222">"#));
+        assert!(xml.contains(r#"<Command uuid="33333333-3333-4333-8333-333333333333">"#));
+        assert!(xml.find("<Resource").unwrap() < xml.find("<Command").unwrap());
     }
 
     #[test]
