@@ -15148,6 +15148,24 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
             entries.push((type_id, format!("cfg:EnumRef.{}", header.name)));
         }
     }
+    if object_code == 21 {
+        push_indexed_register_generated_type_entries(
+            &mut entries,
+            &fields,
+            1,
+            "CalculationRegister",
+            &header.name,
+        );
+    }
+    if object_code == 22 && header_index != Some(1) && field_is_unsigned_integer(fields.get(1)) {
+        push_indexed_register_generated_type_entries(
+            &mut entries,
+            &fields,
+            2,
+            "AccountingRegister",
+            &header.name,
+        );
+    }
     if object_code == 28 {
         push_indexed_generated_type(
             &mut entries,
@@ -15294,6 +15312,24 @@ fn push_indexed_generated_type(
 ) {
     if let Some(type_id) = fields.get(index).copied().and_then(parse_uuid_field) {
         entries.push((type_id, format!("cfg:{generated_type}.{name}")));
+    }
+}
+
+fn push_indexed_register_generated_type_entries(
+    entries: &mut Vec<(String, String)>,
+    fields: &[&str],
+    start_index: usize,
+    type_prefix: &str,
+    name: &str,
+) {
+    for (offset, suffix) in register_generated_type_suffixes() {
+        push_indexed_generated_type(
+            entries,
+            fields,
+            start_index + offset,
+            &format!("{type_prefix}{suffix}"),
+            name,
+        );
     }
 }
 
@@ -16006,54 +16042,18 @@ fn parse_register_properties_from_text(
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
     let mut generated_types = Vec::new();
-    if kind == "AccumulationRegister" {
-        push_generated_type_entry(
+    let register_start_index = match kind {
+        "AccountingRegister" => Some(2),
+        "AccumulationRegister" | "CalculationRegister" => Some(1),
+        _ => None,
+    };
+    if let Some(start_index) = register_start_index {
+        push_register_generated_type_entries(
             &mut generated_types,
             &fields,
-            1,
-            2,
-            &format!("AccumulationRegisterObject.{}", header.name),
-            "Object",
-        );
-        push_generated_type_entry(
-            &mut generated_types,
-            &fields,
-            3,
-            4,
-            &format!("AccumulationRegisterManager.{}", header.name),
-            "Manager",
-        );
-        push_generated_type_entry(
-            &mut generated_types,
-            &fields,
-            5,
-            6,
-            &format!("AccumulationRegisterSelection.{}", header.name),
-            "Selection",
-        );
-        push_generated_type_entry(
-            &mut generated_types,
-            &fields,
-            7,
-            8,
-            &format!("AccumulationRegisterList.{}", header.name),
-            "List",
-        );
-        push_generated_type_entry(
-            &mut generated_types,
-            &fields,
-            9,
-            10,
-            &format!("AccumulationRegisterRecordSet.{}", header.name),
-            "RecordSet",
-        );
-        push_generated_type_entry(
-            &mut generated_types,
-            &fields,
-            11,
-            12,
-            &format!("AccumulationRegisterRecordKey.{}", header.name),
-            "RecordKey",
+            start_index,
+            kind,
+            &header.name,
         );
     }
     if kind == "InformationRegister" {
@@ -16125,6 +16125,48 @@ fn parse_register_properties_from_text(
         generated_types,
         child_objects,
     })
+}
+
+fn push_register_generated_type_entries(
+    entries: &mut Vec<GeneratedTypeEntry>,
+    fields: &[&str],
+    start_index: usize,
+    type_prefix: &str,
+    name: &str,
+) {
+    for (offset, suffix) in register_generated_type_suffixes() {
+        push_generated_type_entry(
+            entries,
+            fields,
+            start_index + offset,
+            start_index + offset + 1,
+            &format!("{type_prefix}{suffix}.{name}"),
+            register_generated_type_category(suffix),
+        );
+    }
+}
+
+fn register_generated_type_suffixes() -> &'static [(usize, &'static str)] {
+    &[
+        (0, "Object"),
+        (2, "Manager"),
+        (4, "Selection"),
+        (6, "List"),
+        (8, "RecordSet"),
+        (10, "RecordKey"),
+    ]
+}
+
+fn register_generated_type_category(suffix: &str) -> &'static str {
+    match suffix {
+        "Object" => "Object",
+        "Manager" => "Manager",
+        "Selection" => "Selection",
+        "List" => "List",
+        "RecordSet" => "RecordSet",
+        "RecordKey" => "RecordKey",
+        _ => unreachable!("unknown register generated type suffix"),
+    }
 }
 
 fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Option<&'static str> {
@@ -30922,6 +30964,189 @@ mod tests {
                 xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap()
             );
         }
+    }
+
+    #[test]
+    fn extracts_accounting_and_calculation_register_generated_types_internal_info() {
+        let accounting_uuid = "11111111-1111-4111-8111-111111111111";
+        let accounting_object_type_id = "22222222-2222-4222-8222-222222222221";
+        let accounting_object_value_id = "22222222-2222-4222-8222-222222222222";
+        let accounting_manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let accounting_manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let accounting_selection_type_id = "44444444-4444-4444-8444-444444444441";
+        let accounting_selection_value_id = "44444444-4444-4444-8444-444444444442";
+        let accounting_list_type_id = "55555555-5555-4555-8555-555555555551";
+        let accounting_list_value_id = "55555555-5555-4555-8555-555555555552";
+        let accounting_record_set_type_id = "66666666-6666-4666-8666-666666666661";
+        let accounting_record_set_value_id = "66666666-6666-4666-8666-666666666662";
+        let accounting_key_type_id = "77777777-7777-4777-8777-777777777771";
+        let accounting_key_value_id = "77777777-7777-4777-8777-777777777772";
+        let accounting_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,22,{accounting_object_type_id},{accounting_object_value_id},\
+{accounting_manager_type_id},{accounting_manager_value_id},\
+{accounting_selection_type_id},{accounting_selection_value_id},\
+{accounting_list_type_id},{accounting_list_value_id},\
+{accounting_record_set_type_id},{accounting_record_set_value_id},\
+{accounting_key_type_id},{accounting_key_value_id},\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{accounting_uuid}}},\"Ledger\",{{1,\"en\",\"Ledger\"}},\"\"}}\r\n}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let calculation_uuid = "88888888-8888-4888-8888-888888888888";
+        let calculation_object_type_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+        let calculation_object_value_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+        let calculation_manager_type_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+        let calculation_manager_value_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+        let calculation_selection_type_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let calculation_selection_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+        let calculation_list_type_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
+        let calculation_list_value_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2";
+        let calculation_record_set_type_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
+        let calculation_record_set_value_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2";
+        let calculation_key_type_id = "ffffffff-ffff-4fff-8fff-fffffffffff1";
+        let calculation_key_value_id = "ffffffff-ffff-4fff-8fff-fffffffffff2";
+        let calculation_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{21,{calculation_object_type_id},{calculation_object_value_id},\
+{calculation_manager_type_id},{calculation_manager_value_id},\
+{calculation_selection_type_id},{calculation_selection_value_id},\
+{calculation_list_type_id},{calculation_list_value_id},\
+{calculation_record_set_type_id},{calculation_record_set_value_id},\
+{calculation_key_type_id},{calculation_key_value_id},\r\n\
+{{3,\r\n{{1,0,{calculation_uuid}}},\"Premiums\",{{1,\"en\",\"Premiums\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let accounting = extract_metadata_source_xml_with_refs(
+            &accounting_blob,
+            accounting_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let accounting_xml = String::from_utf8(accounting.xml).unwrap();
+
+        assert_eq!(
+            accounting.relative_path,
+            PathBuf::from("AccountingRegisters/Ledger.xml")
+        );
+        assert_eq!(accounting_xml.matches("<xr:GeneratedType").count(), 6);
+        assert!(accounting_xml.contains(
+            r#"<xr:GeneratedType name="AccountingRegisterObject.Ledger" category="Object">"#
+        ));
+        assert!(accounting_xml.contains(
+            r#"<xr:GeneratedType name="AccountingRegisterManager.Ledger" category="Manager">"#
+        ));
+        assert!(accounting_xml.contains(
+            r#"<xr:GeneratedType name="AccountingRegisterSelection.Ledger" category="Selection">"#
+        ));
+        assert!(accounting_xml.contains(
+            r#"<xr:GeneratedType name="AccountingRegisterList.Ledger" category="List">"#
+        ));
+        assert!(accounting_xml.contains(
+            r#"<xr:GeneratedType name="AccountingRegisterRecordSet.Ledger" category="RecordSet">"#
+        ));
+        assert!(accounting_xml.contains(
+            r#"<xr:GeneratedType name="AccountingRegisterRecordKey.Ledger" category="RecordKey">"#
+        ));
+        assert!(accounting_xml.contains(&format!(
+            "<xr:TypeId>{accounting_object_type_id}</xr:TypeId>"
+        )));
+        assert!(accounting_xml.contains(&format!(
+            "<xr:ValueId>{accounting_record_set_value_id}</xr:ValueId>"
+        )));
+        assert!(
+            accounting_xml.find("\t\t<InternalInfo>").unwrap()
+                < accounting_xml.find("\t\t<Properties>").unwrap()
+        );
+
+        let calculation = extract_metadata_source_xml_with_refs(
+            &calculation_blob,
+            calculation_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let calculation_xml = String::from_utf8(calculation.xml).unwrap();
+
+        assert_eq!(
+            calculation.relative_path,
+            PathBuf::from("CalculationRegisters/Premiums.xml")
+        );
+        assert_eq!(calculation_xml.matches("<xr:GeneratedType").count(), 6);
+        assert!(calculation_xml.contains(
+            r#"<xr:GeneratedType name="CalculationRegisterObject.Premiums" category="Object">"#
+        ));
+        assert!(calculation_xml.contains(
+            r#"<xr:GeneratedType name="CalculationRegisterManager.Premiums" category="Manager">"#
+        ));
+        assert!(calculation_xml.contains(
+            r#"<xr:GeneratedType name="CalculationRegisterSelection.Premiums" category="Selection">"#
+        ));
+        assert!(calculation_xml.contains(
+            r#"<xr:GeneratedType name="CalculationRegisterList.Premiums" category="List">"#
+        ));
+        assert!(calculation_xml.contains(
+            r#"<xr:GeneratedType name="CalculationRegisterRecordSet.Premiums" category="RecordSet">"#
+        ));
+        assert!(calculation_xml.contains(
+            r#"<xr:GeneratedType name="CalculationRegisterRecordKey.Premiums" category="RecordKey">"#
+        ));
+        assert!(calculation_xml.contains(&format!(
+            "<xr:TypeId>{calculation_object_type_id}</xr:TypeId>"
+        )));
+        assert!(calculation_xml.contains(&format!(
+            "<xr:ValueId>{calculation_key_value_id}</xr:ValueId>"
+        )));
+        assert!(
+            calculation_xml.find("\t\t<InternalInfo>").unwrap()
+                < calculation_xml.find("\t\t<Properties>").unwrap()
+        );
+
+        let rows = vec![
+            ConfigRow {
+                file_name: accounting_uuid.to_string(),
+                part_no: 0,
+                data_size: accounting_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&accounting_blob),
+            },
+            ConfigRow {
+                file_name: calculation_uuid.to_string(),
+                part_no: 0,
+                data_size: calculation_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&calculation_blob),
+            },
+        ];
+        let index = build_metadata_type_index(&rows);
+
+        assert_eq!(
+            index.get(accounting_object_type_id).map(String::as_str),
+            Some("cfg:AccountingRegisterObject.Ledger")
+        );
+        assert_eq!(
+            index.get(accounting_record_set_type_id).map(String::as_str),
+            Some("cfg:AccountingRegisterRecordSet.Ledger")
+        );
+        assert_eq!(
+            index.get(calculation_manager_type_id).map(String::as_str),
+            Some("cfg:CalculationRegisterManager.Premiums")
+        );
+        assert_eq!(
+            index.get(calculation_key_type_id).map(String::as_str),
+            Some("cfg:CalculationRegisterRecordKey.Premiums")
+        );
     }
 
     #[test]
