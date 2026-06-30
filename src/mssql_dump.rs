@@ -15423,6 +15423,7 @@ struct RegisterProperties {
 struct MetadataChildObject {
     tag: &'static str,
     header: MetadataHeader,
+    value_types: Vec<ConstantValueType>,
     child_objects: Vec<MetadataChildObject>,
 }
 
@@ -16467,15 +16468,21 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Role" {
         format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     } else if kind == "Catalog" {
-        let catalog = parse_catalog_properties_from_text(text, uuid, form_refs, template_refs)?;
+        let catalog =
+            parse_catalog_properties_from_text(text, uuid, type_index, form_refs, template_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
     } else if kind == "Report" {
         let report =
             parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
     } else if kind == "DataProcessor" {
-        let data_processor =
-            parse_data_processor_properties_from_text(text, uuid, form_refs, template_refs)?;
+        let data_processor = parse_data_processor_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            form_refs,
+            template_refs,
+        )?;
         format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
         let document =
@@ -17183,6 +17190,7 @@ fn parse_attribute_tabular_section_child_objects(
     owner_name: &str,
     text: &str,
     owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
 ) -> Vec<MetadataChildObject> {
     let mut roots = Vec::<MetadataChildObject>::new();
     let mut tabular_section_indexes = BTreeMap::<String, usize>::new();
@@ -17202,6 +17210,11 @@ fn parse_attribute_tabular_section_child_objects(
         };
         let child = MetadataChildObject {
             tag,
+            value_types: if tag == "Attribute" {
+                parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index)
+            } else {
+                Vec::new()
+            },
             header,
             child_objects: Vec::new(),
         };
@@ -17230,6 +17243,43 @@ fn parse_attribute_tabular_section_child_objects(
     }
 
     roots
+}
+
+fn parse_metadata_child_value_types(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Vec<ConstantValueType> {
+    let Some((_, _, fields)) =
+        innermost_metadata_object_fields_around_header(text, marker_start, child_uuid)
+    else {
+        return Vec::new();
+    };
+
+    fields
+        .iter()
+        .filter_map(|field| parse_metadata_type_pattern_from_child_field(field, type_index))
+        .find(|value_types| !value_types.is_empty())
+        .unwrap_or_default()
+}
+
+fn parse_metadata_type_pattern_from_child_field(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    if let Some(value_types) = parse_metadata_type_pattern(field, type_index) {
+        return Some(value_types);
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(1)
+        .filter_map(|field| parse_metadata_type_pattern(field, type_index))
+        .next()
 }
 
 fn attribute_tabular_section_child_object_tag(
@@ -17286,6 +17336,7 @@ fn attribute_tabular_section_child_object_tag(
 fn parse_catalog_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<CatalogProperties> {
@@ -17397,6 +17448,7 @@ fn parse_catalog_properties_from_text(
             &header.name,
             text,
             uuid,
+            type_index,
         ),
         child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_catalog_template_names_in_text_order(
@@ -17684,6 +17736,7 @@ fn parse_settings_storage_properties_from_text(
 fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DataProcessorProperties> {
@@ -17724,6 +17777,7 @@ fn parse_data_processor_properties_from_text(
             &header.name,
             text,
             uuid,
+            type_index,
         ),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_data_processor_template_names_in_text_order(
@@ -22264,6 +22318,7 @@ fn push_metadata_header_child_object_xml(
         &MetadataChildObject {
             tag,
             header: header.clone(),
+            value_types: Vec::new(),
             child_objects: Vec::new(),
         },
     );
@@ -22285,6 +22340,12 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
         xml.push_str(&format!(
             "\t\t\t\t\t<Comment>{}</Comment>\r\n",
             escape_xml_element_text(&child.header.comment)
+        ));
+    }
+    if !child.value_types.is_empty() {
+        xml.push_str(&format_metadata_types_xml_with_indent(
+            &child.value_types,
+            "\t\t\t\t\t",
         ));
     }
     xml.push_str("\t\t\t\t</Properties>\r\n");
@@ -22321,6 +22382,12 @@ fn push_nested_metadata_child_object_xml(
         xml.push_str(&format!(
             "{tab}\t\t<Comment>{}</Comment>\r\n",
             escape_xml_element_text(&child.header.comment)
+        ));
+    }
+    if !child.value_types.is_empty() {
+        xml.push_str(&format_metadata_types_xml_with_indent(
+            &child.value_types,
+            &format!("{tab}\t\t"),
         ));
     }
     xml.push_str(&format!("{tab}\t</Properties>\r\n"));
@@ -23262,10 +23329,19 @@ fn push_integration_service_channel_xml(
 }
 
 fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
-    let mut xml = "\t\t\t<Type>\r\n".to_string();
+    format_metadata_types_xml_with_indent(value_types, "\t\t\t")
+}
+
+fn format_metadata_types_xml_with_indent(
+    value_types: &[ConstantValueType],
+    indent: &str,
+) -> String {
+    let nested = format!("{indent}\t");
+    let nested2 = format!("{nested}\t");
+    let mut xml = format!("{indent}<Type>\r\n");
     for value_type in value_types {
         xml.push_str(&format!(
-            "\t\t\t\t<v8:Type>{}</v8:Type>\r\n",
+            "{nested}<v8:Type>{}</v8:Type>\r\n",
             metadata_type_xml_name(value_type)
         ));
     }
@@ -23278,20 +23354,17 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         } => Some((*digits, *fraction_digits, *allowed_sign_flag)),
         _ => None,
     }) {
-        xml.push_str("\t\t\t\t<v8:NumberQualifiers>\r\n");
+        xml.push_str(&format!("{nested}<v8:NumberQualifiers>\r\n"));
+        xml.push_str(&format!("{nested2}<v8:Digits>{}</v8:Digits>\r\n", number.0));
         xml.push_str(&format!(
-            "\t\t\t\t\t<v8:Digits>{}</v8:Digits>\r\n",
-            number.0
-        ));
-        xml.push_str(&format!(
-            "\t\t\t\t\t<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
+            "{nested2}<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
             number.1
         ));
         xml.push_str(&format!(
-            "\t\t\t\t\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            "{nested2}<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
             number_allowed_sign_xml(number.2)
         ));
-        xml.push_str("\t\t\t\t</v8:NumberQualifiers>\r\n");
+        xml.push_str(&format!("{nested}</v8:NumberQualifiers>\r\n"));
     }
 
     if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
@@ -23304,16 +23377,13 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         )),
         _ => None,
     }) {
-        xml.push_str("\t\t\t\t<v8:StringQualifiers>\r\n");
+        xml.push_str(&format!("{nested}<v8:StringQualifiers>\r\n"));
+        xml.push_str(&format!("{nested2}<v8:Length>{}</v8:Length>\r\n", string.0));
         xml.push_str(&format!(
-            "\t\t\t\t\t<v8:Length>{}</v8:Length>\r\n",
-            string.0
-        ));
-        xml.push_str(&format!(
-            "\t\t\t\t\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            "{nested2}<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
             string_allowed_length_xml(string.1)
         ));
-        xml.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
+        xml.push_str(&format!("{nested}</v8:StringQualifiers>\r\n"));
     }
 
     if let Some(date_fractions) = value_types.iter().find_map(|value_type| {
@@ -23324,13 +23394,13 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
         }
     }) {
         xml.push_str(&format!(
-            "\t\t\t\t<v8:DateQualifiers>\r\n\
-\t\t\t\t\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
-\t\t\t\t</v8:DateQualifiers>\r\n"
+            "{nested}<v8:DateQualifiers>\r\n\
+{nested2}<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
+{nested}</v8:DateQualifiers>\r\n"
         ));
     }
 
-    xml.push_str("\t\t\t</Type>\r\n");
+    xml.push_str(&format!("{indent}</Type>\r\n"));
     xml
 }
 
@@ -38376,6 +38446,81 @@ mod tests {
     }
 
     #[test]
+    fn extracts_data_processor_child_attribute_types() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let catalog_ref_type_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{27,\r\n{{2,0,{{\"Pattern\",{{\"S\",80,1}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"FileName\",{{1,\"en\",\"File name\"}},\"\"}}\r\n}},\
+{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Rows\",{{1,\"en\",\"Rows\"}},\"\"}},\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{27,\r\n{{2,0,{{\"Pattern\",{{\"#\",{catalog_ref_type_id}}}}}}},\
+{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Product\",{{1,\"en\",\"Product\"}},\"\"}}\r\n}}\
+}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let type_index = BTreeMap::from([(
+            catalog_ref_type_id.to_string(),
+            "cfg:CatalogRef.Products".to_string(),
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+        assert!(attribute_xml.contains("<Type>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<v8:Type>xs:string</v8:Type>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<v8:Length>80</v8:Length>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"),
+            "{xml}"
+        );
+
+        let tabular_start = xml
+            .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+            .unwrap();
+        let tabular_end = tabular_start + xml[tabular_start..].find("</TabularSection>").unwrap();
+        let tabular_xml = &xml[tabular_start..tabular_end];
+        assert!(
+            tabular_xml.contains("<v8:Type>cfg:CatalogRef.Products</v8:Type>"),
+            "{xml}"
+        );
+        assert!(
+            tabular_xml.find("<Comment/>").unwrap() < tabular_xml.find("<Type>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
     fn extracts_catalog_generated_types_to_metadata_xml() {
         let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let object_type_id = "11111111-1111-4111-8111-111111111111";
@@ -38719,6 +38864,7 @@ mod tests {
         let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
         let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
         let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let catalog_ref_type_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
         let zero_uuid = "00000000-0000-0000-0000-000000000000";
         let catalog_blob = deflate_for_test(
             format!(
@@ -38731,19 +38877,25 @@ mod tests {
 {zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
 55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
 0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{{5,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\"}}\r\n}},\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,0}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\"}}\r\n}},\
 {{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
 {{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
-{{5,\r\n{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Price\",{{1,\"en\",\"Price\"}},\"\"}}\r\n}}\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"#\",{catalog_ref_type_id}}}}}}},\
+{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Price\",{{1,\"en\",\"Price\"}},\"\"}}\r\n}}\
 }}}}\r\n}}"
             )
             .as_bytes(),
         );
+        let type_index = BTreeMap::from([(
+            catalog_ref_type_id.to_string(),
+            "cfg:CatalogRef.Prices".to_string(),
+        )]);
 
         let extracted = extract_metadata_source_xml(
             &catalog_blob,
             catalog_uuid,
-            &BTreeMap::new(),
+            &type_index,
             &BTreeMap::new(),
             &BTreeMap::new(),
         )
@@ -38758,6 +38910,8 @@ mod tests {
         assert!(xml.contains(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#));
         assert!(xml.contains(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#));
         assert!(xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "{xml}");
+        assert!(xml.contains("<v8:Length>20</v8:Length>"), "{xml}");
         assert!(
             xml.find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
                 .unwrap()
@@ -38773,6 +38927,10 @@ mod tests {
         let tabular_xml = &xml[tabular_start..tabular_end];
         assert!(tabular_xml.contains("<ChildObjects>"), "{xml}");
         assert!(tabular_xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
+        assert!(
+            tabular_xml.contains("<v8:Type>cfg:CatalogRef.Prices</v8:Type>"),
+            "{xml}"
+        );
     }
 
     #[test]
