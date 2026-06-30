@@ -2458,7 +2458,18 @@ impl MoxelFormat {
     }
 }
 
-struct CommandInterfaceEntry {
+struct CommandInterface {
+    commands_order: Vec<CommandInterfaceOrderEntry>,
+    groups_order: Vec<String>,
+    commands_visibility: Vec<CommandInterfaceVisibilityEntry>,
+}
+
+struct CommandInterfaceOrderEntry {
+    name: String,
+    command_group: String,
+}
+
+struct CommandInterfaceVisibilityEntry {
     name: String,
     common: bool,
 }
@@ -3406,15 +3417,75 @@ fn parse_command_interface_blob(
     bytes: &[u8],
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
-) -> Option<Vec<CommandInterfaceEntry>> {
+) -> Option<CommandInterface> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
     if fields.first()?.trim() != "7" {
         return None;
     }
+
+    parse_command_interface_order_fields(&fields, command_refs, metadata_refs)
+        .or_else(|| parse_command_interface_visibility_fields(&fields, command_refs, metadata_refs))
+}
+
+fn parse_command_interface_order_fields(
+    fields: &[&str],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
+    if fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(4)?.trim().parse::<usize>().ok()?;
+    let default_group_uuid = fields.get(5)?.trim();
+    if !is_uuid_text(default_group_uuid) {
+        return None;
+    }
+    let mut commands_order = Vec::with_capacity(count);
+    let mut groups_order = Vec::<String>::new();
+    let mut index = 6usize;
+    for _ in 0..count {
+        let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
+        index += 1;
+        let code = command_ref.first()?.trim();
+        let uuid = command_ref.get(1).map(|value| value.trim())?;
+        if !code.chars().all(|ch| ch.is_ascii_digit()) || !is_uuid_text(uuid) {
+            return None;
+        }
+        let group_uuid = match fields.get(index)?.trim() {
+            "0" => default_group_uuid,
+            value => value,
+        };
+        index += 1;
+        if !is_uuid_text(group_uuid) {
+            return None;
+        }
+        let name = command_interface_command_name(code, uuid, command_refs, metadata_refs);
+        let command_group = command_interface_group_name(group_uuid);
+        if !groups_order.iter().any(|group| group == &command_group) {
+            groups_order.push(command_group.clone());
+        }
+        commands_order.push(CommandInterfaceOrderEntry {
+            name,
+            command_group,
+        });
+    }
+
+    Some(CommandInterface {
+        commands_order,
+        groups_order,
+        commands_visibility: Vec::new(),
+    })
+}
+
+fn parse_command_interface_visibility_fields(
+    fields: &[&str],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
     let count = fields.get(2)?.trim().parse::<usize>().ok()?;
-    let mut entries = Vec::with_capacity(count);
+    let mut commands_visibility = Vec::with_capacity(count);
     let mut index = 3usize;
     for _ in 0..count {
         let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
@@ -3433,10 +3504,14 @@ fn parse_command_interface_blob(
         } else {
             code.to_string()
         };
-        entries.push(CommandInterfaceEntry { name, common });
+        commands_visibility.push(CommandInterfaceVisibilityEntry { name, common });
     }
 
-    Some(entries)
+    Some(CommandInterface {
+        commands_order: Vec::new(),
+        groups_order: Vec::new(),
+        commands_visibility,
+    })
 }
 
 fn parse_command_interface_common_flag(value: &str) -> Option<bool> {
@@ -3876,6 +3951,10 @@ fn command_interface_standard_command(kind: &str) -> Option<&'static str> {
         | "Task" => Some("OpenList"),
         _ => None,
     }
+}
+
+fn command_interface_group_name(uuid: &str) -> String {
+    common_command_group_name(uuid).unwrap_or(uuid).to_string()
 }
 
 fn parse_role_rights_blob(
@@ -4824,24 +4903,50 @@ fn predefined_string_allowed_length_xml(value: u8) -> &'static str {
     }
 }
 
-fn format_command_interface_xml(entries: &[CommandInterfaceEntry]) -> String {
+fn format_command_interface_xml(command_interface: &CommandInterface) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<CommandInterface xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
-\t<CommandsVisibility>\r\n",
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<CommandInterface xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n",
     );
-    for entry in entries {
-        xml.push_str(&format!(
-            "\t\t<Command name=\"{}\">\r\n\
+    if !command_interface.commands_order.is_empty() {
+        xml.push_str("\t<CommandsOrder>\r\n");
+        for entry in &command_interface.commands_order {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\">\r\n\
+\t\t\t<CommandGroup>{}</CommandGroup>\r\n\
+\t\t</Command>\r\n",
+                escape_xml_text(&entry.name),
+                escape_xml_text(&entry.command_group)
+            ));
+        }
+        xml.push_str("\t</CommandsOrder>\r\n");
+    }
+    if !command_interface.groups_order.is_empty() {
+        xml.push_str("\t<GroupsOrder>\r\n");
+        for group in &command_interface.groups_order {
+            xml.push_str(&format!(
+                "\t\t<Group>{}</Group>\r\n",
+                escape_xml_text(group)
+            ));
+        }
+        xml.push_str("\t</GroupsOrder>\r\n");
+    }
+    if !command_interface.commands_visibility.is_empty() {
+        xml.push_str("\t<CommandsVisibility>\r\n");
+        for entry in &command_interface.commands_visibility {
+            xml.push_str(&format!(
+                "\t\t<Command name=\"{}\">\r\n\
 \t\t\t<Visibility>\r\n\
 \t\t\t\t<xr:Common>{}</xr:Common>\r\n\
 \t\t\t</Visibility>\r\n\
 \t\t</Command>\r\n",
-            escape_xml_text(&entry.name),
-            xml_bool(entry.common)
-        ));
+                escape_xml_text(&entry.name),
+                xml_bool(entry.common)
+            ));
+        }
+        xml.push_str("\t</CommandsVisibility>\r\n");
     }
-    xml.push_str("\t</CommandsVisibility>\r\n</CommandInterface>\r\n");
+    xml.push_str("</CommandInterface>");
     xml
 }
 
@@ -13660,6 +13765,7 @@ fn parse_common_command_parameter_type_names(
 }
 
 fn common_command_group_name(uuid: &str) -> Option<&'static str> {
+    // Platform standard command group UUIDs; these are not configuration-specific ids.
     match uuid.to_ascii_lowercase().as_str() {
         "77ea1b8f-dd79-4717-9dba-5628e7f348cf" => Some("NavigationPanelOrdinary"),
         "bc80566a-86a5-4e87-acd4-872239385a2e" => Some("NavigationPanelSeeAlso"),
@@ -22891,6 +22997,101 @@ mod tests {
         assert_eq!(
             body_row.source_asset_path.as_deref(),
             Some("Subsystems/Admin/Ext/CommandInterface.xml")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_subsystem_command_interface_order_to_source_layout() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let subsystem_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let document_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let navigation_panel_ordinary_uuid = "77ea1b8f-dd79-4717-9dba-5628e7f348cf";
+        let subsystem_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},1}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let catalog_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Customers\",{{1,\"en\",\"Customers\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let document_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let command_interface = deflate_for_test(
+            format!(
+                "{{7,0,0,1,2,{navigation_panel_ordinary_uuid},\r\n{{0,{catalog_uuid}}},{navigation_panel_ordinary_uuid},\r\n{{0,{document_uuid}}},0,1,1,{navigation_panel_ordinary_uuid},0}}"
+            )
+            .as_bytes(),
+        );
+        let rows = vec![
+            ConfigRow {
+                file_name: subsystem_uuid.to_string(),
+                part_no: 0,
+                data_size: subsystem_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&subsystem_metadata),
+            },
+            ConfigRow {
+                file_name: format!("{subsystem_uuid}.1"),
+                part_no: 0,
+                data_size: command_interface.len() as i64,
+                binary_hex: encode_hex_for_test(&command_interface),
+            },
+            ConfigRow {
+                file_name: catalog_uuid.to_string(),
+                part_no: 0,
+                data_size: catalog_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&catalog_metadata),
+            },
+            ConfigRow {
+                file_name: document_uuid.to_string(),
+                part_no: 0,
+                data_size: document_metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&document_metadata),
+            },
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+        assert_eq!(dumped.source_asset_rows, 1);
+        let path = root.join("Subsystems/Sales/Ext/CommandInterface.xml");
+        let bytes = fs::read(&path).unwrap();
+        assert!(bytes.starts_with(&[0xef, 0xbb, 0xbf]));
+        assert!(!bytes.ends_with(b"\r\n"));
+        let xml = String::from_utf8(bytes).unwrap();
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains("<CommandsOrder>"));
+        assert!(xml.contains(r#"<Command name="Catalog.Customers.StandardCommand.OpenList">"#));
+        assert!(xml.contains(r#"<Command name="Document.Invoice.StandardCommand.OpenList">"#));
+        assert_eq!(
+            xml.matches("<CommandGroup>NavigationPanelOrdinary</CommandGroup>")
+                .count(),
+            2
+        );
+        assert!(xml.contains("<GroupsOrder>"));
+        assert!(xml.contains("<Group>NavigationPanelOrdinary</Group>"));
+        assert!(!xml.contains("<CommandsVisibility>"));
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{subsystem_uuid}.1"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("Subsystems/Sales/Ext/CommandInterface.xml")
         );
 
         let _ = fs::remove_dir_all(root);
