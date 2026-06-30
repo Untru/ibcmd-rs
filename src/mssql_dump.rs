@@ -3229,7 +3229,10 @@ fn data_composition_current_config_prefix(xml: &str, position: usize) -> &'stati
         cursor = end + 1;
     }
 
-    if stack.iter().any(|entry| entry.name == "parameter") {
+    if stack
+        .iter()
+        .any(|entry| matches!(entry.name, "parameter" | "calculatedField"))
+    {
         "d4p1"
     } else if stack
         .iter()
@@ -33381,6 +33384,38 @@ mod tests {
         assert!(xml.contains(
             r#"<v8:Type xmlns:d6p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d6p1:CatalogRef.Номенклатура</v8:Type>"#
         ));
+        assert!(!xml.contains("<v8:TypeId>"));
+    }
+
+    #[test]
+    fn normalizes_dcs_calculated_field_type_id_with_parameter_current_config_prefix() {
+        let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+        let type_index = BTreeMap::from([(
+            type_id.to_string(),
+            "cfg:CatalogRef.Контрагенты".to_string(),
+        )]);
+        let raw = format!(
+            "\0\0\0\0\
+\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<calculatedField>\r\n\
+\t\t\t<dataPath>Контрагент</dataPath>\r\n\
+\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{type_id}</TypeId></valueType>\r\n\
+\t\t</calculatedField>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(
+            r#"<v8:Type xmlns:d4p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d4p1:CatalogRef.Контрагенты</v8:Type>"#
+        ));
+        assert!(!xml.contains("xmlns:d5p1="));
         assert!(!xml.contains("<v8:TypeId>"));
     }
 
