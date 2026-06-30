@@ -1554,6 +1554,7 @@ fn selected_metadata_source_reference_index_needs(
             Some(kind) if metadata_kind_needs_form_template_reference_indexes(kind) => {
                 needs.form_refs = true;
                 needs.template_refs = true;
+                needs.type_index = true;
             }
             _ => return None,
         }
@@ -36791,7 +36792,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_enum_metadata_requests_only_child_reference_indexes() {
+    fn selected_enum_metadata_requests_child_and_type_indexes() {
         let enum_metadata = MetadataTextRow {
             file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
             text: String::new(),
@@ -36817,11 +36818,36 @@ mod tests {
         assert!(!needs.field_refs);
         assert!(!needs.functional_option_refs);
         assert!(!needs.command_refs);
-        assert!(!needs.type_index);
+        assert!(needs.type_index);
     }
 
     #[test]
-    fn selected_task_metadata_requests_child_reference_indexes() {
+    fn selected_simple_template_owner_metadata_requests_type_index_for_dcs_template_bodies() {
+        let register_metadata = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            text: String::new(),
+            object_code: Some(28),
+            header: Some(MetadataHeader {
+                uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                name: "Stock".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("AccumulationRegister".to_string()),
+            folder: Some("AccumulationRegisters"),
+        };
+
+        let needs = selected_metadata_source_reference_index_needs(&[register_metadata])
+            .expect("accumulation register selected metadata needs");
+
+        assert!(needs.form_refs);
+        assert!(needs.template_refs);
+        assert!(needs.type_index);
+    }
+
+    #[test]
+    fn selected_task_metadata_requests_child_and_type_indexes() {
         let task_metadata = MetadataTextRow {
             file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
             text: String::new(),
@@ -36847,11 +36873,11 @@ mod tests {
         assert!(!needs.field_refs);
         assert!(!needs.functional_option_refs);
         assert!(!needs.command_refs);
-        assert!(!needs.type_index);
+        assert!(needs.type_index);
     }
 
     #[test]
-    fn selected_exchange_plan_metadata_requests_child_reference_indexes() {
+    fn selected_exchange_plan_metadata_requests_child_and_type_indexes() {
         let exchange_plan_metadata = MetadataTextRow {
             file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
             text: String::new(),
@@ -36877,11 +36903,11 @@ mod tests {
         assert!(!needs.field_refs);
         assert!(!needs.functional_option_refs);
         assert!(!needs.command_refs);
-        assert!(!needs.type_index);
+        assert!(needs.type_index);
     }
 
     #[test]
-    fn selected_document_journal_metadata_requests_child_reference_indexes() {
+    fn selected_document_journal_metadata_requests_child_and_type_indexes() {
         let journal_metadata = MetadataTextRow {
             file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
             text: String::new(),
@@ -36907,7 +36933,7 @@ mod tests {
         assert!(!needs.field_refs);
         assert!(!needs.functional_option_refs);
         assert!(!needs.command_refs);
-        assert!(!needs.type_index);
+        assert!(needs.type_index);
     }
 
     #[test]
