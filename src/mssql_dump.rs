@@ -5057,6 +5057,10 @@ fn parse_configuration_properties_from_text(
         script_variant: fields
             .get(13)
             .and_then(|field| configuration_script_variant_xml(field.trim())),
+        default_roles: fields
+            .get(39)
+            .map(|field| parse_configuration_default_roles(field, object_refs))
+            .unwrap_or_default(),
         vendor: fields
             .get(14)
             .and_then(|field| parse_1c_quoted_string(field.trim())),
@@ -5070,6 +5074,29 @@ fn parse_configuration_properties_from_text(
             .get(43)
             .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
     })
+}
+
+fn parse_configuration_default_roles(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return Vec::new();
+    };
+    let Some(count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .filter(|reference| reference.starts_with("Role."))
+        .collect()
 }
 
 fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
@@ -15471,6 +15498,7 @@ struct ConfigurationProperties {
     default_style: Option<String>,
     default_language: Option<String>,
     script_variant: Option<&'static str>,
+    default_roles: Vec<String>,
     vendor: Option<String>,
     version: Option<String>,
     update_catalog_address: Option<String>,
@@ -20296,6 +20324,16 @@ fn format_configuration_source_xml(
         properties.default_language.as_deref(),
     );
     push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
+    if !properties.default_roles.is_empty() {
+        insert.push_str("\t\t\t<DefaultRoles>\r\n");
+        for role in &properties.default_roles {
+            insert.push_str(&format!(
+                "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                escape_xml_element_text(role)
+            ));
+        }
+        insert.push_str("\t\t\t</DefaultRoles>\r\n");
+    }
     push_optional_simple_property_xml(&mut insert, "Vendor", properties.vendor.as_deref());
     push_optional_simple_property_xml(&mut insert, "Version", properties.version.as_deref());
     push_optional_simple_property_xml(
@@ -33845,6 +33883,81 @@ mod tests {
                         .find("<DefaultLanguage>Language.English</DefaultLanguage>")
                         .unwrap()
             );
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_default_role_refs() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let role_admin_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let role_user_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let mut fields = vec!["0".to_string(); 44];
+        fields[0] = "68".to_string();
+        fields[1] = format!(
+            "{{0,{{3,{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,{zero_uuid},0}}}}"
+        );
+        fields[2] = "\"\"".to_string();
+        fields[3] = "1".to_string();
+        fields[9] = zero_uuid.to_string();
+        fields[10] = zero_uuid.to_string();
+        fields[13] = "0".to_string();
+        fields[14] = "\"Vendor\"".to_string();
+        fields[15] = "\"1.2.3\"".to_string();
+        fields[16] = "\"\"".to_string();
+        fields[26] = "80327".to_string();
+        fields[39] = format!(
+            "{{0,2,{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{role_admin_uuid}}}}},{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{role_user_uuid}}}}}}}"
+        );
+        fields[43] = "80320".to_string();
+        let plain = format!(
+            "{{2,{{{uuid}}},1,{{9cd510cd-abfc-11d4-9434-004095e12fc7,{{1,{{{}}}}}}}}}",
+            fields.join(",")
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs = BTreeMap::from([
+            (
+                role_admin_uuid.to_string(),
+                "Role.Administrators".to_string(),
+            ),
+            (role_user_uuid.to_string(), "Role.Users".to_string()),
+        ]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<DefaultRoles>"));
+            assert!(
+                xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Role.Administrators</xr:Item>"#)
+            );
+            assert!(xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Role.Users</xr:Item>"#));
+            assert!(
+                xml.find("<ScriptVariant>Russian</ScriptVariant>").unwrap()
+                    < xml.find("<DefaultRoles>").unwrap()
+            );
+            assert!(
+                xml.find("</DefaultRoles>").unwrap() < xml.find("<Vendor>Vendor</Vendor>").unwrap()
+            );
+            assert!(!xml.contains(role_admin_uuid));
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
