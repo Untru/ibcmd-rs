@@ -14340,6 +14340,10 @@ struct ReportProperties {
     child_templates: Vec<String>,
 }
 
+struct DocumentProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
@@ -15060,6 +15064,9 @@ fn extract_metadata_source_xml_from_text_row(
         let report =
             parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
         format_report_source_xml(&header, &report, source_version).into_bytes()
+    } else if kind == "Document" {
+        let document = parse_document_properties_from_text(text, uuid)?;
+        format_document_source_xml(&header, &document, source_version).into_bytes()
     } else if kind == "Enum" {
         let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
         format_enum_source_xml(&header, &enumeration, source_version).into_bytes()
@@ -15512,6 +15519,42 @@ fn parse_report_properties_from_text(
         explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
         child_templates: parse_report_child_templates_from_text(text, template_refs),
     })
+}
+
+fn parse_document_properties_from_text(text: &str, uuid: &str) -> Option<DocumentProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("40") {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("DocumentObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("DocumentRef.{}", header.name),
+        "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        26,
+        27,
+        &format!("DocumentManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(DocumentProperties { generated_types })
 }
 
 fn parse_enum_properties_from_text(
@@ -17964,22 +18007,9 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         uuid = escape_xml_text(&header.uuid),
     );
 
-    if !catalog.generated_types.is_empty() {
-        xml.push_str("\t\t<InternalInfo>\r\n");
-        for generated_type in &catalog.generated_types {
-            xml.push_str(&format!(
-                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
-\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
-\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
-\t\t\t</xr:GeneratedType>\r\n",
-                escape_xml_text(&generated_type.name),
-                escape_xml_text(generated_type.category),
-                escape_xml_text(&generated_type.type_id),
-                escape_xml_text(&generated_type.value_id)
-            ));
-        }
-        xml.push_str("\t\t</InternalInfo>\r\n");
-    }
+    xml.push_str(&format_generated_types_internal_info_xml(
+        &catalog.generated_types,
+    ));
 
     xml.push_str("\t\t<Properties>\r\n");
     xml.push_str(&format!(
@@ -18196,22 +18226,9 @@ fn format_report_source_xml(
         escape_xml_text(&header.uuid),
     );
 
-    if !report.generated_types.is_empty() {
-        xml.push_str("\t\t<InternalInfo>\r\n");
-        for generated_type in &report.generated_types {
-            xml.push_str(&format!(
-                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
-\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
-\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
-\t\t\t</xr:GeneratedType>\r\n",
-                escape_xml_text(&generated_type.name),
-                escape_xml_text(generated_type.category),
-                escape_xml_text(&generated_type.type_id),
-                escape_xml_text(&generated_type.value_id)
-            ));
-        }
-        xml.push_str("\t\t</InternalInfo>\r\n");
-    }
+    xml.push_str(&format_generated_types_internal_info_xml(
+        &report.generated_types,
+    ));
 
     xml.push_str("\t\t<Properties>\r\n");
     xml.push_str(&format!(
@@ -18298,6 +18315,19 @@ fn format_report_source_xml(
     xml
 }
 
+fn format_document_source_xml(
+    header: &MetadataHeader,
+    document: &DocumentProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Document", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&document.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    xml
+}
+
 fn format_enum_source_xml(
     header: &MetadataHeader,
     enumeration: &EnumProperties,
@@ -18317,22 +18347,9 @@ fn format_enum_source_xml(
         escape_xml_text(&header.uuid),
     );
 
-    if !enumeration.generated_types.is_empty() {
-        xml.push_str("\t\t<InternalInfo>\r\n");
-        for generated_type in &enumeration.generated_types {
-            xml.push_str(&format!(
-                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
-\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
-\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
-\t\t\t</xr:GeneratedType>\r\n",
-                escape_xml_text(&generated_type.name),
-                escape_xml_text(generated_type.category),
-                escape_xml_text(&generated_type.type_id),
-                escape_xml_text(&generated_type.value_id)
-            ));
-        }
-        xml.push_str("\t\t</InternalInfo>\r\n");
-    }
+    xml.push_str(&format_generated_types_internal_info_xml(
+        &enumeration.generated_types,
+    ));
 
     xml.push_str("\t\t<Properties>\r\n");
     xml.push_str(&format!(
@@ -18443,6 +18460,27 @@ fn format_enum_source_xml(
     }
 
     xml.push_str("\t</Enum>\r\n</MetaDataObject>");
+    xml
+}
+
+fn format_generated_types_internal_info_xml(generated_types: &[GeneratedTypeEntry]) -> String {
+    if generated_types.is_empty() {
+        return String::new();
+    }
+    let mut xml = "\t\t<InternalInfo>\r\n".to_string();
+    for generated_type in generated_types {
+        xml.push_str(&format!(
+            "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+            escape_xml_text(&generated_type.name),
+            escape_xml_text(generated_type.category),
+            escape_xml_text(&generated_type.type_id),
+            escape_xml_text(&generated_type.value_id)
+        ));
+    }
+    xml.push_str("\t\t</InternalInfo>\r\n");
     xml
 }
 
@@ -30690,6 +30728,65 @@ mod tests {
             index.get(exchange_ref_type_id).map(String::as_str),
             Some("cfg:ExchangePlanRef.Sync")
         );
+    }
+
+    #[test]
+    fn extracts_document_generated_types_to_metadata_xml() {
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let zero_fields = std::iter::repeat("0")
+            .take(20)
+            .collect::<Vec<_>>()
+            .join(",");
+        let document_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{zero_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &document_blob,
+            document_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Documents").join("Invoice.xml")
+        );
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(
+            xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="DocumentObject.Invoice" category="Object">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="DocumentRef.Invoice" category="Ref">"#));
+        assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="DocumentManager.Invoice" category="Manager">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
     }
 
     #[test]
