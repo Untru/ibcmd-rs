@@ -252,6 +252,7 @@ struct FormXmlChildItem {
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
     choice_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
+    restore_current_row: Option<bool>,
     row_picture_data_path: Option<String>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
     user_settings_group: Option<String>,
@@ -4379,6 +4380,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "UseAlternationRowColor"
                         | "DefaultItem"
                         | "ChoiceFoldersAndItems"
+                        | "RestoreCurrentRow"
                         | "RowPictureDataPath"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
@@ -4942,6 +4944,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &current_child_items,
                     )
+                    || path_ends_with_for_child_restore_current_row(&path, &current_child_items)
                     || path_ends_with_for_child_row_picture_data_path(&path, &current_child_items)
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
                     || path_ends_with_for_child_user_settings_group(&path, &current_child_items)
@@ -5392,6 +5395,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &current_child_items,
                     )
+                    || path_ends_with_for_child_restore_current_row(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
@@ -6757,6 +6761,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(parse_form_use_for_folders_and_items_xml(text_value.trim())?);
                         }
                     }
+                    "RestoreCurrentRow"
+                        if path_ends_with_for_child_restore_current_row(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.restore_current_row = Some(parse_form_xml_bool(
+                                "ChildItem/RestoreCurrentRow",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "RowPictureDataPath"
                         if path_ends_with_for_child_row_picture_data_path(
                             &path,
@@ -7289,6 +7306,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "UseAlternationRowColor"
                         | "DefaultItem"
                         | "ChoiceFoldersAndItems"
+                        | "RestoreCurrentRow"
                         | "RowPictureDataPath"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
@@ -7474,6 +7492,7 @@ fn parse_form_child_item_xml(
         use_alternation_row_color: None,
         default_item: None,
         choice_folders_and_items: None,
+        restore_current_row: None,
         row_picture_data_path: None,
         update_on_data_change: None,
         user_settings_group: None,
@@ -8218,6 +8237,16 @@ fn path_ends_with_for_child_choice_folders_and_items(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "ChoiceFoldersAndItems"])
+}
+
+fn path_ends_with_for_child_restore_current_row(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RestoreCurrentRow"])
 }
 
 fn path_ends_with_for_child_row_picture_data_path(
@@ -11229,6 +11258,21 @@ fn patch_form_layout_child_item_entry(
                     r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},{}}}"##,
                     form_use_for_folders_and_items_code(choice_folders_and_items)
                 ),
+            ));
+        }
+        if let Some(restore_current_row) = item.restore_current_row
+            && let Some(restore_range) =
+                form_layout_table_property_bag_value_range(text, fields, "12")
+            && is_form_property_bag_bool_value(&text[restore_range.clone()])
+        {
+            replacements.push((
+                restore_range.clone(),
+                if restore_current_row {
+                    r#"{"B",1}"#
+                } else {
+                    r#"{"B",0}"#
+                }
+                .to_string(),
             ));
         }
         if let Some(row_picture_data_path) = &item.row_picture_data_path
@@ -29301,6 +29345,32 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(r##"8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}"##)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_restore_current_row() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,12,{"B",1}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<RestoreCurrentRow>false</RestoreCurrentRow>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let properties = super::parse_form_xml_body_properties(xml)?;
+        assert_eq!(properties.child_items[0].restore_current_row, Some(false));
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"12,{"B",0}"#), "{}", parsed.layout);
+        assert!(!parsed.layout.contains(r#"12,{"B",1}"#));
         Ok(())
     }
 
