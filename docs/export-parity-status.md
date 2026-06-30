@@ -51,6 +51,11 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 41 Form.xml slice | unit-level packer verification | new `CheckBoxField` child items can carry explicit `ShowInHeader` through the extended layout shape |
+| Round 41 MXL template slice | unit-level extractor/packer verification | MOXCEL number-format string tables round-trip through `document/format/format/v8:item` references |
+| Round 41 workflow metadata slice | unit-level metadata XML verification | `BusinessProcess` and `Task` metadata XML emit `UseStandardCommands` from the native owner field |
+| Round 41 source staging readiness slice | unit-level readiness audit verification | `Predefined.xml` reports precise base-dependent row, nesting, editable-field and native-shape blockers |
+| Round 41 mssql_dump split slice | compile and focused fetch/timing verification | SQL/BCP fetch helpers are isolated in `src/mssql_dump/fetch.rs` without changing the dump API |
 | Round 40 Configuration.xml slice | unit-level metadata XML verification | root child object tags are detected through the shared metadata classifier for Language, XDTOPackage, SettingsStorage, ScheduledJob, CommandGroup, Style and DocumentNumerator in source XML 2.20/2.21 |
 | Round 40 Catalog metadata slice | unit-level metadata XML verification | `QuickChoice` and `ChoiceMode` are read from native root fields while older shorter blobs keep the previous defaults |
 | Round 40 Form.xml slice | unit-level extractor verification | `TextDocumentField` uses the shared read-only path and emits explicit `ReadOnly=true` |
@@ -523,5 +528,10 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #16 | Form.xml `TextDocumentField/ReadOnly=true` extraction | merged to `master` in round 40 |
 | #21 | sectionless Form body native skeleton readiness audit | merged to `master` in round 40 |
 | #19 | source-asset/Form CPU timing summary breakdown and existing evidence audit | merged to `master` in round 40 |
+| #16 | Form.xml new `CheckBoxField/ShowInHeader` generation | merged to `master` in round 41 |
+| #17 | MOXCEL number-format string table extraction and packing | merged to `master` in round 41 |
+| #18 | BusinessProcess/Task `UseStandardCommands` metadata XML | merged to `master` in round 41 |
+| #21 | precise `Predefined.xml` native-shape base dependency audit | merged to `master` in round 41 |
+| #24 | SQL/BCP fetch helpers extracted to `src/mssql_dump/fetch.rs` | merged to `master` in round 41 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

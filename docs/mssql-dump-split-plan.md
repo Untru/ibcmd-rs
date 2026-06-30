@@ -68,7 +68,7 @@ Rust path choice:
 
 ## Safe Order
 
-1. Extract `timing.rs` and `fetch.rs`.
+1. Extract `timing.rs` and `fetch.rs`. Done in rounds 40 and 41.
    These are low-risk because they have clear boundaries and few dependencies
    on metadata/MXL/Form internals.
 
@@ -103,9 +103,9 @@ Rust path choice:
 - Keep one agent per module-move round. Parallelizing the first split will
   create worse conflicts than the current file.
 
-## Suggested First Split Task
+## Completed First Split Task
 
-Start with:
+Implemented layout:
 
 ```text
 src/mssql_dump/
@@ -114,12 +114,13 @@ src/mssql_dump/
   fetch.rs
 ```
 
-Move only:
+Moved:
 
 - `MssqlDumpTimingReport`, `MssqlDumpTimingSummary`,
   `MssqlDumpTableTimingSummary`;
 - timing helper methods and JSON readers;
 - SQL/BCP row fetch structs and functions from the bottom of the file.
 
-This should reduce the file by roughly 2k lines and gives a template for later
-format-specific moves without touching parity behavior.
+This reduced the central file and gives a template for later format-specific
+moves without touching parity behavior. The next practical split is
+`form_xml.rs`, followed by MXL/source-asset modules.

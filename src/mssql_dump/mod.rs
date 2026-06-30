@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::LazyLock;
 use std::time::Instant;
 
@@ -18,7 +17,10 @@ use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
 use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
 
+mod fetch;
 mod timing;
+
+use fetch::*;
 
 pub use timing::{
     MssqlDumpTableTimingSummary, MssqlDumpTimingReport, MssqlDumpTimingSummary,
@@ -3873,6 +3875,7 @@ struct MoxelCell {
     empty_text: bool,
 }
 
+#[derive(Clone)]
 struct MoxelLocalizedValue {
     lang: String,
     content: String,
@@ -3974,6 +3977,7 @@ struct MoxelFormat {
     text_placement: Option<&'static str>,
     text_orientation: Option<usize>,
     fill_type: Option<&'static str>,
+    number_format: Vec<MoxelLocalizedValue>,
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
     details_use: Option<&'static str>,
@@ -4006,6 +4010,7 @@ impl MoxelFormat {
             && self.text_placement.is_none()
             && self.text_orientation.is_none()
             && self.fill_type.is_none()
+            && self.number_format.is_empty()
             && self.drawing_border.is_none()
             && self.by_selected_columns.is_none()
             && self.details_use.is_none()
@@ -13586,11 +13591,18 @@ fn parse_moxel_spreadsheet_text(
         .iter()
         .map(|drawing| drawing.format_index)
         .collect::<BTreeSet<_>>();
+    let number_format_refs = parse_moxel_number_format_refs(
+        &fields,
+        column_format_slots,
+        &style_refs,
+        &drawing_format_indices,
+    );
     let (column_formats, formats) = parse_moxel_formats(
         &fields,
         column_format_slots,
         &style_refs,
         &drawing_format_indices,
+        &number_format_refs,
     );
     let all_formats = column_formats
         .iter()
@@ -14669,6 +14681,7 @@ fn parse_moxel_formats(
     column_count: usize,
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
+    number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
     for index in 0..fields.len() {
         let Some(count) = fields
@@ -14682,7 +14695,7 @@ fn parse_moxel_formats(
         }
         let mut formats = Vec::with_capacity(count);
         for (format_offset, field) in fields[index + 1..=index + count].iter().enumerate() {
-            let Some(mut format) = parse_moxel_format(field, style_refs) else {
+            let Some(mut format) = parse_moxel_format(field, style_refs, number_format_refs) else {
                 formats.clear();
                 break;
             };
@@ -14709,7 +14722,116 @@ fn parse_moxel_formats(
     (Vec::new(), Vec::new())
 }
 
-fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<MoxelFormat> {
+fn moxel_format_table_end_index(
+    fields: &[&str],
+    column_count: usize,
+    style_refs: &[Option<String>],
+    drawing_format_indices: &BTreeSet<usize>,
+) -> Option<usize> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count <= column_count || count > 2048 || index + count >= fields.len() {
+            continue;
+        }
+        let mut parsed_count = 0usize;
+        for (format_offset, field) in fields[index + 1..=index + count].iter().enumerate() {
+            let Some(mut format) = parse_moxel_format(field, style_refs, &[]) else {
+                break;
+            };
+            if drawing_format_indices.contains(&(format_offset + 1)) {
+                format.drawing_border = format.left_border;
+                format.left_border = None;
+            }
+            parsed_count += 1;
+        }
+        if parsed_count == count {
+            return Some(index + count + 1);
+        }
+    }
+    None
+}
+
+fn parse_moxel_number_format_refs(
+    fields: &[&str],
+    column_count: usize,
+    style_refs: &[Option<String>],
+    drawing_format_indices: &BTreeSet<usize>,
+) -> Vec<Vec<MoxelLocalizedValue>> {
+    let required_count = fields
+        .iter()
+        .filter_map(|field| parse_moxel_format_number_format_index(field))
+        .max()
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    if required_count == 0 {
+        return Vec::new();
+    }
+    let start =
+        moxel_format_table_end_index(fields, column_count, style_refs, drawing_format_indices)
+            .unwrap_or(0);
+    for index in start..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count < required_count || count > 1024 || index + count >= fields.len() {
+            continue;
+        }
+        let formats = fields[index + 1..=index + count]
+            .iter()
+            .map(|field| parse_moxel_localized_values(field))
+            .collect::<Option<Vec<_>>>();
+        if let Some(formats) = formats {
+            return formats;
+        }
+    }
+    Vec::new()
+}
+
+fn parse_moxel_format_number_format_index(text: &str) -> Option<usize> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let flags = fields.first()?.trim().parse::<u64>().ok()?;
+    let values = moxel_format_values(flags, &fields)?;
+    parse_moxel_format_usize(&values, 24)
+}
+
+fn parse_moxel_localized_values(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != count + 2 {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| {
+            let pair = split_1c_braced_fields(field, 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            Some(MoxelLocalizedValue {
+                lang: parse_1c_string(pair.first()?)?,
+                content: parse_1c_string(pair.get(1)?)?,
+            })
+        })
+        .collect()
+}
+
+fn parse_moxel_format(
+    text: &str,
+    style_refs: &[Option<String>],
+    number_format_refs: &[Vec<MoxelLocalizedValue>],
+) -> Option<MoxelFormat> {
     let fields = split_1c_braced_fields(text, 0)?;
     let flags = fields.first()?.trim().parse::<u64>().ok()?;
     let values = moxel_format_values(flags, &fields)?;
@@ -14747,6 +14869,10 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         text_orientation: parse_moxel_format_usize(&values, 13),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        number_format: parse_moxel_format_usize(&values, 24)
+            .and_then(|index| number_format_refs.get(index))
+            .cloned()
+            .unwrap_or_default(),
         drawing_border: None,
         by_selected_columns: parse_moxel_format_usize(&values, 20)
             .and_then(moxel_by_selected_columns),
@@ -14804,6 +14930,7 @@ fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 16
             | 19
             | 20
+            | 24
             | 26
             | 30
             | 31
@@ -15454,6 +15581,7 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_usize(xml, "textOrientation", format.text_orientation);
     push_moxel_format_text(xml, "fillType", format.fill_type);
+    push_moxel_number_format_xml(xml, &format.number_format);
     push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     if let Some(by_selected_columns) = format.by_selected_columns {
         xml.push_str(&format!(
@@ -15488,6 +15616,26 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     );
     push_moxel_format_text(xml, "picVerticalAlignment", format.pic_vertical_alignment);
     xml.push_str("\t</format>\r\n");
+}
+
+fn push_moxel_number_format_xml(xml: &mut String, values: &[MoxelLocalizedValue]) {
+    if values.is_empty() {
+        return;
+    }
+    xml.push_str("\t\t<format>\r\n");
+    for value in values {
+        xml.push_str("\t\t\t<v8:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&value.lang)
+        ));
+        xml.push_str(&format!(
+            "\t\t\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&value.content)
+        ));
+        xml.push_str("\t\t\t</v8:item>\r\n");
+    }
+    xml.push_str("\t\t</format>\r\n");
 }
 
 fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -> MoxelFormat {
@@ -16593,10 +16741,12 @@ struct DocumentStandardAttributes {
 
 struct BusinessProcessProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
 }
 
 struct TaskProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
 }
 
 struct SettingsStorageProperties {
@@ -19220,6 +19370,7 @@ fn parse_business_process_properties_from_text(
     if fields.first().map(|value| value.trim()) != Some("30") {
         return None;
     }
+    let header_index = metadata_header_field_index(&fields, uuid)?;
 
     let mut generated_types = Vec::new();
     push_generated_type_entry(
@@ -19271,7 +19422,11 @@ fn parse_business_process_properties_from_text(
         "RoutePointRef",
     );
 
-    Some(BusinessProcessProperties { generated_types })
+    Some(BusinessProcessProperties {
+        generated_types,
+        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
+            .unwrap_or(true),
+    })
 }
 
 fn parse_task_properties_from_text(text: &str, uuid: &str) -> Option<TaskProperties> {
@@ -19325,7 +19480,12 @@ fn parse_task_properties_from_text(text: &str, uuid: &str) -> Option<TaskPropert
         "Manager",
     );
 
-    Some(TaskProperties { generated_types })
+    let header_index = metadata_header_field_index(&fields, uuid)?;
+    Some(TaskProperties {
+        generated_types,
+        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
+            .unwrap_or(true),
+    })
 }
 
 fn parse_settings_storage_properties_from_text(
@@ -23471,6 +23631,15 @@ fn format_business_process_source_xml(
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        xml.insert_str(
+            index,
+            &format!(
+                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(business_process.use_standard_commands)
+            ),
+        );
+    }
     xml
 }
 
@@ -23483,6 +23652,15 @@ fn format_task_source_xml(
     let internal_info = format_generated_types_internal_info_xml(&task.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        xml.insert_str(
+            index,
+            &format!(
+                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(task.use_standard_commands)
+            ),
+        );
     }
     xml
 }
@@ -26006,700 +26184,6 @@ fn sanitize_source_path_segment(value: &str) -> String {
     }
 }
 
-fn fetch_rows(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> Result<Vec<ConfigRow>> {
-    let sql = build_fetch_rows_sql(database, table, selected_file_names);
-    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
-    let chunks = parse_config_chunk_rows(&stdout)
-        .with_context(|| format!("failed to parse {table} row chunks for {database}"))?;
-    assemble_config_rows(chunks)
-        .with_context(|| format!("failed to assemble {table} row chunks for {database}"))
-}
-
-#[allow(dead_code)]
-fn fetch_rows_direct_hex(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> Result<Vec<ConfigRow>> {
-    let sql = build_fetch_rows_direct_hex_sql(database, table, selected_file_names);
-    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
-    parse_config_direct_rows(&stdout)
-        .with_context(|| format!("failed to parse direct {table} rows for {database}"))
-}
-
-fn fetch_binary_rows_bcp(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-    use_range_filter: bool,
-) -> Result<Vec<BinaryConfigRow>> {
-    let query =
-        build_fetch_binary_rows_query(database, table, selected_file_names, use_range_filter);
-    fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)
-}
-
-fn fetch_binary_rows_bcp_query(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-    query: &str,
-) -> Result<Vec<BinaryConfigRow>> {
-    let output_path = std::env::temp_dir().join(format!(
-        "ibcmd-rs-bcp-{}-{}.bcp",
-        std::process::id(),
-        uuid::Uuid::new_v4().hyphenated()
-    ));
-    let bcp = bcp_executable_for_sqlcmd(sqlcmd);
-    let mut command = Command::new(&bcp);
-    command
-        .arg(&query)
-        .arg("queryout")
-        .arg(&output_path)
-        .arg("-S")
-        .arg(server)
-        .arg("-n")
-        .arg("-u")
-        .arg("-a")
-        .arg("65535");
-    match user {
-        Some(user) => {
-            command.arg("-U").arg(user);
-            if let Some(password) = password {
-                command.arg("-P").arg(password);
-            }
-        }
-        None => {
-            command.arg("-T");
-        }
-    }
-
-    let output = command
-        .output()
-        .with_context(|| format!("failed to run {}", bcp.display()))?;
-    if !output.status.success() {
-        let _ = fs::remove_file(&output_path);
-        bail!(
-            "bcp failed with status {}: {}{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let bytes = fs::read(&output_path)
-        .with_context(|| format!("failed to read {}", output_path.display()))?;
-    let _ = fs::remove_file(&output_path);
-    let parts = parse_bcp_native_config_rows(&bytes)
-        .with_context(|| format!("failed to parse native bcp rows for {database}.{table}"))?;
-    assemble_binary_config_rows(parts)
-        .with_context(|| format!("failed to assemble native bcp rows for {database}.{table}"))
-}
-
-fn bcp_executable_for_sqlcmd(sqlcmd: &Path) -> PathBuf {
-    if let Some(parent) = sqlcmd.parent() {
-        for name in ["bcp.exe", "bcp"] {
-            let candidate = parent.join(name);
-            if candidate.exists() {
-                return candidate;
-            }
-        }
-    }
-    PathBuf::from("bcp")
-}
-
-#[allow(dead_code)]
-fn fetch_metadata_rows(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-) -> Result<Vec<ConfigRow>> {
-    let sql = build_fetch_metadata_rows_sql(database, table);
-    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
-    let chunks = parse_config_chunk_rows(&stdout)
-        .with_context(|| format!("failed to parse {table} metadata row chunks for {database}"))?;
-    assemble_config_rows(chunks)
-        .with_context(|| format!("failed to assemble {table} metadata rows for {database}"))
-}
-
-fn fetch_metadata_rows_bcp(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-) -> Result<Vec<ConfigRow>> {
-    let query = build_fetch_metadata_rows_bcp_query(database, table);
-    let rows =
-        fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)?;
-    Ok(config_rows_from_binary(rows))
-}
-
-fn fetch_config_rows_bcp(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> Result<Vec<ConfigRow>> {
-    let rows = fetch_binary_rows_bcp(
-        sqlcmd,
-        server,
-        user,
-        password,
-        database,
-        table,
-        selected_file_names,
-        false,
-    )?;
-    Ok(config_rows_from_binary(rows))
-}
-
-fn config_rows_from_binary(rows: Vec<BinaryConfigRow>) -> Vec<ConfigRow> {
-    rows.into_iter().map(config_row_from_binary).collect()
-}
-
-fn config_row_from_binary(row: BinaryConfigRow) -> ConfigRow {
-    ConfigRow {
-        file_name: row.file_name,
-        part_no: row.part_no,
-        data_size: row.data_size,
-        binary_hex: encode_hex_lower(&row.binary),
-    }
-}
-
-fn build_fetch_binary_rows_query(
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-    use_range_filter: bool,
-) -> String {
-    let filter = if selected_file_names.is_empty() {
-        String::new()
-    } else if use_range_filter {
-        let first = selected_file_names
-            .first()
-            .expect("non-empty selected_file_names has first value");
-        let last = selected_file_names
-            .last()
-            .expect("non-empty selected_file_names has last value");
-        format!(
-            "WHERE FileName >= N'{}' AND FileName <= N'{}'\n",
-            quote_string(first),
-            quote_string(last)
-        )
-    } else {
-        let values = selected_file_names
-            .iter()
-            .map(|value| format!("N'{}'", quote_string(value)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("WHERE FileName IN ({values})\n")
-    };
-
-    format!(
-        "SELECT FileName, PartNo, DataSize, BinaryData\n\
-         FROM {qualified_table}\n\
-         {filter}\
-         ORDER BY FileName, PartNo",
-        qualified_table = qualified_storage_table(database, table),
-        filter = filter,
-    )
-}
-
-fn build_fetch_metadata_rows_bcp_query(database: &str, table: &str) -> String {
-    format!(
-        "SELECT FileName, PartNo, DataSize, BinaryData\n\
-         FROM {qualified_table}\n\
-         WHERE CHARINDEX(N'.', FileName) = 0\n\
-         ORDER BY FileName, PartNo",
-        qualified_table = qualified_storage_table(database, table),
-    )
-}
-
-#[allow(dead_code)]
-fn build_fetch_metadata_rows_sql(database: &str, table: &str) -> String {
-    format!(
-        "SET NOCOUNT ON;\n\
-         DECLARE @chunk_size int = {chunk_size};\n\
-         WITH SourceRows AS (\n\
-             SELECT FileName, PartNo, DataSize, BinaryData\n\
-             FROM {qualified_table}\n\
-             WHERE CHARINDEX(N'.', FileName) = 0\n\
-         )\n\
-         SELECT rows.FileName AS file_name,\n\
-                rows.PartNo AS part_no,\n\
-                rows.DataSize AS data_size,\n\
-                chunks.chunk_index,\n\
-                CONVERT(varchar(max), SUBSTRING(rows.BinaryData, chunks.chunk_index * @chunk_size + 1, @chunk_size), 2) AS binary_hex\n\
-         FROM SourceRows rows\n\
-         CROSS APPLY (\n\
-             SELECT chunk_count = CASE\n\
-                 WHEN DATALENGTH(rows.BinaryData) = 0 THEN 1\n\
-                 ELSE (DATALENGTH(rows.BinaryData) + @chunk_size - 1) / @chunk_size\n\
-             END\n\
-         ) counts\n\
-         CROSS APPLY (\n\
-             SELECT TOP (counts.chunk_count)\n\
-                    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS chunk_index\n\
-             FROM sys.all_objects a CROSS JOIN sys.all_objects b\n\
-         ) chunks\n\
-         ORDER BY rows.FileName, rows.PartNo, chunks.chunk_index\n\
-         ;",
-        chunk_size = SQLCMD_BINARY_CHUNK_SIZE,
-        qualified_table = qualified_storage_table(database, table),
-    )
-}
-
-fn fetch_row_headers(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> Result<Vec<ConfigRowHeader>> {
-    let sql = build_fetch_row_headers_sql(database, table, selected_file_names);
-    let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
-    parse_config_row_headers(&stdout)
-        .with_context(|| format!("failed to parse {table} row headers for {database}"))
-}
-
-fn build_fetch_row_headers_sql(
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> String {
-    let filter = if selected_file_names.is_empty() {
-        String::new()
-    } else {
-        let values = selected_file_names
-            .iter()
-            .map(|value| format!("N'{}'", quote_string(value)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("WHERE FileName IN ({values})\n")
-    };
-
-    format!(
-        "SET NOCOUNT ON;\n\
-         SELECT FileName AS file_name,\n\
-                PartNo AS part_no,\n\
-                DataSize AS data_size\n\
-         FROM {qualified_table}\n\
-         {filter}\
-         ORDER BY FileName, PartNo\n\
-         ;",
-        qualified_table = qualified_storage_table(database, table),
-        filter = filter,
-    )
-}
-
-fn parse_config_row_headers(stdout: &str) -> Result<Vec<ConfigRowHeader>> {
-    let mut rows = Vec::new();
-    for (line_index, line) in stdout.lines().enumerate() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        if is_sqlcmd_header_or_separator(line) {
-            continue;
-        }
-        let fields = line.split('\t').collect::<Vec<_>>();
-        if fields.len() != 3 {
-            bail!(
-                "unexpected sqlcmd row header line {}: expected 3 tab-separated fields, got {}",
-                line_index + 1,
-                fields.len()
-            );
-        }
-        rows.push(ConfigRowHeader {
-            file_name: fields[0].trim_end().to_string(),
-            part_no: fields[1]
-                .trim()
-                .parse()
-                .with_context(|| format!("invalid part_no on header line {}", line_index + 1))?,
-            data_size: fields[2]
-                .trim()
-                .parse()
-                .with_context(|| format!("invalid data_size on header line {}", line_index + 1))?,
-        });
-    }
-    Ok(rows)
-}
-
-fn build_fetch_rows_sql(
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> String {
-    let filter = if selected_file_names.is_empty() {
-        String::new()
-    } else {
-        let values = selected_file_names
-            .iter()
-            .map(|value| format!("N'{}'", quote_string(value)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("WHERE FileName IN ({values})\n")
-    };
-
-    format!(
-        "SET NOCOUNT ON;\n\
-         DECLARE @chunk_size int = {chunk_size};\n\
-         WITH SourceRows AS (\n\
-             SELECT FileName, PartNo, DataSize, BinaryData\n\
-             FROM {qualified_table}\n\
-             {filter}\
-         )\n\
-         SELECT rows.FileName AS file_name,\n\
-                rows.PartNo AS part_no,\n\
-                rows.DataSize AS data_size,\n\
-                chunks.chunk_index,\n\
-                CONVERT(varchar(max), SUBSTRING(rows.BinaryData, chunks.chunk_index * @chunk_size + 1, @chunk_size), 2) AS binary_hex\n\
-         FROM SourceRows rows\n\
-         CROSS APPLY (\n\
-             SELECT chunk_count = CASE\n\
-                 WHEN DATALENGTH(rows.BinaryData) = 0 THEN 1\n\
-                 ELSE (DATALENGTH(rows.BinaryData) + @chunk_size - 1) / @chunk_size\n\
-             END\n\
-         ) counts\n\
-         CROSS APPLY (\n\
-             SELECT TOP (counts.chunk_count)\n\
-                    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS chunk_index\n\
-             FROM sys.all_objects a CROSS JOIN sys.all_objects b\n\
-         ) chunks\n\
-         ORDER BY rows.FileName, rows.PartNo, chunks.chunk_index\n\
-         ;",
-        chunk_size = SQLCMD_BINARY_CHUNK_SIZE,
-        qualified_table = qualified_storage_table(database, table),
-        filter = filter,
-    )
-}
-
-fn build_fetch_rows_direct_hex_sql(
-    database: &str,
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-) -> String {
-    let filter = if selected_file_names.is_empty() {
-        String::new()
-    } else {
-        let values = selected_file_names
-            .iter()
-            .map(|value| format!("N'{}'", quote_string(value)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("WHERE FileName IN ({values})\n")
-    };
-
-    format!(
-        "SET NOCOUNT ON;\n\
-         SELECT FileName AS file_name,\n\
-                PartNo AS part_no,\n\
-                DataSize AS data_size,\n\
-                CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
-         FROM {qualified_table}\n\
-         {filter}\
-         ORDER BY FileName, PartNo\n\
-         ;",
-        qualified_table = qualified_storage_table(database, table),
-        filter = filter,
-    )
-}
-
-fn parse_config_direct_rows(stdout: &str) -> Result<Vec<ConfigRow>> {
-    let mut rows = Vec::new();
-    for (line_index, line) in stdout.lines().enumerate() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        if is_sqlcmd_header_or_separator(line) {
-            continue;
-        }
-        let fields = line.split('\t').collect::<Vec<_>>();
-        if fields.len() != 4 {
-            bail!(
-                "unexpected sqlcmd direct row line {}: expected 4 tab-separated fields, got {}",
-                line_index + 1,
-                fields.len()
-            );
-        }
-        rows.push(ConfigRow {
-            file_name: fields[0].trim_end().to_string(),
-            part_no: fields[1].trim().parse().with_context(|| {
-                format!("invalid part_no on direct row line {}", line_index + 1)
-            })?,
-            data_size: fields[2].trim().parse().with_context(|| {
-                format!("invalid data_size on direct row line {}", line_index + 1)
-            })?,
-            binary_hex: fields[3].trim().to_ascii_lowercase(),
-        });
-    }
-    Ok(rows)
-}
-
-fn parse_config_chunk_rows(stdout: &str) -> Result<Vec<ConfigChunkRow>> {
-    let mut rows = Vec::new();
-    for (line_index, line) in stdout.lines().enumerate() {
-        let line = line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        if is_sqlcmd_header_or_separator(line) {
-            continue;
-        }
-        let fields = line.split('\t').collect::<Vec<_>>();
-        if fields.len() != 5 {
-            bail!(
-                "unexpected sqlcmd row chunk line {}: expected 5 tab-separated fields, got {}",
-                line_index + 1,
-                fields.len()
-            );
-        }
-        rows.push(ConfigChunkRow {
-            file_name: fields[0].trim_end().to_string(),
-            part_no: fields[1]
-                .trim()
-                .parse()
-                .with_context(|| format!("invalid part_no on chunk line {}", line_index + 1))?,
-            data_size: fields[2]
-                .trim()
-                .parse()
-                .with_context(|| format!("invalid data_size on chunk line {}", line_index + 1))?,
-            chunk_index: fields[3]
-                .trim()
-                .parse()
-                .with_context(|| format!("invalid chunk_index on chunk line {}", line_index + 1))?,
-            binary_hex: fields[4].trim_end().to_string(),
-        });
-    }
-    Ok(rows)
-}
-
-fn is_sqlcmd_header_or_separator(line: &str) -> bool {
-    if line
-        .split('\t')
-        .next()
-        .is_some_and(|field| field.trim() == "file_name")
-    {
-        return true;
-    }
-    line.chars().all(|ch| ch == '-' || ch == '\t' || ch == ' ')
-}
-
-fn assemble_config_rows(chunks: Vec<ConfigChunkRow>) -> Result<Vec<ConfigRow>> {
-    let mut parts = BTreeMap::<(String, i32), ConfigRow>::new();
-    let mut expected_chunk = BTreeMap::<(String, i32), i32>::new();
-
-    for chunk in chunks {
-        let key = (chunk.file_name.clone(), chunk.part_no);
-        let expected = expected_chunk.entry(key.clone()).or_insert(0);
-        if chunk.chunk_index != *expected {
-            bail!(
-                "Config row {} part {} chunk order gap: expected {}, got {}",
-                chunk.file_name,
-                chunk.part_no,
-                expected,
-                chunk.chunk_index
-            );
-        }
-        *expected += 1;
-
-        parts
-            .entry(key)
-            .and_modify(|row| {
-                row.binary_hex.push_str(&chunk.binary_hex);
-            })
-            .or_insert_with(|| ConfigRow {
-                file_name: chunk.file_name,
-                part_no: chunk.part_no,
-                data_size: chunk.data_size,
-                binary_hex: chunk.binary_hex,
-            });
-    }
-
-    let mut rows = BTreeMap::<String, ConfigRow>::new();
-    let mut expected_part = BTreeMap::<String, i32>::new();
-    for part in parts.into_values() {
-        let expected = expected_part.entry(part.file_name.clone()).or_insert(0);
-        if part.part_no != *expected {
-            bail!(
-                "Config row {} part order gap: expected {}, got {}",
-                part.file_name,
-                expected,
-                part.part_no
-            );
-        }
-        *expected += 1;
-
-        rows.entry(part.file_name.clone())
-            .and_modify(|row| {
-                if row.data_size != part.data_size {
-                    row.data_size = part.data_size;
-                }
-                row.binary_hex.push_str(&part.binary_hex);
-            })
-            .or_insert_with(|| ConfigRow {
-                file_name: part.file_name,
-                part_no: 0,
-                data_size: part.data_size,
-                binary_hex: part.binary_hex,
-            });
-    }
-
-    for row in rows.values() {
-        let binary_bytes = row.binary_hex.len() / 2;
-        if binary_bytes != row.data_size as usize {
-            bail!(
-                "Config row {} DataSize {} does not match assembled BinaryData length {}",
-                row.file_name,
-                row.data_size,
-                binary_bytes
-            );
-        }
-    }
-
-    Ok(rows.into_values().collect())
-}
-
-fn parse_bcp_native_config_rows(bytes: &[u8]) -> Result<Vec<BinaryConfigRow>> {
-    let mut rows = Vec::new();
-    let mut offset = 0usize;
-    while offset < bytes.len() {
-        let name_len = read_u16_le(bytes, &mut offset)? as usize;
-        let name_bytes = read_bytes(bytes, &mut offset, name_len)?;
-        if name_bytes.len() % 2 != 0 {
-            bail!(
-                "invalid native bcp nvarchar byte length: {}",
-                name_bytes.len()
-            );
-        }
-        let units = name_bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect::<Vec<_>>();
-        let file_name = String::from_utf16(&units).context("invalid UTF-16 FileName in bcp row")?;
-        let part_no = read_i32_le(bytes, &mut offset)?;
-        let data_size = read_i64_le(bytes, &mut offset)?;
-        let binary_len = read_i64_le(bytes, &mut offset)?;
-        if binary_len < 0 {
-            bail!("unexpected NULL BinaryData in bcp row {file_name}");
-        }
-        let binary = read_bytes(bytes, &mut offset, binary_len as usize)?.to_vec();
-        rows.push(BinaryConfigRow {
-            file_name,
-            part_no,
-            data_size,
-            binary,
-        });
-    }
-    Ok(rows)
-}
-
-fn assemble_binary_config_rows(parts: Vec<BinaryConfigRow>) -> Result<Vec<BinaryConfigRow>> {
-    let mut rows = BTreeMap::<String, BinaryConfigRow>::new();
-    let mut expected_part = BTreeMap::<String, i32>::new();
-    for part in parts {
-        let expected = expected_part.entry(part.file_name.clone()).or_insert(0);
-        if part.part_no != *expected {
-            bail!(
-                "Config row {} part order gap: expected {}, got {}",
-                part.file_name,
-                expected,
-                part.part_no
-            );
-        }
-        *expected += 1;
-
-        rows.entry(part.file_name.clone())
-            .and_modify(|row| {
-                if row.data_size != part.data_size {
-                    row.data_size = part.data_size;
-                }
-                row.binary.extend_from_slice(&part.binary);
-            })
-            .or_insert_with(|| BinaryConfigRow {
-                file_name: part.file_name,
-                part_no: 0,
-                data_size: part.data_size,
-                binary: part.binary,
-            });
-    }
-
-    for row in rows.values() {
-        if row.binary.len() != row.data_size as usize {
-            bail!(
-                "Config row {} DataSize {} does not match assembled BinaryData length {}",
-                row.file_name,
-                row.data_size,
-                row.binary.len()
-            );
-        }
-    }
-
-    Ok(rows.into_values().collect())
-}
-
-fn read_bytes<'a>(bytes: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
-    let end = offset
-        .checked_add(len)
-        .ok_or_else(|| anyhow!("native bcp offset overflow"))?;
-    let slice = bytes
-        .get(*offset..end)
-        .ok_or_else(|| anyhow!("unexpected end of native bcp data"))?;
-    *offset = end;
-    Ok(slice)
-}
-
-fn read_u16_le(bytes: &[u8], offset: &mut usize) -> Result<u16> {
-    let slice = read_bytes(bytes, offset, 2)?;
-    Ok(u16::from_le_bytes([slice[0], slice[1]]))
-}
-
-fn read_i32_le(bytes: &[u8], offset: &mut usize) -> Result<i32> {
-    let slice = read_bytes(bytes, offset, 4)?;
-    Ok(i32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
-}
-
-fn read_i64_le(bytes: &[u8], offset: &mut usize) -> Result<i64> {
-    let slice = read_bytes(bytes, offset, 8)?;
-    Ok(i64::from_le_bytes([
-        slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
-    ]))
-}
-
-const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
-const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 4096;
-const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 256 * 1024 * 1024;
-const SQLCMD_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
-
 fn selected_file_names_from_args(
     file_names: &[String],
     file_name_lists: &[PathBuf],
@@ -26747,74 +26231,6 @@ fn metadata_id_from_module_file_name(file_name: &str) -> Option<&str> {
 }
 
 const MODULE_BODY_SUFFIXES: &[&str] = &["0", "1", "2", "3", "5", "6", "7", "8", "15", "16"];
-
-fn run_sql_capture_tsv(
-    sqlcmd: &Path,
-    server: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    sql: &str,
-) -> Result<String> {
-    let mut command = Command::new(sqlcmd);
-    command.arg("-C").arg("-S").arg(server);
-    if let Some(user) = user {
-        command.arg("-U").arg(user);
-        if let Some(password) = password {
-            command.arg("-P").arg(password);
-        }
-    }
-    command
-        .arg("-s")
-        .arg("\t")
-        .arg("-w")
-        .arg("65535")
-        .arg("-y")
-        .arg("0")
-        .arg("-Y")
-        .arg("0");
-    let sql_file = if sql.chars().count() > SQLCMD_INLINE_QUERY_MAX_CHARS {
-        let path = std::env::temp_dir().join(format!(
-            "ibcmd-rs-sqlcmd-{}-{}.sql",
-            std::process::id(),
-            uuid::Uuid::new_v4().hyphenated()
-        ));
-        fs::write(&path, sql).with_context(|| format!("failed to write {}", path.display()))?;
-        command.arg("-i").arg(&path);
-        Some(path)
-    } else {
-        command.arg("-Q").arg(sql);
-        None
-    };
-    let output = command
-        .output()
-        .with_context(|| format!("failed to run {}", sqlcmd.display()));
-    if let Some(path) = &sql_file {
-        let _ = fs::remove_file(path);
-    }
-    let output = output?;
-    if !output.status.success() {
-        bail!(
-            "sqlcmd failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn sql_password(user: Option<&str>, password: Option<&str>, password_env: &str) -> Option<String> {
-    user?;
-    password
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .or_else(|| std::env::var(password_env).ok())
-}
-
-#[cfg(test)]
-fn normalize_sqlcmd_json(value: &str) -> String {
-    value.replace(['\r', '\n'], "")
-}
 
 fn prepare_output_dir(path: &Path, overwrite: bool) -> Result<()> {
     if path.exists() {
@@ -34995,7 +34411,7 @@ mod tests {
 
     #[test]
     fn formats_moxel_decodes_cut_text_placement() {
-        let format = parse_moxel_format("{16384,1}", &[]).unwrap();
+        let format = parse_moxel_format("{16384,1}", &[], &[]).unwrap();
 
         assert_eq!(format.text_placement, Some("Cut"));
 
@@ -35013,7 +34429,7 @@ mod tests {
 
     #[test]
     fn formats_moxel_decodes_text_orientation_between_width_and_text_placement() {
-        let format = parse_moxel_format("{24704,72,900,3}", &[]).unwrap();
+        let format = parse_moxel_format("{24704,72,900,3}", &[], &[]).unwrap();
 
         assert_eq!(format.width, Some(72));
         assert_eq!(format.text_orientation, Some(900));
@@ -35027,6 +34443,7 @@ mod tests {
             1,
             &[],
             &BTreeSet::new(),
+            &[],
         );
 
         assert_eq!(column_formats.len(), 1);
@@ -35048,6 +34465,20 @@ mod tests {
         assert!(xml.contains("<f>2</f>"));
         assert!(xml.contains(
             "\t<format>\r\n\t\t<width>72</width>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<textOrientation>900</textOrientation>\r\n\t</format>"
+        ));
+    }
+
+    #[test]
+    fn formats_moxel_number_format_string_table() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{16777216,0},{1,0},1,{1,1,{\"ru\",\"БЛ=; БИ=√\"}}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<format>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>БЛ=; БИ=√</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</format>\r\n\t</format>"
         ));
     }
 
@@ -35127,7 +34558,7 @@ mod tests {
     #[test]
     fn formats_moxel_field_selection_back_color_style() {
         let style_refs = parse_moxel_style_refs(&["{3,3,{-21}}"], &BTreeMap::new());
-        let format = parse_moxel_format("{2048,0}", &style_refs).unwrap();
+        let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
         let spreadsheet = MoxelSpreadsheet {
             column_count: 0,
             column_sets: Vec::new(),
@@ -35159,7 +34590,7 @@ mod tests {
     #[test]
     fn formats_moxel_field_text_color_style() {
         let style_refs = parse_moxel_style_refs(&["{3,3,{-13}}"], &BTreeMap::new());
-        let format = parse_moxel_format("{1024,0}", &style_refs).unwrap();
+        let format = parse_moxel_format("{1024,0}", &style_refs, &[]).unwrap();
         let spreadsheet = MoxelSpreadsheet {
             column_count: 0,
             column_sets: Vec::new(),
@@ -35191,7 +34622,7 @@ mod tests {
     #[test]
     fn formats_moxel_button_text_color_style() {
         let style_refs = parse_moxel_style_refs(&["{3,3,{-15}}"], &BTreeMap::new());
-        let format = parse_moxel_format("{1024,0}", &style_refs).unwrap();
+        let format = parse_moxel_format("{1024,0}", &style_refs, &[]).unwrap();
         let spreadsheet = MoxelSpreadsheet {
             column_count: 0,
             column_sets: Vec::new(),
@@ -35254,7 +34685,7 @@ mod tests {
         assert_eq!(style_refs[6].as_deref(), Some("style:TableFooterBackColor"));
         assert_eq!(style_refs[7].as_deref(), Some("style:TableFooterTextColor"));
 
-        let format = parse_moxel_format("{2048,0}", &style_refs).unwrap();
+        let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
         let spreadsheet = MoxelSpreadsheet {
             column_count: 0,
             column_sets: Vec::new(),
@@ -42902,6 +42333,58 @@ mod tests {
         ));
         assert!(xml.contains(&format!("<xr:TypeId>{route_point_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{route_point_value_id}</xr:ValueId>")));
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    }
+
+    #[test]
+    fn extracts_business_process_use_standard_commands_to_metadata_xml() {
+        let business_process_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let business_process_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{30,0,0,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
+22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\r\n\
+{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"\"}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &business_process_blob,
+                business_process_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("BusinessProcesses").join("Approval.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+            assert!(
+                xml.find("<Comment/>").unwrap() < xml.find("<UseStandardCommands>").unwrap(),
+                "{xml}"
+            );
+            assert!(
+                xml.find("<UseStandardCommands>").unwrap() < xml.find("</Properties>").unwrap(),
+                "{xml}"
+            );
+        }
     }
 
     #[test]
@@ -42973,6 +42456,12 @@ mod tests {
         );
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(
+            xml.find("<Comment>task comment</Comment>").unwrap()
+                < xml.find("<UseStandardCommands>").unwrap(),
+            "{xml}"
+        );
     }
 
     #[test]

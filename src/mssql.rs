@@ -7932,7 +7932,10 @@ mod tests {
                 .contains("Predefined.xml requires active base blob")
         );
         assert!(row.reason.contains("2 predefined items"));
+        assert!(row.reason.contains("1 root row"));
         assert!(row.reason.contains("patches existing base rows"));
+        assert!(row.reason.contains("8 editable value fields"));
+        assert!(row.reason.contains("child table counts"));
         assert!(row.reason.contains("type UUID slots"));
 
         let _ = fs::remove_dir_all(root);

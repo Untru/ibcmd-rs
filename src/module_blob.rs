@@ -658,6 +658,17 @@ struct PredefinedDataXmlItem {
     children: Vec<PredefinedDataXmlItem>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct PredefinedDataXmlStats {
+    items: usize,
+    root_items: usize,
+    folders: usize,
+    nested_child_links: usize,
+    editable_value_fields: usize,
+    non_empty_text_fields: usize,
+    max_depth: usize,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FlowchartXmlItem {
     kind: String,
@@ -1745,11 +1756,13 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     }
     fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
     fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
-    fields.extend(format_spreadsheet_formats_for_moxel(
-        &spreadsheet,
-        column_format_slots,
-    ));
+    let (format_fields, number_format_refs) =
+        format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots);
+    fields.extend(format_fields);
     fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
+    fields.extend(format_spreadsheet_number_formats_for_moxel(
+        &number_format_refs,
+    ));
     if !spreadsheet.pictures.is_empty() {
         fields.push(format_spreadsheet_pictures_for_moxel(
             &spreadsheet.pictures,
@@ -1888,6 +1901,7 @@ struct SpreadsheetDocumentXmlFormat {
     text_placement: Option<String>,
     text_orientation: Option<usize>,
     fill_type: Option<String>,
+    number_format: Vec<LocalizedString>,
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
     details_use: Option<String>,
@@ -1976,6 +1990,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_area = None::<SpreadsheetDocumentXmlArea>;
     let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
     let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
+    let mut current_number_format_item = None::<LocalizedString>;
     let mut current_line = None::<SpreadsheetDocumentXmlLine>;
     let mut current_header_footer = None::<SpreadsheetDocumentXmlHeaderFooter>;
     let mut current_picture = None::<SpreadsheetDocumentXmlPicture>;
@@ -2003,8 +2018,15 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
                 } else if local == "printSettings" {
                     current_print_settings = Some(SpreadsheetDocumentXmlPrintSettings::default());
-                } else if local == "format" {
+                } else if local == "format" && path_ends_with(&path, &["document"]) {
                     current_format = Some(SpreadsheetDocumentXmlFormat::default());
+                } else if local == "item"
+                    && path_ends_with(&path, &["document", "format", "format"])
+                {
+                    current_number_format_item = Some(LocalizedString {
+                        lang: String::new(),
+                        content: String::new(),
+                    });
                 } else if local == "font"
                     && let Some(font) = parse_spreadsheet_font_xml_attributes(&event)?
                 {
@@ -2050,7 +2072,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     if let Some(font) = parse_spreadsheet_font_xml_attributes(&event)? {
                         document.fonts.push(font);
                     }
-                } else if local == "format" {
+                } else if local == "format" && path_ends_with(&path, &["document"]) {
                     document
                         .formats
                         .push(SpreadsheetDocumentXmlFormat::default());
@@ -2123,6 +2145,17 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_picture.as_mut(),
                     current_drawing.as_mut(),
                 );
+                if local == "lang"
+                    && path_ends_with(&path, &["document", "format", "format", "item", "lang"])
+                    && let Some(item) = current_number_format_item.as_mut()
+                {
+                    item.lang = text.trim().to_string();
+                } else if local == "content"
+                    && path_ends_with(&path, &["document", "format", "format", "item", "content"])
+                    && let Some(item) = current_number_format_item.as_mut()
+                {
+                    item.content = text.to_string();
+                }
                 if local == "c" && current_row.is_some() {
                     if c_depth == 1
                         && let Some(mut cell) = current_cell.take()
@@ -2173,7 +2206,14 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(print_settings) = current_print_settings.take()
                 {
                     document.print_settings = Some(print_settings);
+                } else if local == "item"
+                    && path_ends_with(&path, &["document", "format", "format", "item"])
+                    && let Some(item) = current_number_format_item.take()
+                    && let Some(format) = current_format.as_mut()
+                {
+                    format.number_format.push(item);
                 } else if local == "format"
+                    && path_ends_with(&path, &["document", "format"])
                     && let Some(format) = current_format.take()
                 {
                     document.formats.push(format);
@@ -2324,6 +2364,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "formatIndex"
             | "i"
             | "f"
+            | "lang"
             | "content"
             | "parameter"
             | "detailParameter"
@@ -3402,9 +3443,9 @@ fn bool_to_usize(value: bool) -> usize {
 fn format_spreadsheet_formats_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     column_format_slots: usize,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<SpreadsheetNumberFormatSlot>) {
     if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     let source_format_count = spreadsheet
         .formats
@@ -3415,6 +3456,7 @@ fn format_spreadsheet_formats_for_moxel(
     let column_placeholder_count = column_format_slots.max(1);
     let count = body_format_count + column_placeholder_count;
     let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
+    let mut number_format_refs = Vec::<SpreadsheetNumberFormatSlot>::new();
     let mut format_fields = Vec::with_capacity(count + 1);
     format_fields.push(count.to_string());
     for global_index in column_format_slots + 1..=source_format_count {
@@ -3422,6 +3464,7 @@ fn format_spreadsheet_formats_for_moxel(
             spreadsheet,
             global_index,
             &mut style_refs,
+            &mut number_format_refs,
         ));
     }
     for global_index in 1..=column_placeholder_count {
@@ -3429,6 +3472,7 @@ fn format_spreadsheet_formats_for_moxel(
             spreadsheet,
             global_index,
             &mut style_refs,
+            &mut number_format_refs,
         ));
     }
     let mut fields = style_refs
@@ -3436,18 +3480,21 @@ fn format_spreadsheet_formats_for_moxel(
         .map(format_spreadsheet_style_ref_slot_for_moxel)
         .collect::<Vec<_>>();
     fields.push(format!("{{{}}}", format_fields.join(",")));
-    fields
+    (fields, number_format_refs)
 }
 
 fn format_spreadsheet_format_index_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     global_index: usize,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+    number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> String {
     spreadsheet
         .formats
         .get(global_index.saturating_sub(1))
-        .and_then(|format| format_spreadsheet_format_for_moxel(format, style_refs))
+        .and_then(|format| {
+            format_spreadsheet_format_for_moxel(format, style_refs, number_format_refs)
+        })
         .unwrap_or_else(spreadsheet_empty_format_for_moxel)
 }
 
@@ -3462,9 +3509,13 @@ enum SpreadsheetStyleRefSlot {
     WebColor(u32),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SpreadsheetNumberFormatSlot(Vec<LocalizedString>);
+
 fn format_spreadsheet_format_for_moxel(
     format: &SpreadsheetDocumentXmlFormat,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+    number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> Option<String> {
     let mut values = Vec::<(u8, usize)>::new();
     push_spreadsheet_format_value(&mut values, 0, format.font);
@@ -3536,6 +3587,11 @@ fn format_spreadsheet_format_for_moxel(
             .fill_type
             .as_deref()
             .and_then(spreadsheet_fill_type_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        24,
+        spreadsheet_number_format_index(&format.number_format, number_format_refs),
     );
     push_spreadsheet_format_value(
         &mut values,
@@ -3616,6 +3672,54 @@ fn spreadsheet_style_ref_index(
     let index = style_refs.len();
     style_refs.push(slot);
     Some(index)
+}
+
+fn spreadsheet_number_format_index(
+    values: &[LocalizedString],
+    number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
+) -> Option<usize> {
+    if values.is_empty() {
+        return None;
+    }
+    let slot = SpreadsheetNumberFormatSlot(values.to_vec());
+    if let Some(index) = number_format_refs
+        .iter()
+        .position(|existing| existing == &slot)
+    {
+        return Some(index);
+    }
+    let index = number_format_refs.len();
+    number_format_refs.push(slot);
+    Some(index)
+}
+
+fn format_spreadsheet_number_formats_for_moxel(
+    refs: &[SpreadsheetNumberFormatSlot],
+) -> Vec<String> {
+    if refs.is_empty() {
+        return Vec::new();
+    }
+    let mut fields = Vec::with_capacity(refs.len() + 1);
+    fields.push(refs.len().to_string());
+    fields.extend(
+        refs.iter()
+            .map(|slot| format_spreadsheet_number_format_for_moxel(&slot.0)),
+    );
+    fields
+}
+
+fn format_spreadsheet_number_format_for_moxel(values: &[LocalizedString]) -> String {
+    let mut fields = Vec::with_capacity(values.len() + 2);
+    fields.push("1".to_string());
+    fields.push(values.len().to_string());
+    for value in values {
+        fields.push(format!(
+            "{{{},{}}}",
+            format_1c_string(&value.lang),
+            format_1c_string(&value.content)
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
 }
 
 fn spreadsheet_style_ref_slot(value: &str) -> Option<SpreadsheetStyleRefSlot> {
@@ -10899,12 +11003,38 @@ fn format_form_layout_new_extended_label_field_item(
 }
 
 fn format_form_layout_new_checkbox_field_item(item: &FormXmlChildItem, item_uuid: &str) -> String {
+    if item.show_in_header.is_some() {
+        return format_form_layout_new_extended_checkbox_field_item(item, item_uuid);
+    }
+
     let mut text = format!(
         "{{48,{{{},{}}},0,0,0,3,{},1,0,{{1,0}},{}",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
         format_1c_synonyms(&item.title)
+    );
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
+}
+
+fn format_form_layout_new_extended_checkbox_field_item(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+) -> String {
+    let show_in_header = if item.show_in_header.unwrap_or(true) {
+        "1"
+    } else {
+        "0"
+    };
+    let mut text = format!(
+        "{{48,{{{},{}}},0,0,0,3,{},1,0,{{1,0}},{},{{1,0}},{{0}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},{},1,0,3,0",
+        item.id,
+        item_uuid,
+        format_1c_string(&item.name),
+        format_1c_synonyms(&item.title),
+        show_in_header
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
@@ -15886,22 +16016,33 @@ pub fn pack_predefined_data_blob_from_xml(
 
 pub fn predefined_data_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
     let items = parse_predefined_data_xml(xml)?;
-    let flat = flatten_predefined_xml_items(&items)?;
-    let folders = flat.values().filter(|item| item.is_folder).count();
-    let child_links = flat.len().saturating_sub(items.len());
-    let folder_word = if folders == 1 { "folder" } else { "folders" };
-    let child_link_word = if child_links == 1 {
+    let stats = predefined_data_xml_stats(&items);
+    let item_word = if stats.items == 1 { "item" } else { "items" };
+    let root_word = if stats.root_items == 1 {
+        "root row"
+    } else {
+        "root rows"
+    };
+    let folder_word = if stats.folders == 1 {
+        "folder"
+    } else {
+        "folders"
+    };
+    let child_link_word = if stats.nested_child_links == 1 {
         "nested child link"
     } else {
         "nested child links"
     };
     Ok(vec![
         format!(
-            "source XML has {} predefined items ({folders} {folder_word}, {child_links} {child_link_word}) addressed by UUID, but the Config row owns the serialized predefined table order and parent/children rowset shape",
-            flat.len()
+            "source XML has {} predefined {item_word} across {} {root_word} ({} {folder_word}, {} {child_link_word}, max depth {}), addressed by UUID, but the Config row owns the serialized predefined table order, rowset nesting and parent/children row shape",
+            stats.items, stats.root_items, stats.folders, stats.nested_child_links, stats.max_depth,
         ),
-        "source XML carries editable item values only; staging currently patches existing base rows and fails for source items missing from the base blob".to_string(),
-        "base PredefinedData row preserves type UUID slots, parent reference slots, value count, and trailing fields that are not fully represented in Predefined.xml".to_string(),
+        format!(
+            "source XML carries only {} editable value fields (Name, Code, Description, IsFolder per item; {} non-empty text fields); staging currently patches existing base rows by item UUID and fails for source items missing from the base blob",
+            stats.editable_value_fields, stats.non_empty_text_fields
+        ),
+        "base PredefinedData row preserves type UUID slots, parent reference slots, row value count, child table counts and trailing fields that are not fully represented in Predefined.xml".to_string(),
     ])
 }
 
@@ -17498,6 +17639,36 @@ fn flatten_predefined_xml_items_into(
         flatten_predefined_xml_items_into(&item.children, by_id)?;
     }
     Ok(())
+}
+
+fn predefined_data_xml_stats(items: &[PredefinedDataXmlItem]) -> PredefinedDataXmlStats {
+    if items.is_empty() {
+        return PredefinedDataXmlStats::default();
+    }
+    let mut stats = PredefinedDataXmlStats {
+        root_items: items.len(),
+        ..Default::default()
+    };
+    collect_predefined_data_xml_stats(items, 1, &mut stats);
+    stats
+}
+
+fn collect_predefined_data_xml_stats(
+    items: &[PredefinedDataXmlItem],
+    depth: usize,
+    stats: &mut PredefinedDataXmlStats,
+) {
+    stats.max_depth = stats.max_depth.max(depth);
+    for item in items {
+        stats.items += 1;
+        stats.folders += usize::from(item.is_folder);
+        stats.nested_child_links += item.children.len();
+        stats.editable_value_fields += 4;
+        stats.non_empty_text_fields += usize::from(!item.name.is_empty());
+        stats.non_empty_text_fields += usize::from(!item.code.is_empty());
+        stats.non_empty_text_fields += usize::from(!item.description.is_empty());
+        collect_predefined_data_xml_stats(&item.children, depth + 1, stats);
+    }
 }
 
 fn collect_predefined_replacements(
@@ -23439,7 +23610,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
     #[test]
     fn packs_simple_spreadsheet_document_xml() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
 	<columns>
 		<size>3</size>
@@ -23470,7 +23641,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 </document>
 "#;
 
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.starts_with("MOXCEL\0"));
@@ -23819,6 +23990,47 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains(r#"{2,{128,88},{0}}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_number_format_string_table() -> anyhow::Result<()> {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format/>
+	<format>
+		<format>
+			<v8:item>
+				<v8:lang>ru</v8:lang>
+				<v8:content>&#x411;&#x41B;=; &#x411;&#x418;=&#x221A;</v8:content>
+			</v8:item>
+		</format>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{16777216,0},{0}}"#));
+        assert!(text.contains(r#"1,{1,1,{"ru","БЛ=; БИ=√"}}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -30542,6 +30754,52 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_new_checkbox_field_show_in_header() -> anyhow::Result<()> {
+        for (value, expected_code) in [("true", "1"), ("false", "0")] {
+            let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<CheckBoxField name="EnabledFlag" id="42">
+			<Title>
+				<v8:item>
+					<v8:lang>en</v8:lang>
+					<v8:content>Enabled</v8:content>
+				</v8:item>
+			</Title>
+			<ShowInHeader>{value}</ShowInHeader>
+		</CheckBoxField>
+	</ChildItems>
+</Form>
+"#
+            );
+
+            let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let checkbox_fields =
+                super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+            assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+            assert_eq!(&parsed.layout[checkbox_fields[0].clone()], "48");
+            assert_eq!(&parsed.layout[checkbox_fields[5].clone()], "3");
+            assert_eq!(
+                &parsed.layout[checkbox_fields[6].clone()],
+                r#""EnabledFlag""#
+            );
+            assert_eq!(
+                &parsed.layout[checkbox_fields[10].clone()],
+                r#"{1,"en","Enabled"}"#
+            );
+            assert_eq!(&parsed.layout[checkbox_fields[21].clone()], expected_code);
+            assert_eq!(parsed.module_text, "Old module");
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_new_table_with_search_addition() -> anyhow::Result<()> {
         let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
@@ -31735,12 +31993,22 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(
             blockers
                 .iter()
+                .any(|blocker| blocker.contains("1 root row"))
+        );
+        assert!(
+            blockers
+                .iter()
                 .any(|blocker| blocker.contains("1 folder") && blocker.contains("1 nested"))
         );
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("patches existing base rows"))
+                .any(|blocker| blocker.contains("8 editable value fields"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("patches existing base rows by item UUID"))
         );
         assert!(
             blockers

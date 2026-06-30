@@ -61,6 +61,11 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 41 | Form.xml | new `CheckBoxField` items now pack explicit `ShowInHeader` through the extended layout shape |
+| 41 | MXL templates | MOXCEL number-format string tables now export and pack `document/format/format/v8:item` references |
+| 41 | Workflow metadata XML | `BusinessProcess` and `Task` now emit `UseStandardCommands` from the native owner field |
+| 41 | Source staging readiness | `Predefined.xml` base dependency audit reports exact row, nesting, editable-field and native-shape blockers |
+| 41 | Refactor | SQL/BCP fetch helpers moved from `src/mssql_dump/mod.rs` to `src/mssql_dump/fetch.rs` with focused fetch/timing checks |
 | 40 | Configuration.xml | root child object tags now reuse the shared metadata classifier for Languages, XDTOPackages, SettingsStorages, ScheduledJobs, CommandGroups, Styles and DocumentNumerators in source XML 2.20/2.21 |
 | 40 | Catalog metadata XML | `QuickChoice` and `ChoiceMode` are extracted from native root fields with backward-compatible defaults |
 | 40 | Form.xml | `TextDocumentField` now exports explicit `ReadOnly=true` through the shared child-item path |
