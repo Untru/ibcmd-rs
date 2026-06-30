@@ -14437,6 +14437,10 @@ struct DocumentProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
 
+struct SettingsStorageProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
@@ -14687,6 +14691,7 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
     let object_text = *root_fields.get(1)?;
     let fields = split_1c_braced_fields(object_text, 0)?;
     let mut entries = Vec::new();
+    let header_index = metadata_header_field_index(&fields, &row.file_name);
 
     if object_code == 0 {
         push_indexed_generated_type(&mut entries, &fields, 1, "DefinedType", &header.name);
@@ -14746,6 +14751,15 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
     if object_code == 19 {
         push_indexed_generated_type(&mut entries, &fields, 12, "ReportManager", &header.name);
     }
+    if object_code == 2 && header_index == Some(1) && field_starts_with(fields.get(1), "{0,") {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            2,
+            "SettingsStorageManager",
+            &header.name,
+        );
+    }
     if object_code == 57 {
         push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 3, "CatalogRef", &header.name);
@@ -14753,7 +14767,6 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
         push_indexed_generated_type(&mut entries, &fields, 7, "CatalogList", &header.name);
         push_indexed_generated_type(&mut entries, &fields, 34, "CatalogManager", &header.name);
     }
-    let header_index = metadata_header_field_index(&fields, &row.file_name);
 
     if object_code == 20 && header_index == Some(5) {
         if let Some(type_id) = fields.get(1).copied().and_then(parse_uuid_field) {
@@ -15195,6 +15208,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(text, uuid)?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
+    } else if kind == "SettingsStorage" {
+        let settings_storage = parse_settings_storage_properties_from_text(text, uuid)?;
+        format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
     } else if kind == "Enum" {
         let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
         format_enum_source_xml(&header, &enumeration, source_version).into_bytes()
@@ -15750,6 +15766,32 @@ fn parse_document_properties_from_text(text: &str, uuid: &str) -> Option<Documen
     );
 
     Some(DocumentProperties { generated_types })
+}
+
+fn parse_settings_storage_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<SettingsStorageProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("2")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+        || !field_starts_with(fields.get(1), "{0,")
+    {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        2,
+        3,
+        &format!("SettingsStorageManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(SettingsStorageProperties { generated_types })
 }
 
 fn parse_data_processor_properties_from_text(
@@ -18807,6 +18849,19 @@ fn format_document_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("Document", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&document.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    xml
+}
+
+fn format_settings_storage_source_xml(
+    header: &MetadataHeader,
+    settings_storage: &SettingsStorageProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("SettingsStorage", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&settings_storage.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
@@ -30727,6 +30782,67 @@ mod tests {
         assert_eq!(properties.uuid, uuid);
         assert_eq!(properties.name, "UseFeatureFor");
         assert!(!repacked.blob.is_empty());
+    }
+
+    #[test]
+    fn extracts_settings_storage_xml_with_manager_generated_type() {
+        let uuid = "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let manager_type_id = "44444444-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let manager_value_id = "44444444-cccc-4ccc-8ccc-cccccccccccc";
+        let plain = format!(
+            "{{1,\r\n{{2,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"UserSettings\",{{1,\"en\",\"User settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000}},2,\r\n{{0}},\r\n{{0}}\r\n}},0}}"
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
+        let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
+        let generated_types = parse_generated_type_entries_from_blob(&blob, uuid).unwrap();
+        let xml = String::from_utf8(extracted.xml.clone()).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("SettingsStorages").join("UserSettings.xml")
+        );
+        assert_eq!(properties.kind, "SettingsStorage");
+        assert_eq!(properties.uuid, uuid);
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="SettingsStorageManager.UserSettings" category="Manager">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+        assert!(generated_types.contains(&(
+            manager_type_id.to_string(),
+            "cfg:SettingsStorageManager.UserSettings".to_string()
+        )));
+        assert!(!repacked.blob.is_empty());
+        let repacked_plain =
+            String::from_utf8(inflate_raw_deflate(&repacked.blob).unwrap()).unwrap();
+        assert_eq!(repacked_plain, plain);
+
+        let extracted_v21 = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+        assert!(xml_v21.contains(r#"version="2.21""#));
+        assert!(!xml_v21.contains(r#"version="2.20""#));
+        assert!(xml_v21.contains("SettingsStorageManager.UserSettings"));
     }
 
     #[test]
