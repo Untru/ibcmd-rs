@@ -17,10 +17,11 @@ They are still intended only for throwaway test databases.
 
 ## Export Compatibility Status
 
-Current parity tracking is summarized in
+Current parity tracking is maintained in
 [docs/export-parity-status.md](docs/export-parity-status.md). The table below is
-the compact top-level view for the `ut_ibcmd` export comparison against native
-`ibcmd`.
+the compact top-level view from the last full `ut_ibcmd` export comparison
+against native `ibcmd`; incremental verified fixes after that snapshot are
+listed in the status document until the next full diff is regenerated.
 
 EDT XML exporter/importer plugin findings are summarized in
 [docs/edt-xml-layer-analysis.md](docs/edt-xml-layer-analysis.md). The short
