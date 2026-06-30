@@ -4295,6 +4295,7 @@ struct MoxelFormat {
     back_color: Option<String>,
     text_color: Option<String>,
     text_placement: Option<&'static str>,
+    text_orientation: Option<usize>,
     fill_type: Option<&'static str>,
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
@@ -4326,6 +4327,7 @@ impl MoxelFormat {
             && self.back_color.is_none()
             && self.text_color.is_none()
             && self.text_placement.is_none()
+            && self.text_orientation.is_none()
             && self.fill_type.is_none()
             && self.drawing_border.is_none()
             && self.by_selected_columns.is_none()
@@ -14913,6 +14915,7 @@ fn parse_moxel_format(text: &str, style_refs: &[Option<String>]) -> Option<Moxel
         back_color: parse_moxel_format_style_ref(&values, 11, style_refs),
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
+        text_orientation: parse_moxel_format_usize(&values, 13),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
         drawing_border: None,
         by_selected_columns: parse_moxel_format_usize(&values, 20)
@@ -14965,6 +14968,7 @@ fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 9
             | 10
             | 11
+            | 13
             | 14
             | 15
             | 16
@@ -15594,6 +15598,7 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     push_moxel_format_text(xml, "backColor", format.back_color.as_deref());
     push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
+    push_moxel_format_usize(xml, "textOrientation", format.text_orientation);
     push_moxel_format_text(xml, "fillType", format.fill_type);
     push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     if let Some(by_selected_columns) = format.by_selected_columns {
@@ -34818,10 +34823,11 @@ mod tests {
     }
 
     #[test]
-    fn formats_moxel_ignores_unknown_format_bits_without_dropping_known_values() {
+    fn formats_moxel_decodes_text_orientation_between_width_and_text_placement() {
         let format = parse_moxel_format("{24704,72,900,3}", &[]).unwrap();
 
         assert_eq!(format.width, Some(72));
+        assert_eq!(format.text_orientation, Some(900));
         assert_eq!(format.text_placement, Some("Wrap"));
     }
 
@@ -34836,7 +34842,7 @@ mod tests {
 
         assert!(xml.contains("<f>2</f>"));
         assert!(xml.contains(
-            "\t<format>\r\n\t\t<width>72</width>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t</format>"
+            "\t<format>\r\n\t\t<width>72</width>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<textOrientation>900</textOrientation>\r\n\t</format>"
         ));
     }
 

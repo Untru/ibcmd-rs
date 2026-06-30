@@ -1879,6 +1879,7 @@ struct SpreadsheetDocumentXmlFormat {
     back_color: Option<String>,
     text_color: Option<String>,
     text_placement: Option<String>,
+    text_orientation: Option<usize>,
     fill_type: Option<String>,
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
@@ -2354,6 +2355,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "backColor"
             | "textColor"
             | "textPlacement"
+            | "textOrientation"
             | "fillType"
             | "drawingBorder"
             | "bySelectedColumns"
@@ -2751,6 +2753,11 @@ fn apply_spreadsheet_text_value(
         "textPlacement" if path_ends_with(path, &["format", "textPlacement"]) => {
             set_spreadsheet_format_string(format, text, |format, parsed| {
                 format.text_placement = Some(parsed)
+            });
+        }
+        "textOrientation" if path_ends_with(path, &["format", "textOrientation"]) => {
+            set_spreadsheet_format_usize(format, value, |format, parsed| {
+                format.text_orientation = Some(parsed)
             });
         }
         "fillType" if path_ends_with(path, &["format", "fillType"]) => {
@@ -3504,6 +3511,7 @@ fn format_spreadsheet_format_for_moxel(
             .as_deref()
             .and_then(spreadsheet_text_placement_code),
     );
+    push_spreadsheet_format_value(&mut values, 13, format.text_orientation);
     push_spreadsheet_format_value(
         &mut values,
         15,
@@ -23516,6 +23524,45 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains(r#"{2,{33024,6,1},{128,72}}"#));
+        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_text_orientation_format() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<textPlacement>Wrap</textPlacement>
+		<textOrientation>900</textOrientation>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{24576,900,3},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
