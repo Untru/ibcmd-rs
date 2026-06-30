@@ -1,6 +1,9 @@
-use anyhow::Result;
+use std::collections::BTreeMap;
+
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use ibcmd_rs::cli::{Cli, Commands, InfobaseCommands, InfobaseConfigCommands};
+use ibcmd_rs::plan::SourceDiffSignatureOptions;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -84,6 +87,21 @@ fn main() -> Result<()> {
                 ibcmd_rs::plan::diff_source_trees(&args.left, &args.right, &args.path_prefix)?;
             if let Some(output) = args.output {
                 ibcmd_rs::plan::write_source_diff(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::SourceDiffSignatures(args) => {
+            let diff = ibcmd_rs::plan::read_source_diff(&args.diff)?;
+            let options = SourceDiffSignatureOptions {
+                max_files_per_kind: args.max_files_per_kind,
+                kind_limits: parse_kind_limits(&args.kind_limit)?,
+                top: Some(args.top),
+                examples_per_signature: args.examples_per_signature,
+            };
+            let report = ibcmd_rs::plan::build_source_diff_signature_report(&diff, &options);
+            if let Some(output) = args.output {
+                ibcmd_rs::plan::write_source_diff_signature_report(&report, &output)?;
             } else {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
@@ -403,4 +421,27 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn parse_kind_limits(values: &[String]) -> Result<BTreeMap<String, usize>> {
+    let mut limits = BTreeMap::new();
+    for value in values {
+        let Some((kind, limit)) = value.split_once('=') else {
+            return Err(anyhow!(
+                "invalid --kind-limit {value:?}; expected KIND=COUNT"
+            ));
+        };
+        let kind = kind.trim();
+        if kind.is_empty() {
+            return Err(anyhow!(
+                "invalid --kind-limit {value:?}; kind must not be empty"
+            ));
+        }
+        let limit = limit
+            .trim()
+            .parse::<usize>()
+            .map_err(|error| anyhow!("invalid --kind-limit {value:?}: {error}"))?;
+        limits.insert(kind.to_string(), limit);
+    }
+    Ok(limits)
 }

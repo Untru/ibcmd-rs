@@ -31,6 +31,8 @@ pub enum Commands {
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
     SourceDiff(SourceDiffArgs),
+    /// Summarize repeated XML diff signatures from a source-diff JSON report.
+    SourceDiffSignatures(SourceDiffSignaturesArgs),
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
@@ -408,6 +410,27 @@ pub struct SourceDiffArgs {
     /// Optional source path prefix to compare. Can be repeated.
     #[arg(long)]
     pub path_prefix: Vec<String>,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct SourceDiffSignaturesArgs {
+    /// Source-diff JSON produced by `source-diff`.
+    pub diff: PathBuf,
+    /// Optional maximum changed XML file pairs to parse per source kind.
+    #[arg(long)]
+    pub max_files_per_kind: Option<usize>,
+    /// Per-kind sample limit override, such as `form=900` or `template=450`. Can be repeated.
+    #[arg(long)]
+    pub kind_limit: Vec<String>,
+    /// Maximum number of signature rows to include.
+    #[arg(long, default_value_t = 200)]
+    pub top: usize,
+    /// Maximum example file paths to keep per signature.
+    #[arg(long, default_value_t = 3)]
+    pub examples_per_signature: usize,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
@@ -3009,6 +3032,38 @@ mod tests {
                 assert_eq!(
                     args.output,
                     Some(PathBuf::from(r"C:\audit\source-diff.json"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let signatures = Cli::parse_from([
+            "ibcmd-rs",
+            "source-diff-signatures",
+            r"C:\audit\source-diff.json",
+            "--max-files-per-kind",
+            "100",
+            "--kind-limit",
+            "form=900",
+            "--kind-limit",
+            "template=450",
+            "--top",
+            "50",
+            "--examples-per-signature",
+            "2",
+            "-o",
+            r"C:\audit\source-diff-signatures.json",
+        ]);
+        match signatures.command {
+            Commands::SourceDiffSignatures(args) => {
+                assert_eq!(args.diff, PathBuf::from(r"C:\audit\source-diff.json"));
+                assert_eq!(args.max_files_per_kind, Some(100));
+                assert_eq!(args.kind_limit, vec!["form=900", "template=450"]);
+                assert_eq!(args.top, 50);
+                assert_eq!(args.examples_per_signature, 2);
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"C:\audit\source-diff-signatures.json"))
                 );
             }
             other => panic!("unexpected command: {other:?}"),
