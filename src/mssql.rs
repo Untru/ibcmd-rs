@@ -1088,8 +1088,8 @@ fn metadata_body_bootstrap_rows(
         help_suffix,
         "help_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        true,
-        "Help packer builds the help blob from Help.xml, pages and files; current staging queries Config only to choose an existing help row id when present",
+        false,
+        "Help packer builds the help blob from Help.xml, pages and files using the deterministic body id without reading active Config rows",
     ));
 
     for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
@@ -3856,8 +3856,7 @@ fn prepare_object_help_body_row(
     if !body_path.exists() {
         return Ok(Vec::new());
     }
-    let body_id = resolve_help_body_id(sqlcmd, server, database, properties)
-        .with_context(|| format!("failed to resolve Help body id for {}", body_path.display()))?;
+    let body_id = infer_help_body_id(properties);
     prepare_help_blob_body_row(sqlcmd, server, database, body_id, body_path, "Help")
 }
 
@@ -3927,24 +3926,6 @@ fn infer_help_body_id_for_kind(kind: &str, uuid: &str) -> String {
         "5"
     };
     format!("{uuid}.{suffix}")
-}
-
-fn resolve_help_body_id(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
-    properties: &SimpleMetadataXmlProperties,
-) -> Result<String> {
-    let rows = fetch_config_blobs_by_file_name_prefix(
-        sqlcmd,
-        server,
-        database,
-        &format!("{}.", properties.uuid),
-    )?;
-    Ok(
-        resolve_help_body_id_from_config_rows(&properties.kind, &properties.uuid, &rows)
-            .unwrap_or_else(|| infer_help_body_id(properties)),
-    )
 }
 
 fn resolve_help_body_id_from_config_rows(
@@ -4854,35 +4835,6 @@ fn fetch_config_blobs_for_files(
         rows.append(&mut chunk_rows);
     }
     Ok(rows)
-}
-
-fn fetch_config_blobs_by_file_name_prefix(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
-    file_name_prefix: &str,
-) -> Result<Vec<BinaryBlobRow>> {
-    let sql = format!(
-        "SET NOCOUNT ON; USE {db};\n\
-         SELECT COALESCE((\n\
-             SELECT FileName AS file_name,\n\
-                    DataSize AS data_size,\n\
-                    CONVERT(varchar(max), BinaryData, 2) AS binary_hex\n\
-             FROM Config\n\
-             WHERE PartNo = 0 AND FileName LIKE N'{file_name_prefix}%'\n\
-             ORDER BY FileName\n\
-             FOR JSON PATH\n\
-         ), '[]');",
-        db = quote_ident(database),
-        file_name_prefix = quote_string(file_name_prefix),
-    );
-    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
-    let json = extract_json_array(
-        &stdout,
-        &format!("fetch_config_blobs_by_file_name_prefix({file_name_prefix})"),
-    )?;
-    serde_json::from_str(&json)
-        .with_context(|| format!("failed to parse Config blob JSON for {file_name_prefix}"))
 }
 
 fn fetch_config_blob(
@@ -7392,7 +7344,7 @@ mod tests {
         assert_eq!(report.config_rows, 7);
         assert_eq!(report.rows_requiring_base_blob, 4);
         assert_eq!(report.rows_generatable_without_base_blob, 3);
-        assert_eq!(report.current_staging_rows_fetching_base_blob, 7);
+        assert_eq!(report.current_staging_rows_fetching_base_blob, 6);
         assert_eq!(report.objects_requiring_base_blob, 2);
         assert_eq!(report.objects_fully_generatable_without_base_blob, 0);
 
@@ -7407,6 +7359,20 @@ mod tests {
         );
         assert_eq!(row.generation, "requires_base_blob");
         assert!(row.current_staging_fetches_base_blob);
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "help_body")
+            .unwrap();
+        assert_eq!(
+            row.config_file_name,
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5"
+        );
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(row.source_path, "Catalogs/Products/Ext/Help.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading active Config rows"));
 
         let row = report
             .rows
@@ -7427,6 +7393,54 @@ mod tests {
             .unwrap();
         assert_eq!(row.config_file_name, "versions");
         assert_eq!(row.generation, "requires_base_blob");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_object_help_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-help-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let catalog_xml = root.join("Catalogs").join("Products.xml");
+        let body_path = root
+            .join("Catalogs")
+            .join("Products")
+            .join("Ext")
+            .join("Help.xml");
+        let page_path = body_path.with_extension("").join("ru.html");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::create_dir_all(page_path.parent().unwrap()).unwrap();
+        fs::write(&catalog_xml, b"<Catalog/>").unwrap();
+        fs::write(
+            &body_path,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
+	<Page>ru</Page>
+</Help>
+"#,
+        )
+        .unwrap();
+        fs::write(&page_path, b"<html></html>").unwrap();
+        let properties = test_simple_metadata_properties(
+            "Catalog",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Products",
+        );
+
+        let rows = super::prepare_object_help_body_row(
+            PathBuf::from("missing-sqlcmd-for-help-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &catalog_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5");
+        assert_eq!(rows[0].path, body_path);
 
         let _ = fs::remove_dir_all(root);
     }
