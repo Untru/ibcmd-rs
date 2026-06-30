@@ -4400,6 +4400,7 @@ struct FlowchartItem {
     name: String,
     title: Vec<(String, String)>,
     tab_order: String,
+    z_order: String,
     properties: FlowchartItemProperties,
     events: Vec<FlowchartEvent>,
 }
@@ -6685,8 +6686,13 @@ fn parse_business_process_flowchart_text(text: &str) -> Option<BusinessProcessFl
     }
 
     let mut items = Vec::with_capacity(item_count);
-    for (code, body) in raw_items {
-        items.push(parse_flowchart_item(&code, &body, &names)?);
+    for (z_order, (code, body)) in raw_items.into_iter().enumerate() {
+        items.push(parse_flowchart_item(
+            &code,
+            &body,
+            &names,
+            z_order.to_string(),
+        )?);
     }
 
     Some(BusinessProcessFlowchart { items })
@@ -6696,6 +6702,7 @@ fn parse_flowchart_item(
     code: &str,
     body: &str,
     names: &BTreeMap<String, String>,
+    z_order: String,
 ) -> Option<FlowchartItem> {
     let fields = split_1c_braced_fields(body, 0)?;
     let base = parse_flowchart_base(code, body)?;
@@ -6807,6 +6814,7 @@ fn parse_flowchart_item(
         name: base.name,
         title: base.title,
         tab_order: base.tab_order,
+        z_order,
         properties,
         events,
     })
@@ -8344,7 +8352,10 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
     xml.push_str("\t\t\t\t<TextColor>style:FormTextColor</TextColor>\r\n");
     xml.push_str("\t\t\t\t<LineColor>style:BorderColor</LineColor>\r\n");
     xml.push_str("\t\t\t\t<GroupNumber>0</GroupNumber>\r\n");
-    xml.push_str("\t\t\t\t<ZOrder>0</ZOrder>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t<ZOrder>{}</ZOrder>\r\n",
+        escape_xml_text(&item.z_order)
+    ));
     xml.push_str("\t\t\t\t<Hyperlink>false</Hyperlink>\r\n");
     xml.push_str(&format!(
         "\t\t\t\t<Transparent>{}</Transparent>\r\n",
@@ -35962,6 +35973,14 @@ mod tests {
             fs::read_to_string(root.join("BusinessProcesses/Approval/Ext/Flowchart.xml")).unwrap();
         assert!(xml.contains(r#"<Start id="1" uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">"#));
         assert!(xml.contains(r#"<ConnectionLine id="2">"#));
+        let line_xml = xml
+            .split(r#"<ConnectionLine id="2">"#)
+            .nth(1)
+            .unwrap()
+            .split("</ConnectionLine>")
+            .next()
+            .unwrap();
+        assert!(line_xml.contains("<ZOrder>1</ZOrder>"));
         assert!(xml.contains("<Item>Start</Item>"));
         assert!(xml.contains("<Item>Done</Item>"));
         assert!(xml.contains(r#"<Completion id="3" uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">"#));
