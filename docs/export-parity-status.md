@@ -5,7 +5,7 @@ Generated from:
 ```powershell
 target\release\ibcmd-rs.exe mssql-dump-config `
   --database ut_ibcmd `
-  -o E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_dump `
+  -o E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_dump `
   --overwrite `
   --inflate `
   --extract-module-text `
@@ -14,35 +14,35 @@ target\release\ibcmd-rs.exe mssql-dump-config `
   --no-binary-rows
 
 robocopy `
-  E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_dump `
-  E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_source_only `
+  E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_dump `
+  E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_source_only `
   /E /XD Config_inflated Config_raw ConfigSave_inflated ConfigSave_raw `
   /XF manifest.json *.json
 
 target\release\ibcmd-rs.exe source-diff `
-  -o E:\ibcmd_lab\full_diff_20260630_184120\diff_full_source_only.json `
+  -o E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\diff_full_source_only.json `
   D:\ibcmd-rs\lab\ut_ibcmd_20260629_164647\ibcmd `
-  E:\ibcmd_lab\full_diff_20260630_184120\ibcmd_rs_source_only
+  E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_source_only
 ```
 
 The full JSON report is retained at
-`E:\ibcmd_lab\full_diff_20260630_184120\diff_full_source_only.json`.
+`E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\diff_full_source_only.json`.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
-Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
-round 32 incremental verified fixes listed below.
+Candidate: `ibcmd-rs` full export snapshot generated after the round 32
+incremental verified fixes and before round 33 agent branches were merged.
 
 Raw source-only summary:
 
 | left_only | right_only | different | unchanged |
 |---:|---:|---:|---:|
-| 1 | 0 | 16984 | 32638 |
+| 1 | 0 | 16864 | 32758 |
 
 The only `left_only` file is `ConfigDumpInfo.xml`; it remains a deliberate
 scope exclusion and is not counted as parity debt.
 
-Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **65.8%**
-(`32638 / 49622` byte-identical files), with **16984** files still different.
+Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **66.0%**
+(`32758 / 49622` byte-identical files; 66.02% exact), with **16864** files still different.
 
 Verification history:
 
@@ -215,8 +215,8 @@ Diff by file kind:
 | kind | different |
 |---|---:|
 | form | 10690 |
-| metadata_xml | 3856 |
-| template | 1267 |
+| metadata_xml | 3902 |
+| template | 1101 |
 | other | 1170 |
 | configuration_root | 1 |
 
@@ -242,20 +242,20 @@ Diff by file kind:
 | StyleItems | done | 400 | 400 | 0 | 100.0 |
 | WSReferences | done | 2 | 2 | 0 | 100.0 |
 | XDTOPackages | done | 814 | 814 | 0 | 100.0 |
-| Enums | partial | 1195 | 1122 | 73 | 93.9 |
-| CommonTemplates | partial | 495 | 406 | 89 | 82.0 |
-| Roles | partial | 2220 | 1752 | 468 | 78.9 |
+| Enums | partial | 1195 | 1136 | 59 | 95.1 |
+| CommonTemplates | partial | 495 | 409 | 86 | 82.6 |
+| Reports | partial | 2362 | 1597 | 765 | 67.6 |
 | AccumulationRegisters | partial | 449 | 267 | 182 | 59.5 |
-| Reports | partial | 2362 | 1299 | 1063 | 55.0 |
+| Roles | partial | 2220 | 1207 | 1013 | 54.4 |
+| ExchangePlans | partial | 366 | 190 | 176 | 51.9 |
 | HTTPServices | partial | 10 | 5 | 5 | 50.0 |
 | WebServices | partial | 36 | 18 | 18 | 50.0 |
-| ExchangePlans | partial | 366 | 182 | 184 | 49.7 |
 | DocumentJournals | partial | 121 | 60 | 61 | 49.6 |
+| DataProcessors | partial | 7058 | 3456 | 3602 | 49.0 |
 | Tasks | partial | 49 | 23 | 26 | 46.9 |
-| DataProcessors | partial | 7058 | 3214 | 3844 | 45.5 |
-| Catalogs | partial | 6705 | 3033 | 3672 | 45.2 |
+| Catalogs | partial | 6705 | 3055 | 3650 | 45.6 |
+| Documents | partial | 6219 | 2799 | 3420 | 45.0 |
 | InformationRegisters | partial | 3978 | 1751 | 2227 | 44.0 |
-| Documents | partial | 6219 | 2721 | 3498 | 43.8 |
 | ChartsOfCharacteristicTypes | partial | 167 | 70 | 97 | 41.9 |
 | BusinessProcesses | partial | 152 | 63 | 89 | 41.4 |
 | SettingsStorages | partial | 82 | 32 | 50 | 39.0 |
@@ -264,7 +264,7 @@ Diff by file kind:
 | FilterCriteria | partial | 7 | 1 | 6 | 14.3 |
 | CommonAttributes | partial | 7 | 0 | 7 | 0.0 |
 | Configuration.xml | partial | 1 | 0 | 1 | 0.0 |
-| **Overall full snapshot** | **partial** | **49622** | **32638** | **16984** | **65.8** |
+| **Overall full snapshot** | **partial** | **49622** | **32758** | **16864** | **66.0** |
 
 ## Scope Exclusions
 

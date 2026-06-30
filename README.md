@@ -33,20 +33,20 @@ import hierarchy, not as a production runtime dependency.
 | Object / group | Status | Ready | Remaining |
 |---|---|---:|---:|
 | CommandGroups, CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, DocumentNumerators, EventSubscriptions, Ext, FunctionalOptions, FunctionalOptionsParameters, IntegrationServices, Languages, ScheduledJobs, SessionParameters, StyleItems, WSReferences, XDTOPackages | done / byte-identical | 100.0% | 0 |
-| Enums | partial | 93.9% | 73 |
-| CommonTemplates | partial | 82.0% | 89 |
-| Roles | partial | 78.9% | 468 |
+| Enums | partial | 95.1% | 59 |
+| CommonTemplates | partial | 82.6% | 86 |
+| Reports | partial | 67.6% | 765 |
 | AccumulationRegisters | partial | 59.5% | 182 |
-| Reports | partial | 55.0% | 1063 |
+| Roles | partial | 54.4% | 1013 |
+| ExchangePlans | partial | 51.9% | 176 |
 | HTTPServices | partial | 50.0% | 5 |
 | WebServices | partial | 50.0% | 18 |
-| ExchangePlans | partial | 49.7% | 184 |
 | DocumentJournals | partial | 49.6% | 61 |
+| DataProcessors | partial | 49.0% | 3602 |
 | Tasks | partial | 46.9% | 26 |
-| DataProcessors | partial | 45.5% | 3844 |
-| Catalogs | partial | 45.2% | 3672 |
+| Catalogs | partial | 45.6% | 3650 |
+| Documents | partial | 45.0% | 3420 |
 | InformationRegisters | partial | 44.0% | 2227 |
-| Documents | partial | 43.8% | 3498 |
 | ChartsOfCharacteristicTypes | partial | 41.9% | 97 |
 | BusinessProcesses | partial | 41.4% | 89 |
 | SettingsStorages | partial | 39.0% | 50 |
@@ -55,7 +55,7 @@ import hierarchy, not as a production runtime dependency.
 | FilterCriteria | partial | 14.3% | 6 |
 | CommonAttributes | partial | 0.0% | 7 |
 | Configuration.xml | partial | 0.0% | 1 |
-| **Overall full snapshot** | **partial** | **65.8%** | **16984** |
+| **Overall full snapshot** | **partial** | **66.0%** | **16864** |
 
 Latest verified slices:
 
