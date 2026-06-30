@@ -59,6 +59,10 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 18 | Form.xml | new top-level `Button` items preserve explicit `DefaultButton` values |
+| 18 | Partial metadata XML | `ExchangePlan` emits `UseStandardCommands` from the metadata blob |
+| 18 | Configuration.xml | root `Catalog` child object headers are emitted |
+| 18 | Source staging readiness | root configuration raw-id `MainSectionCommandInterface.xml` rows are covered as base-free |
 | 17 | Form.xml | new `InputField` items preserve explicit `SkipOnInput` values |
 | 17 | Partial metadata XML | `Task` generated type `InternalInfo` entries are emitted |
 | 17 | MXL templates | SpreadsheetDocument `style:FieldSelectionBackColor` is supported in pack path |
@@ -84,8 +88,9 @@ Scope exclusion: `ConfigDumpInfo.xml` is intentionally not generated and is not
 counted as parity debt.
 
 `Configuration.xml` support currently covers the root metadata header
-(name/synonym/comment/uuid) and source XML version selection; deeper root
-properties remain tracked under Issue #22.
+(name/synonym/comment/uuid), source XML version selection, and selected root
+child object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`);
+deeper root properties remain tracked under Issue #22.
 
 ## Commands
 

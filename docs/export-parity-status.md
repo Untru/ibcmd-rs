@@ -72,6 +72,10 @@ Incremental selected verification after this snapshot:
 | Round 17 partial metadata slice | unit-level metadata XML verification | `Task` emits generated type `InternalInfo` entries |
 | Round 17 MXL template slice | unit-level packer verification | SpreadsheetDocument `style:FieldSelectionBackColor` is supported in pack path |
 | Round 17 source staging readiness slice | unit-level staging verification | root configuration raw-id `CommandInterface.xml` rows are covered as base-free |
+| Round 18 Form.xml slice | unit-level packer verification | new top-level `Button` items preserve explicit `DefaultButton` values |
+| Round 18 partial metadata slice | unit-level metadata XML verification | `ExchangePlan` emits `UseStandardCommands` from the metadata blob |
+| Round 18 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits `Catalog` child object headers |
+| Round 18 source staging readiness slice | unit-level staging verification | root configuration raw-id `MainSectionCommandInterface.xml` rows are covered as base-free |
 
 Performance note for selected extraction:
 
@@ -151,8 +155,9 @@ Diff by file kind:
 | ConfigDumpInfo.xml | do not generate | Not required for the replacement export/import workflow; do not count it as parity debt. |
 
 Note: `Configuration.xml` currently covers the root metadata header
-(uuid/name/synonym/comment) and source XML version selection. Deeper root
-properties are still tracked as Issue #22 follow-up work.
+(uuid/name/synonym/comment), source XML version selection, and selected root
+child object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`).
+Deeper root properties are still tracked as Issue #22 follow-up work.
 
 ## Delegation History
 
@@ -196,5 +201,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #18 | Task generated type InternalInfo | merged to `master` in round 17 |
 | #17 | SpreadsheetDocument `style:FieldSelectionBackColor` pack | merged to `master` in round 17 |
 | #21 | configuration CommandInterface.xml raw-id base-free coverage | merged to `master` in round 17 |
+| #16 | Form.xml new top-level `Button/DefaultButton` generation | merged to `master` in round 18 |
+| #18 | ExchangePlan `UseStandardCommands` metadata XML | merged to `master` in round 18 |
+| #22 | Configuration.xml root Catalog child headers | merged to `master` in round 18 |
+| #21 | configuration MainSectionCommandInterface.xml raw-id base-free coverage | merged to `master` in round 18 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
