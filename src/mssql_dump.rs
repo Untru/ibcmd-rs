@@ -7583,7 +7583,7 @@ fn push_client_application_interface_group_xml(
 
 fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String {
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <ExchangePlanContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
     );
     for item in items {
@@ -7596,7 +7596,7 @@ fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String
             item.auto_record
         ));
     }
-    xml.push_str("</ExchangePlanContent>\r\n");
+    xml.push_str("</ExchangePlanContent>");
     xml
 }
 
@@ -33100,7 +33100,10 @@ mod tests {
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
 
         assert_eq!(dumped.source_asset_rows, 1);
-        let xml = fs::read_to_string(root.join("ExchangePlans/Sync/Ext/Content.xml")).unwrap();
+        let bytes = fs::read(root.join("ExchangePlans/Sync/Ext/Content.xml")).unwrap();
+        assert!(bytes.starts_with(&[0xef, 0xbb, 0xbf]));
+        assert!(!bytes.ends_with(b"\r\n"));
+        let xml = String::from_utf8(bytes).unwrap();
         assert!(xml.contains("<Metadata>Catalog.Customers</Metadata>"));
         assert!(xml.contains("<AutoRecord>Deny</AutoRecord>"));
         assert!(xml.contains("<Metadata>InformationRegister.Prices</Metadata>"));
