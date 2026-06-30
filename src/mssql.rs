@@ -1405,10 +1405,10 @@ fn configuration_asset_bootstrap_rows(
         object_path,
         infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
         "8",
-        "configuration_raw_body",
+        "configuration_home_page_work_area_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
         false,
-        "configuration raw asset is stored as a raw deflated body generated from source bytes without reading the active Config row",
+        "HomePageWorkArea.xml is stored as a raw deflated configuration body generated from source bytes without reading the active Config row",
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -9299,6 +9299,90 @@ mod tests {
         assert_eq!(rows[0].path, body_path);
         assert_eq!(rows[0].blob, body);
         assert_eq!(rows[0].blob_sha256, hex_sha256(body));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_home_page_work_area_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-home-page-work-area-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let configuration_xml = root.join("Configuration.xml");
+        let ext = root.join("Ext");
+        fs::create_dir_all(&ext).unwrap();
+        fs::write(
+            &configuration_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Configuration uuid="ffffffff-ffff-4fff-ffff-ffffffffffff">
+    <Properties><Name>Main</Name></Properties>
+  </Configuration>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(ext.join("HomePageWorkArea.xml"), br#"<HomePageWorkArea/>"#).unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&configuration_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "configuration_home_page_work_area_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "ffffffff-ffff-4fff-ffff-ffffffffffff.8"
+        );
+        assert_eq!(row.source_path, "Ext/HomePageWorkArea.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("HomePageWorkArea.xml"));
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_home_page_work_area_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-home-page-work-area-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let body_path = root.join("Ext").join("HomePageWorkArea.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let body = br#"<HomePageWorkArea/>"#;
+        fs::write(&body_path, body).unwrap();
+        let properties = test_simple_metadata_properties(
+            "Configuration",
+            "ffffffff-ffff-4fff-ffff-ffffffffffff",
+            "Main",
+        );
+
+        let rows = super::prepare_configuration_raw_deflated_body_row(
+            PathBuf::from("missing-sqlcmd-for-home-page-work-area-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &properties,
+            body_path.clone(),
+            "8",
+            "HomePageWorkArea",
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "ffffffff-ffff-4fff-ffff-ffffffffffff.8");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(body)
+        );
 
         let _ = fs::remove_dir_all(root);
     }
