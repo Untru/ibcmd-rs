@@ -12365,6 +12365,21 @@ struct CatalogProperties {
     explanation: Vec<(String, String)>,
 }
 
+struct ReportProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
+    default_form: Option<String>,
+    main_data_composition_schema: Option<String>,
+    default_settings_form: Option<String>,
+    default_variant_form: Option<String>,
+    variants_storage: Option<String>,
+    settings_storage: Option<String>,
+    include_help_in_contents: bool,
+    extended_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    child_templates: Vec<String>,
+}
+
 struct GeneratedTypeEntry {
     name: String,
     category: &'static str,
@@ -12887,6 +12902,10 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Catalog" {
         let catalog = parse_catalog_properties_from_text(text, uuid, form_refs)?;
         format_catalog_source_xml(&header, &catalog).into_bytes()
+    } else if kind == "Report" {
+        let report =
+            parse_report_properties_from_text(text, uuid, form_refs, template_refs, object_refs)?;
+        format_report_source_xml(&header, &report).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed).into_bytes()
@@ -13239,6 +13258,56 @@ fn parse_catalog_properties_from_text(
     })
 }
 
+fn parse_report_properties_from_text(
+    text: &str,
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ReportProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if !matches!(fields.first().map(|value| value.trim()), Some("19" | "20")) {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        1,
+        2,
+        &format!("ReportObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        12,
+        13,
+        &format!("ReportManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(ReportProperties {
+        generated_types,
+        use_standard_commands: parse_1c_bool_field(fields.get(7).copied()).unwrap_or(true),
+        default_form: parse_metadata_form_ref(fields.get(4).copied(), form_refs),
+        main_data_composition_schema: parse_metadata_template_ref(
+            fields.get(5).copied(),
+            template_refs,
+        ),
+        default_settings_form: parse_metadata_form_ref(fields.get(6).copied(), form_refs),
+        default_variant_form: parse_metadata_form_ref(fields.get(10).copied(), form_refs),
+        variants_storage: parse_metadata_object_ref(fields.get(8).copied(), object_refs),
+        settings_storage: parse_metadata_object_ref(fields.get(9).copied(), object_refs),
+        include_help_in_contents: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
+        extended_presentation: parse_1c_synonyms(fields.get(15).copied().unwrap_or("{0}")),
+        explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
+        child_templates: parse_report_child_templates_from_text(text, template_refs),
+    })
+}
+
 fn push_generated_type_entry(
     entries: &mut Vec<GeneratedTypeEntry>,
     fields: &[&str],
@@ -13283,8 +13352,33 @@ fn parse_catalog_form_ref(
     field: Option<&str>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<String> {
+    parse_metadata_form_ref(field, form_refs)
+}
+
+fn parse_metadata_form_ref(
+    field: Option<&str>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<String> {
     let uuid = parse_non_zero_uuid(field?)?;
     form_refs.get(&uuid).and_then(form_source_reference_name)
+}
+
+fn parse_metadata_template_ref(
+    field: Option<&str>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<String> {
+    let uuid = parse_non_zero_uuid(field?)?;
+    template_refs
+        .get(&uuid)
+        .and_then(template_source_reference_name)
+}
+
+fn parse_metadata_object_ref(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let uuid = parse_non_zero_uuid(field?)?;
+    object_refs.get(&uuid).cloned()
 }
 
 fn parse_catalog_input_by_string_fields(field: Option<&str>, catalog_name: &str) -> Vec<String> {
@@ -13303,12 +13397,48 @@ fn parse_catalog_input_by_string_fields(field: Option<&str>, catalog_name: &str)
     values
 }
 
+fn parse_report_child_templates_from_text(
+    text: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Vec<String> {
+    let Some(root_fields) = split_1c_braced_fields(text, 0) else {
+        return Vec::new();
+    };
+    let mut templates = Vec::new();
+    let mut seen = BTreeSet::new();
+    for field in root_fields.iter().skip(3) {
+        let Some(child_fields) = split_1c_braced_fields(field, 0) else {
+            continue;
+        };
+        let Some(uuid) = child_fields
+            .get(2)
+            .and_then(|value| parse_non_zero_uuid(value))
+        else {
+            continue;
+        };
+        let Some(template_ref) = template_refs.get(&uuid) else {
+            continue;
+        };
+        let Some(name) = source_reference_file_stem(&template_ref.relative_path) else {
+            continue;
+        };
+        if seen.insert(name.clone()) {
+            templates.push(name);
+        }
+    }
+    templates
+}
+
 fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
     match code {
         "-3" => Some("Description"),
         "-2" => Some("Code"),
         _ => None,
     }
+}
+
+fn source_reference_file_stem(path: &Path) -> Option<String> {
+    path.file_stem()?.to_str().map(ToOwned::to_owned)
 }
 
 fn form_source_reference_name(form_ref: &FormSourceReference) -> Option<String> {
@@ -14781,6 +14911,133 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
     xml
 }
 
+fn format_report_source_xml(header: &MetadataHeader, report: &ReportProperties) -> String {
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
+\t<Report uuid=\"{}\">\r\n",
+        escape_xml_text(&header.uuid),
+    );
+
+    if !report.generated_types.is_empty() {
+        xml.push_str("\t\t<InternalInfo>\r\n");
+        for generated_type in &report.generated_types {
+            xml.push_str(&format!(
+                "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n",
+                escape_xml_text(&generated_type.name),
+                escape_xml_text(generated_type.category),
+                escape_xml_text(&generated_type.type_id),
+                escape_xml_text(&generated_type.value_id)
+            ));
+        }
+        xml.push_str("\t\t</InternalInfo>\r\n");
+    }
+
+    xml.push_str("\t\t<Properties>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&header.name)
+    ));
+    if header.synonyms.is_empty() {
+        xml.push_str("\t\t\t<Synonym/>\r\n");
+    } else {
+        xml.push_str("\t\t\t<Synonym>\r\n");
+        for (lang, content) in &header.synonyms {
+            xml.push_str("\t\t\t\t<v8:item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+                escape_xml_text(lang)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+                escape_xml_text(content)
+            ));
+            xml.push_str("\t\t\t\t</v8:item>\r\n");
+        }
+        xml.push_str("\t\t\t</Synonym>\r\n");
+    }
+    if header.comment.is_empty() {
+        xml.push_str("\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_text(&header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+        xml_bool(report.use_standard_commands)
+    ));
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultForm",
+        report.default_form.as_deref(),
+    );
+    xml.push_str("\t\t\t<AuxiliaryForm/>\r\n");
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "MainDataCompositionSchema",
+        report.main_data_composition_schema.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultSettingsForm",
+        report.default_settings_form.as_deref(),
+    );
+    xml.push_str("\t\t\t<AuxiliarySettingsForm/>\r\n");
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "DefaultVariantForm",
+        report.default_variant_form.as_deref(),
+    );
+    xml.push_str("\t\t\t<AuxiliaryVariantForm/>\r\n");
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "VariantsStorage",
+        report.variants_storage.as_deref(),
+    );
+    push_optional_text_element(
+        &mut xml,
+        "\t\t\t",
+        "SettingsStorage",
+        report.settings_storage.as_deref(),
+    );
+    xml.push_str(&format!(
+        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+        xml_bool(report.include_help_in_contents)
+    ));
+    push_localized_property(
+        &mut xml,
+        "\t\t\t",
+        "ExtendedPresentation",
+        &report.extended_presentation,
+    );
+    push_localized_property(&mut xml, "\t\t\t", "Explanation", &report.explanation);
+    xml.push_str("\t\t</Properties>\r\n");
+
+    if !report.child_templates.is_empty() {
+        xml.push_str("\t\t<ChildObjects>\r\n");
+        for template in &report.child_templates {
+            xml.push_str(&format!(
+                "\t\t\t<Template>{}</Template>\r\n",
+                escape_xml_text(template)
+            ));
+        }
+        xml.push_str("\t\t</ChildObjects>\r\n");
+    }
+
+    xml.push_str("\t</Report>\r\n</MetaDataObject>");
+    xml
+}
+
 fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
     if fields.is_empty() {
         xml.push_str("\t\t\t<InputByString/>\r\n");
@@ -15008,13 +15265,9 @@ fn insert_metadata_child_commands_xml(
     if commands.is_empty() {
         return;
     }
-    let marker = format!("\t</{owner_kind}>");
-    let Some(index) = xml.find(&marker) else {
-        return;
-    };
-    let mut child_objects = String::from("\t\t<ChildObjects>\r\n");
+    let mut command_objects = String::new();
     for command in commands {
-        child_objects.push_str(&format!(
+        command_objects.push_str(&format!(
             "\t\t\t<Command uuid=\"{}\">\r\n\
 \t\t\t\t<Properties>\r\n\
 \t\t\t\t\t<Name>{}</Name>\r\n",
@@ -15022,33 +15275,45 @@ fn insert_metadata_child_commands_xml(
             escape_xml_text(&command.name),
         ));
         if command.synonyms.is_empty() {
-            child_objects.push_str("\t\t\t\t\t<Synonym/>\r\n");
+            command_objects.push_str("\t\t\t\t\t<Synonym/>\r\n");
         } else {
-            child_objects.push_str("\t\t\t\t\t<Synonym>\r\n");
+            command_objects.push_str("\t\t\t\t\t<Synonym>\r\n");
             for (lang, content) in &command.synonyms {
-                child_objects.push_str("\t\t\t\t\t\t<v8:item>\r\n");
-                child_objects.push_str(&format!(
+                command_objects.push_str("\t\t\t\t\t\t<v8:item>\r\n");
+                command_objects.push_str(&format!(
                     "\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
                     escape_xml_text(lang)
                 ));
-                child_objects.push_str(&format!(
+                command_objects.push_str(&format!(
                     "\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
                     escape_xml_text(content)
                 ));
-                child_objects.push_str("\t\t\t\t\t\t</v8:item>\r\n");
+                command_objects.push_str("\t\t\t\t\t\t</v8:item>\r\n");
             }
-            child_objects.push_str("\t\t\t\t\t</Synonym>\r\n");
+            command_objects.push_str("\t\t\t\t\t</Synonym>\r\n");
         }
         if command.comment.is_empty() {
-            child_objects.push_str("\t\t\t\t\t<Comment/>\r\n");
+            command_objects.push_str("\t\t\t\t\t<Comment/>\r\n");
         } else {
-            child_objects.push_str(&format!(
+            command_objects.push_str(&format!(
                 "\t\t\t\t\t<Comment>{}</Comment>\r\n",
                 escape_xml_text(&command.comment)
             ));
         }
-        child_objects.push_str("\t\t\t\t</Properties>\r\n\t\t\t</Command>\r\n");
+        command_objects.push_str("\t\t\t\t</Properties>\r\n\t\t\t</Command>\r\n");
     }
+
+    if let Some(index) = xml.find("\t\t</ChildObjects>\r\n") {
+        xml.insert_str(index, &command_objects);
+        return;
+    }
+
+    let marker = format!("\t</{owner_kind}>");
+    let Some(index) = xml.find(&marker) else {
+        return;
+    };
+    let mut child_objects = String::from("\t\t<ChildObjects>\r\n");
+    child_objects.push_str(&command_objects);
     child_objects.push_str("\t\t</ChildObjects>\r\n");
     xml.insert_str(index, &child_objects);
 }
@@ -24419,6 +24684,78 @@ mod tests {
         assert!(xml.contains(
             "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
         ));
+    }
+
+    #[test]
+    fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
+        let report_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let object_type_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+        let object_value_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+        let manager_type_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let manager_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+        let template_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let storage_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let report_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{zero_uuid},{template_uuid},{zero_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let template_refs = BTreeMap::from([(
+            template_uuid.to_string(),
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Reports/SalesReport/Templates/MainSchema.xml"),
+                kind: "Template",
+                template_type: "DataCompositionSchema",
+            },
+        )]);
+        let object_refs = BTreeMap::from([(
+            storage_uuid.to_string(),
+            "SettingsStorage.ReportVariants".to_string(),
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &report_blob,
+            report_uuid,
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &template_refs,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Reports").join("SalesReport.xml")
+        );
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="ReportObject.SalesReport" category="Object">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(
+            xml.contains(
+                r#"<xr:GeneratedType name="ReportManager.SalesReport" category="Manager">"#
+            )
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains("<Comment/>"));
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert!(xml.contains(
+            "<MainDataCompositionSchema>Report.SalesReport.Template.MainSchema</MainDataCompositionSchema>"
+        ));
+        assert!(xml.contains("<VariantsStorage>SettingsStorage.ReportVariants</VariantsStorage>"));
+        assert!(xml.contains("<SettingsStorage/>"));
+        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+        assert!(xml.contains("<ExtendedPresentation>"));
+        assert!(xml.contains("<v8:content>Sales report extended</v8:content>"));
+        assert!(xml.contains("<Explanation>"));
+        assert!(xml.contains("<v8:content>Builds sales summary</v8:content>"));
+        assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Template>MainSchema</Template>"));
     }
 
     #[test]
