@@ -5926,7 +5926,8 @@ fn parse_1c_string(text: &str) -> Option<String> {
 fn exchange_plan_auto_record_xml(value: &str) -> &'static str {
     match value {
         "0" => "Deny",
-        "1" => "Auto",
+        "1" => "Allow",
+        "2" => "Auto",
         _ => "Auto",
     }
 }
@@ -30812,6 +30813,7 @@ mod tests {
         let plan_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let catalog_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
         let register_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let document_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
         let plan = deflate_for_test(
             format!(
                 "{{1,\r\n{{37,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{3,\r\n{{1,0,{plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}}"
@@ -30830,8 +30832,15 @@ mod tests {
             )
             .as_bytes(),
         );
-        let content =
-            deflate_for_test(format!("{{2,2,{catalog_uuid},0,{register_uuid},1}}").as_bytes());
+        let document = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let content = deflate_for_test(
+            format!("{{2,3,{catalog_uuid},0,{register_uuid},1,{document_uuid},2}}").as_bytes(),
+        );
         let rows = vec![
             ConfigRow {
                 file_name: plan_uuid.to_string(),
@@ -30857,6 +30866,12 @@ mod tests {
                 data_size: register.len() as i64,
                 binary_hex: encode_hex_for_test(&register),
             },
+            ConfigRow {
+                file_name: document_uuid.to_string(),
+                part_no: 0,
+                data_size: document.len() as i64,
+                binary_hex: encode_hex_for_test(&document),
+            },
         ];
 
         let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
@@ -30866,7 +30881,20 @@ mod tests {
         assert!(xml.contains("<Metadata>Catalog.Customers</Metadata>"));
         assert!(xml.contains("<AutoRecord>Deny</AutoRecord>"));
         assert!(xml.contains("<Metadata>InformationRegister.Prices</Metadata>"));
+        assert!(xml.contains("<AutoRecord>Allow</AutoRecord>"));
+        assert!(xml.contains("<Metadata>Document.Invoice</Metadata>"));
         assert!(xml.contains("<AutoRecord>Auto</AutoRecord>"));
+        assert!(
+            xml.find("<Metadata>Catalog.Customers</Metadata>").unwrap()
+                < xml
+                    .find("<Metadata>InformationRegister.Prices</Metadata>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<Metadata>InformationRegister.Prices</Metadata>")
+                .unwrap()
+                < xml.find("<Metadata>Document.Invoice</Metadata>").unwrap()
+        );
         let content_row = dumped
             .rows
             .iter()
