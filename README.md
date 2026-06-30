@@ -61,6 +61,14 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 31 | Native dump performance / Form.xml CPU | full source-layout after-run completed without `ConfigDumpInfo.xml`; `InputField` option-bag parsing is cached per form item, reducing `source_asset_form_child_items_cpu_ms` from 70,750 to 68,886 and `source_asset_form_cpu_ms` from 124,212 to 123,507 |
+| 31 | Role Rights.xml | Task child refs now map and pack as `Task.<name>.AddressingAttribute.<child>` instead of ordinary attributes |
+| 31 | Form.xml | wrapper `55` table `ChoiceFoldersAndItems` extracts and packs through existing typed table slot |
+| 31 | Object metadata XML | tabular-section property tails are emitted, and child property tails now include empty `<LinkByType/>` between `ChoiceForm` and `ChoiceHistoryOnInput` |
+| 31 | Register metadata XML | register dimensions/resources/attributes reuse generic child object parsing and emit decoded types plus common property tails |
+| 31 | Configuration.xml | root settings-storage refs are emitted from UUID-backed metadata fields |
+| 31 | DCS templates | generated type id lookup is case-insensitive for DataCompositionSchema template bodies |
+| 31 | Source staging readiness | WebService `Ext/Module.bsl` is covered as a base-free source staging body |
 | 30 | Native dump performance / ExchangePlan Content.xml | selected ExchangePlan content now requests `object_refs`; selected and full source-layout exports completed without `ConfigDumpInfo.xml`, with full timing captured under `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source-report.json` |
 | 30 | Role Rights.xml | import packing maps rights objects by source-resolved refs instead of XML order, including commands, child dimensions/resources/attributes, standard attributes, and direct metadata refs |
 | 30 | Form.xml | wrapper `55` table `RowPictureDataPath` extracts and packs through string property-bag key `19` |
@@ -164,8 +172,9 @@ Scope exclusion: `ConfigDumpInfo.xml` is intentionally not generated and is not
 counted as parity debt.
 
 `Configuration.xml` support currently covers the root metadata header
-(name/synonym/comment/uuid), source XML version selection, and selected root
-child object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`);
+(name/synonym/comment/uuid), source XML version selection, selected root child
+object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`) and
+selected root refs such as default roles/style/language/settings storages;
 deeper root properties remain tracked under Issue #22.
 
 ## Commands

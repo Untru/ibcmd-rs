@@ -30,7 +30,7 @@ The full JSON report is retained at
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
-round 28 incremental verified fixes listed below.
+round 31 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -173,6 +173,14 @@ Verification history:
 | Round 30 CommonAttribute slice | unit-level metadata XML verification | native separation tail properties and UUID-backed separation refs are emitted |
 | Round 30 DCS template slice | unit-level template body verification | current-config `v8:Type` prefixes normalize by DCS context (`d4p1`, `d5p1`, `d6p1`) |
 | Round 30 source staging readiness slice | unit-level readiness/row-generation verification | FilterCriterion manager modules can stage base-free from `FilterCriteria/<Name>/Ext/ManagerModule.bsl` |
+| Round 31 native dump performance slice | real full source-layout timing plus unit-level extractor verification | `InputField` option bags are parsed once per form item; after-run completed without `ConfigDumpInfo.xml`, with `source_asset_form_child_items_cpu_ms` reduced from 70,750 to 68,886 and `source_asset_form_cpu_ms` from 124,212 to 123,507 |
+| Round 31 Role Rights.xml slice | unit-level extractor/packer verification | Task child refs map as `Task.<name>.AddressingAttribute.<child>` and source-based rights packing resolves `AddressingAttribute` children |
+| Round 31 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `ChoiceFoldersAndItems` extracts and packs through the existing typed table slot |
+| Round 31 object metadata slice | unit-level metadata XML verification | tabular-section property tails are emitted, and generic child property tails include empty `<LinkByType/>` before `ChoiceHistoryOnInput` |
+| Round 31 register metadata slice | unit-level metadata XML verification | register dimensions/resources/attributes reuse generic child object parsing and emit decoded types plus common property tails |
+| Round 31 Configuration.xml slice | unit-level metadata XML verification | root settings-storage refs (`CommonSettingsStorage`, report settings/variants storage, form data settings storage) are emitted from UUID-backed metadata fields |
+| Round 31 DCS template slice | unit-level template body verification | generated type id lookup is case-insensitive for DataCompositionSchema template bodies |
+| Round 31 source staging readiness slice | unit-level readiness/row-generation verification | WebService `Ext/Module.bsl` is covered as a base-free source staging body |
 
 Performance note for selected extraction:
 
@@ -192,6 +200,7 @@ Performance note for selected extraction:
 - Round 28 #19 standalone-content follow-up: source-asset-only dumps now resolve `Ext/StandaloneConfigurationContent.bin` references without requiring `--extract-metadata-xml`. A real selected repro on `ut_ibcmd` wrote 6 rows / 40,421 bytes / 2 source assets under `E:\ibcmd_lab\perf\issue-19-standalone-content-v6-standalone-repro-targeted`, resolving `0014cc2a-b5ed-427d-8ac6-116e92aaa9a4` as `Role.РазделОтчетыИМониторингЦелевыеПоказатели`. A full source-layout timing retry passed standalone content and then stopped at `ExchangePlans\Полный\Ext\Content.xml`; no `ConfigDumpInfo.xml` was generated.
 - Round 29 #19 ExchangePlan content follow-up: source-layout extraction now builds metadata object/type indexes when source assets are extracted without metadata XML, and `ExchangePlanContent` parsing reports precise unsupported ids. A selected repro for `ExchangePlans\Полный\Ext\Content.xml` now stops at `ExchangePlanContent item 0 references unsupported metadata id ff76e85a-6d29-41d3-a83e-f4a34139c6b2`; the id is a direct Constant row named `ВыгружатьВнутренниеШтрихкодыШтучныхТоваров`. Artifacts are under `E:\ibcmd_lab\perf\issue-19-exchange-content-v1-*`. No `ConfigDumpInfo.xml` was generated.
 - Round 30 #19 ExchangePlan content follow-up: selected ExchangePlan owner metadata now requests `object_refs`, so the Constant referenced from `ExchangePlans\Полный\Ext\Content.xml` resolves. The selected repro passed, and a full release source-layout run completed under `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source`, writing 13,428 files from 40,576 rows / 10,277 source assets without `ConfigDumpInfo.xml`. Full timing: `prepare_indexes_ms=17461`, `prepare_object_refs_ms=10621`, `fetch_rows_ms=5043`, `process_rows_wall_ms=15598`, `source_asset_cpu_ms=191976`, `source_asset_form_cpu_ms=124212`.
+- Round 31 #19 form CPU follow-up: `InputField` extended option bags are cached per form child item instead of reparsed for each option probe. The full source-layout after-run completed under `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after` without `ConfigDumpInfo.xml`; `source_asset_form_child_items_cpu_ms` changed from 70,750 to 68,886 and `source_asset_form_cpu_ms` from 124,212 to 123,507.
 - Scope decision: `ConfigDumpInfo.xml` is intentionally not generated. The native file is derived from the `versions` row, but it is not needed for our export/import target and should not be treated as remaining work.
 
 Diff by file kind:
@@ -258,7 +267,8 @@ Diff by file kind:
 
 Note: `Configuration.xml` currently covers the root metadata header
 (uuid/name/synonym/comment), source XML version selection, and selected root
-child object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`).
+child object headers (`CommonAttribute`, `CommonModule`, `Constant`, `Catalog`),
+plus selected root refs such as default roles/style/language/settings storages.
 Deeper root properties are still tracked as Issue #22 follow-up work.
 
 ## Delegation History
@@ -380,5 +390,14 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #19 | ExchangePlan content direct object refs and successful full source-layout timing run | merged to `master` in round 30 |
 | #21 | base-free FilterCriterion manager module staging | merged to `master` in round 30 |
 | #22 | CommonAttribute separation tail properties and refs | merged to `master` in round 30 |
+| #13 | Task `AddressingAttribute` Role Rights.xml refs and source packing | merged to `master` in round 31 |
+| #15 | tabular-section property tails and child `<LinkByType/>` metadata XML | merged to `master` in round 31 |
+| #16 | Form.xml wrapper `55` table `ChoiceFoldersAndItems` extraction and packing | merged to `master` in round 31 |
+| #17 | case-insensitive DCS generated type id lookup | merged to `master` in round 31 |
+| #18 | register child object decoded types and property tails | merged to `master` in round 31 |
+| #19 | form source-asset CPU option-bag caching and after-run timing | merged to `master` in round 31 |
+| #21 | WebService module base-free source staging coverage | merged to `master` in round 31 |
+| #22 | Configuration.xml root settings-storage refs | merged to `master` in round 31 |
+| #23 | shared V8 container parser/builder extraction | closed in round 22; kept as the required dependency for future Config/ConfigSave container work |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
