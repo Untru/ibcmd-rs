@@ -568,6 +568,7 @@ struct RoleRightsXml {
     set_for_attributes_by_default: Option<bool>,
     independent_rights_of_child_objects: Option<bool>,
     objects: Vec<RoleObjectRightsXml>,
+    restriction_templates: Vec<RoleRestrictionTemplateXml>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -581,6 +582,12 @@ struct RoleRightXml {
     name: String,
     value: bool,
     restriction_by_condition: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleRestrictionTemplateXml {
+    name: String,
+    condition: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -13738,11 +13745,20 @@ pub fn pack_role_rights_blob_from_xml(
         .get(1)
         .ok_or_else(|| anyhow!("base Role rights body has no object rights field"))?
         .clone();
+    let templates_range = fields
+        .get(2)
+        .ok_or_else(|| anyhow!("base Role rights body has no restriction templates field"))?
+        .clone();
     let set_for_new_objects_range = fields
         .get(3)
         .ok_or_else(|| anyhow!("base Role rights body has no setForNewObjects field"))?
         .clone();
     let mut replacements = role_right_value_replacements(&plain, objects_range, &rights.objects)?;
+    replacements.extend(role_restriction_template_value_replacements(
+        &plain,
+        templates_range,
+        &rights.restriction_templates,
+    )?);
     replacements.push((
         set_for_new_objects_range,
         if rights.set_for_new_objects { "1" } else { "0" }.to_string(),
@@ -14048,6 +14064,60 @@ fn role_right_value_replacements(
             rights_range.clone(),
             object,
         )?);
+    }
+    Ok(replacements)
+}
+
+fn role_restriction_template_value_replacements(
+    plain: &str,
+    templates_range: Range<usize>,
+    templates: &[RoleRestrictionTemplateXml],
+) -> Result<Vec<(Range<usize>, String)>> {
+    let fields = scan_braced_fields(plain, templates_range.start)?;
+    let base_count_range = fields
+        .first()
+        .ok_or_else(|| anyhow!("base Role restriction templates field is empty"))?
+        .clone();
+    let base_count = plain[base_count_range]
+        .trim()
+        .parse::<usize>()
+        .context("invalid base Role restriction templates count")?;
+    if base_count != templates.len() {
+        return Err(anyhow!(
+            "Role Rights.xml restriction template count {} does not match base blob count {}",
+            templates.len(),
+            base_count
+        ));
+    }
+    if fields.len() != base_count + 1 {
+        return Err(anyhow!(
+            "base Role restriction templates field count {} does not match declared count {}",
+            fields.len().saturating_sub(1),
+            base_count
+        ));
+    }
+
+    let mut replacements = Vec::with_capacity(base_count * 2);
+    for (template_index, template) in templates.iter().enumerate() {
+        let entry_range = fields[template_index + 1].clone();
+        let entry_fields = scan_braced_fields(plain, entry_range.start)?;
+        if entry_fields.len() != 2 {
+            return Err(anyhow!(
+                "base Role restriction template entry {template_index} has {} fields, expected 2",
+                entry_fields.len()
+            ));
+        }
+        parse_1c_quoted_string(plain[entry_fields[0].clone()].trim()).with_context(|| {
+            format!("base Role restriction template entry {template_index} has invalid name")
+        })?;
+        parse_1c_quoted_string(plain[entry_fields[1].clone()].trim()).with_context(|| {
+            format!("base Role restriction template entry {template_index} has invalid condition")
+        })?;
+        replacements.push((entry_fields[0].clone(), format_1c_string(&template.name)));
+        replacements.push((
+            entry_fields[1].clone(),
+            format_1c_string(&template.condition),
+        ));
     }
     Ok(replacements)
 }
@@ -14410,8 +14480,10 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
     let mut set_for_attributes_by_default = None::<bool>;
     let mut independent_rights_of_child_objects = None::<bool>;
     let mut objects = Vec::<RoleObjectRightsXml>::new();
+    let mut restriction_templates = Vec::<RoleRestrictionTemplateXml>::new();
     let mut current_object = None::<RoleObjectRightsXml>;
     let mut current_right = None::<RoleRightXml>;
+    let mut current_restriction_template = None::<RoleRestrictionTemplateXml>;
     let mut text_value = String::new();
 
     loop {
@@ -14428,6 +14500,11 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                         name: String::new(),
                         value: false,
                         restriction_by_condition: None,
+                    });
+                } else if local == "restrictionTemplate" && path_ends_with(&path, &["Rights"]) {
+                    current_restriction_template = Some(RoleRestrictionTemplateXml {
+                        name: String::new(),
+                        condition: String::new(),
                     });
                 }
                 if matches!(
@@ -14459,6 +14536,11 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                     && let Some(right) = current_right.as_mut()
                 {
                     right.restriction_by_condition = Some(String::new());
+                } else if local == "condition"
+                    && path_ends_with(&path, &["Rights", "restrictionTemplate"])
+                    && let Some(template) = current_restriction_template.as_mut()
+                {
+                    template.condition = String::new();
                 }
             }
             Ok(Event::Text(text)) => {
@@ -14478,6 +14560,8 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                             "condition",
                         ],
                     )
+                    || path_ends_with(&path, &["Rights", "restrictionTemplate", "name"])
+                    || path_ends_with(&path, &["Rights", "restrictionTemplate", "condition"])
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -14499,6 +14583,8 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                             "condition",
                         ],
                     )
+                    || path_ends_with(&path, &["Rights", "restrictionTemplate", "name"])
+                    || path_ends_with(&path, &["Rights", "restrictionTemplate", "condition"])
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -14565,6 +14651,21 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                             right.restriction_by_condition = Some(text_value.clone());
                         }
                     }
+                    "name" if path_ends_with(&path, &["Rights", "restrictionTemplate", "name"]) => {
+                        if let Some(template) = current_restriction_template.as_mut() {
+                            template.name = text_value.clone();
+                        }
+                    }
+                    "condition"
+                        if path_ends_with(
+                            &path,
+                            &["Rights", "restrictionTemplate", "condition"],
+                        ) =>
+                    {
+                        if let Some(template) = current_restriction_template.as_mut() {
+                            template.condition = text_value.clone();
+                        }
+                    }
                     "right" if path_ends_with(&path, &["Rights", "object", "right"]) => {
                         let right = current_right.take().ok_or_else(|| {
                             anyhow!("Rights.xml ended right without active right")
@@ -14584,6 +14685,19 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                             return Err(anyhow!("Rights.xml contains object without name"));
                         }
                         objects.push(object);
+                    }
+                    "restrictionTemplate"
+                        if path_ends_with(&path, &["Rights", "restrictionTemplate"]) =>
+                    {
+                        let template = current_restriction_template.take().ok_or_else(|| {
+                            anyhow!("Rights.xml ended restrictionTemplate without active template")
+                        })?;
+                        if template.name.is_empty() {
+                            return Err(anyhow!(
+                                "Rights.xml contains restrictionTemplate without name"
+                            ));
+                        }
+                        restriction_templates.push(template);
                     }
                     _ => {}
                 }
@@ -14613,6 +14727,7 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
         set_for_attributes_by_default,
         independent_rights_of_child_objects,
         objects,
+        restriction_templates,
     })
 }
 
@@ -27123,7 +27238,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_role_rights_xml_preserving_base_identifiers() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,499e8968-ca89-43f0-9955-8756058b1b53,-1,1,{499e8968-ca89-43f0-9955-8756058b1b53,{1,{1,\"WHERE OLD\"}}}}}},{0},4294967295,0,0,4294967295}",
+            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,499e8968-ca89-43f0-9955-8756058b1b53,-1,1,{499e8968-ca89-43f0-9955-8756058b1b53,{1,{1,\"WHERE OLD\"}}}}}},{1,{\"OldTemplate\",\"WHERE OLD TEMPLATE\"}},4294967295,0,0,4294967295}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
@@ -27144,6 +27259,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<right><name>Read</name><value>false</value></right>
 		<right><name>Update</name><value>true</value></right>
 	</object>
+	<restrictionTemplate>
+		<name>NewTemplate</name>
+		<condition>WHERE NEW TEMPLATE</condition>
+	</restrictionTemplate>
 </Rights>
 "#;
 
@@ -27155,7 +27274,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1"));
         assert!(text.contains("499e8968-ca89-43f0-9955-8756058b1b53,1"));
         assert!(text.contains(r#""WHERE TRUE""#));
+        assert!(text.contains(r#""NewTemplate","WHERE NEW TEMPLATE""#));
         assert!(!text.contains("WHERE OLD"));
+        assert!(!text.contains("OldTemplate"));
         assert!(text.ends_with(",1,0,1,4294967295}"));
         assert_eq!(packed.plain_bytes, text.len());
 
