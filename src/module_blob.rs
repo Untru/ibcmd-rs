@@ -15423,19 +15423,18 @@ fn role_right_value_replacements(
         let object_ref_range = entry_fields.get(0).ok_or_else(|| {
             anyhow!("base Role object rights entry {object_index} has no object reference")
         })?;
-        let object_key = role_object_ref_sort_key(plain, object_ref_range.clone())
+        validate_role_object_ref(plain, object_ref_range.clone())
             .with_context(|| format!("base Role object rights entry {object_index}"))?;
         let rights_range = entry_fields.get(1).ok_or_else(|| {
             anyhow!("base Role object rights entry {object_index} has no rights payload")
         })?;
-        base_entries.push((object_key, rights_range.clone()));
+        base_entries.push(rights_range.clone());
     }
-    base_entries.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut replacements = Vec::new();
-    for (object_index, (_, rights_range)) in base_entries.into_iter().enumerate() {
+    for (object_index, rights_range) in base_entries.into_iter().enumerate() {
         let object = objects.get(object_index).ok_or_else(|| {
-            anyhow!("Role Rights.xml has no object for sorted base entry {object_index}")
+            anyhow!("Role Rights.xml has no object for base entry {object_index}")
         })?;
         replacements.extend(role_object_right_value_replacements(
             plain,
@@ -15446,7 +15445,7 @@ fn role_right_value_replacements(
     Ok(replacements)
 }
 
-fn role_object_ref_uuid(plain: &str, object_ref_range: Range<usize>) -> Result<String> {
+fn validate_role_object_ref(plain: &str, object_ref_range: Range<usize>) -> Result<()> {
     let fields = scan_braced_fields(plain, object_ref_range.start)?;
     let uuid_range = fields
         .get(1)
@@ -15455,18 +15454,7 @@ fn role_object_ref_uuid(plain: &str, object_ref_range: Range<usize>) -> Result<S
     if !is_uuid_text(uuid) {
         return Err(anyhow!("object reference has invalid UUID {uuid}"));
     }
-    Ok(uuid.to_string())
-}
-
-fn role_object_ref_sort_key(plain: &str, object_ref_range: Range<usize>) -> Result<String> {
-    let fields = scan_braced_fields(plain, object_ref_range.start)?;
-    let uuid = role_object_ref_uuid(plain, object_ref_range)?;
-    let mut key = uuid;
-    for range in fields.iter().skip(2) {
-        key.push(':');
-        key.push_str(plain[range.clone()].trim());
-    }
-    Ok(key)
+    Ok(())
 }
 
 fn role_restriction_template_value_replacements(
@@ -29559,18 +29547,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<setForAttributesByDefault>false</setForAttributesByDefault>
 	<independentRightsOfChildObjects>true</independentRightsOfChildObjects>
 	<object>
-		<name>Catalog.Products</name>
-		<right><name>View</name><value>true</value></right>
-		<right><name>Read</name><value>false</value></right>
-		<right><name>Update</name><value>true</value></right>
-	</object>
-	<object>
 		<name>InformationRegister.Prices</name>
 		<right>
 			<name>Get</name>
 			<value>true</value>
 			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
 		</right>
+	</object>
+	<object>
+		<name>Catalog.Products</name>
+		<right><name>View</name><value>true</value></right>
+		<right><name>Read</name><value>false</value></right>
+		<right><name>Update</name><value>true</value></right>
 	</object>
 	<restrictionTemplate>
 		<name>NewTemplate</name>
@@ -29662,7 +29650,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_role_rights_xml_matches_repeated_object_refs_by_tail() -> anyhow::Result<()> {
+    fn packs_role_rights_xml_uses_serialized_object_order() -> anyhow::Result<()> {
         let base = super::deflate_raw(
             b"{10,{3,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}}},{0},0,1,0,4294967295}",
         )?;
@@ -29672,16 +29660,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<setForAttributesByDefault>true</setForAttributesByDefault>
 	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
 	<object>
+		<name>InformationRegister.Prices.StandardAttribute.Period</name>
+		<right><name>Edit</name><value>true</value></right>
+	</object>
+	<object>
 		<name>InformationRegister.Prices</name>
 		<right><name>Read</name><value>true</value></right>
 	</object>
 	<object>
 		<name>InformationRegister.Prices.StandardAttribute.Active</name>
 		<right><name>View</name><value>true</value></right>
-	</object>
-	<object>
-		<name>InformationRegister.Prices.StandardAttribute.Period</name>
-		<right><name>Edit</name><value>true</value></right>
 	</object>
 </Rights>
 "#;

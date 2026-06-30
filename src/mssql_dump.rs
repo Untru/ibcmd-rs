@@ -4297,7 +4297,6 @@ struct RoleRights {
 }
 
 struct RoleObjectRights {
-    object_key: String,
     name: String,
     rights: Vec<RoleRight>,
 }
@@ -6721,18 +6720,15 @@ fn parse_role_rights_blob(
         if !is_uuid_text(object_uuid) {
             return None;
         }
-        let object_key = role_object_ref_sort_key(&object_ref)?;
         let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
         objects.push(RoleObjectRights {
-            object_key,
             name: object_name,
             rights,
         });
     }
 
-    objects.sort_by(|left, right| left.object_key.cmp(&right.object_key));
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
     let set_for_attributes_by_default = parse_role_bool_field_or_default(&fields, 4, true)?;
@@ -6744,19 +6740,6 @@ fn parse_role_rights_blob(
         objects,
         restriction_templates,
     })
-}
-
-fn role_object_ref_sort_key(fields: &[&str]) -> Option<String> {
-    let uuid = fields.get(1)?.trim();
-    if !is_uuid_text(uuid) {
-        return None;
-    }
-    let mut key = uuid.to_string();
-    for field in fields.iter().skip(2) {
-        key.push(':');
-        key.push_str(field.trim());
-    }
-    Some(key)
 }
 
 fn role_object_ref_name(fields: &[&str], object_refs: &BTreeMap<String, String>) -> Option<String> {
@@ -32925,12 +32908,18 @@ mod tests {
         assert!(!xml.ends_with("\r\n"));
         assert!(xml.contains(r#"<Rights xmlns="http://v8.1c.ru/8.2/roles""#));
         assert!(
-            xml.find("<name>WebService.RemoteApi.Operation.Ping</name>")
-                .unwrap()
-                < xml.find("<name>Catalog.Products</name>").unwrap()
+            xml.find("<name>Catalog.Products</name>").unwrap()
+                < xml.find("<name>Configuration.DemoApp</name>").unwrap()
         );
         assert!(
-            xml.find("<name>Catalog.Products</name>").unwrap()
+            xml.find("<name>Configuration.DemoApp</name>").unwrap()
+                < xml
+                    .find("<name>WebService.RemoteApi.Operation.Ping</name>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<name>WebService.RemoteApi.Operation.Ping</name>")
+                .unwrap()
                 < xml.find("<name>InformationRegister.Prices</name>").unwrap()
         );
         assert!(xml.contains("<name>Configuration.DemoApp</name>"));
@@ -32983,7 +32972,6 @@ mod tests {
             set_for_attributes_by_default: true,
             independent_rights_of_child_objects: false,
             objects: vec![RoleObjectRights {
-                object_key: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa:0:0".to_string(),
                 name: "Document.Invoice".to_string(),
                 rights: vec![
                     RoleRight {
@@ -33186,7 +33174,7 @@ mod tests {
     }
 
     #[test]
-    fn role_rights_objects_follow_object_uuid_order() {
+    fn role_rights_objects_follow_serialized_object_order() {
         let object_a = "11111111-1111-4111-8111-111111111111";
         let object_b = "22222222-2222-4222-8222-222222222222";
         let object_c = "33333333-3333-4333-8333-333333333333";
@@ -33213,7 +33201,7 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["Catalog.Alpha", "Catalog.Beta", "Catalog.Gamma"]
+            vec!["Catalog.Gamma", "Catalog.Alpha", "Catalog.Beta"]
         );
     }
 
