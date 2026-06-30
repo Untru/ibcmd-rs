@@ -593,7 +593,13 @@ struct RoleObjectRightsXml {
 struct RoleRightXml {
     name: String,
     value: bool,
-    restriction_by_condition: Option<String>,
+    restriction_by_condition: Option<RoleRightRestrictionXml>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RoleRightRestrictionXml {
+    field: Option<String>,
+    condition: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -15554,7 +15560,7 @@ fn role_object_right_value_replacements(
         .iter()
         .map(|right| (right.name.as_str(), right))
         .collect::<BTreeMap<_, _>>();
-    let mut conditions_by_uuid = BTreeMap::<String, String>::new();
+    let mut restrictions_by_uuid = BTreeMap::<String, RoleRightRestrictionXml>::new();
     let mut replacements = Vec::with_capacity(count);
     for right_index in 0..count {
         let uuid = plain[fields[start + right_index * 2].clone()].trim();
@@ -15571,11 +15577,11 @@ fn role_object_right_value_replacements(
             }
             .to_string(),
         ));
-        if let Some(condition) = right.and_then(|right| right.restriction_by_condition.as_ref()) {
-            conditions_by_uuid.insert(uuid.to_string(), condition.clone());
+        if let Some(restriction) = right.and_then(|right| right.restriction_by_condition.as_ref()) {
+            restrictions_by_uuid.insert(uuid.to_string(), restriction.clone());
         }
     }
-    if marker == "1" && !conditions_by_uuid.is_empty() {
+    if marker == "1" && !restrictions_by_uuid.is_empty() {
         let restrictions_count_range = fields
             .get(required_fields)
             .ok_or_else(|| {
@@ -15591,7 +15597,7 @@ fn role_object_right_value_replacements(
                 plain,
                 restrictions_count,
                 &fields[required_fields + 1..],
-                &conditions_by_uuid,
+                &restrictions_by_uuid,
             )?);
         }
     }
@@ -15602,7 +15608,7 @@ fn role_restriction_condition_replacements(
     plain: &str,
     count: usize,
     ranges: &[Range<usize>],
-    conditions_by_uuid: &BTreeMap<String, String>,
+    restrictions_by_uuid: &BTreeMap<String, RoleRightRestrictionXml>,
 ) -> Result<Vec<(Range<usize>, String)>> {
     let mut replacements = Vec::new();
     if ranges.len() == count {
@@ -15610,7 +15616,7 @@ fn role_restriction_condition_replacements(
             collect_role_restriction_entry_replacement(
                 plain,
                 range.clone(),
-                conditions_by_uuid,
+                restrictions_by_uuid,
                 &mut replacements,
             )?;
         }
@@ -15631,7 +15637,7 @@ fn role_restriction_condition_replacements(
                 plain,
                 pair[0].clone(),
                 pair[1].clone(),
-                conditions_by_uuid,
+                restrictions_by_uuid,
                 &mut replacements,
             )?;
         }
@@ -15642,7 +15648,7 @@ fn role_restriction_condition_replacements(
             collect_role_restriction_entry_replacement(
                 plain,
                 range,
-                conditions_by_uuid,
+                restrictions_by_uuid,
                 &mut replacements,
             )?;
         }
@@ -15653,7 +15659,7 @@ fn role_restriction_condition_replacements(
 fn collect_role_restriction_entry_replacement(
     plain: &str,
     entry_range: Range<usize>,
-    conditions_by_uuid: &BTreeMap<String, String>,
+    restrictions_by_uuid: &BTreeMap<String, RoleRightRestrictionXml>,
     replacements: &mut Vec<(Range<usize>, String)>,
 ) -> Result<()> {
     let fields = scan_braced_fields(plain, entry_range.start)?;
@@ -15664,7 +15670,7 @@ fn collect_role_restriction_entry_replacement(
         plain,
         fields[0].clone(),
         fields[1].clone(),
-        conditions_by_uuid,
+        restrictions_by_uuid,
         replacements,
     )
 }
@@ -15673,29 +15679,39 @@ fn collect_role_restriction_pair_replacement(
     plain: &str,
     uuid_range: Range<usize>,
     restriction_range: Range<usize>,
-    conditions_by_uuid: &BTreeMap<String, String>,
+    restrictions_by_uuid: &BTreeMap<String, RoleRightRestrictionXml>,
     replacements: &mut Vec<(Range<usize>, String)>,
 ) -> Result<()> {
     let uuid = plain[uuid_range].trim();
-    let Some(condition) = conditions_by_uuid.get(uuid) else {
+    let Some(restriction) = restrictions_by_uuid.get(uuid) else {
         return Ok(());
     };
-    if let Some(condition_range) = role_restriction_condition_text_range(plain, restriction_range)?
-    {
-        replacements.push((condition_range, format_1c_string(condition)));
+    if let Some(ranges) = role_restriction_condition_ranges(plain, restriction_range)? {
+        replacements.push((ranges.condition, format_1c_string(&restriction.condition)));
+        if let (Some(field), Some(field_range)) = (&restriction.field, ranges.field) {
+            replacements.push((field_range, format_1c_string(field)));
+        }
     }
     Ok(())
 }
 
-fn role_restriction_condition_text_range(
+struct RoleRestrictionConditionRanges {
+    condition: Range<usize>,
+    field: Option<Range<usize>>,
+}
+
+fn role_restriction_condition_ranges(
     plain: &str,
     restriction_range: Range<usize>,
-) -> Result<Option<Range<usize>>> {
+) -> Result<Option<RoleRestrictionConditionRanges>> {
     let wrapper = scan_braced_fields(plain, restriction_range.start)?;
-    if wrapper.first().map(|range| plain[range.clone()].trim()) != Some("1") {
-        return Ok(None);
-    }
-    let Some(body_range) = wrapper.get(1) else {
+    let marker = wrapper.first().map(|range| plain[range.clone()].trim());
+    let body_range = match marker {
+        Some("1") => wrapper.get(1),
+        Some("2") => wrapper.get(2),
+        _ => return Ok(None),
+    };
+    let Some(body_range) = body_range else {
         return Ok(None);
     };
     let body = scan_braced_fields(plain, body_range.start)?;
@@ -15706,7 +15722,45 @@ fn role_restriction_condition_text_range(
         return Ok(None);
     };
     parse_1c_quoted_string(plain[condition_range.clone()].trim())?;
-    Ok(Some(condition_range.clone()))
+    let field = if marker == Some("2") {
+        body.get(3)
+            .map(|range| role_restriction_field_text_range(plain, range.clone()))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    Ok(Some(RoleRestrictionConditionRanges {
+        condition: condition_range.clone(),
+        field,
+    }))
+}
+
+fn role_restriction_field_text_range(
+    plain: &str,
+    field_range: Range<usize>,
+) -> Result<Option<Range<usize>>> {
+    if parse_1c_quoted_string(plain[field_range.clone()].trim()).is_ok() {
+        return Ok(Some(field_range));
+    }
+    if plain.as_bytes().get(field_range.start) != Some(&b'{') {
+        return Ok(None);
+    }
+    let fields = scan_braced_fields(plain, field_range.start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) == Some("1")
+        && let Some(value_range) = fields.get(1)
+        && parse_1c_quoted_string(plain[value_range.clone()].trim()).is_ok()
+    {
+        return Ok(Some(value_range.clone()));
+    }
+    for range in fields {
+        if plain.as_bytes().get(range.start) == Some(&b'{')
+            && let Some(nested) = role_restriction_field_text_range(plain, range)?
+        {
+            return Ok(Some(nested));
+        }
+    }
+    Ok(None)
 }
 
 fn role_right_name(uuid: &str) -> Option<&'static str> {
@@ -15908,6 +15962,7 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                         | "independentRightsOfChildObjects"
                         | "name"
                         | "value"
+                        | "field"
                         | "condition"
                 ) {
                     text_value.clear();
@@ -15929,7 +15984,10 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                     )
                     && let Some(right) = current_right.as_mut()
                 {
-                    right.restriction_by_condition = Some(String::new());
+                    right.restriction_by_condition = Some(RoleRightRestrictionXml {
+                        field: None,
+                        condition: String::new(),
+                    });
                 } else if local == "condition"
                     && path_ends_with(&path, &["Rights", "restrictionTemplate"])
                     && let Some(template) = current_restriction_template.as_mut()
@@ -15944,6 +16002,16 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                     || path_ends_with(&path, &["Rights", "object", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "value"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Rights",
+                            "object",
+                            "right",
+                            "restrictionByCondition",
+                            "field",
+                        ],
+                    )
                     || path_ends_with(
                         &path,
                         &[
@@ -15967,6 +16035,16 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                     || path_ends_with(&path, &["Rights", "object", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "name"])
                     || path_ends_with(&path, &["Rights", "object", "right", "value"])
+                    || path_ends_with(
+                        &path,
+                        &[
+                            "Rights",
+                            "object",
+                            "right",
+                            "restrictionByCondition",
+                            "field",
+                        ],
+                    )
                     || path_ends_with(
                         &path,
                         &[
@@ -16029,6 +16107,29 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                                 parse_xml_bool_text("Role/right/value", text_value.trim())?;
                         }
                     }
+                    "field"
+                        if path_ends_with(
+                            &path,
+                            &[
+                                "Rights",
+                                "object",
+                                "right",
+                                "restrictionByCondition",
+                                "field",
+                            ],
+                        ) =>
+                    {
+                        if let Some(right) = current_right.as_mut() {
+                            let restriction =
+                                right.restriction_by_condition.get_or_insert_with(|| {
+                                    RoleRightRestrictionXml {
+                                        field: None,
+                                        condition: String::new(),
+                                    }
+                                });
+                            restriction.field = Some(text_value.clone());
+                        }
+                    }
                     "condition"
                         if path_ends_with(
                             &path,
@@ -16042,7 +16143,14 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                         ) =>
                     {
                         if let Some(right) = current_right.as_mut() {
-                            right.restriction_by_condition = Some(text_value.clone());
+                            let restriction =
+                                right.restriction_by_condition.get_or_insert_with(|| {
+                                    RoleRightRestrictionXml {
+                                        field: None,
+                                        condition: String::new(),
+                                    }
+                                });
+                            restriction.condition = text_value.clone();
                         }
                     }
                     "name" if path_ends_with(&path, &["Rights", "restrictionTemplate", "name"]) => {
@@ -16103,6 +16211,7 @@ fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
                         | "independentRightsOfChildObjects"
                         | "name"
                         | "value"
+                        | "field"
                         | "condition"
                 ) {
                     text_value.clear();
@@ -29514,6 +29623,40 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,-1"));
         assert!(!text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,1"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_xml_string_field_restrictions() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{10,{1,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{1,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,1,{24abfe06-289a-48c5-8bb4-032c733e45c5,{2,{1,"",0},{1,"WHERE OLD",1,{{0},{1,"OldField"}}}}}}}},{0},0,1,0,4294967295}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>false</setForNewObjects>
+	<setForAttributesByDefault>true</setForAttributesByDefault>
+	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
+	<object>
+		<name>InformationRegister.Prices</name>
+		<right>
+			<name>TotalsControl</name>
+			<value>true</value>
+			<restrictionByCondition>
+				<field>DataVersion</field>
+				<condition>WHERE NEW</condition>
+			</restrictionByCondition>
+		</right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{1,"WHERE NEW",1,{{0},{1,"DataVersion"}}}"#));
+        assert!(!text.contains("WHERE OLD"));
+        assert!(!text.contains("OldField"));
 
         Ok(())
     }

@@ -6675,6 +6675,9 @@ fn parse_role_restriction_field(
     {
         return Some(name.clone());
     }
+    if let Some(field) = parse_role_restriction_condition_body_field(value) {
+        return Some(field);
+    }
     let field_wrapper = split_1c_braced_fields(value, 0)?;
     if field_wrapper.first()?.trim() != "0" {
         return None;
@@ -6684,6 +6687,30 @@ fn parse_role_restriction_field(
         return None;
     }
     parse_1c_quoted_string_with_len(field_fields.get(1)?.trim()).map(|(value, _)| value)
+}
+
+fn parse_role_restriction_condition_body_field(value: &str) -> Option<String> {
+    let condition_fields = split_1c_braced_fields(value, 0)?;
+    if condition_fields.first()?.trim() != "1" {
+        return None;
+    }
+    let field_payload = condition_fields.get(3)?;
+    parse_role_restriction_field_payload(field_payload)
+}
+
+fn parse_role_restriction_field_payload(value: &str) -> Option<String> {
+    if let Some(value) = parse_1c_quoted_string(value.trim()) {
+        return Some(value);
+    }
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() == "1" {
+        return fields
+            .get(1)
+            .and_then(|field| parse_1c_quoted_string(field.trim()));
+    }
+    fields
+        .iter()
+        .find_map(|field| parse_role_restriction_field_payload(field))
 }
 
 fn parse_role_restriction_templates(value: &str) -> Option<Vec<RoleRestrictionTemplate>> {
@@ -32647,6 +32674,26 @@ mod tests {
         assert!(xml.contains("<name>InformationRegister.Prices.Attribute.Comment</name>"));
         assert!(xml.contains("<name>View</name>\r\n\t\t\t<value>false</value>"));
         assert!(xml.contains("<name>Edit</name>\r\n\t\t\t<value>false</value>"));
+    }
+
+    #[test]
+    fn role_rights_blob_formats_string_field_restrictions() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let rights_text = format!(
+            r#"{{10,{{1,{{{{1,{object_uuid},0,0}},{{1,1,24abfe06-289a-48c5-8bb4-032c733e45c5,1,1,{{24abfe06-289a-48c5-8bb4-032c733e45c5,{{2,{{1,"",0}},{{1,"WHERE FALSE",1,{{{{0}},{{1,"DataVersion"}}}}}}}}}}}}}}}},{{0}},0,1,0,4294967295}}"#
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "InformationRegister.Prices".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let xml = format_role_rights_xml(&rights);
+
+        assert!(xml.contains("<name>TotalsControl</name>"));
+        assert!(xml.contains("<field>DataVersion</field>"));
+        assert!(xml.contains("<condition>WHERE FALSE</condition>"));
     }
 
     #[test]
