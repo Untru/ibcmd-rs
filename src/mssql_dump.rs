@@ -16630,8 +16630,9 @@ struct FunctionalOptionProperties {
 }
 
 struct SubsystemProperties {
+    include_help_in_contents: bool,
     include_in_command_interface: bool,
-    use_standard_commands: bool,
+    use_one_command: bool,
     child_subsystems: Vec<String>,
 }
 
@@ -18199,9 +18200,24 @@ fn parse_subsystem_properties_from_text(
     {
         return None;
     }
+    let second_scalar = fields
+        .get(3)
+        .and_then(|field| parse_1c_bool_field(Some(*field)));
+    let include_help_in_contents = if second_scalar.is_some() {
+        parse_1c_bool_field(fields.get(2).copied()).unwrap_or(false)
+    } else {
+        false
+    };
+    let include_in_command_interface = second_scalar
+        .unwrap_or_else(|| parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true));
+    let use_one_command = fields
+        .get(4)
+        .and_then(|field| parse_1c_bool_field(Some(*field)))
+        .unwrap_or(false);
     Some(SubsystemProperties {
-        include_in_command_interface: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true),
-        use_standard_commands: parse_1c_bool_field(fields.get(3).copied()).unwrap_or(true),
+        include_help_in_contents,
+        include_in_command_interface,
+        use_one_command,
         child_subsystems: parse_subsystem_child_references(&fields, uuid, subsystem_refs),
     })
 }
@@ -22974,10 +22990,12 @@ fn format_subsystem_source_xml(
         xml.insert_str(
             offset,
             &format!(
-                "\t\t\t<IncludeInCommandInterface>{}</IncludeInCommandInterface>\r\n\
-\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+\t\t\t<IncludeInCommandInterface>{}</IncludeInCommandInterface>\r\n\
+\t\t\t<UseOneCommand>{}</UseOneCommand>\r\n",
+                xml_bool(subsystem.include_help_in_contents),
                 xml_bool(subsystem.include_in_command_interface),
-                xml_bool(subsystem.use_standard_commands)
+                xml_bool(subsystem.use_one_command)
             ),
         );
     }
@@ -36860,9 +36878,18 @@ mod tests {
         assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(xml.contains(r#"version="2.20""#));
         assert!(xml.contains("<Comment>subsystem comment</Comment>"));
+        assert!(xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"));
         assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
+        assert!(xml.contains("<UseOneCommand>false</UseOneCommand>"));
         assert!(
             xml.find("<Comment>subsystem comment</Comment>").unwrap()
+                < xml
+                    .find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                .unwrap()
                 < xml
                     .find("<IncludeInCommandInterface>true</IncludeInCommandInterface>")
                     .unwrap()
@@ -36886,38 +36913,61 @@ mod tests {
     }
 
     #[test]
-    fn extracts_subsystem_use_standard_commands_to_metadata_xml() {
+    fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
         let subsystem_uuid = "11111111-1111-4111-8111-111111111111";
         let blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1,0}}\r\n}}"
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1,0,1}}\r\n}}"
             )
             .as_bytes(),
         );
 
-        let extracted = extract_metadata_source_xml(
-            &blob,
-            subsystem_uuid,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .unwrap();
-        let xml = String::from_utf8(extracted.xml).unwrap();
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                subsystem_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
 
-        assert_eq!(
-            extracted.relative_path,
-            PathBuf::from("Subsystems/Admin.xml")
-        );
-        assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
-        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-        assert!(
-            xml.find("<IncludeInCommandInterface>true</IncludeInCommandInterface>")
-                .unwrap()
-                < xml
-                    .find("<UseStandardCommands>false</UseStandardCommands>")
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("Subsystems/Admin.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+            assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
+            assert!(xml.contains("<UseOneCommand>true</UseOneCommand>"));
+            assert!(!xml.contains("<UseStandardCommands>"));
+            assert!(
+                xml.find("<Comment/>").unwrap()
+                    < xml
+                        .find("<IncludeHelpInContents>true</IncludeHelpInContents>")
+                        .unwrap()
+            );
+            assert!(
+                xml.find("<IncludeHelpInContents>true</IncludeHelpInContents>")
                     .unwrap()
-        );
+                    < xml
+                        .find("<IncludeInCommandInterface>false</IncludeInCommandInterface>")
+                        .unwrap()
+            );
+            assert!(
+                xml.find("<IncludeInCommandInterface>false</IncludeInCommandInterface>")
+                    .unwrap()
+                    < xml.find("<UseOneCommand>true</UseOneCommand>").unwrap()
+            );
+        }
     }
 
     #[test]
