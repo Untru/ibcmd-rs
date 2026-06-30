@@ -9491,7 +9491,7 @@ fn extract_form_dimension(fields: &[&str], index: usize) -> Option<String> {
 
 fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
     match fields.get(2).map(|field| field.trim())? {
-        "0" => Some("DontBlock"),
+        "0" => None,
         "1" => Some("LockOwner"),
         "2" => Some("LockWholeInterface"),
         _ => None,
@@ -29494,6 +29494,19 @@ mod tests {
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
         assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
         assert!(!form_xml.contains("<ShowCommandBar>"));
+    }
+
+    #[test]
+    fn omits_form_default_window_opening_mode_from_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,0,80,30,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Width>80</Width>"));
+        assert!(form_xml.contains("<Height>30</Height>"));
+        assert!(!form_xml.contains("<WindowOpeningMode>"));
     }
 
     #[test]
