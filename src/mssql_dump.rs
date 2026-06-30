@@ -10430,21 +10430,89 @@ fn extract_form_child_items(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
-    let table_name_by_id = form_table_names_by_id(fields);
-    let table_column_names_by_id = form_table_column_names_by_id(fields);
+    let indexes = collect_form_child_item_indexes(fields);
     let mut items = parse_form_child_item_pairs(
         fields,
         main_data_path,
         None,
         &attribute_names_by_id,
-        &table_name_by_id,
-        &table_column_names_by_id,
+        &indexes.table_name_by_id,
+        &indexes.table_column_names_by_id,
         commands,
         object_refs,
     )
     .unwrap_or_default();
-    resolve_form_child_item_user_settings_groups(&mut items, fields);
+    apply_form_table_user_settings_groups(&mut items, &indexes.user_settings_group_by_table_id);
     items
+}
+
+#[derive(Default)]
+struct FormChildItemIndexes {
+    table_name_by_id: BTreeMap<String, String>,
+    table_column_names_by_id: BTreeMap<String, BTreeMap<String, String>>,
+    item_name_by_id: BTreeMap<String, String>,
+    user_settings_group_id_by_table_id: BTreeMap<String, String>,
+    user_settings_group_by_table_id: BTreeMap<String, String>,
+}
+
+fn collect_form_child_item_indexes(fields: &[&str]) -> FormChildItemIndexes {
+    let mut indexes = FormChildItemIndexes::default();
+    for field in fields {
+        collect_form_child_item_indexes_from_field(field, &mut indexes);
+    }
+    indexes.user_settings_group_by_table_id = indexes
+        .user_settings_group_id_by_table_id
+        .iter()
+        .filter_map(|(table_id, group_id)| {
+            indexes
+                .item_name_by_id
+                .get(group_id)
+                .map(|name| (table_id.clone(), name.clone()))
+        })
+        .collect();
+    indexes
+}
+
+fn collect_form_child_item_indexes_from_field(field: &str, indexes: &mut FormChildItemIndexes) {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return;
+    };
+    let wrapper = fields.first().map(|field| field.trim());
+    if let Some(wrapper) = wrapper
+        && form_child_item_tag(wrapper, &fields).is_some()
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes.item_name_by_id.insert(id.to_string(), name.clone());
+        if matches!(wrapper, "73" | "55") {
+            indexes.table_name_by_id.insert(id.to_string(), name);
+            let mut columns = BTreeMap::new();
+            collect_form_table_column_names_for_table(&fields, &mut columns);
+            if !columns.is_empty() {
+                indexes
+                    .table_column_names_by_id
+                    .insert(id.to_string(), columns);
+            }
+            if let Some(group_id) = parse_form_table_property_bag_number(&fields, "16") {
+                indexes
+                    .user_settings_group_id_by_table_id
+                    .insert(id.to_string(), group_id);
+            }
+        }
+    }
+    for nested in fields {
+        if nested.trim_start().starts_with('{') {
+            collect_form_child_item_indexes_from_field(nested, indexes);
+        }
+    }
+}
+
+fn form_child_item_id<'a>(fields: &[&'a str]) -> Option<&'a str> {
+    let identity = fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let id = identity.first()?.trim();
+    (id != "0").then_some(id)
 }
 
 fn parse_form_child_item_pairs(
@@ -11727,77 +11795,6 @@ fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -> Option<St
     fields.get(1).and_then(|field| parse_1c_string(field))
 }
 
-fn resolve_form_child_item_user_settings_groups(items: &mut [FormChildItem], fields: &[&str]) {
-    let mut item_names_by_id = BTreeMap::<String, String>::new();
-    for field in fields {
-        collect_form_child_item_names_by_id(field, &mut item_names_by_id);
-    }
-    let mut group_names_by_table_id = BTreeMap::<String, String>::new();
-    for field in fields {
-        collect_form_table_user_settings_groups(
-            field,
-            &item_names_by_id,
-            &mut group_names_by_table_id,
-        );
-    }
-    apply_form_table_user_settings_groups(items, &group_names_by_table_id);
-}
-
-fn collect_form_child_item_names_by_id(
-    field: &str,
-    item_names_by_id: &mut BTreeMap<String, String>,
-) {
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
-        return;
-    };
-    if let Some(wrapper) = fields.first().map(|field| field.trim())
-        && form_child_item_tag(wrapper, &fields).is_some()
-        && let Some(identity) = fields
-            .get(1)
-            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-        && let Some(id) = identity.first().map(|field| field.trim())
-        && id != "0"
-        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
-    {
-        item_names_by_id.insert(id.to_string(), name);
-    }
-    for nested in fields {
-        if nested.trim_start().starts_with('{') {
-            collect_form_child_item_names_by_id(nested, item_names_by_id);
-        }
-    }
-}
-
-fn collect_form_table_user_settings_groups(
-    field: &str,
-    item_names_by_id: &BTreeMap<String, String>,
-    group_names_by_table_id: &mut BTreeMap<String, String>,
-) {
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
-        return;
-    };
-    if let Some(wrapper) = fields.first().map(|field| field.trim())
-        && form_child_item_tag(wrapper, &fields) == Some("Table")
-        && let Some(identity) = fields
-            .get(1)
-            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-        && let Some(table_id) = identity.first().map(|field| field.trim())
-        && let Some(group_id) = parse_form_table_property_bag_number(&fields, "16")
-        && let Some(group_name) = item_names_by_id.get(&group_id)
-    {
-        group_names_by_table_id.insert(table_id.to_string(), group_name.clone());
-    }
-    for nested in fields {
-        if nested.trim_start().starts_with('{') {
-            collect_form_table_user_settings_groups(
-                nested,
-                item_names_by_id,
-                group_names_by_table_id,
-            );
-        }
-    }
-}
-
 fn apply_form_table_user_settings_groups(
     items: &mut [FormChildItem],
     group_names_by_table_id: &BTreeMap<String, String>,
@@ -12144,71 +12141,6 @@ fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
         "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
         _ => None,
-    }
-}
-
-fn form_table_names_by_id(fields: &[&str]) -> BTreeMap<String, String> {
-    let mut tables = BTreeMap::new();
-    collect_form_table_names(fields, &mut tables);
-    tables
-}
-
-fn form_table_column_names_by_id(fields: &[&str]) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut tables = BTreeMap::new();
-    collect_form_table_column_names(fields, &mut tables);
-    tables
-}
-
-fn collect_form_table_names(fields: &[&str], tables: &mut BTreeMap<String, String>) {
-    for field in fields {
-        let field = field.trim();
-        if !field.starts_with('{') {
-            continue;
-        }
-        let Some(nested) = split_1c_braced_fields(field, 0) else {
-            continue;
-        };
-        let wrapper = nested.first().map(|value| value.trim());
-        if matches!(wrapper, Some("73" | "55"))
-            && let Some(identity) = nested
-                .get(1)
-                .and_then(|field| split_1c_braced_fields(field, 0))
-            && let (Some(id), Some(name)) = (
-                identity.first().map(|value| value.trim()),
-                wrapper.and_then(|wrapper| parse_form_child_item_name(wrapper, &nested)),
-            )
-        {
-            tables.insert(id.to_string(), name);
-        }
-        collect_form_table_names(&nested, tables);
-    }
-}
-
-fn collect_form_table_column_names(
-    fields: &[&str],
-    tables: &mut BTreeMap<String, BTreeMap<String, String>>,
-) {
-    for field in fields {
-        let field = field.trim();
-        if !field.starts_with('{') {
-            continue;
-        }
-        let Some(nested) = split_1c_braced_fields(field, 0) else {
-            continue;
-        };
-        if matches!(nested.first().map(|value| value.trim()), Some("73" | "55"))
-            && let Some(identity) = nested
-                .get(1)
-                .and_then(|field| split_1c_braced_fields(field, 0))
-            && let Some(table_id) = identity.first().map(|value| value.trim().to_string())
-        {
-            let mut columns = BTreeMap::new();
-            collect_form_table_column_names_for_table(&nested, &mut columns);
-            if !columns.is_empty() {
-                tables.insert(table_id, columns);
-            }
-        }
-        collect_form_table_column_names(&nested, tables);
     }
 }
 
