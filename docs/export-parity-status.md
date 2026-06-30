@@ -20,6 +20,9 @@ Overall summary:
 |---:|---:|---:|---:|
 | 0 | 0 | 17623 | 32000 |
 
+Overall full-snapshot readiness: **64.5%** (`32000 / 49623`
+byte-identical files), with **17623** files still different.
+
 Incremental selected verification after this snapshot:
 
 | Object | Verification | Result |
@@ -147,6 +150,7 @@ Diff by file kind:
 | CommonAttributes | partial | 7 | 1 | 6 | 14.3 |
 | ConfigDumpInfo.xml | excluded | 1 | 0 | 0 | n/a |
 | Configuration.xml | partial | 1 | 1 | 0 | 100.0 |
+| **Overall full snapshot** | **partial** | **49623** | **32000** | **17623** | **64.5** |
 
 ## Scope Exclusions
 

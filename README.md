@@ -54,6 +54,7 @@ import hierarchy, not as a production runtime dependency.
 | Subsystems | partial | 9.9% | 690 |
 | CommonAttributes | partial | 14.3% | 6 |
 | Configuration.xml | partial | 100.0% | 0 |
+| **Overall full snapshot** | **partial** | **64.5%** | **17623** |
 
 Latest verified incremental slices after the full snapshot:
 
