@@ -8055,6 +8055,7 @@ const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048
 const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
     "874260df-7e23-4f02-9e10-5794914b5adf";
 const FORM_REPORT_ATTRIBUTE_REF_UUID: &str = "11cfd3e0-86f8-4480-aaa5-dc6a6ccac689";
+const FORM_UPDATE_ON_DATA_CHANGE_UUID: &str = "eac7bfa0-10b4-4369-996c-d258871ad519";
 const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
 const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
 const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
@@ -8175,6 +8176,7 @@ struct FormChildItem {
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
+    update_on_data_change: Option<&'static str>,
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
@@ -9958,6 +9960,11 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        update_on_data_change: if tag == "Table" {
+            parse_form_table_update_on_data_change(&fields)
+        } else {
+            None
+        },
         button_representation: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(10)
@@ -10863,6 +10870,21 @@ fn parse_form_table_property_bag_number(fields: &[&str], key: &str) -> Option<St
         .get(1)
         .map(|field| field.trim().to_string())
         .filter(|value| value.parse::<u32>().is_ok())
+}
+
+fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<&'static str> {
+    let value = form_table_property_bag_value(fields, "14")?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    match (
+        fields.first().and_then(|field| parse_1c_string(field)),
+        fields.get(1).map(|field| field.trim()),
+        fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(marker), Some(FORM_UPDATE_ON_DATA_CHANGE_UUID), Some("0")) if marker == "#" => {
+            Some("Auto")
+        }
+        _ => None,
+    }
 }
 
 fn form_table_property_bag_value<'a>(fields: &[&'a str], key: &str) -> Option<&'a str> {
@@ -11780,6 +11802,12 @@ fn format_form_child_item_xml(
                 } else {
                     "false"
                 }
+            ));
+        }
+        if let Some(update_on_data_change) = item.update_on_data_change {
+            xml.push_str(&format!(
+                "{tab}\t<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n",
+                escape_xml_text(update_on_data_change)
             ));
         }
     }
@@ -26638,12 +26666,14 @@ mod tests {
         assert_eq!(item.auto_refresh, Some(false));
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
         assert_eq!(item.use_alternation_row_color, Some(false));
+        assert_eq!(item.update_on_data_change, Some("Auto"));
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
         assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
         assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
+        assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
     }
 
     #[test]
@@ -28183,6 +28213,7 @@ mod tests {
             auto_refresh: None,
             auto_refresh_period: None,
             use_alternation_row_color: None,
+            update_on_data_change: None,
             button_representation: None,
             location_in_command_bar: None,
             default_button: None,
@@ -28246,6 +28277,7 @@ mod tests {
                     auto_refresh: None,
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
+                    update_on_data_change: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
@@ -28310,6 +28342,7 @@ mod tests {
                     auto_refresh: None,
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
+                    update_on_data_change: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,

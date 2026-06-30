@@ -28,6 +28,7 @@ const STD_PICTURE_INFORMATION_UUID: &str = "4b54770b-d069-4c0e-9b17-5cc2a01134d9
 const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
 const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
 const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+const FORM_UPDATE_ON_DATA_CHANGE_UUID: &str = "eac7bfa0-10b4-4369-996c-d258871ad519";
 
 #[derive(Debug, Serialize)]
 pub struct ModuleBlobPackReport {
@@ -249,6 +250,7 @@ struct FormXmlChildItem {
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
+    update_on_data_change: Option<FormXmlUpdateOnDataChange>,
     horizontal_align: Option<FormXmlHorizontalAlign>,
     autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
@@ -407,6 +409,11 @@ enum FormXmlReportResultViewMode {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlViewModeApplicationOnSetReportResult {
+    Auto,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormXmlUpdateOnDataChange {
     Auto,
 }
 
@@ -4317,6 +4324,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefresh"
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
+                        | "UpdateOnDataChange"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -4871,6 +4879,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &current_child_items,
                     )
+                    || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
@@ -4918,6 +4927,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_data_path(&path, &current_child_items)
                     || path_ends_with_for_child_auto_refresh(&path, &current_child_items)
                     || path_ends_with_for_child_auto_refresh_period(&path, &current_child_items)
+                    || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
                     || path_ends_with(
                         &path,
@@ -6646,6 +6656,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "UpdateOnDataChange"
+                        if path_ends_with_for_child_update_on_data_change(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.update_on_data_change =
+                                Some(parse_form_update_on_data_change_xml(text_value.trim())?);
+                        }
+                    }
                     "HorizontalAlign"
                         if path_ends_with_for_child_horizontal_align(
                             &path,
@@ -7132,6 +7153,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefresh"
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
+                        | "UpdateOnDataChange"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -7311,6 +7333,7 @@ fn parse_form_child_item_xml(
         auto_refresh: None,
         auto_refresh_period: None,
         use_alternation_row_color: None,
+        update_on_data_change: None,
         horizontal_align: None,
         autofill: None,
         button_representation: None,
@@ -8036,6 +8059,16 @@ fn path_ends_with_for_child_use_alternation_row_color(
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UseAlternationRowColor"])
 }
 
+fn path_ends_with_for_child_update_on_data_change(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UpdateOnDataChange"])
+}
+
 fn path_ends_with_for_child_horizontal_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -8120,6 +8153,15 @@ fn parse_form_use_posting_mode_xml(value: &str) -> Result<FormXmlUsePostingMode>
         "Regular" => Ok(FormXmlUsePostingMode::Regular),
         "Auto" => Ok(FormXmlUsePostingMode::Auto),
         other => Err(anyhow!("unsupported Form UsePostingMode: {other}")),
+    }
+}
+
+fn parse_form_update_on_data_change_xml(value: &str) -> Result<FormXmlUpdateOnDataChange> {
+    match value {
+        "Auto" => Ok(FormXmlUpdateOnDataChange::Auto),
+        other => Err(anyhow!(
+            "unsupported Form Table UpdateOnDataChange: {other}"
+        )),
     }
 }
 
@@ -8979,6 +9021,10 @@ fn is_form_conversations_representation_value(value: &str) -> bool {
     is_form_property_bag_enum_value(value, FORM_CONVERSATIONS_REPRESENTATION_UUID)
 }
 
+fn is_form_update_on_data_change_value(value: &str) -> bool {
+    is_form_property_bag_enum_value(value, FORM_UPDATE_ON_DATA_CHANGE_UUID)
+}
+
 fn is_form_property_bag_enum_value(value: &str, uuid: &str) -> bool {
     let value = value.trim();
     let Ok(fields) = scan_braced_fields(value, 0) else {
@@ -9054,6 +9100,12 @@ fn form_use_posting_mode_code(value: FormXmlUsePostingMode) -> &'static str {
     match value {
         FormXmlUsePostingMode::Regular => "0",
         FormXmlUsePostingMode::Auto => "3",
+    }
+}
+
+fn form_update_on_data_change_code(value: FormXmlUpdateOnDataChange) -> &'static str {
+    match value {
+        FormXmlUpdateOnDataChange::Auto => "0",
     }
 }
 
@@ -10887,6 +10939,20 @@ fn patch_form_layout_child_item_entry(
                     r#"{"B",0}"#
                 }
                 .to_string(),
+            ));
+        }
+        if let Some(update_on_data_change) = item.update_on_data_change
+            && let Some(update_range) =
+                form_layout_table_property_bag_value_range(text, fields, "14")
+            && is_form_update_on_data_change_value(&text[update_range.clone()])
+        {
+            replacements.push((
+                update_range.clone(),
+                format!(
+                    r##"{{"#",{},{}}}"##,
+                    FORM_UPDATE_ON_DATA_CHANGE_UUID,
+                    form_update_on_data_change_code(update_on_data_change)
+                ),
             ));
         }
     }
@@ -28323,6 +28389,39 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.layout.contains(r#"9,{"B",1}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"9,{"B",0}"#));
         assert!(parsed.layout.contains(r#"5,{"B",1},6,{"N",30}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_update_on_data_change() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,1}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<UpdateOnDataChange>Auto</UpdateOnDataChange>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains(r##"14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,1}"##)
+        );
         Ok(())
     }
 
