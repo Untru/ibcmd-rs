@@ -1997,7 +1997,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     next_column_index = 0;
                 } else if local == "merge" || local == "verticalUnmerge" {
                     current_merge = Some(SpreadsheetDocumentXmlMerge::default());
-                } else if local == "namedItem" {
+                } else if local == "namedItem" && spreadsheet_named_item_is_cells(&event)? {
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
                 } else if local == "printArea" {
                     current_area = Some(SpreadsheetDocumentXmlArea::default());
@@ -2290,6 +2290,12 @@ fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Optio
         }
     }
     Ok(None)
+}
+
+fn spreadsheet_named_item_is_cells(event: &BytesStart<'_>) -> Result<bool> {
+    Ok(xml_attribute_value(event, "type")?
+        .as_deref()
+        .is_none_or(|value| value == "NamedItemCells" || value.ends_with(":NamedItemCells")))
 }
 
 fn xml_event_is_nil(event: &BytesStart<'_>) -> Result<bool> {
@@ -23595,6 +23601,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             text.contains(r#"{1,"Header",{1,{3,2,1,4,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0}}"#)
         );
         assert!(text.contains("{1,0,5,4,7,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_named_areas_ignores_named_drawings() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<columns>
+		<size>2</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<namedItem xsi:type="NamedItemCells">
+		<name>Header</name>
+		<area>
+			<type>Rows</type>
+			<beginRow>4</beginRow>
+			<endRow>6</endRow>
+			<beginColumn>-1</beginColumn>
+			<endColumn>-1</endColumn>
+		</area>
+	</namedItem>
+	<namedItem xsi:type="NamedItemDrawing">
+		<name>BarcodePicture</name>
+		<drawingID>10</drawingID>
+	</namedItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(
+            text.contains(r#"{1,"Header",{1,{1,0,4,0,6,00000000-0000-0000-0000-000000000000},0}}"#)
+        );
+        assert!(!text.contains("BarcodePicture"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
