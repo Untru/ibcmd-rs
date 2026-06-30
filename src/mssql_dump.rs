@@ -16589,7 +16589,7 @@ struct MetadataChildProperties {
     choice_parameters: Option<Vec<MetadataChoiceParameter>>,
     quick_choice: Option<&'static str>,
     create_on_input: Option<&'static str>,
-    choice_form_empty: bool,
+    choice_form: Option<MetadataChoiceForm>,
     link_by_type_empty: bool,
     choice_history_on_input: Option<&'static str>,
     use_mode: Option<&'static str>,
@@ -16604,6 +16604,12 @@ struct MetadataChildProperties {
 struct MetadataChoiceParameter {
     name: String,
     value_refs: Vec<String>,
+}
+
+#[derive(Clone)]
+enum MetadataChoiceForm {
+    Empty,
+    Reference(String),
 }
 
 #[derive(Clone)]
@@ -18762,8 +18768,9 @@ fn parse_metadata_child_properties_from_fields(
         create_on_input: fields
             .get(header_index + 18)
             .and_then(|field| metadata_create_on_input_xml(field.trim())),
-        choice_form_empty: metadata_child_choice_form_is_empty(
+        choice_form: parse_metadata_child_choice_form(
             fields.get(header_index + 19).copied(),
+            object_refs,
         ),
         link_by_type_empty: metadata_child_collection_is_empty(
             fields.get(header_index + 20).copied(),
@@ -18899,11 +18906,15 @@ fn metadata_child_collection_is_empty(field: Option<&str>) -> bool {
     matches!(field.map(str::trim), Some("{0}") | Some("0"))
 }
 
-fn metadata_child_choice_form_is_empty(field: Option<&str>) -> bool {
-    matches!(
-        field.map(str::trim),
-        Some("0") | Some("00000000-0000-0000-0000-000000000000")
-    )
+fn parse_metadata_child_choice_form(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChoiceForm> {
+    let field = field?;
+    if matches!(field.trim(), "0" | "00000000-0000-0000-0000-000000000000") {
+        return Some(MetadataChoiceForm::Empty);
+    }
+    parse_design_time_reference(field, object_refs).map(MetadataChoiceForm::Reference)
 }
 
 fn metadata_choice_folders_and_items_xml(value: &str) -> Option<&'static str> {
@@ -24627,8 +24638,18 @@ fn push_metadata_child_properties_xml(
             "{indent}<CreateOnInput>{create_on_input}</CreateOnInput>\r\n"
         ));
     }
-    if properties.choice_form_empty {
-        xml.push_str(&format!("{indent}<ChoiceForm/>\r\n"));
+    if let Some(choice_form) = &properties.choice_form {
+        match choice_form {
+            MetadataChoiceForm::Empty => {
+                xml.push_str(&format!("{indent}<ChoiceForm/>\r\n"));
+            }
+            MetadataChoiceForm::Reference(reference) => {
+                xml.push_str(&format!(
+                    "{indent}<ChoiceForm>{}</ChoiceForm>\r\n",
+                    escape_xml_element_text(reference)
+                ));
+            }
+        }
     }
     if properties.link_by_type_empty {
         xml.push_str(&format!("{indent}<LinkByType/>\r\n"));
@@ -42994,6 +43015,7 @@ mod tests {
         let status_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
         let mode_one_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
         let mode_two_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+        let choice_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc4";
         let single_parameter_value = [
             r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,e9aecab4-da2b-4a51-b13c-fb8ca3924bce,"##,
             status_uuid,
@@ -43026,7 +43048,7 @@ mod tests {
 {{3,\r\n{{1,0,{attribute_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"\"}},\
 0,{{0}},{{0}},{{0}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},\
 {choice_parameters},\
-0,0,0,0,0,0,0,0,0}}\r\n\
+0,0,{choice_form_uuid},0,0,0,0,0,0}}\r\n\
 }}\r\n}}"
             )
             .as_bytes(),
@@ -43047,6 +43069,10 @@ mod tests {
             (
                 mode_two_uuid.to_string(),
                 "Enum.Modes.EnumValue.Manual".to_string(),
+            ),
+            (
+                choice_form_uuid.to_string(),
+                "DataProcessor.Loader.Form.ChoiceForm".to_string(),
             ),
         ]);
 
@@ -43101,6 +43127,10 @@ mod tests {
             "{xml}"
         );
         assert!(
+            attribute_xml.contains("<ChoiceForm>DataProcessor.Loader.Form.ChoiceForm</ChoiceForm>"),
+            "{xml}"
+        );
+        assert!(
             attribute_xml.find("<ChoiceParameterLinks/>").unwrap()
                 < attribute_xml.find("<ChoiceParameters>").unwrap(),
             "{xml}"
@@ -43108,6 +43138,16 @@ mod tests {
         assert!(
             attribute_xml.find("<ChoiceParameters>").unwrap()
                 < attribute_xml.find("<QuickChoice>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<CreateOnInput>").unwrap()
+                < attribute_xml.find("<ChoiceForm>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceForm>").unwrap()
+                < attribute_xml.find("<LinkByType/>").unwrap(),
             "{xml}"
         );
     }
@@ -43594,6 +43634,7 @@ mod tests {
         let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
         let status_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let choice_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
         let zero_uuid = "00000000-0000-0000-0000-000000000000";
         let single_parameter_value = [
             r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,"##,
@@ -43617,15 +43658,21 @@ mod tests {
 {{3,\r\n{{1,0,{attribute_uuid}}},\"RequiredFlag\",{{1,\"en\",\"Required flag\"}},\"\"}},\
 0,{{1,\"en\",\"Flag format\"}},{{0}},{{1,\"en\",\"Flag tooltip\"}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},\
 {choice_parameters},\
-1,2,0,{{0}},0,2,2,0,1,0,0}}\r\n\
+1,2,{choice_form_uuid},{{0}},0,2,2,0,1,0,0}}\r\n\
 }}\r\n}}"
             )
             .as_bytes(),
         );
-        let object_refs = BTreeMap::from([(
-            status_uuid.to_string(),
-            "Enum.Statuses.EnumValue.Open".to_string(),
-        )]);
+        let object_refs = BTreeMap::from([
+            (
+                status_uuid.to_string(),
+                "Enum.Statuses.EnumValue.Open".to_string(),
+            ),
+            (
+                choice_form_uuid.to_string(),
+                "Catalog.Products.Form.ChoiceForm".to_string(),
+            ),
+        ]);
 
         let extracted = extract_metadata_source_xml_with_refs(
             &catalog_blob,
@@ -43665,7 +43712,9 @@ mod tests {
         ));
         assert!(attribute_xml.contains("<QuickChoice>Use</QuickChoice>"));
         assert!(attribute_xml.contains("<CreateOnInput>Use</CreateOnInput>"));
-        assert!(attribute_xml.contains("<ChoiceForm/>"));
+        assert!(
+            attribute_xml.contains("<ChoiceForm>Catalog.Products.Form.ChoiceForm</ChoiceForm>")
+        );
         assert!(attribute_xml.contains("<LinkByType/>"));
         assert!(attribute_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
         assert!(attribute_xml.contains("<Use>ForFolderAndItem</Use>"));
@@ -43690,6 +43739,16 @@ mod tests {
         assert!(
             attribute_xml.find("<ChoiceParameters>").unwrap()
                 < attribute_xml.find("<QuickChoice>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<CreateOnInput>").unwrap()
+                < attribute_xml.find("<ChoiceForm>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceForm>").unwrap()
+                < attribute_xml.find("<LinkByType/>").unwrap(),
             "{xml}"
         );
         assert!(
