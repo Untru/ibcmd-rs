@@ -56,6 +56,10 @@ Incremental selected verification after this snapshot:
 | Round 13 Catalog metadata slice | unit-level metadata XML verification | `Catalog` metadata emits owned `Form` and `Template` child object headers |
 | Round 13 MXL template slice | unit-level packer/formatter verification | SpreadsheetDocument `style:ButtonTextColor` is supported in pack and extract paths |
 | Round 13 source staging readiness slice | unit-level staging verification | SpreadsheetDocument `Ext/Template.xml` rows are prepared without active Config blobs |
+| Round 14 Form.xml slice | unit-level packer verification | new `InputField` items preserve explicit `ReadOnly` values |
+| Round 14 BusinessProcess metadata slice | unit-level metadata XML verification | `BusinessProcess` emits generated type `InternalInfo` entries |
+| Round 14 Task metadata slice | unit-level metadata XML verification | `Task` metadata emits owned `Form` and `Template` child object headers |
+| Round 14 source staging readiness slice | unit-level staging verification | `Style/Ext/Style.xml` rows are prepared without active Config blobs |
 
 Performance note for selected extraction:
 
@@ -164,5 +168,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #15 | Catalog owned Form/Template child refs | merged to `master` in round 13 |
 | #17 | SpreadsheetDocument `style:ButtonTextColor` pack/extract | merged to `master` in round 13 |
 | #21 | SpreadsheetDocument Template.xml staging without active Config query | merged to `master` in round 13 |
+| #16 | Form.xml new `InputField/ReadOnly` generation | merged to `master` in round 14 |
+| #18 | BusinessProcess generated type InternalInfo | merged to `master` in round 14 |
+| #14 | Task owned Form/Template child refs | merged to `master` in round 14 |
+| #21 | Style.xml staging without active Config query | merged to `master` in round 14 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

@@ -55,6 +55,19 @@ import hierarchy, not as a production runtime dependency.
 | CommonAttributes | partial | 14.3% | 6 |
 | Configuration.xml | partial | 100.0% | 0 |
 
+Latest verified incremental slices after the full snapshot:
+
+| Round | Area | Verified progress |
+|---|---|---|
+| 14 | Form.xml | new `InputField` items preserve explicit `ReadOnly` values |
+| 14 | BusinessProcess metadata XML | generated type `InternalInfo` entries are emitted |
+| 14 | Task metadata XML | owned `Form` and `Template` child object headers are emitted |
+| 14 | Source staging readiness | `Style/Ext/Style.xml` rows are prepared without active `Config` blobs |
+| 13 | Form.xml | new `PictureDecoration` child items can be compiled from XML |
+| 13 | Catalog metadata XML | owned `Form` and `Template` child object headers are emitted |
+| 13 | MXL templates | SpreadsheetDocument `style:ButtonTextColor` is supported in pack and extract paths |
+| 13 | Source staging readiness | SpreadsheetDocument `Ext/Template.xml` rows are prepared without active `Config` blobs |
+
 Scope exclusion: `ConfigDumpInfo.xml` is intentionally not generated and is not
 counted as parity debt.
 
