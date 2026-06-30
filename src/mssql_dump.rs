@@ -8453,6 +8453,7 @@ struct FormChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     update_on_data_change: Option<&'static str>,
+    user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
@@ -9877,7 +9878,7 @@ fn extract_form_child_items(
         .collect::<BTreeMap<_, _>>();
     let table_name_by_id = form_table_names_by_id(fields);
     let table_column_names_by_id = form_table_column_names_by_id(fields);
-    parse_form_child_item_pairs(
+    let mut items = parse_form_child_item_pairs(
         fields,
         main_data_path,
         None,
@@ -9887,7 +9888,9 @@ fn extract_form_child_items(
         commands,
         object_refs,
     )
-    .unwrap_or_default()
+    .unwrap_or_default();
+    resolve_form_child_item_user_settings_groups(&mut items, fields);
+    items
 }
 
 fn parse_form_child_item_pairs(
@@ -10242,6 +10245,7 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        user_settings_group: None,
         allow_getting_current_row_url: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, "20")
         } else {
@@ -11152,6 +11156,91 @@ fn parse_form_table_property_bag_number(fields: &[&str], key: &str) -> Option<St
         .get(1)
         .map(|field| field.trim().to_string())
         .filter(|value| value.parse::<u32>().is_ok())
+}
+
+fn resolve_form_child_item_user_settings_groups(items: &mut [FormChildItem], fields: &[&str]) {
+    let mut item_names_by_id = BTreeMap::<String, String>::new();
+    for field in fields {
+        collect_form_child_item_names_by_id(field, &mut item_names_by_id);
+    }
+    let mut group_names_by_table_id = BTreeMap::<String, String>::new();
+    for field in fields {
+        collect_form_table_user_settings_groups(
+            field,
+            &item_names_by_id,
+            &mut group_names_by_table_id,
+        );
+    }
+    apply_form_table_user_settings_groups(items, &group_names_by_table_id);
+}
+
+fn collect_form_child_item_names_by_id(
+    field: &str,
+    item_names_by_id: &mut BTreeMap<String, String>,
+) {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return;
+    };
+    if let Some(wrapper) = fields.first().map(|field| field.trim())
+        && form_child_item_tag(wrapper, &fields).is_some()
+        && let Some(identity) = fields
+            .get(1)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        && let Some(id) = identity.first().map(|field| field.trim())
+        && id != "0"
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        item_names_by_id.insert(id.to_string(), name);
+    }
+    for nested in fields {
+        if nested.trim_start().starts_with('{') {
+            collect_form_child_item_names_by_id(nested, item_names_by_id);
+        }
+    }
+}
+
+fn collect_form_table_user_settings_groups(
+    field: &str,
+    item_names_by_id: &BTreeMap<String, String>,
+    group_names_by_table_id: &mut BTreeMap<String, String>,
+) {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return;
+    };
+    if let Some(wrapper) = fields.first().map(|field| field.trim())
+        && form_child_item_tag(wrapper, &fields) == Some("Table")
+        && let Some(identity) = fields
+            .get(1)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        && let Some(table_id) = identity.first().map(|field| field.trim())
+        && let Some(group_id) = parse_form_table_property_bag_number(&fields, "16")
+        && let Some(group_name) = item_names_by_id.get(&group_id)
+    {
+        group_names_by_table_id.insert(table_id.to_string(), group_name.clone());
+    }
+    for nested in fields {
+        if nested.trim_start().starts_with('{') {
+            collect_form_table_user_settings_groups(
+                nested,
+                item_names_by_id,
+                group_names_by_table_id,
+            );
+        }
+    }
+}
+
+fn apply_form_table_user_settings_groups(
+    items: &mut [FormChildItem],
+    group_names_by_table_id: &BTreeMap<String, String>,
+) {
+    for item in items {
+        if item.tag == "Table"
+            && let Some(group_name) = group_names_by_table_id.get(&item.id)
+        {
+            item.user_settings_group = Some(group_name.clone());
+        }
+        apply_form_table_user_settings_groups(&mut item.child_items, group_names_by_table_id);
+    }
 }
 
 fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<&'static str> {
@@ -12090,6 +12179,12 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n",
                 escape_xml_text(update_on_data_change)
+            ));
+        }
+        if let Some(user_settings_group) = &item.user_settings_group {
+            xml.push_str(&format!(
+                "{tab}\t<UserSettingsGroup>{}</UserSettingsGroup>\r\n",
+                escape_xml_text(user_settings_group)
             ));
         }
         if let Some(allow_getting_current_row_url) = item.allow_getting_current_row_url {
@@ -27584,6 +27679,32 @@ mod tests {
     }
 
     #[test]
+    fn extracts_wrapper55_table_user_settings_group() {
+        let attributes = vec![FormAttribute {
+            id: "1".to_string(),
+            name: "Rows".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            main_attribute: true,
+            use_always: Vec::new(),
+            settings: None,
+        }];
+        let group_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let table_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let group = r#"{22,{288,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"SettingsGroup",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,0},0,0,0,3,3,0}"#;
+        let table = r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,0},{1,0},{1,{1}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,16,{"N",288}}"##;
+        let layout = format!("{{2,{group_uuid},{group},{table_uuid},{table}}}");
+        let fields = split_1c_braced_fields(&layout, 0).unwrap();
+
+        let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new());
+
+        let table = items.iter().find(|item| item.tag == "Table").unwrap();
+        assert_eq!(table.user_settings_group.as_deref(), Some("SettingsGroup"));
+        let xml = format_form_child_items_xml(&items, 1);
+        assert!(xml.contains("<UserSettingsGroup>SettingsGroup</UserSettingsGroup>"));
+    }
+
+    #[test]
     fn extracts_real_sfc_page_scroll_on_compress() {
         let form_body = fs::read(
             r"lab\sfc\verify\event_aliases_after_patch_20260628\Config\f1335af3-b387-4b08-b9f0-d742466fb011.0__part0.bin",
@@ -29121,6 +29242,7 @@ mod tests {
             auto_refresh_period: None,
             use_alternation_row_color: None,
             update_on_data_change: None,
+            user_settings_group: None,
             allow_getting_current_row_url: None,
             button_representation: None,
             location_in_command_bar: None,
@@ -29186,6 +29308,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     update_on_data_change: None,
+                    user_settings_group: None,
                     allow_getting_current_row_url: None,
                     button_representation: None,
                     location_in_command_bar: None,
@@ -29252,6 +29375,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     update_on_data_change: None,
+                    user_settings_group: None,
                     allow_getting_current_row_url: None,
                     button_representation: None,
                     location_in_command_bar: None,

@@ -251,6 +251,7 @@ struct FormXmlChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
+    user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
     horizontal_align: Option<FormXmlHorizontalAlign>,
     autofill: Option<bool>,
@@ -4361,6 +4362,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "UpdateOnDataChange"
+                        | "UserSettingsGroup"
                         | "AllowGettingCurrentRowURL"
                         | "ScrollOnCompress"
                         | "ShowTitle"
@@ -4917,6 +4919,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
+                    || path_ends_with_for_child_user_settings_group(&path, &current_child_items)
                     || path_ends_with_for_child_allow_getting_current_row_url(
                         &path,
                         &current_child_items,
@@ -4969,6 +4972,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_auto_refresh(&path, &current_child_items)
                     || path_ends_with_for_child_auto_refresh_period(&path, &current_child_items)
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
+                    || path_ends_with_for_child_user_settings_group(&path, &current_child_items)
                     || path_ends_with_for_child_allow_getting_current_row_url(
                         &path,
                         &current_child_items,
@@ -6712,6 +6716,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(parse_form_update_on_data_change_xml(text_value.trim())?);
                         }
                     }
+                    "UserSettingsGroup"
+                        if path_ends_with_for_child_user_settings_group(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.user_settings_group = Some(text_value.trim().to_string());
+                        }
+                    }
                     "AllowGettingCurrentRowURL"
                         if path_ends_with_for_child_allow_getting_current_row_url(
                             &path,
@@ -7212,6 +7226,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "UpdateOnDataChange"
+                        | "UserSettingsGroup"
                         | "AllowGettingCurrentRowURL"
                         | "ScrollOnCompress"
                         | "ShowTitle"
@@ -7393,6 +7408,7 @@ fn parse_form_child_item_xml(
         auto_refresh_period: None,
         use_alternation_row_color: None,
         update_on_data_change: None,
+        user_settings_group: None,
         allow_getting_current_row_url: None,
         horizontal_align: None,
         autofill: None,
@@ -8127,6 +8143,16 @@ fn path_ends_with_for_child_update_on_data_change(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UpdateOnDataChange"])
+}
+
+fn path_ends_with_for_child_user_settings_group(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UserSettingsGroup"])
 }
 
 fn path_ends_with_for_child_allow_getting_current_row_url(
@@ -9497,6 +9523,8 @@ fn patch_form_layout_child_items(
     let table_ids_by_name = form_layout_table_ids_by_name(layout)?;
     let table_column_ids_by_name = form_layout_table_column_ids_by_name(layout)?;
     let attribute_ids_by_name = form_attribute_ids_by_name(attributes);
+    let item_ids_by_name = form_xml_child_item_ids_by_name(items);
+    patch_form_layout_table_user_settings_groups(layout, items, &item_ids_by_name)?;
     for item in items {
         if item.depth != 0 {
             continue;
@@ -9529,11 +9557,80 @@ fn patch_form_layout_child_items(
     Ok(())
 }
 
+fn patch_form_layout_table_user_settings_groups(
+    layout: &mut String,
+    items: &[FormXmlChildItem],
+    item_ids_by_name: &BTreeMap<String, String>,
+) -> Result<()> {
+    for item in items {
+        if let Some(group_id) = item
+            .user_settings_group
+            .as_ref()
+            .and_then(|name| item_ids_by_name.get(name))
+        {
+            let _ = patch_form_layout_table_user_settings_group(layout, item, group_id)
+                .with_context(|| {
+                    format!(
+                        "failed to patch Form Table UserSettingsGroup for {}",
+                        item.name
+                    )
+                })?;
+        }
+        patch_form_layout_table_user_settings_groups(layout, &item.child_items, item_ids_by_name)?;
+    }
+    Ok(())
+}
+
 fn form_attribute_ids_by_name(attributes: &[FormXmlAttribute]) -> BTreeMap<String, String> {
     attributes
         .iter()
         .map(|attribute| (attribute.name.clone(), attribute.id.clone()))
         .collect()
+}
+
+fn form_xml_child_item_ids_by_name(items: &[FormXmlChildItem]) -> BTreeMap<String, String> {
+    let mut ids = BTreeMap::new();
+    collect_form_xml_child_item_ids_by_name(items, &mut ids);
+    ids
+}
+
+fn collect_form_xml_child_item_ids_by_name(
+    items: &[FormXmlChildItem],
+    ids: &mut BTreeMap<String, String>,
+) {
+    for item in items {
+        ids.insert(item.name.clone(), item.id.clone());
+        collect_form_xml_child_item_ids_by_name(&item.child_items, ids);
+    }
+}
+
+fn patch_form_layout_table_user_settings_group(
+    text: &mut String,
+    item: &FormXmlChildItem,
+    group_id: &str,
+) -> Result<bool> {
+    let fields = scan_braced_fields(text, 0)?;
+    if form_layout_child_item_matches(text, &fields, item) && item.tag == "Table" {
+        if let Some(value_range) = form_layout_table_property_bag_value_range(text, &fields, "16")
+            && is_form_property_bag_number_value(&text[value_range.clone()])
+        {
+            text.replace_range(value_range, &format!(r#"{{"N",{group_id}}}"#));
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+
+    for range in fields {
+        if !text[range.clone()].trim_start().starts_with('{') {
+            continue;
+        }
+        let mut nested = text[range.clone()].to_string();
+        if patch_form_layout_table_user_settings_group(&mut nested, item, group_id)? {
+            text.replace_range(range, &nested);
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn retain_form_layout_top_level_child_items(
@@ -28656,6 +28753,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains(r#"20,{"B",0}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"20,{"B",1}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_user_settings_group() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,2,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{288,cccccccc-cccc-4ccc-8ccc-cccccccccccc},0,0,0,5,"SettingsGroup",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,0},0,0,0,3,3,0},bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,{55,{1,dddddddd-dddd-4ddd-8ddd-dddddddddddd},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,16,{"N",100}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<UsualGroup name="SettingsGroup" id="288"/>
+		<Table name="Rows" id="1">
+			<UserSettingsGroup>SettingsGroup</UserSettingsGroup>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed.layout.contains(r#"16,{"N",288}"#),
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains(r#"16,{"N",100}"#));
         Ok(())
     }
 
