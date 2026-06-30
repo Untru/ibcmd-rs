@@ -14355,6 +14355,7 @@ struct FunctionalOptionProperties {
 
 struct SubsystemProperties {
     include_in_command_interface: bool,
+    child_subsystems: Vec<String>,
 }
 
 struct ExchangePlanProperties {
@@ -15204,7 +15205,7 @@ fn extract_metadata_source_xml_from_text_row(
         format_functional_options_parameter_source_xml(&header, &properties, source_version)
             .into_bytes()
     } else if kind == "Subsystem" {
-        let subsystem = parse_subsystem_properties_from_text(text, uuid)?;
+        let subsystem = parse_subsystem_properties_from_text(text, uuid, subsystem_refs)?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
         let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid)?;
@@ -15507,7 +15508,11 @@ fn parse_functional_option_properties_from_text(
     })
 }
 
-fn parse_subsystem_properties_from_text(text: &str, uuid: &str) -> Option<SubsystemProperties> {
+fn parse_subsystem_properties_from_text(
+    text: &str,
+    uuid: &str,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> Option<SubsystemProperties> {
     let fields = metadata_object_fields(text)?;
     if fields.first().map(|value| value.trim()) != Some("22")
         || metadata_header_field_index(&fields, uuid) != Some(1)
@@ -15516,7 +15521,31 @@ fn parse_subsystem_properties_from_text(text: &str, uuid: &str) -> Option<Subsys
     }
     Some(SubsystemProperties {
         include_in_command_interface: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true),
+        child_subsystems: parse_subsystem_child_references(&fields, uuid, subsystem_refs),
     })
+}
+
+fn parse_subsystem_child_references(
+    fields: &[&str],
+    uuid: &str,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut children = Vec::new();
+    for field in fields.iter().skip(3) {
+        for child_uuid in uuid_like_values_in_text_order(field) {
+            if child_uuid == uuid || !seen.insert(child_uuid.clone()) {
+                continue;
+            }
+            let Some(subsystem_ref) = subsystem_refs.get(&child_uuid) else {
+                continue;
+            };
+            if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+                children.push(reference);
+            }
+        }
+    }
+    children
 }
 
 fn parse_exchange_plan_properties_from_text(
@@ -18407,6 +18436,19 @@ fn format_subsystem_source_xml(
                 xml_bool(subsystem.include_in_command_interface)
             ),
         );
+    }
+    if !subsystem.child_subsystems.is_empty()
+        && let Some(offset) = xml.find("\t</Subsystem>")
+    {
+        let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+        for reference in &subsystem.child_subsystems {
+            child_objects.push_str(&format!(
+                "\t\t\t<Subsystem>{}</Subsystem>\r\n",
+                escape_xml_text(reference)
+            ));
+        }
+        child_objects.push_str("\t\t</ChildObjects>\r\n");
+        xml.insert_str(offset, &child_objects);
     }
     xml
 }
@@ -29266,6 +29308,12 @@ mod tests {
             root.join("Subsystems/StandardSubsystems/Subsystems/Users.xml")
                 .exists()
         );
+        let parent_xml =
+            fs::read_to_string(root.join("Subsystems/StandardSubsystems.xml")).unwrap();
+        assert!(
+            parent_xml
+                .contains("<Subsystem>Subsystem.StandardSubsystems.Subsystem.Users</Subsystem>")
+        );
         assert!(
             fs::read_to_string(
                 root.join("Subsystems/StandardSubsystems/Subsystems/Users/Ext/Help.xml")
@@ -29478,6 +29526,47 @@ mod tests {
             PathBuf::from("Subsystems/Hidden.xml")
         );
         assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
+    }
+
+    #[test]
+    fn extracts_subsystem_child_objects_to_metadata_xml() {
+        let parent_uuid = "11111111-1111-4111-8111-111111111111";
+        let child_uuid = "22222222-2222-4222-8222-222222222222";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"Parent\",{{1,\"en\",\"Parent\"}},\"\"}},1,{child_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let subsystem_refs = BTreeMap::from([(
+            child_uuid.to_string(),
+            SubsystemSourceReference {
+                relative_path: PathBuf::from("Subsystems/Parent/Subsystems/Child.xml"),
+            },
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            parent_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &subsystem_refs,
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("Subsystems/Parent.xml")
+        );
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains("<ChildObjects>"));
+        assert!(xml.contains("<Subsystem>Subsystem.Parent.Subsystem.Child</Subsystem>"));
+        assert!(xml.find("\t\t</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
     }
 
     #[test]
