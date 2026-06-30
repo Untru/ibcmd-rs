@@ -487,6 +487,7 @@ fn is_supported_ext_body_file(path: &str) -> bool {
         || lower.ends_with("/ext/content.xml")
         || lower.ends_with("/ext/flowchart.xml")
         || lower.ends_with("/ext/help.xml")
+        || (lower.starts_with("xdtopackages/") && lower.ends_with("/ext/package.bin"))
         || lower.ends_with("/ext/commandinterface.xml")
         || is_supported_additional_indexes_file(&lower)
         || lower.ends_with("/ext/style.xml")
@@ -1528,6 +1529,7 @@ mod tests {
         fs::create_dir_all(root.join("Catalogs/Products/Ext"))?;
         fs::create_dir_all(root.join("CommonModules/Foo/Ext"))?;
         fs::create_dir_all(root.join("Documents/Order/Ext"))?;
+        fs::create_dir_all(root.join("XDTOPackages/Exchange/Ext"))?;
         fs::create_dir_all(root.join("Ext"))?;
         fs::write(
             root.join("Catalogs/Products.xml"),
@@ -1568,6 +1570,14 @@ mod tests {
         fs::write(
             root.join("Documents/Order/Ext/AdditionalIndexes.xml"),
             b"<AdditionalIndexes/>",
+        )?;
+        fs::write(
+            root.join("XDTOPackages/Exchange.xml"),
+            br#"<MetaDataObject><XDTOPackage uuid="55555555-5555-4555-8555-555555555555"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("XDTOPackages/Exchange/Ext/Package.bin"),
+            b"raw-package-body",
         )?;
         fs::write(
             root.join("Ext/OrdinaryApplicationModule.bsl"),
@@ -1615,14 +1625,14 @@ mod tests {
 
         let report = audit_source_load_coverage(&root)?;
 
-        assert_eq!(report.total_files, 23);
-        assert_eq!(report.stage_metadata_xml_files, 3);
+        assert_eq!(report.total_files, 25);
+        assert_eq!(report.stage_metadata_xml_files, 4);
         assert_eq!(report.stage_common_module_xml_files, 1);
-        assert_eq!(report.stage_entry_files, 4);
+        assert_eq!(report.stage_entry_files, 5);
         assert_eq!(report.module_files, 6);
         assert_eq!(report.supported_module_files, 6);
-        assert_eq!(report.supported_ext_body_files, 12);
-        assert_eq!(report.potentially_stageable_body_files, 19);
+        assert_eq!(report.supported_ext_body_files, 13);
+        assert_eq!(report.potentially_stageable_body_files, 20);
         assert_eq!(report.partially_supported_form_xml_files, 1);
         assert_eq!(report.partially_supported_form_xml_bytes, 26);
         assert_eq!(report.unsupported_form_xml_files, 1);
