@@ -7919,6 +7919,7 @@ struct FormCommand {
     tooltip: Vec<(String, String)>,
     action: String,
     functional_options: Vec<String>,
+    modifies_saved_data: Option<bool>,
     current_row_use: Option<&'static str>,
 }
 
@@ -9295,8 +9296,16 @@ fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Op
             .get(12)
             .map(|field| parse_form_reference_list(field, object_refs))
             .unwrap_or_default(),
+        modifies_saved_data: parse_form_command_modifies_saved_data(fields.get(10).copied()),
         current_row_use: parse_form_current_row_use(fields.get(9).copied()),
     })
+}
+
+fn parse_form_command_modifies_saved_data(field: Option<&str>) -> Option<bool> {
+    match field.map(str::trim)? {
+        "1" => Some(true),
+        _ => None,
+    }
 }
 
 fn parse_form_localized_strings(field: &str) -> Vec<(String, String)> {
@@ -11359,6 +11368,9 @@ fn format_form_body_xml(
                 "\t\t\t<Action>{}</Action>\r\n",
                 escape_xml_text(&command.action)
             ));
+            if command.modifies_saved_data == Some(true) {
+                xml.push_str("\t\t\t<ModifiesSavedData>true</ModifiesSavedData>\r\n");
+            }
             if !command.functional_options.is_empty() {
                 xml.push_str("\t\t\t<FunctionalOptions>\r\n");
                 for item in &command.functional_options {
@@ -25180,6 +25192,28 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_command_modifies_saved_data() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"ЗаписатьИЗакрыть",{1,0},{1,0},0,0,0,"ЗаписатьИЗакрытьВыполнить",3,1,0,{0,0}}},{0}}"#
+                .as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains(r#"<Command name="ЗаписатьИЗакрыть" id="1">"#));
+        assert!(form_xml.contains("<Action>ЗаписатьИЗакрытьВыполнить</Action>"));
+        assert!(form_xml.contains("<ModifiesSavedData>true</ModifiesSavedData>"));
+        assert!(
+            form_xml
+                .find("<ModifiesSavedData>true</ModifiesSavedData>")
+                .unwrap()
+                < form_xml
+                    .find("<CurrentRowUse>DontUse</CurrentRowUse>")
+                    .unwrap()
+        );
+    }
+
+    #[test]
     fn extracts_regular_form_attribute_types_from_body_tail() {
         let reference_type_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let form_body = deflate_for_test(
@@ -26916,6 +26950,7 @@ mod tests {
             tooltip: Vec::new(),
             action: String::new(),
             functional_options: Vec::new(),
+            modifies_saved_data: None,
             current_row_use: None,
         }];
         let table_name_by_id = BTreeMap::from([("25".to_string(), "Rows".to_string())]);
