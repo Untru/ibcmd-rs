@@ -5705,6 +5705,30 @@ fn parse_configuration_properties_from_text(
         update_catalog_address: fields
             .get(16)
             .and_then(|field| parse_1c_quoted_string(field.trim())),
+        common_settings_storage: parse_configuration_root_reference_slot(
+            &fields,
+            22,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        reports_user_settings_storage: parse_configuration_root_reference_slot(
+            &fields,
+            23,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        reports_variants_storage: parse_configuration_root_reference_slot(
+            &fields,
+            24,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        form_data_settings_storage: parse_configuration_root_reference_slot(
+            &fields,
+            25,
+            object_refs,
+            "SettingsStorage.",
+        ),
         compatibility_mode: fields
             .get(43)
             .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
@@ -5745,13 +5769,26 @@ fn parse_configuration_root_reference(
     object_refs: &BTreeMap<String, String>,
     expected_prefix: &str,
 ) -> Option<String> {
-    let uuid = fields
-        .get(index)
-        .and_then(|field| parse_non_zero_uuid(field.trim()))?;
+    parse_configuration_root_reference_slot(fields, index, object_refs, expected_prefix)?.value
+}
+
+fn parse_configuration_root_reference_slot(
+    fields: &[&str],
+    index: usize,
+    object_refs: &BTreeMap<String, String>,
+    expected_prefix: &str,
+) -> Option<ConfigurationRootReference> {
+    let field = fields.get(index)?.trim();
+    if field == "00000000-0000-0000-0000-000000000000" {
+        return Some(ConfigurationRootReference { value: None });
+    }
+    let uuid = parse_non_zero_uuid(field)?;
     let reference = object_refs.get(&uuid)?;
     reference
         .starts_with(expected_prefix)
-        .then(|| reference.clone())
+        .then(|| ConfigurationRootReference {
+            value: Some(reference.clone()),
+        })
 }
 
 fn configuration_default_run_mode_xml(value: &str) -> Option<&'static str> {
@@ -16423,7 +16460,16 @@ struct ConfigurationProperties {
     vendor: Option<String>,
     version: Option<String>,
     update_catalog_address: Option<String>,
+    common_settings_storage: Option<ConfigurationRootReference>,
+    reports_user_settings_storage: Option<ConfigurationRootReference>,
+    reports_variants_storage: Option<ConfigurationRootReference>,
+    form_data_settings_storage: Option<ConfigurationRootReference>,
     compatibility_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationRootReference {
+    value: Option<String>,
 }
 
 struct CommonAttributeProperties {
@@ -21975,6 +22021,26 @@ fn format_configuration_source_xml(
         "UpdateCatalogAddress",
         properties.update_catalog_address.as_deref(),
     );
+    push_optional_root_reference_xml(
+        &mut insert,
+        "CommonSettingsStorage",
+        properties.common_settings_storage.as_ref(),
+    );
+    push_optional_root_reference_xml(
+        &mut insert,
+        "ReportsUserSettingsStorage",
+        properties.reports_user_settings_storage.as_ref(),
+    );
+    push_optional_root_reference_xml(
+        &mut insert,
+        "ReportsVariantsStorage",
+        properties.reports_variants_storage.as_ref(),
+    );
+    push_optional_root_reference_xml(
+        &mut insert,
+        "FormDataSettingsStorage",
+        properties.form_data_settings_storage.as_ref(),
+    );
     push_optional_simple_property_xml(
         &mut insert,
         "CompatibilityMode",
@@ -21990,6 +22056,22 @@ fn push_optional_simple_property_xml(xml: &mut String, name: &str, value: Option
     };
     xml.push_str("\t\t\t");
     xml.push_str(&format_simple_property_xml(name, value));
+    xml.push_str("\r\n");
+}
+
+fn push_optional_root_reference_xml(
+    xml: &mut String,
+    name: &str,
+    reference: Option<&ConfigurationRootReference>,
+) {
+    let Some(reference) = reference else {
+        return;
+    };
+    xml.push_str("\t\t\t");
+    xml.push_str(&format_simple_property_xml(
+        name,
+        reference.value.as_deref().unwrap_or_default(),
+    ));
     xml.push_str("\r\n");
 }
 
@@ -36999,6 +37081,97 @@ mod tests {
                 xml.find("</DefaultRoles>").unwrap() < xml.find("<Vendor>Vendor</Vendor>").unwrap()
             );
             assert!(!xml.contains(role_admin_uuid));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_configuration_xml_with_root_settings_storage_refs() {
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let header_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let common_storage_uuid = "11111111-1111-4111-8111-111111111111";
+        let variants_storage_uuid = "22222222-2222-4222-8222-222222222222";
+        let form_data_storage_uuid = "33333333-3333-4333-8333-333333333333";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let mut fields = vec!["0".to_string(); 44];
+        fields[0] = "68".to_string();
+        fields[1] = format!(
+            "{{0,{{3,{{1,0,{header_uuid}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,{zero_uuid},0}}}}"
+        );
+        fields[2] = "\"\"".to_string();
+        fields[3] = "1".to_string();
+        fields[13] = "0".to_string();
+        fields[14] = "\"Vendor\"".to_string();
+        fields[15] = "\"1.2.3\"".to_string();
+        fields[16] = "\"\"".to_string();
+        fields[22] = common_storage_uuid.to_string();
+        fields[23] = zero_uuid.to_string();
+        fields[24] = variants_storage_uuid.to_string();
+        fields[25] = form_data_storage_uuid.to_string();
+        fields[26] = "80327".to_string();
+        fields[39] = "{0,0}".to_string();
+        fields[43] = "80320".to_string();
+        let plain = format!(
+            "{{2,{{{uuid}}},1,{{9cd510cd-abfc-11d4-9434-004095e12fc7,{{1,{{{}}}}}}}}}",
+            fields.join(",")
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs = BTreeMap::from([
+            (
+                common_storage_uuid.to_string(),
+                "SettingsStorage.Common".to_string(),
+            ),
+            (
+                variants_storage_uuid.to_string(),
+                "SettingsStorage.ReportVariants".to_string(),
+            ),
+            (
+                form_data_storage_uuid.to_string(),
+                "SettingsStorage.FormData".to_string(),
+            ),
+        ]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(extracted.relative_path, PathBuf::from("Configuration.xml"));
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(
+                xml.contains(
+                    "<CommonSettingsStorage>SettingsStorage.Common</CommonSettingsStorage>"
+                )
+            );
+            assert!(xml.contains("<ReportsUserSettingsStorage/>"));
+            assert!(xml.contains(
+                "<ReportsVariantsStorage>SettingsStorage.ReportVariants</ReportsVariantsStorage>"
+            ));
+            assert!(xml.contains(
+                "<FormDataSettingsStorage>SettingsStorage.FormData</FormDataSettingsStorage>"
+            ));
+            assert!(
+                xml.find("<UpdateCatalogAddress/>").unwrap()
+                    < xml.find("<CommonSettingsStorage>").unwrap()
+            );
+            assert!(
+                xml.find("<FormDataSettingsStorage>").unwrap()
+                    < xml.find("<CompatibilityMode>").unwrap()
+            );
+            assert!(!xml.contains(common_storage_uuid));
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
