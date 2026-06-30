@@ -4184,6 +4184,7 @@ struct MoxelColumnSet {
 struct MoxelColumn {
     index: usize,
     format_index: usize,
+    source_format_index: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -13817,6 +13818,7 @@ fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnSet> {
             .map(|index| MoxelColumn {
                 index,
                 format_index: index + 1,
+                source_format_index: None,
             })
             .collect(),
     }]
@@ -13864,7 +13866,6 @@ fn parse_moxel_column_sets(fields: &[&str]) -> (Vec<MoxelColumnSet>, BTreeMap<us
             continue;
         }
         normalize_moxel_column_set_format_indices(&mut column_sets);
-
         let row_column_ids =
             parse_moxel_row_column_set_ids(fields, cursor, &column_sets[1..]).unwrap_or_default();
         return (column_sets, row_column_ids);
@@ -13890,17 +13891,20 @@ fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     };
     let mut columns = Vec::with_capacity(count);
     for column_index in 0..count {
+        let index = fields
+            .get(column_index * 2 + 4)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
+        let format_index = fields
+            .get(column_index * 2 + 5)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
         columns.push(MoxelColumn {
-            index: fields
-                .get(column_index * 2 + 4)?
-                .trim()
-                .parse::<usize>()
-                .ok()?,
-            format_index: fields
-                .get(column_index * 2 + 5)?
-                .trim()
-                .parse::<usize>()
-                .ok()?,
+            index,
+            format_index,
+            source_format_index: Some(format_index),
         });
     }
     Some(MoxelColumnSet {
@@ -15438,8 +15442,9 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for column_set in &spreadsheet.column_sets {
         push_moxel_columns_xml(&mut xml, column_set);
     }
+    let source_format_offset = moxel_source_column_format_offset(&spreadsheet.column_sets);
     for row in &spreadsheet.rows {
-        push_moxel_row_xml(&mut xml, row);
+        push_moxel_row_xml(&mut xml, row, source_format_offset);
     }
     if spreadsheet.empty_headers_footers {
         push_moxel_empty_headers_footers_xml(&mut xml);
@@ -15501,7 +15506,7 @@ fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
     xml.push_str(&format!("\t\t<size>{}</size>\r\n", column_set.size));
     for column in &column_set.columns {
         let column_index = column.index;
-        let format_index = column.format_index;
+        let format_index = column.source_format_index.unwrap_or(column.format_index);
         xml.push_str(&format!(
             "\t\t<columnsItem>\r\n\
 \t\t\t<index>{column_index}</index>\r\n\
@@ -15512,6 +15517,19 @@ fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
         ));
     }
     xml.push_str("\t</columns>\r\n");
+}
+
+fn moxel_source_column_format_offset(column_sets: &[MoxelColumnSet]) -> usize {
+    column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .filter_map(|column| {
+            column
+                .source_format_index
+                .and_then(|source| source.checked_sub(column.format_index))
+        })
+        .next()
+        .unwrap_or(0)
 }
 
 fn push_moxel_empty_headers_footers_xml(xml: &mut String) {
@@ -15871,7 +15889,7 @@ fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
     xml.push_str("\t</printArea>\r\n");
 }
 
-fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
+fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow, source_format_offset: usize) {
     xml.push_str(&format!(
         "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n",
         row.index
@@ -15881,9 +15899,9 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
     }
     xml.push_str("\t\t<row>\r\n");
     if row.format_index > 1 {
+        let format_index = row.format_index + source_format_offset;
         xml.push_str(&format!(
-            "\t\t\t<formatIndex>{}</formatIndex>\r\n",
-            row.format_index
+            "\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
         ));
     }
     if let Some(columns_id) = &row.columns_id {
@@ -15904,7 +15922,12 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow) {
             xml.push_str(&format!("\t\t\t\t<i>{}</i>\r\n", cell.column_index));
         }
         xml.push_str("\t\t\t\t<c>\r\n");
-        xml.push_str(&format!("\t\t\t\t\t<f>{}</f>\r\n", cell.format_index));
+        let cell_format_index = if cell.format_index == 0 {
+            0
+        } else {
+            cell.format_index + source_format_offset
+        };
+        xml.push_str(&format!("\t\t\t\t\t<f>{cell_format_index}</f>\r\n"));
         if let Some(text) = &cell.text {
             xml.push_str("\t\t\t\t\t<tl>\r\n");
             xml.push_str("\t\t\t\t\t\t<v8:item>\r\n");
@@ -34026,8 +34049,8 @@ mod tests {
         assert!(xml.contains("<size>1</size>"));
         assert_eq!(xml.matches("<columnsItem>").count(), 1);
         assert!(xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
-        assert!(xml.contains("<f>2</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
-        assert!(xml.contains("<f>3</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
+        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
+        assert!(xml.contains("<f>5</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
         assert!(!xml.contains("<i>3</i>"));
         assert!(xml.contains("<defaultFormatIndex>4</defaultFormatIndex>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>509</width>\r\n\t</format>"));
@@ -34172,6 +34195,81 @@ mod tests {
             extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
 
         assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("<formatIndex>5</formatIndex>"));
+        assert!(extracted.contains("<f>6</f>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_preserves_non_one_based_column_format_indexes() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>2</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>4</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<formatIndex>5</formatIndex>
+			<c>
+				<c>
+					<f>6</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Cell</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+	<format>
+		<width>30</width>
+	</format>
+	<format>
+		<width>40</width>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+	</format>
+	<format>
+		<verticalAlignment>Center</verticalAlignment>
+	</format>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains(
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+        ));
+        assert!(extracted.contains(
+            "<index>1</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>4</formatIndex>"
+        ));
         assert!(extracted.contains("<formatIndex>5</formatIndex>"));
         assert!(extracted.contains("<f>6</f>"));
     }
@@ -34626,14 +34724,14 @@ mod tests {
 
         assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
         assert!(xml.contains(
-            "<index>11</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+            "<index>11</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>9</formatIndex>"
         ));
         assert_eq!(xml.matches("<columnsItem>").count(), 12);
         assert!(xml.contains("<leftHeader>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</leftHeader>"));
         assert!(xml.contains("<rightFooter>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</rightFooter>"));
         assert!(xml.contains("<defaultFormatIndex>10</defaultFormatIndex>"));
-        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Наименование</parameter>"));
-        assert!(xml.contains("<formatIndex>6</formatIndex>"));
+        assert!(xml.contains("<f>10</f>\r\n\t\t\t\t\t<parameter>Наименование</parameter>"));
+        assert!(xml.contains("<formatIndex>12</formatIndex>"));
         assert!(xml.contains(
             "<font ref=\"style:LargeTextFont\" bold=\"false\" italic=\"false\" underline=\"true\" strikeout=\"false\" kind=\"StyleItem\"/>"
         ));
@@ -34692,17 +34790,17 @@ mod tests {
             "\t<columns>\r\n\t\t<id>9bb67b5f-5e3e-459e-98c5-618e04892d9b</id>\r\n\t\t<size>1</size>"
         ));
         assert!(xml.contains(
-            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>5</formatIndex>"
         ));
         assert!(xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<columnsID>9bb67b5f-5e3e-459e-98c5-618e04892d9b</columnsID>"));
         assert!(xml.contains("<name>Заголовок</name>"));
         assert!(xml.contains("<columnsID>9bb67b5f-5e3e-459e-98c5-618e04892d9b</columnsID>"));
         assert!(xml.contains("<defaultFormatIndex>8</defaultFormatIndex>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>465</width>\r\n\t</format>"));
-        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
-        assert!(xml.contains("<formatIndex>5</formatIndex>"));
-        assert!(xml.contains("<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
-        assert!(xml.contains("<f>7</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
+        assert!(xml.contains("<f>8</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
+        assert!(xml.contains("<formatIndex>9</formatIndex>"));
+        assert!(xml.contains("<f>10</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
+        assert!(xml.contains("<f>11</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
     }
 
     #[test]
@@ -34792,23 +34890,22 @@ mod tests {
     }
 
     #[test]
-    fn formats_moxel_accepts_sparse_column_sets() {
+    fn formats_moxel_preserves_sparse_column_set_format_indexes() {
         let column_set = parse_moxel_column_set(
             "{11,0,00000000-0000-0000-0000-000000000000,8,0,7,2,8,3,9,4,10,5,10,7,11,9,12,10,7}",
         )
         .unwrap();
-        let mut column_sets = vec![column_set];
-        normalize_moxel_column_set_format_indices(&mut column_sets);
+        let column_sets = vec![column_set];
 
         assert_eq!(column_sets[0].size, 11);
         assert_eq!(column_sets[0].columns.len(), 8);
         assert_eq!(column_sets[0].columns[1].index, 2);
-        assert_eq!(column_sets[0].columns[1].format_index, 2);
+        assert_eq!(column_sets[0].columns[1].format_index, 8);
         assert_eq!(column_sets[0].columns[5].index, 7);
-        assert_eq!(column_sets[0].columns[5].format_index, 5);
+        assert_eq!(column_sets[0].columns[5].format_index, 11);
         assert_eq!(column_sets[0].columns[7].index, 10);
-        assert_eq!(column_sets[0].columns[7].format_index, 1);
-        assert_eq!(moxel_column_format_slots(&column_sets, 11), 6);
+        assert_eq!(column_sets[0].columns[7].format_index, 7);
+        assert_eq!(moxel_column_format_slots(&column_sets, 11), 12);
     }
 
     #[test]
@@ -35065,6 +35162,7 @@ mod tests {
                 columns: vec![MoxelColumn {
                     index: 0,
                     format_index: 1,
+                    source_format_index: None,
                 }],
             },
             MoxelColumnSet {
@@ -35074,10 +35172,12 @@ mod tests {
                     MoxelColumn {
                         index: 0,
                         format_index: 2,
+                        source_format_index: None,
                     },
                     MoxelColumn {
                         index: 4,
                         format_index: 6,
+                        source_format_index: None,
                     },
                 ],
             },
