@@ -250,6 +250,7 @@ struct FormXmlChildItem {
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
+    default_item: Option<bool>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
     user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
@@ -4924,6 +4925,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &current_child_items,
                     )
+                    || path_ends_with_for_child_default_item(&path, &current_child_items)
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
                     || path_ends_with_for_child_user_settings_group(&path, &current_child_items)
                     || path_ends_with_for_child_allow_getting_current_row_url(
@@ -5368,6 +5370,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_default_item(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
@@ -6711,6 +6714,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "DefaultItem"
+                        if path_ends_with_for_child_default_item(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.default_item = Some(parse_form_xml_bool(
+                                "ChildItem/DefaultItem",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "UpdateOnDataChange"
                         if path_ends_with_for_child_update_on_data_change(
                             &path,
@@ -7231,6 +7244,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefresh"
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
+                        | "DefaultItem"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
                         | "AllowGettingCurrentRowURL"
@@ -7413,6 +7427,7 @@ fn parse_form_child_item_xml(
         auto_refresh: None,
         auto_refresh_period: None,
         use_alternation_row_color: None,
+        default_item: None,
         update_on_data_change: None,
         user_settings_group: None,
         allow_getting_current_row_url: None,
@@ -8139,6 +8154,13 @@ fn path_ends_with_for_child_use_alternation_row_color(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UseAlternationRowColor"])
+}
+
+fn path_ends_with_for_child_default_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
 }
 
 fn path_ends_with_for_child_update_on_data_change(
@@ -11107,6 +11129,21 @@ fn patch_form_layout_child_item_entry(
             replacements.push((
                 alternation_range.clone(),
                 if use_alternation_row_color {
+                    r#"{"B",1}"#
+                } else {
+                    r#"{"B",0}"#
+                }
+                .to_string(),
+            ));
+        }
+        if let Some(default_item) = item.default_item
+            && let Some(default_item_range) =
+                form_layout_table_property_bag_value_range(text, fields, "11")
+            && is_form_property_bag_bool_value(&text[default_item_range.clone()])
+        {
+            replacements.push((
+                default_item_range.clone(),
+                if default_item {
                     r#"{"B",1}"#
                 } else {
                     r#"{"B",0}"#
@@ -28805,6 +28842,29 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.layout.contains(r#"9,{"B",1}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"9,{"B",0}"#));
         assert!(parsed.layout.contains(r#"5,{"B",1},6,{"N",30}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_default_item() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,11,{"B",0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<DefaultItem>true</DefaultItem>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"11,{"B",1}"#), "{}", parsed.layout);
+        assert!(!parsed.layout.contains(r#"11,{"B",0}"#));
         Ok(())
     }
 
