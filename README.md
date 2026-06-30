@@ -61,6 +61,14 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 29 | Native dump performance / ExchangePlan Content.xml | source asset extraction now builds source-layout refs without metadata XML; ExchangePlan content failures report the exact unsupported metadata id, with the next blocker isolated to a missing Constant ref index |
+| 29 | Role Rights.xml | object rights preserve serialized object order in export and pack paths |
+| 29 | Form.xml | wrapper `55` table `DefaultItem=true` extracts and packs through property-bag key `11` |
+| 29 | Object metadata XML | child `Attribute` property tails emit format/edit/fill/history details from native metadata blobs |
+| 29 | Register metadata XML | AccumulationRegister `DataLockControlMode` and `FullTextSearch` owner properties are emitted |
+| 29 | CommonAttributes | native property detail defaults are emitted before `Content` for source XML 2.20/2.21 |
+| 29 | MXL templates | default-only spreadsheet `printSettings` blocks are suppressed to match native source output |
+| 29 | Source staging readiness | `versions` rows now report precise base-free blockers instead of a generic bootstrap note |
 | 28 | Native dump performance | standalone-content refs resolve without `--extract-metadata-xml`; full timing now advances to an ExchangePlan `Content.xml` blocker |
 | 28 | Role Rights.xml | string-backed restriction fields export/import through `<restrictionByCondition><field>` while preserving base layout |
 | 28 | Form.xml | wrapper `55` table `UserSettingsGroup` extracts and packs existing numeric property-bag slots |
