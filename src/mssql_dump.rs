@@ -3943,7 +3943,7 @@ struct RoleRights {
 }
 
 struct RoleObjectRights {
-    object_uuid: String,
+    object_key: String,
     name: String,
     rights: Vec<RoleRight>,
 }
@@ -6196,20 +6196,18 @@ fn parse_role_rights_blob(
         if !is_uuid_text(object_uuid) {
             return None;
         }
-        let object_name = object_refs
-            .get(object_uuid)
-            .cloned()
-            .unwrap_or_else(|| object_uuid.to_string());
+        let object_key = role_object_ref_sort_key(&object_ref)?;
+        let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
         objects.push(RoleObjectRights {
-            object_uuid: object_uuid.to_string(),
+            object_key,
             name: object_name,
             rights,
         });
     }
 
-    objects.sort_by(|left, right| left.object_uuid.cmp(&right.object_uuid));
+    objects.sort_by(|left, right| left.object_key.cmp(&right.object_key));
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
     let set_for_attributes_by_default = parse_role_bool_field_or_default(&fields, 4, true)?;
@@ -6221,6 +6219,75 @@ fn parse_role_rights_blob(
         objects,
         restriction_templates,
     })
+}
+
+fn role_object_ref_sort_key(fields: &[&str]) -> Option<String> {
+    let uuid = fields.get(1)?.trim();
+    if !is_uuid_text(uuid) {
+        return None;
+    }
+    let mut key = uuid.to_string();
+    for field in fields.iter().skip(2) {
+        key.push(':');
+        key.push_str(field.trim());
+    }
+    Some(key)
+}
+
+fn role_object_ref_name(fields: &[&str], object_refs: &BTreeMap<String, String>) -> Option<String> {
+    let uuid = fields.get(1)?.trim();
+    if !is_uuid_text(uuid) {
+        return None;
+    }
+    let base_name = object_refs
+        .get(uuid)
+        .cloned()
+        .unwrap_or_else(|| uuid.to_string());
+    let kind_code = fields.get(2).map(|field| field.trim());
+    let slot_code = fields.get(3).map(|field| field.trim());
+    role_standard_attribute_ref_name(&base_name, kind_code, slot_code).or(Some(base_name))
+}
+
+fn role_standard_attribute_ref_name(
+    base_name: &str,
+    kind_code: Option<&str>,
+    slot_code: Option<&str>,
+) -> Option<String> {
+    if kind_code != Some("1") {
+        return None;
+    }
+    let slot = slot_code?.parse::<usize>().ok()?;
+    let (kind, _) = base_name.split_once('.')?;
+    let attribute = match kind {
+        "Catalog" => [
+            "PredefinedDataName",
+            "Predefined",
+            "Ref",
+            "DeletionMark",
+            "IsFolder",
+            "Owner",
+            "Parent",
+            "Description",
+            "Code",
+        ]
+        .get(slot)?,
+        "Document" => ["Posted", "Ref", "DeletionMark", "Date", "Number"].get(slot)?,
+        "ExchangePlan" => [
+            "ReceivedNo",
+            "SentNo",
+            "Ref",
+            "DeletionMark",
+            "Description",
+            "Code",
+        ]
+        .get(slot)?,
+        "AccumulationRegister"
+        | "AccountingRegister"
+        | "CalculationRegister"
+        | "InformationRegister" => ["Active", "Period", "Recorder", "LineNumber"].get(slot)?,
+        _ => return None,
+    };
+    Some(format!("{base_name}.StandardAttribute.{attribute}"))
 }
 
 fn parse_role_object_rights(
@@ -31492,7 +31559,7 @@ mod tests {
             set_for_attributes_by_default: true,
             independent_rights_of_child_objects: false,
             objects: vec![RoleObjectRights {
-                object_uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                object_key: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa:0:0".to_string(),
                 name: "Document.Invoice".to_string(),
                 rights: vec![
                     RoleRight {
@@ -31544,6 +31611,48 @@ mod tests {
         assert!(xml.contains("<name>InformationRegister.Prices.Attribute.Comment</name>"));
         assert!(xml.contains("<name>View</name>\r\n\t\t\t<value>false</value>"));
         assert!(xml.contains("<name>Edit</name>\r\n\t\t\t<value>false</value>"));
+    }
+
+    #[test]
+    fn role_rights_blob_resolves_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let rights_text = format!(
+            "{{10,{{5,\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}},\
+{{{{1,{object_uuid},1,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,2}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,3}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "InformationRegister.Prices".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "InformationRegister.Prices",
+                "InformationRegister.Prices.StandardAttribute.Active",
+                "InformationRegister.Prices.StandardAttribute.Period",
+                "InformationRegister.Prices.StandardAttribute.Recorder",
+                "InformationRegister.Prices.StandardAttribute.LineNumber",
+            ]
+        );
+        let xml = format_role_rights_xml(&rights);
+        assert!(xml.contains("<name>InformationRegister.Prices.StandardAttribute.Active</name>"));
+        assert!(
+            xml.contains("<name>InformationRegister.Prices.StandardAttribute.LineNumber</name>")
+        );
     }
 
     #[test]

@@ -15236,12 +15236,12 @@ fn role_right_value_replacements(
         let object_ref_range = entry_fields.get(0).ok_or_else(|| {
             anyhow!("base Role object rights entry {object_index} has no object reference")
         })?;
-        let object_uuid = role_object_ref_uuid(plain, object_ref_range.clone())
+        let object_key = role_object_ref_sort_key(plain, object_ref_range.clone())
             .with_context(|| format!("base Role object rights entry {object_index}"))?;
         let rights_range = entry_fields.get(1).ok_or_else(|| {
             anyhow!("base Role object rights entry {object_index} has no rights payload")
         })?;
-        base_entries.push((object_uuid, rights_range.clone()));
+        base_entries.push((object_key, rights_range.clone()));
     }
     base_entries.sort_by(|left, right| left.0.cmp(&right.0));
 
@@ -15269,6 +15269,17 @@ fn role_object_ref_uuid(plain: &str, object_ref_range: Range<usize>) -> Result<S
         return Err(anyhow!("object reference has invalid UUID {uuid}"));
     }
     Ok(uuid.to_string())
+}
+
+fn role_object_ref_sort_key(plain: &str, object_ref_range: Range<usize>) -> Result<String> {
+    let fields = scan_braced_fields(plain, object_ref_range.start)?;
+    let uuid = role_object_ref_uuid(plain, object_ref_range)?;
+    let mut key = uuid;
+    for range in fields.iter().skip(2) {
+        key.push(':');
+        key.push_str(plain[range.clone()].trim());
+    }
+    Ok(key)
 }
 
 fn role_restriction_template_value_replacements(
@@ -29155,6 +29166,47 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,-1"));
         assert!(!text.contains("b7bab52d-c1b1-4bd8-8276-02db08d42352,1"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_xml_matches_repeated_object_refs_by_tail() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            b"{10,{3,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}}},{0},0,1,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>false</setForNewObjects>
+	<setForAttributesByDefault>true</setForAttributesByDefault>
+	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
+	<object>
+		<name>InformationRegister.Prices</name>
+		<right><name>Read</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices.StandardAttribute.Active</name>
+		<right><name>View</name><value>true</value></right>
+	</object>
+	<object>
+		<name>InformationRegister.Prices.StandardAttribute.Period</name>
+		<right><name>Edit</name><value>true</value></right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml(&base, xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            "{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}"
+        ));
+        assert!(text.contains(
+            "{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}"
+        ));
+        assert!(text.contains(
+            "{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,1}"
+        ));
 
         Ok(())
     }
