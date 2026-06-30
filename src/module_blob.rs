@@ -1084,18 +1084,26 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
 
 pub fn metadata_xml_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
     let properties = parse_simple_metadata_xml_properties(xml)?;
-    let child_objects = count_metadata_xml_child_objects(xml)?;
+    let shape = metadata_xml_base_free_shape(xml, &properties.kind)?;
     let mut blockers = Vec::new();
     blockers.push(format!(
         "{} metadata XML {} ({}) is an editable source projection, but not a complete native Config metadata row",
         properties.kind, properties.name, properties.uuid
     ));
+    blockers.push(format!(
+        "source XML shape has {} direct Properties child element(s) and {} ChildObjects entry/entries{}; these counts do not include native field order, generated type slots, owner-specific tail slots, or serialized section indexes",
+        shape.direct_property_elements,
+        shape.child_objects,
+        shape.child_object_breakdown()
+    ));
     blockers.push(
         "staging currently calls pack_simple_metadata_blob_from_xml_with_source, which patches the selected XML fields into the active metadata blob to preserve native field order, owner-specific tail slots, generated type slots, and unsupported scalar/property bodies".to_string(),
     );
-    if child_objects > 0 {
+    if shape.child_objects > 0 {
         blockers.push(format!(
-            "source XML has {child_objects} ChildObjects entries, but base-free metadata row generation would also need to synthesize the serialized child-object indexes and per-child native payloads"
+            "source XML has {} ChildObjects entries{}, but base-free metadata row generation would also need to synthesize the serialized child-object indexes and per-child native payloads",
+            shape.child_objects,
+            shape.child_object_breakdown()
         ));
     }
     blockers.push(format!(
@@ -3787,6 +3795,7 @@ fn spreadsheet_vertical_alignment_code(value: &str) -> Option<usize> {
     match value {
         "Top" => Some(0),
         "Center" => Some(24),
+        "Bottom" => Some(48),
         _ => None,
     }
 }
@@ -11129,6 +11138,13 @@ fn format_form_layout_new_table_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    if item.data_path.is_some() && item.child_items.is_empty() {
+        return Ok(format_form_layout_new_table_item_with_data_path(
+            item,
+            item_uuid,
+            attribute_ids_by_name,
+        ));
+    }
     let mut nested_table_ids_by_name = table_ids_by_name.clone();
     nested_table_ids_by_name.insert(item.name.clone(), item.id.clone());
     let creatable_children = item
@@ -11164,6 +11180,55 @@ fn format_form_layout_new_table_item(
     text.push_str(&format_form_layout_events_tail(&item.events));
     text.push('}');
     Ok(text)
+}
+
+fn format_form_layout_new_table_item_with_data_path(
+    item: &FormXmlChildItem,
+    item_uuid: &str,
+    attribute_ids_by_name: &BTreeMap<String, String>,
+) -> String {
+    let representation = item
+        .table_representation
+        .as_deref()
+        .and_then(form_table_representation_code)
+        .unwrap_or("0");
+    let data_path = item
+        .data_path
+        .as_deref()
+        .and_then(|data_path| format_form_attribute_data_path(data_path, attribute_ids_by_name))
+        .unwrap_or_else(|| "{0}".to_string());
+    let fields = [
+        "73".to_string(),
+        format!("{{{},{}}}", item.id, item_uuid),
+        "0".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        format_1c_string(&item.name),
+        "0".to_string(),
+        "0".to_string(),
+        representation.to_string(),
+        format_1c_synonyms(&item.title),
+        "{1,0}".to_string(),
+        data_path,
+        "0".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        item.height_in_table_rows
+            .clone()
+            .unwrap_or_else(|| "0".to_string()),
+        "{0}".to_string(),
+    ];
+    let mut text = format!("{{{}}}", fields.join(","));
+    text.pop();
+    text.push_str(&format_form_layout_events_tail(&item.events));
+    text.push('}');
+    text
 }
 
 fn format_form_layout_new_group_item(
@@ -19479,23 +19544,55 @@ pub fn parse_simple_metadata_xml_properties(xml: &[u8]) -> Result<SimpleMetadata
     })
 }
 
-fn count_metadata_xml_child_objects(xml: &[u8]) -> Result<usize> {
+#[derive(Debug, Default)]
+struct MetadataXmlBaseFreeShape {
+    direct_property_elements: usize,
+    child_objects: usize,
+    child_object_kinds: BTreeMap<String, usize>,
+}
+
+impl MetadataXmlBaseFreeShape {
+    fn child_object_breakdown(&self) -> String {
+        if self.child_object_kinds.is_empty() {
+            return String::new();
+        }
+        let breakdown = self
+            .child_object_kinds
+            .iter()
+            .map(|(kind, count)| format!("{kind}={count}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" ({breakdown})")
+    }
+}
+
+fn metadata_xml_base_free_shape(xml: &[u8], object_kind: &str) -> Result<MetadataXmlBaseFreeShape> {
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
-    let mut count = 0usize;
+    let mut shape = MetadataXmlBaseFreeShape::default();
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
-                if path_ends_with(&path, &["ChildObjects"]) {
-                    count += 1;
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &[object_kind, "Properties"]) {
+                    shape.direct_property_elements += 1;
                 }
-                path.push(xml_local_name(event.local_name().as_ref()));
-            }
-            Ok(Event::Empty(_)) => {
                 if path_ends_with(&path, &["ChildObjects"]) {
-                    count += 1;
+                    shape.child_objects += 1;
+                    *shape.child_object_kinds.entry(local.clone()).or_default() += 1;
+                }
+                path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &[object_kind, "Properties"]) {
+                    shape.direct_property_elements += 1;
+                }
+                if path_ends_with(&path, &["ChildObjects"]) {
+                    shape.child_objects += 1;
+                    *shape.child_object_kinds.entry(local).or_default() += 1;
                 }
             }
             Ok(Event::End(_)) => {
@@ -19508,7 +19605,7 @@ fn count_metadata_xml_child_objects(xml: &[u8]) -> Result<usize> {
         buffer.clear();
     }
 
-    Ok(count)
+    Ok(shape)
 }
 
 pub fn parse_common_module_xml_properties(xml: &[u8]) -> Result<CommonModuleXmlProperties> {
@@ -21904,7 +22001,17 @@ mod tests {
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("2 ChildObjects entries"))
+                .any(|blocker| blocker.contains("1 direct Properties child element(s)"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("Command=1") && blocker.contains("Form=1"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("2 ChildObjects entries (Command=1, Form=1)"))
         );
         assert!(
             blockers
@@ -23960,6 +24067,44 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains(r#"{2,{33024,6,1},{128,72}}"#));
+        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_bottom_vertical_alignment_format() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<verticalAlignment>Bottom</verticalAlignment>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{512,48},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -30177,6 +30322,36 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(r#""OnChange","DescriptionOnChange""#)
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_table_data_path() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Attributes>
+		<Attribute name="Rows" id="6"/>
+	</Attributes>
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<DataPath>Rows</DataPath>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[0].clone()], "73");
+        assert_eq!(&parsed.layout[table_fields[5].clone()], r#""Rows""#);
+        assert_eq!(&parsed.layout[table_fields[11].clone()], "{1,{6}}");
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }

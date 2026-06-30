@@ -25,6 +25,8 @@ pub enum Commands {
     AuditSpreadsheetRoundtrip(AuditSpreadsheetRoundtripArgs),
     /// Audit managed Form.xml source coverage and complexity.
     AuditFormSources(AuditFormSourcesArgs),
+    /// Compare two Form.xml/blob pairs and suggest XML path -> layout path mappings.
+    FormDiffCandidates(FormDiffCandidatesArgs),
     /// Audit source-tree files that current SQL loader can or cannot consume.
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
@@ -375,6 +377,25 @@ pub struct AuditSpreadsheetRoundtripArgs {
 pub struct AuditFormSourcesArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct FormDiffCandidatesArgs {
+    /// Baseline Form.xml.
+    #[arg(long)]
+    pub base_xml: PathBuf,
+    /// Variant Form.xml with one or a few controlled changes.
+    #[arg(long)]
+    pub variant_xml: PathBuf,
+    /// Baseline raw deflated Form body blob from Config/ConfigSave.
+    #[arg(long)]
+    pub base_blob: PathBuf,
+    /// Variant raw deflated Form body blob from Config/ConfigSave.
+    #[arg(long)]
+    pub variant_blob: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,

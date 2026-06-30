@@ -7807,7 +7807,10 @@ mod tests {
         assert_eq!(row.generation, "requires_base_blob");
         assert!(row.current_staging_fetches_base_blob);
         assert!(row.reason.contains("DataProcessor metadata XML Loader"));
+        assert!(row.reason.contains("1 direct Properties child element(s)"));
         assert!(row.reason.contains("2 ChildObjects entries"));
+        assert!(row.reason.contains("Command=1"));
+        assert!(row.reason.contains("Form=1"));
         assert!(row.reason.contains("serialized child-object indexes"));
 
         let _ = fs::remove_dir_all(root);
