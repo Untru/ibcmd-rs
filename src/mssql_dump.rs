@@ -15273,6 +15273,7 @@ struct ReportProperties {
     explanation: Vec<(String, String)>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+    child_commands: Vec<MetadataHeader>,
 }
 
 struct DataProcessorProperties {
@@ -16129,7 +16130,7 @@ fn extract_metadata_source_xml_from_text_row(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml")
     };
-    let nested_commands = if metadata_kind_can_own_commands(kind) {
+    let nested_commands = if metadata_kind_can_own_commands(kind) && kind != "Report" {
         nested_command_headers_from_text(text, uuid)
     } else {
         Vec::new()
@@ -16989,6 +16990,7 @@ fn parse_report_properties_from_text(
         explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: parse_report_child_templates_from_text(text, template_refs),
+        child_commands: nested_command_headers_from_text(text, uuid),
     })
 }
 
@@ -20813,7 +20815,10 @@ fn format_report_source_xml(
     push_localized_property(&mut xml, "\t\t\t", "Explanation", &report.explanation);
     xml.push_str("\t\t</Properties>\r\n");
 
-    if !report.child_forms.is_empty() || !report.child_templates.is_empty() {
+    if !report.child_forms.is_empty()
+        || !report.child_templates.is_empty()
+        || !report.child_commands.is_empty()
+    {
         xml.push_str("\t\t<ChildObjects>\r\n");
         for form in &report.child_forms {
             xml.push_str(&format!(
@@ -20826,6 +20831,9 @@ fn format_report_source_xml(
                 "\t\t\t<Template>{}</Template>\r\n",
                 escape_xml_element_text(template)
             ));
+        }
+        for command in &report.child_commands {
+            push_metadata_header_child_object_xml(&mut xml, "Command", command);
         }
         xml.push_str("\t\t</ChildObjects>\r\n");
     }
@@ -35909,11 +35917,12 @@ mod tests {
         let settings_form_uuid = "dddddddd-2222-4ddd-8ddd-dddddddddd22";
         let template_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
         let storage_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+        let command_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff";
         let zero_uuid = "00000000-0000-0000-0000-000000000000";
         let form_list_marker = FORM_LIST_MARKERS[0];
         let report_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}}\r\n}}"
+                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -35995,6 +36004,9 @@ mod tests {
         assert!(xml.contains("<Form>SettingsForm</Form>"));
         assert!(xml.contains("<Form>MainForm</Form>"));
         assert!(xml.contains("<Template>MainSchema</Template>"));
+        assert!(xml.contains(&format!(r#"<Command uuid="{command_uuid}">"#)));
+        assert!(xml.contains("<Name>Refresh</Name>"));
+        assert!(xml.contains("<Comment>command comment</Comment>"));
         assert!(
             xml.find("<Form>SettingsForm</Form>").unwrap()
                 < xml.find("<Form>MainForm</Form>").unwrap()
@@ -36003,7 +36015,11 @@ mod tests {
             xml.find("<Form>MainForm</Form>").unwrap()
                 < xml.find("<Template>MainSchema</Template>").unwrap()
         );
+        assert!(
+            xml.find("<Template>MainSchema</Template>").unwrap() < xml.find("<Command").unwrap()
+        );
         assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
+        assert_eq!(xml.matches("<Command").count(), 1);
 
         let extracted_v21 = extract_metadata_source_xml_with_refs(
             &report_blob,
