@@ -165,6 +165,14 @@ Verification history:
 | Round 29 CommonAttribute slice | unit-level metadata XML verification | native property detail defaults are emitted before `Content` for source XML 2.20/2.21 |
 | Round 29 MXL template slice | unit-level template body verification | default-only spreadsheet `printSettings` blocks are suppressed to match native source output |
 | Round 29 source staging readiness slice | unit-level readiness audit verification | `versions` rows now report precise base-free blockers for generation UUID maps, entry order, unchanged row sets, and platform-owned standard entries |
+| Round 30 ExchangePlan content/performance slice | unit-level source-only extraction verification plus real selected/full repro | selected ExchangePlan content now requests `object_refs`; selected and full source-layout exports completed without `ConfigDumpInfo.xml` |
+| Round 30 Role Rights.xml slice | unit-level packer verification | Role rights import packing maps objects by source-resolved refs instead of XML order, including commands, child dimensions/resources/attributes, standard attributes, and direct metadata refs |
+| Round 30 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table `RowPictureDataPath` extracts and packs through string property-bag key `19` |
+| Round 30 object metadata slice | unit-level metadata XML verification | child `Attribute` tail properties now include choice/use/indexing/full-text/data-history scalar details, and Report/DataProcessor child commands emit command property tails |
+| Round 30 register metadata slice | unit-level metadata XML verification | InformationRegister and AccumulationRegister standard attributes are emitted; AccumulationRegister type value `1` maps to `Turnovers` |
+| Round 30 CommonAttribute slice | unit-level metadata XML verification | native separation tail properties and UUID-backed separation refs are emitted |
+| Round 30 DCS template slice | unit-level template body verification | current-config `v8:Type` prefixes normalize by DCS context (`d4p1`, `d5p1`, `d6p1`) |
+| Round 30 source staging readiness slice | unit-level readiness/row-generation verification | FilterCriterion manager modules can stage base-free from `FilterCriteria/<Name>/Ext/ManagerModule.bsl` |
 
 Performance note for selected extraction:
 
@@ -183,6 +191,7 @@ Performance note for selected extraction:
 - Round 27 #19 timing follow-up: added `mssql-dump-timing-summary` for saved dump JSON reports and ran a real selected blob fetch on `ut_ibcmd` under `E:\ibcmd_lab\perf`. The selected run fetched 663,776,134 bytes in 3 BCP batches, with `fetch_row_batch_max_binary_bytes=268302217` and `fetch_rows_ms=3532`.
 - Round 28 #19 standalone-content follow-up: source-asset-only dumps now resolve `Ext/StandaloneConfigurationContent.bin` references without requiring `--extract-metadata-xml`. A real selected repro on `ut_ibcmd` wrote 6 rows / 40,421 bytes / 2 source assets under `E:\ibcmd_lab\perf\issue-19-standalone-content-v6-standalone-repro-targeted`, resolving `0014cc2a-b5ed-427d-8ac6-116e92aaa9a4` as `Role.РазделОтчетыИМониторингЦелевыеПоказатели`. A full source-layout timing retry passed standalone content and then stopped at `ExchangePlans\Полный\Ext\Content.xml`; no `ConfigDumpInfo.xml` was generated.
 - Round 29 #19 ExchangePlan content follow-up: source-layout extraction now builds metadata object/type indexes when source assets are extracted without metadata XML, and `ExchangePlanContent` parsing reports precise unsupported ids. A selected repro for `ExchangePlans\Полный\Ext\Content.xml` now stops at `ExchangePlanContent item 0 references unsupported metadata id ff76e85a-6d29-41d3-a83e-f4a34139c6b2`; the id is a direct Constant row named `ВыгружатьВнутренниеШтрихкодыШтучныхТоваров`. Artifacts are under `E:\ibcmd_lab\perf\issue-19-exchange-content-v1-*`. No `ConfigDumpInfo.xml` was generated.
+- Round 30 #19 ExchangePlan content follow-up: selected ExchangePlan owner metadata now requests `object_refs`, so the Constant referenced from `ExchangePlans\Полный\Ext\Content.xml` resolves. The selected repro passed, and a full release source-layout run completed under `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source`, writing 13,428 files from 40,576 rows / 10,277 source assets without `ConfigDumpInfo.xml`. Full timing: `prepare_indexes_ms=17461`, `prepare_object_refs_ms=10621`, `fetch_rows_ms=5043`, `process_rows_wall_ms=15598`, `source_asset_cpu_ms=191976`, `source_asset_form_cpu_ms=124212`.
 - Scope decision: `ConfigDumpInfo.xml` is intentionally not generated. The native file is derived from the `versions` row, but it is not needed for our export/import target and should not be treated as remaining work.
 
 Diff by file kind:
@@ -363,5 +372,13 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #19 | ExchangePlan `Content.xml` no-metadata-XML source refs and precise unsupported-id diagnostics | merged to `master` in round 29 |
 | #21 | precise `versions` base-free staging blocker audit | merged to `master` in round 29 |
 | #22 | CommonAttribute native property detail defaults | merged to `master` in round 29 |
+| #13 | Role Rights.xml source-ref-based object mapping for import packing | merged to `master` in round 30 |
+| #15 | child `Attribute` scalar tails and Report/DataProcessor child command properties | merged to `master` in round 30 |
+| #16 | Form.xml wrapper `55` table `RowPictureDataPath` extraction and packing | merged to `master` in round 30 |
+| #17 | DCS current-config type prefix normalization by context | merged to `master` in round 30 |
+| #18 | register standard attributes and AccumulationRegister `Turnovers` enum mapping | merged to `master` in round 30 |
+| #19 | ExchangePlan content direct object refs and successful full source-layout timing run | merged to `master` in round 30 |
+| #21 | base-free FilterCriterion manager module staging | merged to `master` in round 30 |
+| #22 | CommonAttribute separation tail properties and refs | merged to `master` in round 30 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

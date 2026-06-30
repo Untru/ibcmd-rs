@@ -61,6 +61,15 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 30 | Native dump performance / ExchangePlan Content.xml | selected ExchangePlan content now requests `object_refs`; selected and full source-layout exports completed without `ConfigDumpInfo.xml`, with full timing captured under `E:\ibcmd_lab\perf\issue-19-exchange-constant-ref-v2-full-source-report.json` |
+| 30 | Role Rights.xml | import packing maps rights objects by source-resolved refs instead of XML order, including commands, child dimensions/resources/attributes, standard attributes, and direct metadata refs |
+| 30 | Form.xml | wrapper `55` table `RowPictureDataPath` extracts and packs through string property-bag key `19` |
+| 30 | Object metadata XML | child `Attribute` tail properties now include choice/use/indexing/full-text/data-history scalar details |
+| 30 | Object metadata XML | Report/DataProcessor child commands emit command property tails from owner metadata blobs |
+| 30 | Register metadata XML | InformationRegister and AccumulationRegister standard attributes are emitted; AccumulationRegister type value `1` now maps to `Turnovers` |
+| 30 | CommonAttributes | native separation tail properties and UUID-backed separation refs are emitted |
+| 30 | DCS templates | current-config `v8:Type` prefixes normalize by DCS context (`d4p1`, `d5p1`, `d6p1`) |
+| 30 | Source staging readiness | FilterCriterion manager modules can stage base-free from `FilterCriteria/<Name>/Ext/ManagerModule.bsl` |
 | 29 | Native dump performance / ExchangePlan Content.xml | source asset extraction now builds source-layout refs without metadata XML; ExchangePlan content failures report the exact unsupported metadata id, with the next blocker isolated to a missing Constant ref index |
 | 29 | Role Rights.xml | object rights preserve serialized object order in export and pack paths |
 | 29 | Form.xml | wrapper `55` table `DefaultItem=true` extracts and packs through property-bag key `11` |
