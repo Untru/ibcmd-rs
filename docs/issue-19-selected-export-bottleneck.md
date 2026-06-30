@@ -466,3 +466,71 @@ Follow-up: the selected one-row ExchangePlan content repro is now correct but
 expensive because it must build broad object refs. A future performance pass can
 target direct metadata UUIDs from the selected ExchangePlan content body instead
 of building the full object reference index.
+
+## Round 31 Form source-asset CPU pass
+
+The full source-layout report from Round 30 made form extraction the largest
+remaining source-asset CPU target:
+
+| Metric | Round 30 value |
+|---|---:|
+| `source_asset_cpu_ms` | 191,976 |
+| `source_asset_form_cpu_ms` | 124,212 |
+| `source_asset_form_xml_cpu_ms` | 118,809 |
+| `source_asset_form_child_items_cpu_ms` | 70,750 |
+
+The largest generic avoidable cost found in this pass was repeated parsing of
+the same extended `InputField` option bag while extracting child items. Each
+extended input field previously called `form_input_field_extended_options` for
+every individual option-backed property, so one child item could resplit the
+same nested `{38,...}` option block more than twenty times. The extractor now
+splits that option block once per input field and passes the cached field slice
+to the private option-property readers. This is source-preserving: the same
+focused property tests still assert the generated XML for width/height,
+stretching, buttons, quick choice, mark-required, and related options.
+
+An attempted selected `.0` form-body repro used the largest distinct
+`Config.FileName LIKE '%.0'` rows from `ut_ibcmd`, but selected source-only mode
+does not currently build `form_refs` for raw selected form body rows. That run
+therefore fetched 24 rows but wrote `source_asset_rows=0`, so it is recorded as
+a selected-repro caveat rather than performance evidence for form extraction.
+
+Full source-layout repro after the change:
+
+```powershell
+E:\ibcmd_lab\worktrees\issue-19-form-cpu-v1\target\release\ibcmd-rs.exe `
+  mssql-dump-config `
+  --server localhost `
+  --database ut_ibcmd `
+  --output-dir E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after `
+  --overwrite `
+  --no-binary-rows
+```
+
+Result: completed successfully, wrote 10,277 source assets from 40,576 rows,
+and did not generate `ConfigDumpInfo.xml`.
+
+| Metric | Before | After |
+|---|---:|---:|
+| `process_rows_wall_ms` | 15,598 | 16,298 |
+| `source_asset_cpu_ms` | 191,976 | 198,884 |
+| `source_asset_form_cpu_ms` | 124,212 | 123,507 |
+| `source_asset_form_xml_cpu_ms` | 118,809 | 118,673 |
+| `source_asset_form_child_items_cpu_ms` | 70,750 | 68,886 |
+| `source_asset_form_format_cpu_ms` | 1,836 | 1,693 |
+
+Interpretation: the low-risk cache removes a repeated child-item parse and
+reduced the child-item counter by about 1.9 seconds in this full run. The
+overall wall time is within run-to-run noise and other source asset classes were
+slower in this after run, so the next form optimization should still focus on
+`extract_form_child_items`. The remaining larger generic cost appears to be
+recursive child-item discovery repeatedly splitting nested item bodies and
+scanning table/input service children.
+
+Artifacts:
+
+- `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-selected-form-file-names.txt`
+- `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-selected-forms-after-report.json`
+- `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-selected-forms-after`
+- `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after-report.json`
+- `E:\ibcmd_lab\perf\issue-19-form-cpu-v1-full-source-after`

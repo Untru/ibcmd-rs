@@ -10605,6 +10605,10 @@ fn parse_form_child_item_with_attrs(
         table_column_names_by_id,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
+    let input_field_extended_options = (tag == "InputField"
+        && form_input_field_layout_is_extended(&fields))
+    .then(|| form_input_field_extended_options(&fields))
+    .flatten();
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -10872,7 +10876,7 @@ fn parse_form_child_item_with_attrs(
         mark_required_complete: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
-            parse_form_input_field_mark_required_complete(&fields)
+            parse_form_input_field_mark_required_complete(input_field_extended_options.as_deref())
         } else {
             None
         },
@@ -10884,7 +10888,7 @@ fn parse_form_child_item_with_attrs(
             None
         },
         width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_width(&fields)
+            parse_form_input_field_width(input_field_extended_options.as_deref())
         } else {
             None
         },
@@ -10894,7 +10898,7 @@ fn parse_form_child_item_with_attrs(
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_height(&fields)
+            parse_form_input_field_height(input_field_extended_options.as_deref())
         } else if tag == "Pages" {
             fields
                 .get(13)
@@ -10904,52 +10908,52 @@ fn parse_form_child_item_with_attrs(
             None
         },
         auto_max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_auto_max_width(&fields)
+            parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
         } else {
             None
         },
         max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_max_width(&fields)
+            parse_form_input_field_max_width(input_field_extended_options.as_deref())
         } else {
             None
         },
         auto_max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_auto_max_height(&fields)
+            parse_form_input_field_auto_max_height(input_field_extended_options.as_deref())
         } else {
             None
         },
         max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_max_height(&fields)
+            parse_form_input_field_max_height(input_field_extended_options.as_deref())
         } else {
             None
         },
         horizontal_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_horizontal_stretch(&fields)
+            parse_form_input_field_horizontal_stretch(input_field_extended_options.as_deref())
         } else {
             None
         },
         vertical_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_vertical_stretch(&fields)
+            parse_form_input_field_vertical_stretch(input_field_extended_options.as_deref())
         } else {
             None
         },
         password_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_password_mode(&fields)
+            parse_form_input_field_password_mode(input_field_extended_options.as_deref())
         } else {
             None
         },
         multi_line: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_multi_line(&fields)
+            parse_form_input_field_multi_line(input_field_extended_options.as_deref())
         } else {
             None
         },
         wrap: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_wrap(&fields)
+            parse_form_input_field_wrap(input_field_extended_options.as_deref())
         } else {
             None
         },
         text_edit: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_text_edit(&fields)
+            parse_form_input_field_text_edit(input_field_extended_options.as_deref())
         } else {
             None
         },
@@ -10959,65 +10963,67 @@ fn parse_form_child_item_with_attrs(
             None
         },
         drop_list_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_drop_list_button(&fields)
+            parse_form_input_field_drop_list_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         clear_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_clear_button(&fields)
+            parse_form_input_field_clear_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         open_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_open_button(&fields)
+            parse_form_input_field_open_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         create_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_create_button(&fields)
+            parse_form_input_field_create_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         choice_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_choice_button(&fields)
+            parse_form_input_field_choice_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         choice_list_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_choice_list_button(&fields)
+            parse_form_input_field_choice_list_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         spin_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_spin_button(&fields)
+            parse_form_input_field_spin_button(input_field_extended_options.as_deref())
         } else {
             None
         },
         list_choice_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_list_choice_mode(&fields)
+            parse_form_input_field_list_choice_mode(input_field_extended_options.as_deref())
         } else {
             None
         },
         quick_choice: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_quick_choice(&fields)
+            parse_form_input_field_quick_choice(input_field_extended_options.as_deref())
         } else {
             None
         },
         choose_type: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_choose_type(&fields)
+            parse_form_input_field_choose_type(input_field_extended_options.as_deref())
         } else {
             None
         },
         auto_mark_incomplete: if tag == "InputField" && form_input_field_layout_is_extended(&fields)
         {
-            parse_form_input_field_auto_mark_incomplete(&fields)
+            parse_form_input_field_auto_mark_incomplete(input_field_extended_options.as_deref())
         } else {
             None
         },
         choice_button_representation: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
-            parse_form_input_field_choice_button_representation(&fields)
+            parse_form_input_field_choice_button_representation(
+                input_field_extended_options.as_deref(),
+            )
         } else {
             None
         },
@@ -11424,93 +11430,81 @@ fn parse_form_input_field_skip_on_input(field: &str) -> Option<bool> {
     }
 }
 
-fn parse_form_input_field_width(fields: &[&str]) -> Option<String> {
-    let nested = form_input_field_extended_options(fields)?;
-    let value = nested.get(2)?.trim();
+fn parse_form_input_field_width(extended_options: Option<&[&str]>) -> Option<String> {
+    let value = extended_options?.get(2)?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
-fn parse_form_input_field_height(fields: &[&str]) -> Option<String> {
-    let nested = form_input_field_extended_options(fields)?;
-    let value = nested.get(3)?.trim();
+fn parse_form_input_field_height(extended_options: Option<&[&str]>) -> Option<String> {
+    let value = extended_options?.get(3)?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
-fn parse_form_input_field_auto_max_width(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(49).map(|field| field.trim())? {
+fn parse_form_input_field_auto_max_width(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(49).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
 }
 
-fn parse_form_input_field_max_width(fields: &[&str]) -> Option<String> {
-    let nested = form_input_field_extended_options(fields)?;
-    let value = nested.get(50)?.trim();
+fn parse_form_input_field_max_width(extended_options: Option<&[&str]>) -> Option<String> {
+    let value = extended_options?.get(50)?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
-fn parse_form_input_field_auto_max_height(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(52).map(|field| field.trim())? {
+fn parse_form_input_field_auto_max_height(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(52).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
 }
 
-fn parse_form_input_field_max_height(fields: &[&str]) -> Option<String> {
-    let nested = form_input_field_extended_options(fields)?;
-    let value = nested.get(53)?.trim();
+fn parse_form_input_field_max_height(extended_options: Option<&[&str]>) -> Option<String> {
+    let value = extended_options?.get(53)?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
-fn parse_form_input_field_horizontal_stretch(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(4).map(|field| field.trim())? {
+fn parse_form_input_field_horizontal_stretch(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(4).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_vertical_stretch(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(5).map(|field| field.trim())? {
+fn parse_form_input_field_vertical_stretch(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(5).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_password_mode(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(7).map(|field| field.trim())? {
+fn parse_form_input_field_password_mode(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(7).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_multi_line(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(8).map(|field| field.trim())? {
+fn parse_form_input_field_multi_line(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(8).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_wrap(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(6).map(|field| field.trim())? {
+fn parse_form_input_field_wrap(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(6).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
 }
 
-fn parse_form_input_field_text_edit(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(41).map(|field| field.trim())? {
+fn parse_form_input_field_text_edit(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(41).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
@@ -11524,110 +11518,102 @@ fn parse_form_input_field_auto_cell_height(fields: &[&str]) -> Option<bool> {
     }
 }
 
-fn parse_form_input_field_drop_list_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(47).map(|field| field.trim())? {
+fn parse_form_input_field_drop_list_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(47).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_clear_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(13).map(|field| field.trim())? {
+fn parse_form_input_field_clear_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(13).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_open_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(15).map(|field| field.trim())? {
+fn parse_form_input_field_open_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(15).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_create_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(45).map(|field| field.trim())? {
+fn parse_form_input_field_create_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(45).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_choice_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(12).map(|field| field.trim())? {
+fn parse_form_input_field_choice_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(12).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_choice_list_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(11).map(|field| field.trim())? {
+fn parse_form_input_field_choice_list_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(11).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_spin_button(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(14).map(|field| field.trim())? {
+fn parse_form_input_field_spin_button(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(14).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_list_choice_mode(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(19).map(|field| field.trim())? {
+fn parse_form_input_field_list_choice_mode(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(19).map(|field| field.trim())? {
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_quick_choice(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(23).map(|field| field.trim())? {
+fn parse_form_input_field_quick_choice(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(23).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_choose_type(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(32).map(|field| field.trim())? {
+fn parse_form_input_field_choose_type(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(32).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
     }
 }
 
-fn parse_form_input_field_auto_mark_incomplete(fields: &[&str]) -> Option<bool> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(31).map(|field| field.trim())? {
+fn parse_form_input_field_auto_mark_incomplete(extended_options: Option<&[&str]>) -> Option<bool> {
+    match extended_options?.get(31).map(|field| field.trim())? {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
 }
 
-fn parse_form_input_field_mark_required_complete(fields: &[&str]) -> Option<bool> {
-    parse_form_input_field_auto_mark_incomplete(fields)
+fn parse_form_input_field_mark_required_complete(
+    extended_options: Option<&[&str]>,
+) -> Option<bool> {
+    parse_form_input_field_auto_mark_incomplete(extended_options)
 }
 
-fn parse_form_input_field_choice_button_representation(fields: &[&str]) -> Option<&'static str> {
-    let nested = form_input_field_extended_options(fields)?;
-    match nested.get(46).map(|field| field.trim())? {
+fn parse_form_input_field_choice_button_representation(
+    extended_options: Option<&[&str]>,
+) -> Option<&'static str> {
+    match extended_options?.get(46).map(|field| field.trim())? {
         "1" => Some("ShowInDropList"),
         "2" => Some("ShowInDropListAndInInputField"),
         "3" => Some("ShowInInputField"),
