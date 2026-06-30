@@ -251,6 +251,7 @@ struct FormXmlChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
+    allow_getting_current_row_url: Option<bool>,
     horizontal_align: Option<FormXmlHorizontalAlign>,
     autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
@@ -4325,6 +4326,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "UpdateOnDataChange"
+                        | "AllowGettingCurrentRowURL"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -4880,6 +4882,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
+                    || path_ends_with_for_child_allow_getting_current_row_url(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
@@ -4928,6 +4934,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_auto_refresh(&path, &current_child_items)
                     || path_ends_with_for_child_auto_refresh_period(&path, &current_child_items)
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
+                    || path_ends_with_for_child_allow_getting_current_row_url(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Type", "Type"])
                     || path_ends_with(
                         &path,
@@ -6667,6 +6677,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(parse_form_update_on_data_change_xml(text_value.trim())?);
                         }
                     }
+                    "AllowGettingCurrentRowURL"
+                        if path_ends_with_for_child_allow_getting_current_row_url(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.allow_getting_current_row_url = Some(parse_form_xml_bool(
+                                "ChildItem/AllowGettingCurrentRowURL",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "HorizontalAlign"
                         if path_ends_with_for_child_horizontal_align(
                             &path,
@@ -7154,6 +7177,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "UpdateOnDataChange"
+                        | "AllowGettingCurrentRowURL"
                         | "ScrollOnCompress"
                         | "ShowTitle"
                         | "ShowInHeader"
@@ -7334,6 +7358,7 @@ fn parse_form_child_item_xml(
         auto_refresh_period: None,
         use_alternation_row_color: None,
         update_on_data_change: None,
+        allow_getting_current_row_url: None,
         horizontal_align: None,
         autofill: None,
         button_representation: None,
@@ -8067,6 +8092,16 @@ fn path_ends_with_for_child_update_on_data_change(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UpdateOnDataChange"])
+}
+
+fn path_ends_with_for_child_allow_getting_current_row_url(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "AllowGettingCurrentRowURL"])
 }
 
 fn path_ends_with_for_child_horizontal_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -10953,6 +10988,20 @@ fn patch_form_layout_child_item_entry(
                     FORM_UPDATE_ON_DATA_CHANGE_UUID,
                     form_update_on_data_change_code(update_on_data_change)
                 ),
+            ));
+        }
+        if let Some(allow_getting_current_row_url) = item.allow_getting_current_row_url
+            && let Some(url_range) = form_layout_table_property_bag_value_range(text, fields, "20")
+            && is_form_property_bag_bool_value(&text[url_range.clone()])
+        {
+            replacements.push((
+                url_range.clone(),
+                if allow_getting_current_row_url {
+                    r#"{"B",1}"#
+                } else {
+                    r#"{"B",0}"#
+                }
+                .to_string(),
             ));
         }
     }
@@ -28433,6 +28482,30 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .layout
                 .contains(r##"14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,1}"##)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_allow_getting_current_row_url()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,20,{"B",1}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<AllowGettingCurrentRowURL>false</AllowGettingCurrentRowURL>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"20,{"B",0}"#), "{}", parsed.layout);
+        assert!(!parsed.layout.contains(r#"20,{"B",1}"#));
         Ok(())
     }
 

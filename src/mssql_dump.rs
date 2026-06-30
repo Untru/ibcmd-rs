@@ -8271,6 +8271,7 @@ struct FormChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     update_on_data_change: Option<&'static str>,
+    allow_getting_current_row_url: Option<bool>,
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
@@ -10056,6 +10057,11 @@ fn parse_form_child_item_with_attrs(
         },
         update_on_data_change: if tag == "Table" {
             parse_form_table_update_on_data_change(&fields)
+        } else {
+            None
+        },
+        allow_getting_current_row_url: if tag == "Table" {
+            parse_form_table_property_bag_bool(&fields, "20")
         } else {
             None
         },
@@ -11902,6 +11908,16 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n",
                 escape_xml_text(update_on_data_change)
+            ));
+        }
+        if let Some(allow_getting_current_row_url) = item.allow_getting_current_row_url {
+            xml.push_str(&format!(
+                "{tab}\t<AllowGettingCurrentRowURL>{}</AllowGettingCurrentRowURL>\r\n",
+                if allow_getting_current_row_url {
+                    "true"
+                } else {
+                    "false"
+                }
             ));
         }
     }
@@ -26858,6 +26874,7 @@ mod tests {
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
         assert_eq!(item.use_alternation_row_color, Some(false));
         assert_eq!(item.update_on_data_change, Some("Auto"));
+        assert_eq!(item.allow_getting_current_row_url, Some(true));
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
@@ -26865,6 +26882,7 @@ mod tests {
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
         assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
+        assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
     }
 
     #[test]
@@ -28405,6 +28423,7 @@ mod tests {
             auto_refresh_period: None,
             use_alternation_row_color: None,
             update_on_data_change: None,
+            allow_getting_current_row_url: None,
             button_representation: None,
             location_in_command_bar: None,
             default_button: None,
@@ -28469,6 +28488,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     update_on_data_change: None,
+                    allow_getting_current_row_url: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
@@ -28534,6 +28554,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     update_on_data_change: None,
+                    allow_getting_current_row_url: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
