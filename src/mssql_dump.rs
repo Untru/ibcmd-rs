@@ -16083,7 +16083,7 @@ struct RegisterProperties {
     auxiliary_record_form: Option<String>,
     auxiliary_list_form: Option<String>,
     standard_attributes: Vec<RegisterStandardAttribute>,
-    child_objects: Vec<RegisterChildObject>,
+    child_objects: Vec<MetadataChildObject>,
 }
 
 #[derive(Clone)]
@@ -16130,11 +16130,6 @@ enum MetadataChildFillValue {
     Nil,
     Boolean(bool),
     String(String),
-}
-
-struct RegisterChildObject {
-    tag: &'static str,
-    header: MetadataHeader,
 }
 
 struct RegisterStandardAttribute {
@@ -17256,7 +17251,8 @@ fn extract_metadata_source_xml_from_text_row(
         let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid)?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
-        let register = parse_register_properties_from_text(kind, text, uuid, form_refs)?;
+        let register =
+            parse_register_properties_from_text(kind, text, uuid, type_index, form_refs)?;
         format_register_source_xml(kind, &header, &register, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
@@ -17672,6 +17668,7 @@ fn parse_register_properties_from_text(
     kind: &str,
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<RegisterProperties> {
     if !metadata_kind_uses_register_resources(kind) {
@@ -17762,8 +17759,23 @@ fn parse_register_properties_from_text(
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
-            register_child_object_tag(kind, text, marker_start)
-                .map(|tag| RegisterChildObject { tag, header })
+            let tag = register_child_object_tag(kind, text, marker_start)?;
+            let value_types =
+                parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
+            let properties = parse_metadata_child_properties(
+                kind,
+                text,
+                marker_start,
+                &header.uuid,
+                &value_types,
+            );
+            Some(MetadataChildObject {
+                tag,
+                header,
+                value_types,
+                properties,
+                child_objects: Vec::new(),
+            })
         })
         .collect();
     Some(RegisterProperties {
@@ -22111,7 +22123,7 @@ fn format_register_source_xml(
     }
     let mut child_objects = String::new();
     for child in &register.child_objects {
-        push_metadata_header_child_object_xml(&mut child_objects, child.tag, &child.header);
+        push_metadata_child_object_xml(&mut child_objects, child);
     }
     insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
     xml
@@ -36229,6 +36241,69 @@ mod tests {
             assert!(xml.find("\t\t</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
             assert_eq!(xml.matches("<ChildObjects>").count(), 1);
         }
+    }
+
+    #[test]
+    fn extracts_register_child_type_and_property_tail() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let resource_uuid = "22222222-2222-4222-8222-222222222222";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{28,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Sales\",{{1,\"en\",\"Sales\"}},\"\"}},\
+{{b64d9a41-1642-11d6-a3c7-0050bae0a776,1,\r\n{{5,\r\n{{27,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
+{{3,\r\n{{1,0,{resource_uuid}}},\"Confirmed\",{{1,\"en\",\"Confirmed\"}},\"resource comment\"}},\
+0,{{0}},{{0}},{{1,\"en\",\"Confirm flag\"}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},{{0}},0,0,0,0,0,0,0,0,0}}\r\n\
+}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let resource_start = xml
+            .find(r#"<Resource uuid="22222222-2222-4222-8222-222222222222">"#)
+            .unwrap();
+        let resource_end = resource_start + xml[resource_start..].find("</Resource>").unwrap();
+        let resource_xml = &xml[resource_start..resource_end];
+
+        assert!(
+            resource_xml.contains("<v8:Type>xs:boolean</v8:Type>"),
+            "{xml}"
+        );
+        assert!(resource_xml.contains("<Comment>resource comment</Comment>"));
+        assert!(resource_xml.contains("<PasswordMode>false</PasswordMode>"));
+        assert!(resource_xml.contains("<Format/>"));
+        assert!(resource_xml.contains("<EditFormat/>"));
+        assert!(resource_xml.contains("<ToolTip>"));
+        assert!(resource_xml.contains("<v8:content>Confirm flag</v8:content>"));
+        assert!(resource_xml.contains("<MarkNegatives>false</MarkNegatives>"));
+        assert!(resource_xml.contains("<Mask/>"));
+        assert!(resource_xml.contains("<MultiLine>false</MultiLine>"));
+        assert!(resource_xml.contains("<ExtendedEdit>false</ExtendedEdit>"));
+        assert!(resource_xml.contains(r#"<MinValue xsi:nil="true"/>"#));
+        assert!(resource_xml.contains(r#"<MaxValue xsi:nil="true"/>"#));
+        assert!(resource_xml.contains("<FillFromFillingValue>false</FillFromFillingValue>"));
+        assert!(resource_xml.contains(r#"<FillValue xsi:type="xs:boolean">false</FillValue>"#));
+        assert!(resource_xml.contains("<FillChecking>ShowError</FillChecking>"));
+        assert!(resource_xml.contains("<ChoiceParameterLinks/>"));
+        assert!(resource_xml.contains("<ChoiceParameters/>"));
+        assert!(resource_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+        assert!(resource_xml.contains("<DataHistory>DontUse</DataHistory>"));
+        assert!(
+            resource_xml.find("<Type>").unwrap() < resource_xml.find("<PasswordMode>").unwrap(),
+            "{xml}"
+        );
     }
 
     #[test]
