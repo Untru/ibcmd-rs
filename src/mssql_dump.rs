@@ -16599,13 +16599,14 @@ fn push_register_generated_type_entries(
     name: &str,
 ) {
     for (offset, suffix) in register_generated_type_suffixes() {
+        let xml_suffix = register_generated_type_xml_suffix(type_prefix, suffix);
         push_generated_type_entry(
             entries,
             fields,
             start_index + offset,
             start_index + offset + 1,
-            &format!("{type_prefix}{suffix}.{name}"),
-            register_generated_type_category(suffix),
+            &format!("{type_prefix}{xml_suffix}.{name}"),
+            register_generated_type_category(type_prefix, suffix),
         );
     }
 }
@@ -16621,7 +16622,17 @@ fn register_generated_type_suffixes() -> &'static [(usize, &'static str)] {
     ]
 }
 
-fn register_generated_type_category(suffix: &str) -> &'static str {
+fn register_generated_type_xml_suffix<'a>(type_prefix: &str, suffix: &'a str) -> &'a str {
+    match (type_prefix, suffix) {
+        ("AccumulationRegister", "Object") => "Record",
+        _ => suffix,
+    }
+}
+
+fn register_generated_type_category(type_prefix: &str, suffix: &str) -> &'static str {
+    if type_prefix == "AccumulationRegister" && suffix == "Object" {
+        return "Record";
+    }
     match suffix {
         "Object" => "Object",
         "Manager" => "Manager",
@@ -32549,8 +32560,9 @@ mod tests {
             assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
             assert_eq!(xml.matches("<xr:GeneratedType").count(), 6);
             assert!(xml.contains(
-                r#"<xr:GeneratedType name="AccumulationRegisterObject.Sales" category="Object">"#
+                r#"<xr:GeneratedType name="AccumulationRegisterRecord.Sales" category="Record">"#
             ));
+            assert!(!xml.contains("AccumulationRegisterObject.Sales"));
             assert!(xml.contains(
                 r#"<xr:GeneratedType name="AccumulationRegisterManager.Sales" category="Manager">"#
             ));
