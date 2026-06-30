@@ -12109,30 +12109,42 @@ fn parse_moxel_rows(fields: &[&str]) -> Vec<MoxelRow> {
 }
 
 fn parse_moxel_rows_by_scanning(fields: &[&str]) -> Vec<MoxelRow> {
-    let mut rows = Vec::new();
+    let mut best_rows = Vec::new();
     let mut index = 3usize;
-    let mut expected_row_index = 0usize;
-    let mut next_contiguous_index = None;
     while index < fields.len() {
-        if let Some((row, next_index)) =
-            parse_moxel_row_at_for_scanning(fields, index, expected_row_index)
-        {
-            if expected_row_index > 0
-                && is_moxel_compactable_empty_row(&row)
-                && next_contiguous_index != Some(index)
-            {
-                index += 1;
-                continue;
+        let Some((row, next_index)) = parse_moxel_row_start_at_for_scanning(fields, index) else {
+            index += 1;
+            continue;
+        };
+        let mut rows = vec![row];
+        let mut cursor = next_index;
+        while cursor < fields.len() {
+            let expected_row_index = rows.last().map(|row| row.index + 1).unwrap_or(0);
+            let Some((row, next_cursor)) =
+                parse_moxel_row_at_for_scanning(fields, cursor, expected_row_index)
+            else {
+                break;
+            };
+            if next_cursor <= cursor {
+                break;
             }
             rows.push(row);
-            expected_row_index += 1;
-            next_contiguous_index = Some(next_index);
-            index = next_index;
-        } else {
-            index += 1;
+            cursor = next_cursor;
         }
+        if rows.len() > best_rows.len() {
+            best_rows = rows;
+        }
+        index = next_index.max(index + 1);
     }
-    rows
+    best_rows
+}
+
+fn parse_moxel_row_start_at_for_scanning(
+    fields: &[&str],
+    index: usize,
+) -> Option<(MoxelRow, usize)> {
+    let expected_row_index = fields.get(index)?.trim().parse::<usize>().ok()?;
+    parse_moxel_row_at_for_scanning(fields, index, expected_row_index)
 }
 
 fn parse_moxel_row_at(
@@ -28085,6 +28097,45 @@ mod tests {
 
         assert_eq!(extracted, extracted_again);
         assert!(extracted.contains("<empty>true</empty>"));
+    }
+
+    #[test]
+    fn spreadsheet_pack_extract_roundtrip_preserves_nonzero_first_row() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>1</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Second row</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+        let extracted =
+            extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+        let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+        let extracted_again =
+            extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+        assert_eq!(extracted, extracted_again);
+        assert!(extracted.contains("\t<rowsItem>\r\n\t\t<index>1</index>"));
+        assert!(!extracted.contains("\t<rowsItem>\r\n\t\t<index>0</index>"));
+        assert!(extracted.contains("<v8:content>Second row</v8:content>"));
     }
 
     #[test]
