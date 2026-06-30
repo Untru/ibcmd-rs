@@ -14803,6 +14803,10 @@ struct DocumentProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
 
+struct BusinessProcessProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct SettingsStorageProperties {
     generated_types: Vec<GeneratedTypeEntry>,
 }
@@ -15576,6 +15580,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(text, uuid)?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
+    } else if kind == "BusinessProcess" {
+        let business_process = parse_business_process_properties_from_text(text, uuid)?;
+        format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid)?;
         format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
@@ -16341,6 +16348,45 @@ fn parse_document_properties_from_text(text: &str, uuid: &str) -> Option<Documen
     );
 
     Some(DocumentProperties { generated_types })
+}
+
+fn parse_business_process_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<BusinessProcessProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|value| value.trim()) != Some("30") {
+        return None;
+    }
+
+    let mut generated_types = Vec::new();
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        3,
+        4,
+        &format!("BusinessProcessObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        5,
+        6,
+        &format!("BusinessProcessRef.{}", header.name),
+        "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        11,
+        12,
+        &format!("BusinessProcessManager.{}", header.name),
+        "Manager",
+    );
+
+    Some(BusinessProcessProperties { generated_types })
 }
 
 fn parse_settings_storage_properties_from_text(
@@ -19644,6 +19690,19 @@ fn format_document_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("Document", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&document.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    xml
+}
+
+fn format_business_process_source_xml(
+    header: &MetadataHeader,
+    business_process: &BusinessProcessProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("BusinessProcess", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&business_process.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
@@ -33487,6 +33546,65 @@ mod tests {
         assert!(
             xml.contains(r#"<xr:GeneratedType name="DocumentManager.Invoice" category="Manager">"#)
         );
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+    }
+
+    #[test]
+    fn extracts_business_process_generated_types_to_metadata_xml() {
+        let business_process_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let business_process_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{30,0,0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},0,0,0,0,{manager_type_id},{manager_value_id},\r\n{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"approval comment\"}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &business_process_blob,
+            business_process_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("BusinessProcesses").join("Approval.xml")
+        );
+        assert!(xml.starts_with('\u{feff}'));
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains("<Comment>approval comment</Comment>"));
+        assert_eq!(xml.matches("<xr:GeneratedType").count(), 3);
+        assert!(
+            xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
+            "{xml}"
+        );
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="BusinessProcessObject.Approval" category="Object">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+        assert!(
+            xml.contains(r#"<xr:GeneratedType name="BusinessProcessRef.Approval" category="Ref">"#)
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="BusinessProcessManager.Approval" category="Manager">"#
+        ));
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
     }
