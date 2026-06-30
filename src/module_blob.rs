@@ -251,6 +251,7 @@ struct FormXmlChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
+    choice_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     row_picture_data_path: Option<String>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
     user_settings_group: Option<String>,
@@ -4377,6 +4378,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "DefaultItem"
+                        | "ChoiceFoldersAndItems"
                         | "RowPictureDataPath"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
@@ -4936,6 +4938,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_choice_folders_and_items(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_row_picture_data_path(&path, &current_child_items)
                     || path_ends_with_for_child_update_on_data_change(&path, &current_child_items)
                     || path_ends_with_for_child_user_settings_group(&path, &current_child_items)
@@ -5382,6 +5388,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_choice_folders_and_items(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
@@ -6736,6 +6746,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "ChoiceFoldersAndItems"
+                        if path_ends_with_for_child_choice_folders_and_items(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.choice_folders_and_items =
+                                Some(parse_form_use_for_folders_and_items_xml(text_value.trim())?);
+                        }
+                    }
                     "RowPictureDataPath"
                         if path_ends_with_for_child_row_picture_data_path(
                             &path,
@@ -7267,6 +7288,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "AutoRefreshPeriod"
                         | "UseAlternationRowColor"
                         | "DefaultItem"
+                        | "ChoiceFoldersAndItems"
                         | "RowPictureDataPath"
                         | "UpdateOnDataChange"
                         | "UserSettingsGroup"
@@ -7451,6 +7473,7 @@ fn parse_form_child_item_xml(
         auto_refresh_period: None,
         use_alternation_row_color: None,
         default_item: None,
+        choice_folders_and_items: None,
         row_picture_data_path: None,
         update_on_data_change: None,
         user_settings_group: None,
@@ -8185,6 +8208,16 @@ fn path_ends_with_for_child_default_item(path: &[String], items: &[FormXmlChildI
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
+}
+
+fn path_ends_with_for_child_choice_folders_and_items(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "ChoiceFoldersAndItems"])
 }
 
 fn path_ends_with_for_child_row_picture_data_path(
@@ -11183,6 +11216,19 @@ fn patch_form_layout_child_item_entry(
                     r#"{"B",0}"#
                 }
                 .to_string(),
+            ));
+        }
+        if let Some(choice_folders_and_items) = item.choice_folders_and_items
+            && let Some(choice_range) =
+                form_layout_table_property_bag_value_range(text, fields, "8")
+            && is_form_use_for_folders_and_items_value(&text[choice_range.clone()])
+        {
+            replacements.push((
+                choice_range.clone(),
+                format!(
+                    r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},{}}}"##,
+                    form_use_for_folders_and_items_code(choice_folders_and_items)
+                ),
             ));
         }
         if let Some(row_picture_data_path) = &item.row_picture_data_path
@@ -29214,6 +29260,46 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains(r#"11,{"B",1}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"11,{"B",0}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_choice_folders_and_items() -> anyhow::Result<()>
+    {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<ChoiceFoldersAndItems>Folders</ChoiceFoldersAndItems>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let properties = super::parse_form_xml_body_properties(xml)?;
+        assert_eq!(
+            properties.child_items[0].choice_folders_and_items,
+            Some(super::FormXmlUseForFoldersAndItems::Folders)
+        );
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(
+            parsed
+                .layout
+                .contains(r##"8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,1}"##),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            !parsed
+                .layout
+                .contains(r##"8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0}"##)
+        );
         Ok(())
     }
 

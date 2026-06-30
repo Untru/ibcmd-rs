@@ -8982,6 +8982,7 @@ struct FormChildItem {
     auto_refresh_period: Option<String>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
+    choice_folders_and_items: Option<&'static str>,
     row_picture_data_path: Option<String>,
     update_on_data_change: Option<&'static str>,
     user_settings_group: Option<String>,
@@ -10780,6 +10781,11 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        choice_folders_and_items: if tag == "Table" {
+            parse_form_table_choice_folders_and_items(&fields)
+        } else {
+            None
+        },
         row_picture_data_path: if tag == "Table" {
             parse_form_table_property_bag_string(&fields, "19").filter(|value| !value.is_empty())
         } else {
@@ -11794,6 +11800,24 @@ fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<&'static st
     }
 }
 
+fn parse_form_table_choice_folders_and_items(fields: &[&str]) -> Option<&'static str> {
+    let value = form_table_property_bag_value(fields, "8")?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    match (
+        fields.first().and_then(|field| parse_1c_string(field)),
+        fields.get(1).map(|field| field.trim()),
+        fields.get(2).map(|field| field.trim()),
+    ) {
+        (Some(marker), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("0")) if marker == "#" => {
+            Some("Items")
+        }
+        (Some(marker), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("1")) if marker == "#" => {
+            Some("Folders")
+        }
+        _ => None,
+    }
+}
+
 fn form_table_property_bag_value<'a>(fields: &[&'a str], key: &str) -> Option<&'a str> {
     fields.windows(2).find_map(|window| {
         (window[0].trim() == key && window[1].trim_start().starts_with('{')).then_some(window[1])
@@ -12713,6 +12737,12 @@ fn format_form_child_item_xml(
         }
         if item.default_item == Some(true) {
             xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
+        }
+        if let Some(choice_folders_and_items) = item.choice_folders_and_items {
+            xml.push_str(&format!(
+                "{tab}\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
+                escape_xml_text(choice_folders_and_items)
+            ));
         }
         if let Some(update_on_data_change) = item.update_on_data_change {
             xml.push_str(&format!(
@@ -29158,6 +29188,7 @@ mod tests {
         assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
         assert_eq!(item.use_alternation_row_color, Some(false));
         assert_eq!(item.default_item, Some(true));
+        assert_eq!(item.choice_folders_and_items, Some("Items"));
         assert_eq!(item.update_on_data_change, Some("Auto"));
         assert_eq!(item.allow_getting_current_row_url, Some(true));
 
@@ -29167,6 +29198,7 @@ mod tests {
         assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
         assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
         assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
+        assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
         assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
     }
@@ -30761,6 +30793,7 @@ mod tests {
             auto_refresh_period: None,
             use_alternation_row_color: None,
             default_item: None,
+            choice_folders_and_items: None,
             row_picture_data_path: None,
             update_on_data_change: None,
             user_settings_group: None,
@@ -30829,6 +30862,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     default_item: None,
+                    choice_folders_and_items: None,
                     row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
@@ -30898,6 +30932,7 @@ mod tests {
                     auto_refresh_period: None,
                     use_alternation_row_color: None,
                     default_item: None,
+                    choice_folders_and_items: None,
                     row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
