@@ -9092,6 +9092,7 @@ struct FormChildItem {
     default_item: Option<bool>,
     choice_folders_and_items: Option<&'static str>,
     restore_current_row: Option<bool>,
+    row_filter_nil: Option<bool>,
     row_picture_data_path: Option<String>,
     update_on_data_change: Option<&'static str>,
     user_settings_group: Option<String>,
@@ -10980,6 +10981,11 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        row_filter_nil: if tag == "Table" {
+            parse_form_table_property_bag_undefined(&fields, "10")
+        } else {
+            None
+        },
         row_picture_data_path: if tag == "Table" {
             parse_form_table_property_bag_string(&fields, "19").filter(|value| !value.is_empty())
         } else {
@@ -11892,6 +11898,17 @@ fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -> Option<St
         return None;
     }
     fields.get(1).and_then(|field| parse_1c_string(field))
+}
+
+fn parse_form_table_property_bag_undefined(fields: &[&str], key: &str) -> Option<bool> {
+    let value = form_table_property_bag_value(fields, key)?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    (fields.len() == 1
+        && fields
+            .first()
+            .and_then(|field| parse_1c_string(field))
+            .is_some_and(|marker| marker == "U"))
+    .then_some(true)
 }
 
 fn parse_form_table_period(fields: &[&str]) -> Option<FormTablePeriod> {
@@ -12878,6 +12895,9 @@ fn format_form_child_item_xml(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
         ));
+    }
+    if item.tag == "Table" && item.row_filter_nil == Some(true) {
+        xml.push_str(&format!("{tab}\t<RowFilter xsi:nil=\"true\"/>\r\n"));
     }
     if item.tag == "Table"
         && let Some(row_picture_data_path) = &item.row_picture_data_path
@@ -29758,6 +29778,7 @@ mod tests {
         assert_eq!(item.default_item, Some(true));
         assert_eq!(item.choice_folders_and_items, Some("Items"));
         assert_eq!(item.restore_current_row, Some(false));
+        assert_eq!(item.row_filter_nil, Some(true));
         assert_eq!(item.update_on_data_change, Some("Auto"));
         assert_eq!(item.allow_getting_current_row_url, Some(true));
 
@@ -29774,6 +29795,7 @@ mod tests {
         assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
         assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
         assert!(xml.contains("<RestoreCurrentRow>false</RestoreCurrentRow>"));
+        assert!(xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
         assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
     }
@@ -31371,6 +31393,7 @@ mod tests {
             default_item: None,
             choice_folders_and_items: None,
             restore_current_row: None,
+            row_filter_nil: None,
             row_picture_data_path: None,
             update_on_data_change: None,
             user_settings_group: None,
@@ -31442,6 +31465,7 @@ mod tests {
                     default_item: None,
                     choice_folders_and_items: None,
                     restore_current_row: None,
+                    row_filter_nil: None,
                     row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
@@ -31514,6 +31538,7 @@ mod tests {
                     default_item: None,
                     choice_folders_and_items: None,
                     restore_current_row: None,
+                    row_filter_nil: None,
                     row_picture_data_path: None,
                     update_on_data_change: None,
                     user_settings_group: None,
