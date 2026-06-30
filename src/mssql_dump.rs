@@ -12,7 +12,7 @@ use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, Reader};
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
 use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
@@ -25,7 +25,7 @@ const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlDumpConfigReport {
     pub database: String,
     pub output_dir: PathBuf,
@@ -39,7 +39,7 @@ pub struct MssqlDumpConfigReport {
     pub timings: MssqlDumpTimingReport,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlDumpedTableReport {
     pub table: String,
     pub rows: usize,
@@ -51,7 +51,8 @@ pub struct MssqlDumpedTableReport {
     pub timings: MssqlDumpTimingReport,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MssqlDumpTimingReport {
     pub fetch_headers_ms: u64,
     pub fetch_headers_sqlcmd_ms: u64,
@@ -113,6 +114,170 @@ pub struct MssqlDumpTimingReport {
     pub source_asset_schedule_cpu_ms: u64,
     pub source_asset_config_dump_info_cpu_ms: u64,
     pub source_asset_other_cpu_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlDumpTimingSummary {
+    pub report_path: Option<PathBuf>,
+    pub database: String,
+    pub output_dir: PathBuf,
+    pub total_rows: usize,
+    pub total_binary_bytes: usize,
+    pub total_source_asset_rows: usize,
+    pub batch_cap_binary_bytes: u64,
+    pub fetch_row_batches: u64,
+    pub fetch_row_batch_max_rows: u64,
+    pub fetch_row_batch_max_binary_bytes: u64,
+    pub fetch_row_batch_max_binary_mib: u64,
+    pub prepare_indexes_ms: u64,
+    pub prepare_metadata_fetch_ms: u64,
+    pub prepare_metadata_fetch_sqlcmd_ms: u64,
+    pub prepare_metadata_fetch_bcp_ms: u64,
+    pub prepare_metadata_texts_ms: u64,
+    pub prepare_reference_indexes_ms: u64,
+    pub prepare_command_refs_ms: u64,
+    pub fetch_rows_ms: u64,
+    pub fetch_rows_bcp_ms: u64,
+    pub process_rows_wall_ms: u64,
+    pub fetch_rows_ms_per_gib: Option<u64>,
+    pub process_rows_wall_ms_per_gib: Option<u64>,
+    pub tables: Vec<MssqlDumpTableTimingSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MssqlDumpTableTimingSummary {
+    pub table: String,
+    pub rows: usize,
+    pub binary_bytes: usize,
+    pub source_asset_rows: usize,
+    pub fetch_row_batches: u64,
+    pub fetch_row_batch_max_rows: u64,
+    pub fetch_row_batch_max_binary_bytes: u64,
+    pub fetch_row_batch_max_binary_mib: u64,
+    pub prepare_indexes_ms: u64,
+    pub prepare_metadata_fetch_ms: u64,
+    pub prepare_metadata_texts_ms: u64,
+    pub prepare_reference_indexes_ms: u64,
+    pub prepare_command_refs_ms: u64,
+    pub fetch_rows_ms: u64,
+    pub fetch_rows_bcp_ms: u64,
+    pub process_rows_wall_ms: u64,
+    pub fetch_rows_ms_per_gib: Option<u64>,
+    pub process_rows_wall_ms_per_gib: Option<u64>,
+}
+
+pub fn read_dump_timing_summaries(paths: &[PathBuf]) -> Result<Vec<MssqlDumpTimingSummary>> {
+    paths
+        .iter()
+        .map(|path| read_dump_timing_summary(path))
+        .collect()
+}
+
+pub fn read_dump_timing_summary(path: &Path) -> Result<MssqlDumpTimingSummary> {
+    let json = fs::read_to_string(path)
+        .with_context(|| format!("failed to read dump timing report {}", path.display()))?;
+    parse_dump_timing_summary(&json, Some(path.to_path_buf()))
+}
+
+pub fn parse_dump_timing_summary(
+    json: &str,
+    report_path: Option<PathBuf>,
+) -> Result<MssqlDumpTimingSummary> {
+    let report: MssqlDumpConfigReport =
+        serde_json::from_str(json).context("failed to parse mssql-dump-config JSON report")?;
+    Ok(MssqlDumpTimingSummary::from_report(&report, report_path))
+}
+
+impl MssqlDumpTimingSummary {
+    fn from_report(report: &MssqlDumpConfigReport, report_path: Option<PathBuf>) -> Self {
+        Self {
+            report_path,
+            database: report.database.clone(),
+            output_dir: report.output_dir.clone(),
+            total_rows: report.total_rows,
+            total_binary_bytes: report.total_binary_bytes,
+            total_source_asset_rows: report.total_source_asset_rows,
+            batch_cap_binary_bytes: SQLCMD_DUMP_BATCH_MAX_DATA_BYTES,
+            fetch_row_batches: report.timings.fetch_row_batches,
+            fetch_row_batch_max_rows: report.timings.fetch_row_batch_max_rows,
+            fetch_row_batch_max_binary_bytes: report.timings.fetch_row_batch_max_binary_bytes,
+            fetch_row_batch_max_binary_mib: bytes_to_mib_ceil(
+                report.timings.fetch_row_batch_max_binary_bytes,
+            ),
+            prepare_indexes_ms: report.timings.prepare_indexes_ms,
+            prepare_metadata_fetch_ms: report.timings.prepare_metadata_fetch_ms,
+            prepare_metadata_fetch_sqlcmd_ms: report.timings.prepare_metadata_fetch_sqlcmd_ms,
+            prepare_metadata_fetch_bcp_ms: report.timings.prepare_metadata_fetch_bcp_ms,
+            prepare_metadata_texts_ms: report.timings.prepare_metadata_texts_ms,
+            prepare_reference_indexes_ms: report.timings.prepare_reference_indexes_ms,
+            prepare_command_refs_ms: report.timings.prepare_command_refs_ms,
+            fetch_rows_ms: report.timings.fetch_rows_ms,
+            fetch_rows_bcp_ms: report.timings.fetch_rows_bcp_ms,
+            process_rows_wall_ms: report.timings.process_rows_wall_ms,
+            fetch_rows_ms_per_gib: ms_per_gib(
+                report.timings.fetch_rows_ms,
+                report.total_binary_bytes as u64,
+            ),
+            process_rows_wall_ms_per_gib: ms_per_gib(
+                report.timings.process_rows_wall_ms,
+                report.total_binary_bytes as u64,
+            ),
+            tables: report
+                .tables
+                .iter()
+                .map(MssqlDumpTableTimingSummary::from_table_report)
+                .collect(),
+        }
+    }
+}
+
+impl MssqlDumpTableTimingSummary {
+    fn from_table_report(table: &MssqlDumpedTableReport) -> Self {
+        Self {
+            table: table.table.clone(),
+            rows: table.rows,
+            binary_bytes: table.binary_bytes,
+            source_asset_rows: table.source_asset_rows,
+            fetch_row_batches: table.timings.fetch_row_batches,
+            fetch_row_batch_max_rows: table.timings.fetch_row_batch_max_rows,
+            fetch_row_batch_max_binary_bytes: table.timings.fetch_row_batch_max_binary_bytes,
+            fetch_row_batch_max_binary_mib: bytes_to_mib_ceil(
+                table.timings.fetch_row_batch_max_binary_bytes,
+            ),
+            prepare_indexes_ms: table.timings.prepare_indexes_ms,
+            prepare_metadata_fetch_ms: table.timings.prepare_metadata_fetch_ms,
+            prepare_metadata_texts_ms: table.timings.prepare_metadata_texts_ms,
+            prepare_reference_indexes_ms: table.timings.prepare_reference_indexes_ms,
+            prepare_command_refs_ms: table.timings.prepare_command_refs_ms,
+            fetch_rows_ms: table.timings.fetch_rows_ms,
+            fetch_rows_bcp_ms: table.timings.fetch_rows_bcp_ms,
+            process_rows_wall_ms: table.timings.process_rows_wall_ms,
+            fetch_rows_ms_per_gib: ms_per_gib(
+                table.timings.fetch_rows_ms,
+                table.binary_bytes as u64,
+            ),
+            process_rows_wall_ms_per_gib: ms_per_gib(
+                table.timings.process_rows_wall_ms,
+                table.binary_bytes as u64,
+            ),
+        }
+    }
+}
+
+fn bytes_to_mib_ceil(bytes: u64) -> u64 {
+    if bytes == 0 {
+        0
+    } else {
+        bytes.div_ceil(1024 * 1024)
+    }
+}
+
+fn ms_per_gib(elapsed_ms: u64, bytes: u64) -> Option<u64> {
+    if bytes == 0 {
+        return None;
+    }
+    let scaled = u128::from(elapsed_ms) * 1024 * 1024 * 1024;
+    Some((scaled / u128::from(bytes)).min(u128::from(u64::MAX)) as u64)
 }
 
 impl MssqlDumpTimingReport {
@@ -24177,6 +24342,105 @@ mod tests {
         assert_eq!(total.fetch_row_batches, 3);
         assert_eq!(total.fetch_row_batch_max_rows, 9);
         assert_eq!(total.fetch_row_batch_max_binary_bytes, 100);
+    }
+
+    #[test]
+    fn dump_timing_summary_extracts_batch_followup_fields() {
+        let half_gib = 512 * 1024 * 1024usize;
+        let report = MssqlDumpConfigReport {
+            database: "PerfDb".to_string(),
+            output_dir: PathBuf::from(r"E:\ibcmd_lab\perf\full"),
+            tables: vec![MssqlDumpedTableReport {
+                table: "Config".to_string(),
+                rows: 12,
+                binary_bytes: half_gib,
+                inflated_rows: 0,
+                module_text_rows: 0,
+                metadata_xml_rows: 0,
+                source_asset_rows: 8,
+                timings: MssqlDumpTimingReport {
+                    prepare_indexes_ms: 40,
+                    prepare_metadata_fetch_ms: 11,
+                    prepare_metadata_texts_ms: 12,
+                    prepare_reference_indexes_ms: 13,
+                    prepare_command_refs_ms: 14,
+                    fetch_rows_ms: 1000,
+                    fetch_rows_bcp_ms: 900,
+                    fetch_row_batches: 2,
+                    fetch_row_batch_max_rows: 7,
+                    fetch_row_batch_max_binary_bytes: 300 * 1024 * 1024,
+                    process_rows_wall_ms: 2000,
+                    ..MssqlDumpTimingReport::default()
+                },
+            }],
+            total_rows: 12,
+            total_binary_bytes: half_gib,
+            total_inflated_rows: 0,
+            total_module_text_rows: 0,
+            total_metadata_xml_rows: 0,
+            total_source_asset_rows: 8,
+            timings: MssqlDumpTimingReport {
+                prepare_indexes_ms: 40,
+                prepare_metadata_fetch_ms: 11,
+                prepare_metadata_fetch_bcp_ms: 11,
+                prepare_metadata_texts_ms: 12,
+                prepare_reference_indexes_ms: 13,
+                prepare_command_refs_ms: 14,
+                fetch_rows_ms: 1000,
+                fetch_rows_bcp_ms: 900,
+                fetch_row_batches: 2,
+                fetch_row_batch_max_rows: 7,
+                fetch_row_batch_max_binary_bytes: 300 * 1024 * 1024,
+                process_rows_wall_ms: 2000,
+                ..MssqlDumpTimingReport::default()
+            },
+        };
+        let json = serde_json::to_string(&report).unwrap();
+
+        let summary = parse_dump_timing_summary(&json, Some(PathBuf::from("report.json"))).unwrap();
+
+        assert_eq!(summary.report_path, Some(PathBuf::from("report.json")));
+        assert_eq!(summary.database, "PerfDb");
+        assert_eq!(summary.batch_cap_binary_bytes, 256 * 1024 * 1024);
+        assert_eq!(summary.fetch_row_batches, 2);
+        assert_eq!(summary.fetch_row_batch_max_rows, 7);
+        assert_eq!(summary.fetch_row_batch_max_binary_mib, 300);
+        assert_eq!(summary.fetch_rows_ms_per_gib, Some(2000));
+        assert_eq!(summary.process_rows_wall_ms_per_gib, Some(4000));
+        assert_eq!(summary.tables[0].table, "Config");
+        assert_eq!(summary.tables[0].fetch_row_batch_max_binary_mib, 300);
+    }
+
+    #[test]
+    fn dump_timing_summary_defaults_missing_new_timing_fields() {
+        let json = r#"{
+            "database": "OldReport",
+            "output_dir": "E:\\ibcmd_lab\\perf\\old",
+            "tables": [{
+                "table": "Config",
+                "rows": 1,
+                "binary_bytes": 0,
+                "inflated_rows": 0,
+                "module_text_rows": 0,
+                "metadata_xml_rows": 0,
+                "source_asset_rows": 0,
+                "timings": {"fetch_rows_ms": 5}
+            }],
+            "total_rows": 1,
+            "total_binary_bytes": 0,
+            "total_inflated_rows": 0,
+            "total_module_text_rows": 0,
+            "total_metadata_xml_rows": 0,
+            "total_source_asset_rows": 0,
+            "timings": {"fetch_rows_ms": 5}
+        }"#;
+
+        let summary = parse_dump_timing_summary(json, None).unwrap();
+
+        assert_eq!(summary.fetch_rows_ms, 5);
+        assert_eq!(summary.fetch_row_batches, 0);
+        assert_eq!(summary.fetch_row_batch_max_binary_bytes, 0);
+        assert_eq!(summary.fetch_rows_ms_per_gib, None);
     }
 
     #[test]

@@ -39,6 +39,8 @@ pub enum Commands {
     DumpSources(DumpSourcesArgs),
     /// Dump Config/ConfigSave storage rows directly from SQL Server.
     MssqlDumpConfig(MssqlDumpConfigArgs),
+    /// Summarize saved mssql-dump-config JSON timing reports.
+    MssqlDumpTimingSummary(MssqlDumpTimingSummaryArgs),
     /// Write SQL Server and tech-log trace templates for an ibcmd run.
     TraceTemplate(TraceTemplateArgs),
     /// Analyze exported SQL Server Extended Events XML.
@@ -539,6 +541,16 @@ pub struct MssqlDumpConfigArgs {
     /// Write manifest.json with row-level dump details.
     #[arg(long, default_value_t = true, hide = true)]
     pub write_manifest: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlDumpTimingSummaryArgs {
+    /// JSON reports produced by mssql-dump-config.
+    #[arg(required = true)]
+    pub input: Vec<PathBuf>,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -3312,6 +3324,35 @@ mod tests {
                 assert!(args.extract_metadata_xml);
                 assert!(args.no_binary_rows);
                 assert!(args.overwrite);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_mssql_dump_timing_summary_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-timing-summary",
+            r"E:\ibcmd_lab\perf\full-report.json",
+            r"E:\ibcmd_lab\perf\selected-report.json",
+            "-o",
+            r"E:\ibcmd_lab\perf\timing-summary.json",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpTimingSummary(args) => {
+                assert_eq!(
+                    args.input,
+                    vec![
+                        PathBuf::from(r"E:\ibcmd_lab\perf\full-report.json"),
+                        PathBuf::from(r"E:\ibcmd_lab\perf\selected-report.json")
+                    ]
+                );
+                assert_eq!(
+                    args.output,
+                    Some(PathBuf::from(r"E:\ibcmd_lab\perf\timing-summary.json"))
+                );
             }
             other => panic!("unexpected command: {other:?}"),
         }

@@ -108,6 +108,15 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql_dump::dump_config(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlDumpTimingSummary(args) => {
+            let summaries = ibcmd_rs::mssql_dump::read_dump_timing_summaries(&args.input)?;
+            let json = serde_json::to_string_pretty(&summaries)?;
+            if let Some(output) = args.output {
+                std::fs::write(output, json)?;
+            } else {
+                println!("{json}");
+            }
+        }
         Commands::TraceTemplate(args) => {
             ibcmd_rs::templates::write_trace_templates(&args.output_dir, args.overwrite)?;
             println!("Trace templates written to {}", args.output_dir.display());
