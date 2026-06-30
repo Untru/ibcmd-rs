@@ -14610,6 +14610,7 @@ struct TypedMetadataProperties {
 
 struct CommonAttributeProperties {
     value_types: Vec<ConstantValueType>,
+    auto_use: bool,
     use_refs: Vec<String>,
 }
 
@@ -16635,16 +16636,29 @@ fn parse_common_attribute_properties_from_text(
     if fields.first().map(|field| field.trim()) != Some("5") {
         return None;
     }
-    let use_refs = fields
+    let use_fields = fields
         .get(2)
-        .and_then(|field| split_1c_braced_fields(field, 0))
-        .map(|fields| parse_common_attribute_use_refs(&fields, object_refs))
+        .and_then(|field| split_1c_braced_fields(field, 0));
+    let auto_use = use_fields
+        .as_deref()
+        .and_then(parse_common_attribute_auto_use)
+        .unwrap_or(false);
+    let use_refs = use_fields
+        .as_deref()
+        .map(|fields| parse_common_attribute_use_refs(fields, object_refs))
         .unwrap_or_default();
 
     Some(CommonAttributeProperties {
         value_types: typed.value_types,
+        auto_use,
         use_refs,
     })
+}
+
+fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<bool> {
+    fields
+        .first()
+        .and_then(|field| parse_1c_bool_flag(field.trim()))
 }
 
 fn parse_common_attribute_use_refs(
@@ -20263,6 +20277,13 @@ fn format_common_attribute_source_xml(
             xml.insert_str(index, &insert);
         }
     }
+    insert_metadata_properties_xml(
+        &mut xml,
+        &format!(
+            "\t\t\t<AutoUse>{}</AutoUse>\r\n",
+            xml_bool(common_attribute.auto_use)
+        ),
+    );
     xml
 }
 
@@ -30807,6 +30828,7 @@ mod tests {
         assert!(xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"));
         assert!(xml.contains("<Use>"));
         assert!(xml.contains(r#"<xr:Item xsi:type="xr:MDObjectRef">Catalog.Products</xr:Item>"#));
+        assert!(xml.contains("<AutoUse>false</AutoUse>"));
         assert!(!repacked.blob.is_empty());
         let repacked_plain =
             String::from_utf8(inflate_raw_deflate(&repacked.blob).unwrap()).unwrap();
@@ -30827,6 +30849,39 @@ mod tests {
         let xml_v21 = String::from_utf8_lossy(&extracted_v21.xml);
         assert!(xml_v21.contains(r#"version="2.21""#));
         assert!(!xml_v21.contains(r#"version="2.20""#));
+    }
+
+    #[test]
+    fn extracts_common_attribute_xml_with_auto_use_flag() {
+        let uuid = "33333333-3333-4333-8333-333333333333";
+        let plain = format!(
+            "{{1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"CompanyScope\",{{1,\"en\",\"Company scope\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"B\"}}}}\r\n}}\r\n}},\r\n{{1,0}}\r\n}}\r\n}}"
+        );
+        let blob = deflate_for_test(plain.as_bytes());
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8_lossy(&extracted.xml);
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("CommonAttributes").join("CompanyScope.xml")
+        );
+        assert!(xml.contains(r#"version="2.21""#));
+        assert!(xml.contains("<v8:Type>xs:boolean</v8:Type>"));
+        assert!(xml.contains("<AutoUse>true</AutoUse>"));
+        assert!(!xml.contains("<Use>"));
+        assert!(!xml.contains("ConfigDumpInfo"));
     }
 
     #[test]
