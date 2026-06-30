@@ -7952,6 +7952,8 @@ struct FormChildItem {
     enable_start_drag: Option<bool>,
     enable_drag: Option<bool>,
     file_drag_mode: Option<&'static str>,
+    auto_refresh: Option<bool>,
+    auto_refresh_period: Option<String>,
     button_representation: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
@@ -9720,6 +9722,16 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        auto_refresh: if tag == "Table" {
+            parse_form_table_property_bag_bool(&fields, "5")
+        } else {
+            None
+        },
+        auto_refresh_period: if tag == "Table" {
+            parse_form_table_property_bag_number(&fields, "6")
+        } else {
+            None
+        },
         button_representation: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(10)
@@ -10598,6 +10610,37 @@ fn parse_form_table_file_drag_mode(field: &str) -> Option<&'static str> {
     }
 }
 
+fn parse_form_table_property_bag_bool(fields: &[&str], key: &str) -> Option<bool> {
+    let value = form_table_property_bag_value(fields, key)?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.first().and_then(|field| parse_1c_string(field))? != "B" {
+        return None;
+    }
+    match fields.get(1).map(|field| field.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_table_property_bag_number(fields: &[&str], key: &str) -> Option<String> {
+    let value = form_table_property_bag_value(fields, key)?;
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.first().and_then(|field| parse_1c_string(field))? != "N" {
+        return None;
+    }
+    fields
+        .get(1)
+        .map(|field| field.trim().to_string())
+        .filter(|value| value.parse::<u32>().is_ok())
+}
+
+fn form_table_property_bag_value<'a>(fields: &[&'a str], key: &str) -> Option<&'a str> {
+    fields.windows(2).find_map(|window| {
+        (window[0].trim() == key && window[1].trim_start().starts_with('{')).then_some(window[1])
+    })
+}
+
 fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
     match wrapper {
         "22" => match fields.get(5).map(|value| value.trim())? {
@@ -10634,13 +10677,14 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             _ => None,
         },
         "73" => Some("Table"),
+        "55" => Some("Table"),
         _ => None,
     }
 }
 
 fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> {
     let indexes: &[usize] = match wrapper {
-        "73" | "34" => &[5],
+        "73" | "55" | "34" => &[5],
         "48" => &[6, 7],
         _ => &[6],
     };
@@ -10653,7 +10697,7 @@ fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> 
 
 fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
     let indexes: &[usize] = match wrapper {
-        "73" => &[9],
+        "73" | "55" => &[9],
         "34" => &[6],
         "48" => &[9, 10],
         _ => &[7],
@@ -10914,13 +10958,14 @@ fn collect_form_table_names(fields: &[&str], tables: &mut BTreeMap<String, Strin
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        if nested.first().map(|value| value.trim()) == Some("73")
+        let wrapper = nested.first().map(|value| value.trim());
+        if matches!(wrapper, Some("73" | "55"))
             && let Some(identity) = nested
                 .get(1)
                 .and_then(|field| split_1c_braced_fields(field, 0))
             && let (Some(id), Some(name)) = (
                 identity.first().map(|value| value.trim()),
-                parse_form_child_item_name("73", &nested),
+                wrapper.and_then(|wrapper| parse_form_child_item_name(wrapper, &nested)),
             )
         {
             tables.insert(id.to_string(), name);
@@ -10941,7 +10986,7 @@ fn collect_form_table_column_names(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        if nested.first().map(|value| value.trim()) == Some("73")
+        if matches!(nested.first().map(|value| value.trim()), Some("73" | "55"))
             && let Some(identity) = nested
                 .get(1)
                 .and_then(|field| split_1c_braced_fields(field, 0))
@@ -11483,6 +11528,18 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
                 escape_xml_text(file_drag_mode)
+            ));
+        }
+        if let Some(auto_refresh) = item.auto_refresh {
+            xml.push_str(&format!(
+                "{tab}\t<AutoRefresh>{}</AutoRefresh>\r\n",
+                if auto_refresh { "true" } else { "false" }
+            ));
+        }
+        if let Some(auto_refresh_period) = &item.auto_refresh_period {
+            xml.push_str(&format!(
+                "{tab}\t<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n",
+                escape_xml_text(auto_refresh_period)
             ));
         }
     }
@@ -25480,6 +25537,34 @@ mod tests {
     }
 
     #[test]
+    fn extracts_real_wrapper55_table_auto_refresh_properties() {
+        let mut attribute_names_by_id = BTreeMap::new();
+        attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+
+        let item = parse_form_child_item_with_attrs(
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,3,{-22}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",0},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",141},19,{"S",""},20,{"B",1},{0}}"##,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(item.name, "Rows");
+        assert_eq!(item.data_path.as_deref(), Some("Rows"));
+        assert_eq!(item.auto_refresh, Some(false));
+        assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
+        assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
+    }
+
+    #[test]
     fn extracts_real_sfc_page_scroll_on_compress() {
         let form_body = fs::read(
             r"lab\sfc\verify\event_aliases_after_patch_20260628\Config\f1335af3-b387-4b08-b9f0-d742466fb011.0__part0.bin",
@@ -27013,6 +27098,8 @@ mod tests {
             enable_start_drag: None,
             enable_drag: None,
             file_drag_mode: None,
+            auto_refresh: None,
+            auto_refresh_period: None,
             button_representation: None,
             location_in_command_bar: None,
             default_button: None,
@@ -27073,6 +27160,8 @@ mod tests {
                     enable_start_drag: None,
                     enable_drag: None,
                     file_drag_mode: None,
+                    auto_refresh: None,
+                    auto_refresh_period: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
@@ -27134,6 +27223,8 @@ mod tests {
                     enable_start_drag: None,
                     enable_drag: None,
                     file_drag_mode: None,
+                    auto_refresh: None,
+                    auto_refresh_period: None,
                     button_representation: None,
                     location_in_command_bar: None,
                     default_button: None,
