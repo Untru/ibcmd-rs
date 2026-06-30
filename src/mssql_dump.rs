@@ -17101,10 +17101,34 @@ fn parse_business_process_properties_from_text(
     push_generated_type_entry(
         &mut generated_types,
         &fields,
+        7,
+        8,
+        &format!("BusinessProcessSelection.{}", header.name),
+        "Selection",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        9,
+        10,
+        &format!("BusinessProcessList.{}", header.name),
+        "List",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
         11,
         12,
         &format!("BusinessProcessManager.{}", header.name),
         "Manager",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        13,
+        14,
+        &format!("BusinessProcessRoutePointRef.{}", header.name),
+        "RoutePointRef",
     );
 
     Some(BusinessProcessProperties { generated_types })
@@ -17135,6 +17159,30 @@ fn parse_task_properties_from_text(text: &str, uuid: &str) -> Option<TaskPropert
         6,
         &format!("TaskRef.{}", header.name),
         "Ref",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        7,
+        8,
+        &format!("TaskSelection.{}", header.name),
+        "Selection",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        9,
+        10,
+        &format!("TaskList.{}", header.name),
+        "List",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
+        11,
+        12,
+        &format!("TaskManager.{}", header.name),
+        "Manager",
     );
 
     Some(TaskProperties { generated_types })
@@ -36780,11 +36828,17 @@ mod tests {
         let object_value_id = "11111111-1111-4111-8111-111111111112";
         let ref_type_id = "22222222-2222-4222-8222-222222222221";
         let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "44444444-4444-4444-8444-444444444441";
+        let selection_value_id = "44444444-4444-4444-8444-444444444442";
+        let list_type_id = "55555555-5555-4555-8555-555555555551";
+        let list_value_id = "55555555-5555-4555-8555-555555555552";
         let manager_type_id = "33333333-3333-4333-8333-333333333331";
         let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let route_point_type_id = "66666666-6666-4666-8666-666666666661";
+        let route_point_value_id = "66666666-6666-4666-8666-666666666662";
         let business_process_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{30,0,0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},0,0,0,0,{manager_type_id},{manager_value_id},\r\n{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"approval comment\"}}\r\n}}\r\n}}"
+                "{{1,\r\n{{30,0,0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},{manager_type_id},{manager_value_id},{route_point_type_id},{route_point_value_id},\r\n{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"approval comment\"}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -36810,7 +36864,7 @@ mod tests {
         assert!(xml.starts_with('\u{feff}'));
         assert!(xml.contains(r#"version="2.21""#));
         assert!(xml.contains("<Comment>approval comment</Comment>"));
-        assert_eq!(xml.matches("<xr:GeneratedType").count(), 3);
+        assert_eq!(xml.matches("<xr:GeneratedType").count(), 6);
         assert!(
             xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
             "{xml}"
@@ -36826,10 +36880,27 @@ mod tests {
         assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
         assert!(xml.contains(
+            r#"<xr:GeneratedType name="BusinessProcessSelection.Approval" category="Selection">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{selection_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{selection_value_id}</xr:ValueId>")));
+        assert!(
+            xml.contains(
+                r#"<xr:GeneratedType name="BusinessProcessList.Approval" category="List">"#
+            )
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{list_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{list_value_id}</xr:ValueId>")));
+        assert!(xml.contains(
             r#"<xr:GeneratedType name="BusinessProcessManager.Approval" category="Manager">"#
         ));
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="BusinessProcessRoutePointRef.Approval" category="RoutePointRef">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{route_point_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{route_point_value_id}</xr:ValueId>")));
     }
 
     #[test]
@@ -36839,9 +36910,15 @@ mod tests {
         let object_value_id = "11111111-1111-4111-8111-111111111112";
         let ref_type_id = "22222222-2222-4222-8222-222222222221";
         let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let selection_type_id = "33333333-3333-4333-8333-333333333331";
+        let selection_value_id = "33333333-3333-4333-8333-333333333332";
+        let list_type_id = "44444444-4444-4444-8444-444444444441";
+        let list_value_id = "44444444-4444-4444-8444-444444444442";
+        let manager_type_id = "55555555-5555-4555-8555-555555555551";
+        let manager_value_id = "55555555-5555-4555-8555-555555555552";
         let task_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"task comment\"}},0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id}}}\r\n}}"
+                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"task comment\"}},0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},{manager_type_id},{manager_value_id}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -36867,7 +36944,7 @@ mod tests {
         assert!(xml.starts_with('\u{feff}'));
         assert!(xml.contains(r#"version="2.21""#));
         assert!(xml.contains("<Comment>task comment</Comment>"));
-        assert_eq!(xml.matches("<xr:GeneratedType").count(), 2);
+        assert_eq!(xml.matches("<xr:GeneratedType").count(), 5);
         assert!(
             xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
             "{xml}"
@@ -36880,6 +36957,21 @@ mod tests {
         assert!(xml.contains(r#"<xr:GeneratedType name="TaskRef.ExecutorTask" category="Ref">"#));
         assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
+        assert!(xml.contains(
+            r#"<xr:GeneratedType name="TaskSelection.ExecutorTask" category="Selection">"#
+        ));
+        assert!(xml.contains(&format!("<xr:TypeId>{selection_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{selection_value_id}</xr:ValueId>")));
+        assert!(xml.contains(r#"<xr:GeneratedType name="TaskList.ExecutorTask" category="List">"#));
+        assert!(xml.contains(&format!("<xr:TypeId>{list_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{list_value_id}</xr:ValueId>")));
+        assert!(
+            xml.contains(
+                r#"<xr:GeneratedType name="TaskManager.ExecutorTask" category="Manager">"#
+            )
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
     }
 
     #[test]
