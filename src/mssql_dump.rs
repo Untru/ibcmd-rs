@@ -4422,6 +4422,7 @@ struct FlowchartItemProperties {
     pivot_points: Vec<FlowchartPoint>,
     from: Option<FlowchartConnectionEnd>,
     to: Option<FlowchartConnectionEnd>,
+    font: FlowchartFont,
     decorative_line: bool,
     line_style: &'static str,
     begin_arrow: &'static str,
@@ -4449,6 +4450,17 @@ struct FlowchartPoint {
 struct FlowchartConnectionEnd {
     item: String,
     port_index: String,
+}
+
+struct FlowchartFont {
+    reference: String,
+    kind: &'static str,
+    height: Option<String>,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strikeout: bool,
+    scale: Option<String>,
 }
 
 struct FlowchartEvent {
@@ -6736,6 +6748,7 @@ fn parse_flowchart_item(
         pivot_points: Vec::new(),
         from: None,
         to: None,
+        font: FlowchartFont::default(),
         decorative_line: false,
         line_style: "Solid",
         begin_arrow: "None",
@@ -6880,6 +6893,12 @@ fn parse_flowchart_shape_graphics(
     let outer = split_1c_braced_fields(text, 0)?;
     let wrapper = split_1c_braced_fields(outer.first()?, 0)?;
     let geometry = split_1c_braced_fields(wrapper.first()?, 0)?;
+    if let Some(font) = geometry
+        .first()
+        .and_then(|style| parse_flowchart_style_font(style))
+    {
+        properties.font = font;
+    }
     properties.location = Some(FlowchartLocation {
         left: geometry.get(2)?.trim().to_string(),
         top: geometry.get(3)?.trim().to_string(),
@@ -6896,6 +6915,12 @@ fn parse_flowchart_line_graphics(
 ) -> Option<()> {
     let outer = split_1c_braced_fields(text, 0)?;
     let geometry = split_1c_braced_fields(outer.first()?, 0)?;
+    if let Some(font) = geometry
+        .first()
+        .and_then(|style| parse_flowchart_style_font(style))
+    {
+        properties.font = font;
+    }
     let point_count = geometry.get(2)?.trim().parse::<usize>().ok()?;
     let mut points = Vec::with_capacity(point_count);
     let mut index = 3usize;
@@ -6924,6 +6949,95 @@ fn parse_flowchart_line_graphics(
     }
     let _ = names;
     Some(())
+}
+
+impl Default for FlowchartFont {
+    fn default() -> Self {
+        Self {
+            reference: "sys:DefaultGUIFont".to_string(),
+            kind: "WindowsFont",
+            height: None,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikeout: false,
+            scale: None,
+        }
+    }
+}
+
+fn parse_flowchart_style_font(style: &str) -> Option<FlowchartFont> {
+    let fields = split_1c_braced_fields(style, 0)?;
+    if fields.first()?.trim() != "7" {
+        return None;
+    }
+    parse_flowchart_font_tuple(fields.get(4)?)
+}
+
+fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "7" {
+        return None;
+    }
+    let kind = fields.get(1).map(|field| field.trim()).unwrap_or("1");
+    let (reference, kind_xml) = match kind {
+        "1" => ("sys:DefaultGUIFont".to_string(), "WindowsFont"),
+        "2" => {
+            let reference = fields
+                .get(3)
+                .and_then(|field| {
+                    split_1c_braced_fields(field, 0)?
+                        .first()
+                        .and_then(|code| code.trim().parse::<i32>().ok())
+                })
+                .and_then(standard_style_item_for_code)
+                .map(|(_, name)| format!("style:{name}"))
+                .unwrap_or_else(|| "style:TextFont".to_string());
+            (reference, "StyleItem")
+        }
+        _ => return None,
+    };
+    let height = font_height_xml(fields.get(2).map(|field| field.trim()));
+    let (weight, italic, underline, strikeout, scale) = if fields.len() >= 10 {
+        (
+            fields
+                .get(4)
+                .and_then(|field| field.trim().parse::<i32>().ok())
+                .unwrap_or(400),
+            fields
+                .get(5)
+                .and_then(|field| parse_1c_bool_flag(field.trim()))
+                .unwrap_or(false),
+            fields
+                .get(6)
+                .and_then(|field| parse_1c_bool_flag(field.trim()))
+                .unwrap_or(false),
+            fields
+                .get(7)
+                .and_then(|field| parse_1c_bool_flag(field.trim()))
+                .unwrap_or(false),
+            fields.get(9).map(|field| field.trim()).unwrap_or("100"),
+        )
+    } else {
+        (
+            400,
+            false,
+            false,
+            false,
+            fields.get(5).map(|field| field.trim()).unwrap_or("100"),
+        )
+    };
+    let scale = (scale != "100").then(|| scale.to_string());
+    Some(FlowchartFont {
+        reference,
+        kind: kind_xml,
+        height,
+        bold: weight >= 700,
+        italic,
+        underline,
+        strikeout,
+        scale,
+    })
 }
 
 fn parse_flowchart_line_style(text: &str) -> Option<&'static str> {
@@ -8386,7 +8500,7 @@ fn push_flowchart_item_xml(xml: &mut String, item: &FlowchartItem) {
         "\t\t\t\t<Transparent>{}</Transparent>\r\n",
         xml_bool(item.properties.transparent)
     ));
-    xml.push_str("\t\t\t\t<Font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:DefaultGUIFont\" kind=\"WindowsFont\"/>\r\n");
+    push_flowchart_font_xml(xml, &item.properties.font);
     xml.push_str(&format!(
         "\t\t\t\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
         item.properties.horizontal_align
@@ -8436,6 +8550,31 @@ fn push_flowchart_title_xml(xml: &mut String, title: &[(String, String)]) {
         xml.push_str("\t\t\t\t\t</v8:item>\r\n");
     }
     xml.push_str("\t\t\t\t</Title>\r\n");
+}
+
+fn push_flowchart_font_xml(xml: &mut String, font: &FlowchartFont) {
+    xml.push_str("\t\t\t\t<Font");
+    if font.reference.starts_with("sys:") {
+        xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+    }
+    xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(&font.reference)));
+    if let Some(height) = &font.height {
+        xml.push_str(&format!(" height=\"{}\"", escape_xml_text(height)));
+    }
+    if font.bold || font.italic || font.underline || font.strikeout {
+        xml.push_str(&format!(
+            " bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\"",
+            xml_bool(font.bold),
+            xml_bool(font.italic),
+            xml_bool(font.underline),
+            xml_bool(font.strikeout)
+        ));
+    }
+    xml.push_str(&format!(" kind=\"{}\"", font.kind));
+    if let Some(scale) = &font.scale {
+        xml.push_str(&format!(" scale=\"{}\"", escape_xml_text(scale)));
+    }
+    xml.push_str("/>\r\n");
 }
 
 fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
@@ -36104,6 +36243,33 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn writes_business_process_connection_line_font_from_serialized_style() {
+        let default_style =
+            "{7,{3,4,{0}},{3,3,{-22}},{3,3,{-3}},{7,1,0,{0},1,100},{1,0},1,1,1,0,0,0,0,0}";
+        let line_style = "{7,{3,0,{0}},{3,3,{-22}},{3,3,{-3}},{7,2,120,{-31},700,0,1,0,1,90},{1,0},1,1,1,1,0,0,0,0}";
+        let border = "{4,0,{0},1,1,0,e45c0cd8-a878-4bcb-8e1a-af934481e1cc,0}";
+        let line_head = "{4,2,{1,0},\"Line\",2}";
+        let line_geometry = format!("{{{line_style},6,2,50,60,70,80,{border},0,4,2,0,0,1}}");
+        let line_shape = format!("{{{line_geometry}}}");
+        let line_item = format!("{{{line_head},3,-1,0,-1,0,{line_shape}}}");
+        let text = format!("{{5,{{{{1,{default_style},1,20,20}}}},1,1,{line_item}}}");
+
+        let flowchart = parse_business_process_flowchart_text(&text).unwrap();
+        let xml = format_business_process_flowchart_xml(&flowchart);
+        let line_xml = xml
+            .split(r#"<ConnectionLine id="2">"#)
+            .nth(1)
+            .unwrap()
+            .split("</ConnectionLine>")
+            .next()
+            .unwrap();
+
+        assert!(line_xml.contains(
+            r#"<Font ref="style:NormalTextFont" height="12" bold="true" italic="false" underline="true" strikeout="false" kind="StyleItem" scale="90"/>"#
+        ));
     }
 
     #[test]
