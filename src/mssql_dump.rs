@@ -15023,9 +15023,27 @@ struct DataProcessorProperties {
 
 struct DocumentProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
+    numbering: Option<DocumentNumberingProperties>,
     standard_attributes: Option<DocumentStandardAttributes>,
+    default_object_form: Option<String>,
+    default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+}
+
+struct DocumentNumberingProperties {
+    numerator: Option<String>,
+    number_type: &'static str,
+    number_length: u32,
+    number_allowed_length: &'static str,
+    number_periodicity: &'static str,
+    check_unique: bool,
+    autonumbering: bool,
 }
 
 struct DocumentStandardAttributes {
@@ -15853,7 +15871,8 @@ fn extract_metadata_source_xml_from_text_row(
             parse_data_processor_properties_from_text(text, uuid, form_refs, template_refs)?;
         format_data_processor_source_xml(&header, &data_processor, source_version).into_bytes()
     } else if kind == "Document" {
-        let document = parse_document_properties_from_text(text, uuid, form_refs, template_refs)?;
+        let document =
+            parse_document_properties_from_text(text, uuid, object_refs, form_refs, template_refs)?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
     } else if kind == "BusinessProcess" {
         let business_process = parse_business_process_properties_from_text(text, uuid)?;
@@ -16635,6 +16654,7 @@ fn parse_report_properties_from_text(
 fn parse_document_properties_from_text(
     text: &str,
     uuid: &str,
+    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DocumentProperties> {
@@ -16670,9 +16690,37 @@ fn parse_document_properties_from_text(
         "Manager",
     );
 
+    let header_index = metadata_header_field_index(&fields, uuid)?;
     Some(DocumentProperties {
         generated_types,
+        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
+            .unwrap_or(true),
+        numbering: parse_document_numbering_properties(&fields, header_index, object_refs),
         standard_attributes: parse_document_standard_attributes(&fields, uuid),
+        default_object_form: parse_catalog_form_ref(
+            fields.get(header_index + 14).copied(),
+            form_refs,
+        ),
+        default_list_form: parse_catalog_form_ref(
+            fields.get(header_index + 15).copied(),
+            form_refs,
+        ),
+        default_choice_form: parse_catalog_form_ref(
+            fields.get(header_index + 16).copied(),
+            form_refs,
+        ),
+        auxiliary_object_form: parse_catalog_form_ref(
+            fields.get(header_index + 17).copied(),
+            form_refs,
+        ),
+        auxiliary_list_form: parse_catalog_form_ref(
+            fields.get(header_index + 18).copied(),
+            form_refs,
+        ),
+        auxiliary_choice_form: parse_catalog_form_ref(
+            fields.get(header_index + 19).copied(),
+            form_refs,
+        ),
         child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_document_template_names_in_text_order(
             text,
@@ -17439,10 +17487,49 @@ fn parse_document_standard_attributes(
     Some(DocumentStandardAttributes { number_type })
 }
 
+fn parse_document_numbering_properties(
+    fields: &[&str],
+    header_index: usize,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<DocumentNumberingProperties> {
+    Some(DocumentNumberingProperties {
+        numerator: parse_metadata_object_ref(fields.get(header_index + 2).copied(), object_refs),
+        number_type: document_number_type_xml(parse_1c_u32_field(
+            fields.get(header_index + 3).copied(),
+        )?),
+        number_length: parse_1c_u32_field(fields.get(header_index + 4).copied())?,
+        number_allowed_length: document_number_allowed_length_xml(parse_1c_u32_field(
+            fields.get(header_index + 5).copied(),
+        )?),
+        number_periodicity: document_number_periodicity_xml(parse_1c_u32_field(
+            fields.get(header_index + 6).copied(),
+        )?),
+        check_unique: parse_1c_bool_field(fields.get(header_index + 7).copied())?,
+        autonumbering: parse_1c_bool_field(fields.get(header_index + 8).copied())?,
+    })
+}
+
 fn document_number_type_xml(value: u32) -> &'static str {
     match value {
         0 => "Number",
         _ => "String",
+    }
+}
+
+fn document_number_allowed_length_xml(value: u32) -> &'static str {
+    match value {
+        0 => "Fixed",
+        _ => "Variable",
+    }
+}
+
+fn document_number_periodicity_xml(value: u32) -> &'static str {
+    match value {
+        1 => "Month",
+        2 => "Quarter",
+        3 => "Day",
+        4 => "None",
+        _ => "Year",
     }
 }
 
@@ -20199,11 +20286,61 @@ fn format_document_source_xml(
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = format!(
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+            xml_bool(document.use_standard_commands)
+        );
+        if let Some(numbering) = &document.numbering {
+            push_document_numbering_xml(&mut properties, numbering);
+        }
+        xml.insert_str(index, &properties);
+    }
     if let Some(standard_attributes) = &document.standard_attributes
         && let Some(index) = xml.find("\t\t</Properties>")
     {
         let mut properties = String::new();
         push_document_standard_attributes_xml(&mut properties, standard_attributes);
+        xml.insert_str(index, &properties);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = String::new();
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultObjectForm",
+            document.default_object_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultListForm",
+            document.default_list_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultChoiceForm",
+            document.default_choice_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryObjectForm",
+            document.auxiliary_object_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryListForm",
+            document.auxiliary_list_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryChoiceForm",
+            document.auxiliary_choice_form.as_deref(),
+        );
         xml.insert_str(index, &properties);
     }
     if !document.child_forms.is_empty() || !document.child_templates.is_empty() {
@@ -20531,6 +20668,24 @@ fn push_enum_standard_attributes_xml(xml: &mut String) {
         ));
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn push_document_numbering_xml(xml: &mut String, numbering: &DocumentNumberingProperties) {
+    push_optional_text_element(xml, "\t\t\t", "Numerator", numbering.numerator.as_deref());
+    xml.push_str(&format!(
+        "\t\t\t<NumberType>{}</NumberType>\r\n\
+\t\t\t<NumberLength>{}</NumberLength>\r\n\
+\t\t\t<NumberAllowedLength>{}</NumberAllowedLength>\r\n\
+\t\t\t<NumberPeriodicity>{}</NumberPeriodicity>\r\n\
+\t\t\t<CheckUnique>{}</CheckUnique>\r\n\
+\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
+        numbering.number_type,
+        numbering.number_length,
+        numbering.number_allowed_length,
+        numbering.number_periodicity,
+        xml_bool(numbering.check_unique),
+        xml_bool(numbering.autonumbering)
+    ));
 }
 
 fn push_document_standard_attributes_xml(
@@ -35515,6 +35670,130 @@ mod tests {
 
         assert!(!numeric_xml.contains(r#"<xr:FillValue xsi:type="xs:string"/>"#));
         assert!(numeric_xml.contains(r#"<xr:StandardAttribute name="Number">"#));
+    }
+
+    #[test]
+    fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let numerator_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let object_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let list_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+        let choice_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+        let auxiliary_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc4";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let owner_fields = [
+            "0",
+            numerator_uuid,
+            "1",
+            "11",
+            "0",
+            "0",
+            "1",
+            "1",
+            "0",
+            "1",
+            "0",
+            "0",
+            "0",
+            object_form_uuid,
+            list_form_uuid,
+            choice_form_uuid,
+            auxiliary_form_uuid,
+            "00000000-0000-0000-0000-000000000000",
+            "00000000-0000-0000-0000-000000000000",
+            "0",
+        ]
+        .join(",");
+        let document_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([(
+            numerator_uuid.to_string(),
+            "DocumentNumerator.CompanyDocuments".to_string(),
+        )]);
+        let form_refs = BTreeMap::from([
+            (
+                object_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Documents/Invoice/Forms/ObjectForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                list_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Documents/Invoice/Forms/ListForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                choice_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Documents/Invoice/Forms/ChoiceForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                auxiliary_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("Documents/Invoice/Forms/AuxiliaryObjectForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &document_blob,
+            document_uuid,
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &form_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(xml.contains("<Numerator>DocumentNumerator.CompanyDocuments</Numerator>"));
+        assert!(xml.contains("<NumberType>String</NumberType>"));
+        assert!(xml.contains("<NumberLength>11</NumberLength>"));
+        assert!(xml.contains("<NumberAllowedLength>Fixed</NumberAllowedLength>"));
+        assert!(xml.contains("<NumberPeriodicity>Year</NumberPeriodicity>"));
+        assert!(xml.contains("<CheckUnique>true</CheckUnique>"));
+        assert!(xml.contains("<Autonumbering>true</Autonumbering>"));
+        assert!(
+            xml.contains("<DefaultObjectForm>Document.Invoice.Form.ObjectForm</DefaultObjectForm>")
+        );
+        assert!(xml.contains("<DefaultListForm>Document.Invoice.Form.ListForm</DefaultListForm>"));
+        assert!(
+            xml.contains("<DefaultChoiceForm>Document.Invoice.Form.ChoiceForm</DefaultChoiceForm>")
+        );
+        assert!(xml.contains(
+            "<AuxiliaryObjectForm>Document.Invoice.Form.AuxiliaryObjectForm</AuxiliaryObjectForm>"
+        ));
+        assert!(xml.contains("<AuxiliaryListForm/>"));
+        assert!(xml.contains("<AuxiliaryChoiceForm/>"));
+        assert!(
+            xml.find("<UseStandardCommands>false</UseStandardCommands>")
+                .unwrap()
+                < xml.find("<StandardAttributes>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<StandardAttributes>").unwrap() < xml.find("<DefaultObjectForm>").unwrap(),
+            "{xml}"
+        );
     }
 
     #[test]
