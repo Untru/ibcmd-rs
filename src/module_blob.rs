@@ -1012,6 +1012,41 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
     })
 }
 
+pub fn metadata_xml_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+    let properties = parse_simple_metadata_xml_properties(xml)?;
+    let child_objects = count_metadata_xml_child_objects(xml)?;
+    let mut blockers = Vec::new();
+    blockers.push(format!(
+        "{} metadata XML {} ({}) is an editable source projection, but not a complete native Config metadata row",
+        properties.kind, properties.name, properties.uuid
+    ));
+    blockers.push(
+        "staging currently calls pack_simple_metadata_blob_from_xml_with_source, which patches the selected XML fields into the active metadata blob to preserve native field order, owner-specific tail slots, generated type slots, and unsupported scalar/property bodies".to_string(),
+    );
+    if child_objects > 0 {
+        blockers.push(format!(
+            "source XML has {child_objects} ChildObjects entries, but base-free metadata row generation would also need to synthesize the serialized child-object indexes and per-child native payloads"
+        ));
+    }
+    blockers.push(format!(
+        "base-free generation is blocked until a full {} metadata compiler can create the complete native row without using the active Config blob",
+        properties.kind
+    ));
+    Ok(blockers)
+}
+
+pub fn common_module_metadata_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+    let properties = parse_common_module_xml_properties(xml)?;
+    Ok(vec![
+        format!(
+            "CommonModule metadata XML {} ({}) is an editable source projection, but not a complete native Config metadata row",
+            properties.name, properties.uuid
+        ),
+        "staging currently calls pack_common_module_metadata_blob_from_xml, which patches module flags and text properties into the active metadata blob to preserve the native envelope, field order, and trailing slots".to_string(),
+        "base-free generation is blocked until a full CommonModule metadata compiler can create the complete native row without using the active Config blob".to_string(),
+    ])
+}
+
 pub fn pack_style_body_blob_from_xml(
     xml: &[u8],
     source: Option<&MetadataSourceContext>,
@@ -18016,6 +18051,38 @@ pub fn parse_simple_metadata_xml_properties(xml: &[u8]) -> Result<SimpleMetadata
     })
 }
 
+fn count_metadata_xml_child_objects(xml: &[u8]) -> Result<usize> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut count = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                if path_ends_with(&path, &["ChildObjects"]) {
+                    count += 1;
+                }
+                path.push(xml_local_name(event.local_name().as_ref()));
+            }
+            Ok(Event::Empty(_)) => {
+                if path_ends_with(&path, &["ChildObjects"]) {
+                    count += 1;
+                }
+            }
+            Ok(Event::End(_)) => {
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    Ok(count)
+}
+
 pub fn parse_common_module_xml_properties(xml: &[u8]) -> Result<CommonModuleXmlProperties> {
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
@@ -20364,6 +20431,89 @@ mod tests {
         assert_eq!(properties.synonyms.len(), 1);
         assert_eq!(properties.synonyms[0].lang, "ru");
         assert_eq!(properties.synonyms[0].content, "Current user");
+    }
+
+    #[test]
+    fn audits_metadata_xml_as_base_dependent_with_precise_blockers() -> anyhow::Result<()> {
+        let xml = br#"
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Loader</Name></Properties>
+    <ChildObjects>
+      <Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+        <Properties><Name>Load</Name></Properties>
+      </Command>
+      <Form uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+        <Properties><Name>Main</Name></Properties>
+      </Form>
+    </ChildObjects>
+  </DataProcessor>
+</MetaDataObject>
+"#;
+
+        let blockers = super::metadata_xml_base_free_blockers(xml)?;
+
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("DataProcessor metadata XML Loader"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("pack_simple_metadata_blob_from_xml_with_source"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("2 ChildObjects entries"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("full DataProcessor metadata compiler"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn audits_common_module_metadata_as_base_dependent() -> anyhow::Result<()> {
+        let xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonModule uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Utils</Name>
+      <Global>false</Global>
+      <ClientManagedApplication>false</ClientManagedApplication>
+      <Server>true</Server>
+      <ExternalConnection>false</ExternalConnection>
+      <ClientOrdinaryApplication>false</ClientOrdinaryApplication>
+      <ServerCall>false</ServerCall>
+      <Privileged>false</Privileged>
+      <ReturnValuesReuse>DontUse</ReturnValuesReuse>
+    </Properties>
+  </CommonModule>
+</MetaDataObject>
+"#;
+
+        let blockers = super::common_module_metadata_base_free_blockers(xml)?;
+
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("CommonModule metadata XML Utils"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("pack_common_module_metadata_blob_from_xml"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("full CommonModule metadata compiler"))
+        );
+        Ok(())
     }
 
     #[test]

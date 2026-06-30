@@ -42,14 +42,14 @@ use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, business_process_flowchart_base_free_blockers,
     command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
-    form_body_base_free_blockers, hex_sha256, module_blob_text_sha256,
-    pack_base64_payload_blob_from_bytes, pack_business_process_flowchart_blob_from_xml,
-    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
-    pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_bytes,
-    pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
-    pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source,
-    pack_predefined_data_blob_from_xml, pack_raw_deflated_blob_from_bytes,
-    pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
+    common_module_metadata_base_free_blockers, form_body_base_free_blockers, hex_sha256,
+    metadata_xml_base_free_blockers, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
+    pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
+    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
+    pack_help_blob_from_parts, pack_module_blob_bytes,
+    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
+    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml, pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -802,6 +802,8 @@ fn source_bootstrap_readiness_report(
         let object_path = source_relative_path(source_root, xml_path);
         let object_start = rows.len();
 
+        let metadata_reason = metadata_xml_base_free_blocker_reason(&xml)
+            .with_context(|| format!("failed to audit metadata XML {}", xml_path.display()))?;
         rows.push(bootstrap_row_report(
             "metadata_object",
             &properties.kind,
@@ -811,7 +813,7 @@ fn source_bootstrap_readiness_report(
             "metadata_xml",
             BootstrapGeneration::RequiresBaseBlob,
             true,
-            "metadata XML packer patches the selected XML into an existing metadata blob",
+            &metadata_reason,
         ));
         rows.extend(metadata_body_bootstrap_rows(
             source_root,
@@ -836,6 +838,13 @@ fn source_bootstrap_readiness_report(
         let object_path = source_relative_path(source_root, xml_path);
         let object_start = rows.len();
 
+        let metadata_reason =
+            common_module_metadata_base_free_blocker_reason(&xml).with_context(|| {
+                format!(
+                    "failed to audit common module metadata XML {}",
+                    xml_path.display()
+                )
+            })?;
         rows.push(bootstrap_row_report(
             "common_module",
             "CommonModule",
@@ -845,7 +854,7 @@ fn source_bootstrap_readiness_report(
             "common_module_metadata",
             BootstrapGeneration::RequiresBaseBlob,
             true,
-            "common module metadata packer patches an existing metadata blob",
+            &metadata_reason,
         ));
         let body_path = infer_common_module_text_path(xml_path);
         if body_path.exists() {
@@ -1332,6 +1341,22 @@ fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> R
     let blockers = form_body_base_free_blockers(&form_xml, has_module_text, has_item_assets)?;
     Ok(format!(
         "Form body requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn metadata_xml_base_free_blocker_reason(xml: &[u8]) -> Result<String> {
+    let blockers = metadata_xml_base_free_blockers(xml)?;
+    Ok(format!(
+        "metadata XML requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn common_module_metadata_base_free_blocker_reason(xml: &[u8]) -> Result<String> {
+    let blockers = common_module_metadata_base_free_blockers(xml)?;
+    Ok(format!(
+        "CommonModule metadata XML requires active base blob: {}",
         blockers.join("; ")
     ))
 }
@@ -7536,6 +7561,39 @@ mod tests {
         let row = report
             .rows
             .iter()
+            .find(|row| row.row_kind == "metadata_xml")
+            .unwrap();
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert!(
+            row.reason
+                .contains("metadata XML requires active base blob")
+        );
+        assert!(
+            row.reason
+                .contains("pack_simple_metadata_blob_from_xml_with_source")
+        );
+        assert!(row.reason.contains("full Catalog metadata compiler"));
+
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "common_module_metadata")
+            .unwrap();
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert!(
+            row.reason
+                .contains("CommonModule metadata XML requires active base blob")
+        );
+        assert!(
+            row.reason
+                .contains("pack_common_module_metadata_blob_from_xml")
+        );
+
+        let row = report
+            .rows
+            .iter()
             .find(|row| row.row_kind == "predefined_data_body")
             .unwrap();
         assert_eq!(
@@ -7579,6 +7637,54 @@ mod tests {
             .unwrap();
         assert_eq!(row.config_file_name, "versions");
         assert_eq!(row.generation, "requires_base_blob");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_metadata_xml_with_child_objects_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-metadata-xml-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let processor_xml = root.join("DataProcessors").join("Loader.xml");
+        fs::create_dir_all(processor_xml.parent().unwrap()).unwrap();
+        fs::write(
+            &processor_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <DataProcessor uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Loader</Name></Properties>
+    <ChildObjects>
+      <Command uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+        <Properties><Name>Load</Name></Properties>
+      </Command>
+      <Form uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+        <Properties><Name>Main</Name></Properties>
+      </Form>
+    </ChildObjects>
+  </DataProcessor>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&processor_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "metadata_xml")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("DataProcessor metadata XML Loader"));
+        assert!(row.reason.contains("2 ChildObjects entries"));
+        assert!(row.reason.contains("serialized child-object indexes"));
 
         let _ = fs::remove_dir_all(root);
     }
