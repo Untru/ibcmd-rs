@@ -76,7 +76,7 @@ Verification:
 - targeted `cargo test`;
 - lab data only under `E:\ibcmd_lab`.
 
-## Task D - Bootstrap Import Architecture
+## Task D - Issue #21, Bootstrap Import Architecture
 
 Worktree: `D:\ibcmd-rs-wt\issue-bootstrap-import`
 
@@ -102,7 +102,7 @@ Verification:
 - targeted `cargo test` for new audit/report code;
 - no SQL writes unless explicitly guarded and using lab DBs only.
 
-## Task E - CommonAttributes and Configuration.xml Export
+## Task E - Issue #22, CommonAttributes and Configuration.xml Export
 
 Worktree: `D:\ibcmd-rs-wt\issue-commonattrs-config`
 
@@ -124,4 +124,3 @@ Verification:
 
 - targeted unit tests;
 - optional selected export/source-diff under `E:\ibcmd_lab`.
-
