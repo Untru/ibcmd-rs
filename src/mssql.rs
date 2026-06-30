@@ -1149,8 +1149,8 @@ fn metadata_body_bootstrap_rows(
             suffix,
             "additional_indexes_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
-            true,
-            "AdditionalIndexes.xml is stored as a raw deflated body and can be generated from source bytes",
+            false,
+            "AdditionalIndexes.xml is stored as a raw deflated body and can be generated from source bytes without reading the active Config row",
         ));
     }
 
@@ -3103,9 +3103,9 @@ fn prepare_metadata_body_rows(
 }
 
 fn prepare_additional_indexes_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
@@ -3117,7 +3117,6 @@ fn prepare_additional_indexes_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let _base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
     let bytes = fs::read(&body_path)
         .with_context(|| format!("failed to read AdditionalIndexes {}", body_path.display()))?;
     let packed = pack_raw_deflated_blob_from_bytes(&bytes)
@@ -7518,6 +7517,55 @@ mod tests {
     }
 
     #[test]
+    fn reports_additional_indexes_body_as_currently_base_free() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-additional-indexes-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let document_xml = root.join("Documents").join("Order.xml");
+        let document_ext = root.join("Documents").join("Order").join("Ext");
+        fs::create_dir_all(&document_ext).unwrap();
+        fs::write(
+            &document_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Document uuid="eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee">
+    <Properties><Name>Order</Name></Properties>
+  </Document>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            document_ext.join("AdditionalIndexes.xml"),
+            b"<AdditionalIndexes/>",
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&document_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "additional_indexes_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.3"
+        );
+        assert_eq!(row.source_path, "Documents/Order/Ext/AdditionalIndexes.xml");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn prepares_raw_deflated_body_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-raw-body-no-fetch-{}",
@@ -7549,6 +7597,48 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "cccccccc-cccc-4ccc-cccc-cccccccccccc.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(body)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_additional_indexes_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-additional-indexes-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let document_xml = root.join("Documents").join("Order.xml");
+        let body_path = root
+            .join("Documents")
+            .join("Order")
+            .join("Ext")
+            .join("AdditionalIndexes.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&document_xml, b"<Document/>").unwrap();
+        let body = b"<AdditionalIndexes/>";
+        fs::write(&body_path, body).unwrap();
+        let properties = test_simple_metadata_properties(
+            "Document",
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+            "Order",
+        );
+
+        let rows = super::prepare_additional_indexes_body_row(
+            PathBuf::from("missing-sqlcmd-for-additional-indexes-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &document_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.3");
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
