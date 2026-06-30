@@ -4160,6 +4160,7 @@ fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static 
         ],
         "CommonCommand" => &[("2", "CommandModule.bsl")],
         "Constant" => &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")],
+        "FilterCriterion" => &[("0", "ManagerModule.bsl")],
         "SettingsStorage" => &[("8", "ManagerModule.bsl")],
         "Sequence" => &[("0", "RecordSetModule.bsl")],
         "Catalog" => &[("0", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
@@ -7106,6 +7107,10 @@ mod tests {
             &[("2", "CommandModule.bsl")]
         );
         assert_eq!(
+            super::object_module_body_suffixes("FilterCriterion"),
+            &[("0", "ManagerModule.bsl")]
+        );
+        assert_eq!(
             super::object_module_body_suffixes("IntegrationService"),
             &[("0", "Module.bsl")]
         );
@@ -8147,6 +8152,55 @@ mod tests {
     }
 
     #[test]
+    fn reports_filter_criterion_manager_module_readiness_without_base_fetch() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-filter-criterion-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let filter_xml = root.join("FilterCriteria").join("Important.xml");
+        let filter_ext = root.join("FilterCriteria").join("Important").join("Ext");
+        fs::create_dir_all(&filter_ext).unwrap();
+        fs::write(
+            &filter_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <FilterCriterion uuid="eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee">
+    <Properties><Name>Important</Name></Properties>
+  </FilterCriterion>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            filter_ext.join("ManagerModule.bsl"),
+            b"Procedure ApplyFilter()\nEndProcedure",
+        )
+        .unwrap();
+
+        let report =
+            super::source_bootstrap_readiness_report(&root, std::slice::from_ref(&filter_xml), &[])
+                .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "module_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert_eq!(
+            row.config_file_name,
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0"
+        );
+        assert_eq!(
+            row.source_path,
+            "FilterCriteria/Important/Ext/ManagerModule.bsl"
+        );
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn prepares_object_module_body_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-object-module-no-fetch-{}",
@@ -8179,6 +8233,48 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0");
+        assert_eq!(rows[0].path, body_path);
+        assert_eq!(
+            module_blob_text_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(text)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_filter_criterion_manager_module_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-filter-criterion-module-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let filter_xml = root.join("FilterCriteria").join("Important.xml");
+        let body_path = root
+            .join("FilterCriteria")
+            .join("Important")
+            .join("Ext")
+            .join("ManagerModule.bsl");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&filter_xml, b"<FilterCriterion/>").unwrap();
+        let text = b"Procedure ApplyFilter()\nEndProcedure";
+        fs::write(&body_path, text).unwrap();
+        let properties = test_simple_metadata_properties(
+            "FilterCriterion",
+            "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+            "Important",
+        );
+
+        let rows = super::prepare_object_module_body_rows(
+            PathBuf::from("missing-sqlcmd-for-filter-criterion-module-test").as_path(),
+            "missing-server",
+            "missing-database",
+            &filter_xml,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0");
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             module_blob_text_sha256(&rows[0].blob).unwrap(),
