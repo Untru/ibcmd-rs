@@ -40,8 +40,8 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, command_interface_xml_can_pack_without_base, hex_sha256,
-    module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
+    VersionReplacement, command_interface_xml_can_pack_without_base, form_body_base_free_blockers,
+    hex_sha256, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
@@ -1041,23 +1041,28 @@ fn metadata_body_bootstrap_rows(
             let form_path = infer_form_body_path(xml_path);
             let module_path = infer_form_module_body_path(xml_path);
             if form_path.exists() || module_path.exists() {
+                let source_path = if form_path.exists() {
+                    &form_path
+                } else {
+                    &module_path
+                };
+                let reason = form_body_base_free_blocker_reason(&form_path, &module_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to audit Form body base-free blockers for {}",
+                            source_path.display()
+                        )
+                    })?;
                 rows.push(bootstrap_row_report(
                     "metadata_object",
                     &properties.kind,
                     object_path,
-                    source_relative_path(
-                        source_root,
-                        if form_path.exists() {
-                            &form_path
-                        } else {
-                            &module_path
-                        },
-                    ),
+                    source_relative_path(source_root, source_path),
                     format!("{}.0", properties.uuid),
                     "form_body",
                     BootstrapGeneration::RequiresBaseBlob,
                     true,
-                    "Form body packer currently patches layout, tail sections and optional module text into an existing form body; full Form.xml compiler is not implemented",
+                    &reason,
                 ));
             }
         }
@@ -1261,6 +1266,22 @@ fn command_interface_bootstrap_row(
         current_staging_fetches_base_blob,
         reason,
     )]
+}
+
+fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> Result<String> {
+    let form_xml = if form_path.exists() {
+        fs::read(form_path)
+            .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
+    } else {
+        Vec::new()
+    };
+    let has_module_text = module_path.exists();
+    let has_item_assets = form_path.with_extension("").join("Items").is_dir();
+    let blockers = form_body_base_free_blockers(&form_xml, has_module_text, has_item_assets)?;
+    Ok(format!(
+        "Form body requires active base blob: {}",
+        blockers.join("; ")
+    ))
 }
 
 fn configuration_asset_bootstrap_rows(
@@ -7521,6 +7542,119 @@ mod tests {
         assert_eq!(row.source_path, "ExchangePlans/Sync/Ext/Content.xml");
         assert!(!row.current_staging_fetches_base_blob);
         assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_module_only_form_body_with_precise_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-module-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let form_xml = root.join("CommonForms").join("Item.xml");
+        let module_path = root
+            .join("CommonForms")
+            .join("Item")
+            .join("Ext")
+            .join("Form")
+            .join("Module.bsl");
+        fs::create_dir_all(module_path.parent().unwrap()).unwrap();
+        fs::write(
+            &form_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonForm uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Item</Name></Properties>
+  </CommonForm>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(&module_path, b"Procedure OnOpen()\nEndProcedure").unwrap();
+
+        let report =
+            super::source_bootstrap_readiness_report(&root, std::slice::from_ref(&form_xml), &[])
+                .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "form_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(row.source_path, "CommonForms/Item/Ext/Form/Module.bsl");
+        assert!(row.reason.contains("same Form body row as layout"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_form_body_section_blockers_in_readiness_audit() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-section-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let metadata_xml = root.join("CommonForms").join("Item.xml");
+        let body_path = root
+            .join("CommonForms")
+            .join("Item")
+            .join("Ext")
+            .join("Form.xml");
+        let asset_path = body_path
+            .with_extension("")
+            .join("Items")
+            .join("Logo")
+            .join("Picture.png");
+        fs::create_dir_all(asset_path.parent().unwrap()).unwrap();
+        fs::write(
+            &metadata_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonForm uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+    <Properties><Name>Item</Name></Properties>
+  </CommonForm>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &body_path,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Width>480</Width>
+	<Attributes>
+		<Attribute name="Object" id="1">
+			<Type><Type>cfg:CatalogObject.Products</Type></Type>
+		</Attribute>
+	</Attributes>
+	<Commands>
+		<Command name="Do" id="2"/>
+	</Commands>
+	<ChildItems>
+		<Button name="Run" id="3"/>
+	</ChildItems>
+</Form>"#,
+        )
+        .unwrap();
+        fs::write(&asset_path, b"PNG").unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&metadata_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "form_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert_eq!(row.source_path, "CommonForms/Item/Ext/Form.xml");
+        assert!(row.reason.contains("layout/root/child-item"));
+        assert!(row.reason.contains("trailing attributes"));
+        assert!(row.reason.contains("trailing commands"));
+        assert!(row.reason.contains("embedded picture payload"));
 
         let _ = fs::remove_dir_all(root);
     }
