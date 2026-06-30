@@ -4331,13 +4331,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
                 {
                     current_command_interface_item = Some(FormXmlCommandInterfaceItem::default());
-                } else if is_form_child_item_xml_tag(&local)
+                } else if (is_form_child_item_xml_tag(&local)
                     && (path.last().map(String::as_str) == Some("ChildItems")
                         || current_child_items.last().is_some_and(|item| {
                             path.last().map(String::as_str) == Some(item.tag.as_str())
-                        }))
+                        })))
+                    || (local == "Column"
+                        && path_ends_with_for_table_columns(&path, &current_child_items))
                 {
-                    if path.last().map(String::as_str) != Some("ChildItems")
+                    let explicit_child_items =
+                        path.last().map(String::as_str) == Some("ChildItems");
+                    if !explicit_child_items
+                        && local != "Column"
                         && let Some(parent) = current_child_items.last_mut()
                     {
                         parent.child_items_present = true;
@@ -4424,14 +4429,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
-                } else if is_form_child_item_xml_tag(&local)
+                } else if ((is_form_child_item_xml_tag(&local)
                     && (path.last().map(String::as_str) == Some("ChildItems")
                         || current_child_items.last().is_some_and(|item| {
                             path.last().map(String::as_str) == Some(item.tag.as_str())
-                        }))
+                        })))
+                    || (local == "Column"
+                        && path_ends_with_for_table_columns(&path, &current_child_items)))
                     && let Some(mut item) = parse_form_child_item_xml(&local, &event)?
                 {
                     item.depth = current_child_items.len();
+                    let item = finalize_form_xml_child_item(item);
                     if path_ends_with_root_auto_command_bar_child_items(&path)
                         && current_child_items.is_empty()
                     {
@@ -4439,7 +4447,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             command_bar.child_items.push(item);
                         }
                     } else if let Some(parent) = current_child_items.last_mut() {
-                        if path.last().map(String::as_str) != Some("ChildItems") {
+                        if path.last().map(String::as_str) != Some("ChildItems")
+                            && local != "Column"
+                        {
                             parent.child_items_present = true;
                         }
                         parent.child_items.push(item.clone());
@@ -6854,6 +6864,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             .is_some_and(|current| current.as_str() == local.as_str()) =>
                     {
                         if let Some(item) = current_child_items.pop() {
+                            let item = finalize_form_xml_child_item(item);
                             if let Some(parent) = current_child_items.last_mut() {
                                 parent.child_items.push(item.clone());
                             } else if path_ends_with_root_auto_command_bar_child_item(&path, &item)
@@ -7226,6 +7237,27 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "ViewStatusAddition"
             | "SearchControlAddition"
     )
+}
+
+fn finalize_form_xml_child_item(mut item: FormXmlChildItem) -> FormXmlChildItem {
+    if item.tag == "Column" {
+        item.tag = item
+            .item_type
+            .take()
+            .filter(|item_type| {
+                matches!(
+                    item_type.as_str(),
+                    "InputField" | "LabelField" | "CheckBoxField"
+                )
+            })
+            .unwrap_or_else(|| "InputField".to_string());
+    }
+    item
+}
+
+fn path_ends_with_for_table_columns(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    items.last().is_some_and(|item| item.tag == "Table")
+        && path_ends_with(path, &["Table", "Columns"])
 }
 
 fn path_ends_with_for_child_title(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -23718,6 +23750,52 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_table_columns_column_as_direct_table_child() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{73,{25,11111111-1111-4111-8111-111111111111},0,1,0,"Rows",0,0,0,{1,0},1,22222222-2222-4222-8222-222222222222,{48,{40,33333333-3333-4333-8333-333333333333},0,0,0,1,"OldColumn",1,0,{1,"en","Old title"}}}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="25">
+			<Columns>
+				<Column name="NewColumn" id="40">
+					<Type>LabelField</Type>
+					<Title>
+						<v8:item>
+							<v8:lang>en</v8:lang>
+							<v8:content>New title</v8:content>
+						</v8:item>
+					</Title>
+				</Column>
+			</Columns>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let column_fields = super::scan_braced_fields(&parsed.layout, table_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[table_fields[10].clone()], "1");
+        assert_eq!(&parsed.layout[column_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[column_fields[5].clone()], "1");
+        assert_eq!(&parsed.layout[column_fields[6].clone()], r#""NewColumn""#);
+        assert_eq!(
+            &parsed.layout[column_fields[9].clone()],
+            r#"{1,"en","New title"}"#
+        );
+        assert!(!parsed.layout.contains("OldColumn"));
+        assert!(!parsed.layout.contains("Old title"));
+        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }
