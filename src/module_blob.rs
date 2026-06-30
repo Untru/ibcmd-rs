@@ -255,6 +255,7 @@ struct FormXmlChildItem {
     default_item: Option<bool>,
     choice_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     restore_current_row: Option<bool>,
+    row_filter_nil: Option<bool>,
     row_picture_data_path: Option<String>,
     update_on_data_change: Option<FormXmlUpdateOnDataChange>,
     user_settings_group: Option<String>,
@@ -2277,6 +2278,10 @@ fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Optio
         }
     }
     Ok(None)
+}
+
+fn xml_event_is_nil(event: &BytesStart<'_>) -> Result<bool> {
+    Ok(xml_attribute_value(event, "nil")?.as_deref() == Some("true"))
 }
 
 fn spreadsheet_header_footer_tag(local: &str) -> bool {
@@ -4668,6 +4673,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if local == "RowFilter"
+                    && path_ends_with_for_child_row_filter(&path, &current_child_items)
+                    && xml_event_is_nil(&event)?
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.row_filter_nil = Some(true);
                 } else if ((is_form_child_item_xml_tag(&local)
                     && (path.last().map(String::as_str) == Some("ChildItems")
                         || current_child_items.last().is_some_and(|item| {
@@ -7579,6 +7590,7 @@ fn parse_form_child_item_xml(
         default_item: None,
         choice_folders_and_items: None,
         restore_current_row: None,
+        row_filter_nil: None,
         row_picture_data_path: None,
         update_on_data_change: None,
         user_settings_group: None,
@@ -8354,6 +8366,13 @@ fn path_ends_with_for_child_restore_current_row(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RestoreCurrentRow"])
+}
+
+fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path.last().map(String::as_str) == Some(item.tag.as_str())
 }
 
 fn path_ends_with_for_child_row_picture_data_path(
@@ -9441,6 +9460,17 @@ fn is_form_property_bag_bool_value(value: &str) -> bool {
     }) && fields
         .get(1)
         .is_some_and(|range| matches!(value[range.clone()].trim(), "0" | "1"))
+}
+
+fn is_form_property_bag_undefined_value(value: &str) -> bool {
+    let value = value.trim();
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.len() == 1
+        && fields.first().is_some_and(|range| {
+            parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "U")
+        })
 }
 
 fn format_form_title_value(title: &[LocalizedString]) -> String {
@@ -11456,6 +11486,13 @@ fn patch_form_layout_child_item_entry(
                 }
                 .to_string(),
             ));
+        }
+        if item.row_filter_nil == Some(true)
+            && let Some(row_filter_range) =
+                form_layout_table_property_bag_value_range(text, fields, "10")
+            && is_form_property_bag_undefined_value(&text[row_filter_range.clone()])
+        {
+            replacements.push((row_filter_range.clone(), r#"{"U"}"#.to_string()));
         }
         if let Some(row_picture_data_path) = &item.row_picture_data_path
             && let Some(row_picture_range) =
@@ -29729,6 +29766,31 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains(r#"12,{"B",0}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"12,{"B",1}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_row_filter_nil() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,10,{"U"}}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<RowFilter xsi:nil="true"/>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let properties = super::parse_form_xml_body_properties(xml)?;
+        assert_eq!(properties.child_items[0].row_filter_nil, Some(true));
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains(r#"10,{"U"}"#), "{}", parsed.layout);
         Ok(())
     }
 
