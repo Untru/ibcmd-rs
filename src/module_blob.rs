@@ -3914,6 +3914,110 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
     })
 }
 
+pub fn form_body_base_free_blockers(
+    form_xml: &[u8],
+    has_module_text: bool,
+    has_item_assets: bool,
+) -> Result<Vec<String>> {
+    let mut blockers = Vec::new();
+    if form_xml.is_empty() {
+        if has_module_text {
+            blockers.push(
+                "Module.bsl is stored in the same Form body row as layout and trailing sections"
+                    .to_string(),
+            );
+        }
+    } else {
+        let properties = parse_form_xml_body_properties(form_xml)?;
+        if form_xml_requires_existing_layout(&properties) {
+            blockers.push(
+                "Form.xml layout/root/child-item data is currently applied by patching an existing layout section"
+                    .to_string(),
+            );
+        }
+        if properties.attributes_present {
+            blockers.push(
+                "Form attributes require the existing trailing attributes section shape"
+                    .to_string(),
+            );
+        }
+        if properties.parameters_present {
+            blockers.push(
+                "Form parameters require the existing trailing parameters section shape"
+                    .to_string(),
+            );
+        }
+        if properties.commands_present {
+            blockers.push(
+                "Form commands require the existing trailing commands section shape".to_string(),
+            );
+        }
+        if properties.command_interface_present {
+            blockers.push(
+                "Form command interface requires the existing trailing command-interface section shape"
+                    .to_string(),
+            );
+        }
+        if has_module_text {
+            blockers.push(
+                "Module.bsl shares the Form body row with layout and trailing sections".to_string(),
+            );
+        }
+    }
+    if has_item_assets {
+        blockers
+            .push("form item assets replace existing embedded picture payload slots".to_string());
+    }
+    if blockers.is_empty() {
+        blockers.push(
+            "base-free Form body container synthesis is not implemented or platform-validated"
+                .to_string(),
+        );
+    }
+    Ok(blockers)
+}
+
+fn form_xml_requires_existing_layout(properties: &FormXmlBodyProperties) -> bool {
+    properties.window_opening_mode.is_some()
+        || properties.enter_key_behavior.is_some()
+        || properties.save_window_settings.is_some()
+        || !properties.title.is_empty()
+        || properties.width.is_some()
+        || properties.height.is_some()
+        || properties.auto_title.is_some()
+        || properties.auto_url.is_some()
+        || properties.save_data_in_settings.is_some()
+        || properties.auto_save_data_in_settings.is_some()
+        || properties.group.is_some()
+        || properties.scaling_mode.is_some()
+        || properties.auto_time.is_some()
+        || properties.use_posting_mode.is_some()
+        || properties.repost_on_write.is_some()
+        || properties.auto_fill_check.is_some()
+        || !properties.command_set_excluded_commands.is_empty()
+        || properties.use_for_folders_and_items.is_some()
+        || properties.customizable.is_some()
+        || properties.command_bar_location.is_some()
+        || properties.vertical_scroll.is_some()
+        || properties.horizontal_align.is_some()
+        || properties.conversations_representation.is_some()
+        || properties.show_title.is_some()
+        || properties.show_command_bar.is_some()
+        || properties.show_close_button.is_some()
+        || properties.report_result.is_some()
+        || properties.details_data.is_some()
+        || properties.report_form_type.is_some()
+        || properties.auto_show_state.is_some()
+        || properties.report_result_view_mode.is_some()
+        || properties
+            .view_mode_application_on_set_report_result
+            .is_some()
+        || properties.events_present
+        || properties.auto_command_bar.is_some()
+        || properties.child_items_present
+        || !properties.child_items.is_empty()
+}
+
 fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Result<()> {
     if !assets_root.is_dir() {
         return Ok(());
@@ -28527,6 +28631,73 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.module_text, "");
         assert_eq!(parsed.trailing, vec!["{0}"]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn audits_module_only_form_body_as_base_dependent() -> anyhow::Result<()> {
+        let blockers = super::form_body_base_free_blockers(&[], true, false)?;
+
+        assert_eq!(blockers.len(), 1);
+        assert!(blockers[0].contains("same Form body row as layout"));
+        Ok(())
+    }
+
+    #[test]
+    fn audits_form_body_sections_as_base_dependent() -> anyhow::Result<()> {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Width>480</Width>
+	<Attributes>
+		<Attribute name="Object" id="1">
+			<Type>
+				<Type>cfg:CatalogObject.Products</Type>
+			</Type>
+		</Attribute>
+	</Attributes>
+	<Parameters>
+		<Parameter name="Key" id="2"/>
+	</Parameters>
+	<Commands>
+		<Command name="Do" id="3"/>
+	</Commands>
+	<CommandInterface/>
+	<ChildItems>
+		<Button name="Run" id="4"/>
+	</ChildItems>
+</Form>"#;
+
+        let blockers = super::form_body_base_free_blockers(xml, true, true)?;
+
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("layout/root/child-item"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("trailing attributes"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("trailing parameters"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("trailing commands"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("command-interface"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("embedded picture payload"))
+        );
         Ok(())
     }
 
