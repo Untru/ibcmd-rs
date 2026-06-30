@@ -14952,6 +14952,10 @@ struct ExchangePlanProperties {
 struct RegisterProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    default_record_form: Option<String>,
+    default_list_form: Option<String>,
+    auxiliary_record_form: Option<String>,
+    auxiliary_list_form: Option<String>,
     child_objects: Vec<RegisterChildObject>,
 }
 
@@ -15917,7 +15921,7 @@ fn extract_metadata_source_xml_from_text_row(
         let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid)?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
-        let register = parse_register_properties_from_text(kind, text, uuid)?;
+        let register = parse_register_properties_from_text(kind, text, uuid, form_refs)?;
         format_register_source_xml(kind, &header, &register, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
@@ -16317,6 +16321,7 @@ fn parse_register_properties_from_text(
     kind: &str,
     text: &str,
     uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<RegisterProperties> {
     if !metadata_kind_uses_register_resources(kind) {
         return None;
@@ -16397,6 +16402,7 @@ fn parse_register_properties_from_text(
         );
     }
     let use_standard_commands = parse_register_use_standard_commands(kind, &fields, uuid);
+    let form_refs = parse_register_form_refs(kind, &fields, uuid, form_refs);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
@@ -16407,8 +16413,37 @@ fn parse_register_properties_from_text(
     Some(RegisterProperties {
         generated_types,
         use_standard_commands,
+        default_record_form: form_refs.0,
+        default_list_form: form_refs.1,
+        auxiliary_record_form: form_refs.2,
+        auxiliary_list_form: form_refs.3,
         child_objects,
     })
+}
+
+fn parse_register_form_refs(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    if kind != "InformationRegister" {
+        return (None, None, None, None);
+    }
+    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
+        return (None, None, None, None);
+    };
+    (
+        parse_catalog_form_ref(fields.get(header_index + 1).copied(), form_refs),
+        parse_catalog_form_ref(fields.get(header_index + 2).copied(), form_refs),
+        None,
+        None,
+    )
 }
 
 fn parse_register_use_standard_commands(kind: &str, fields: &[&str], uuid: &str) -> bool {
@@ -19884,6 +19919,36 @@ fn format_register_source_xml(
                 xml_bool(register.use_standard_commands)
             ),
         );
+    }
+    if kind == "InformationRegister"
+        && let Some(index) = xml.find("\t\t</Properties>")
+    {
+        let mut form_refs_xml = String::new();
+        push_optional_text_element(
+            &mut form_refs_xml,
+            "\t\t\t",
+            "DefaultRecordForm",
+            register.default_record_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut form_refs_xml,
+            "\t\t\t",
+            "DefaultListForm",
+            register.default_list_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut form_refs_xml,
+            "\t\t\t",
+            "AuxiliaryRecordForm",
+            register.auxiliary_record_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut form_refs_xml,
+            "\t\t\t",
+            "AuxiliaryListForm",
+            register.auxiliary_list_form.as_deref(),
+        );
+        xml.insert_str(index, &form_refs_xml);
     }
     if register.child_objects.is_empty() {
         return xml;
@@ -32148,6 +32213,80 @@ mod tests {
         );
         assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
         assert!(!xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    }
+
+    #[test]
+    fn extracts_information_register_default_forms_to_metadata_xml() {
+        let register_uuid = "11111111-1111-4111-8111-111111111111";
+        let record_form_uuid = "99999999-9999-4999-8999-999999999991";
+        let list_form_uuid = "99999999-9999-4999-8999-999999999992";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
+88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},\
+{record_form_uuid},{list_form_uuid},0,0,1,0,0,0,1,0,\
+{{0}},{zero_uuid},{zero_uuid},{{0}},{{0}},{{0}},{{0}},{{0}},0,0,0,0,0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_refs = BTreeMap::from([
+            (
+                record_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("InformationRegisters/Prices/Forms/Record.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                list_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("InformationRegisters/Prices/Forms/List.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("InformationRegisters/Prices.xml")
+        );
+        assert!(xml.contains(
+            "<DefaultRecordForm>InformationRegister.Prices.Form.Record</DefaultRecordForm>"
+        ));
+        assert!(
+            xml.contains("<DefaultListForm>InformationRegister.Prices.Form.List</DefaultListForm>")
+        );
+        assert!(xml.contains("<AuxiliaryRecordForm/>"));
+        assert!(xml.contains("<AuxiliaryListForm/>"));
+        assert!(
+            xml.find("<UseStandardCommands>false</UseStandardCommands>")
+                .unwrap()
+                < xml.find("<DefaultRecordForm>").unwrap()
+        );
+        assert!(
+            xml.find("<DefaultListForm>").unwrap() < xml.find("<AuxiliaryRecordForm/>").unwrap()
+        );
     }
 
     #[test]
