@@ -51,6 +51,12 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 37 Form.xml slice | unit-level extractor/packer verification | dynamic-list `Settings/Field` entries now export `dataPath`/`field` and pack back into the serialized settings bag |
+| Round 37 MXL text-placement slice | unit-level extractor/packer verification | `textPlacement=Cut` maps to MOXCEL code `1` in both export and import packing |
+| Round 37 MXL format-index slice | unit-level template body verification | raw column `formatIndex` values are preserved separately from normalized internal indexes, keeping non-1-based column format references stable |
+| Round 37 Configuration.xml slice | unit-level metadata XML verification | root `CommonPicture` child objects are detected by native field shape and emitted for source XML 2.20/2.21 |
+| Round 37 object metadata slice | unit-level metadata XML verification | child attribute `ChoiceForm` tails preserve empty values and resolved non-empty design-time refs |
+| Round 37 source staging readiness slice | unit-level readiness/row-generation verification | root `Ext/MainSectionPicture.xml` can stage without fetching an active Config blob and is counted by source-load coverage |
 | Round 36 diff-mining slice | reusable XML-path signature mining | added `source-diff-signatures`; a bounded run sampled 2,101 XML pairs from the last full diff and confirmed the largest remaining clusters are MXL `document/format/*` and `formatIndex` signatures |
 | Round 36 Form.xml slice | unit-level extractor/packer verification | default `Page/ScrollOnCompress=false` is omitted from source XML while explicit `true` remains supported |
 | Round 36 Flowchart.xml slice | unit-level source asset verification | BusinessProcess/GraphicalSchema connection-line `Font` now decodes serialized style font tuples instead of always emitting the default GUI font |
@@ -234,6 +240,12 @@ Verification history:
 | Round 36 MXL template slice | unit-level extractor/packer verification | MXL `textOrientation` format bit 13 is preserved in export and import packing |
 | Round 36 CommonAttribute metadata slice | unit-level metadata XML verification | CommonAttribute `FillChecking` is emitted from native property details in native XML order |
 | Round 36 source staging readiness slice | unit-level readiness/row-generation verification | raw `CommonCommand/Ext/CommandInterface.xml` staging no longer needs an active base blob |
+| Round 37 Form.xml slice | unit-level extractor/packer verification | dynamic-list `Settings/Field` entries round-trip through the form settings bag |
+| Round 37 MXL text-placement slice | unit-level extractor/packer verification | MOXCEL text placement code `1` is emitted as `Cut` and packs back as code `1` |
+| Round 37 MXL format-index slice | unit-level template body verification | non-1-based column `formatIndex` values are preserved in XML while internal decoding can still normalize indexes |
+| Round 37 Configuration.xml slice | unit-level metadata XML verification | root `CommonPicture` child objects are emitted without misclassifying other code-4 root children |
+| Round 37 object metadata slice | unit-level metadata XML verification | shared child attribute property tails now include resolved non-empty `ChoiceForm` refs |
+| Round 37 source staging readiness slice | unit-level readiness/row-generation verification | `Ext/MainSectionPicture.xml` is covered by base-free row generation and source-load audit classification |
 
 Performance note for selected extraction:
 

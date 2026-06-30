@@ -61,6 +61,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 37 | Form.xml | dynamic-list `Settings/Field` entries now export `dataPath`/`field` and pack back into the serialized settings bag |
+| 37 | MXL templates | `textPlacement=Cut` now extracts from MOXCEL code `1` and packs back to the same format bit |
+| 37 | MXL templates | non-1-based column `formatIndex` values are preserved separately from the normalized internal indexes used for row/cell decoding |
+| 37 | Configuration.xml | root `CommonPicture` child objects are classified by native field shape and emitted in `Configuration.xml` for source XML 2.20/2.21 |
+| 37 | Object metadata XML | child attribute `ChoiceForm` tails now preserve empty values and resolved non-empty design-time refs |
+| 37 | Source staging readiness | root `Ext/MainSectionPicture.xml` is covered as base-free staging and source-load coverage |
 | 36 | Diff mining | reusable `source-diff-signatures` CLI added; bounded scan of the last full diff sampled 2,101 XML pairs and shows the largest remaining clusters are still MXL `document/format/*` and `formatIndex` signatures |
 | 36 | Form.xml | default `Page/ScrollOnCompress=false` is suppressed while explicit `true` remains exported and packable |
 | 36 | Flowchart.xml | BusinessProcess/GraphicalSchema `Font` now decodes serialized style font tuples for connection lines |
