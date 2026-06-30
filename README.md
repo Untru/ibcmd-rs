@@ -61,6 +61,13 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 25 | Role Rights.xml | explicit disabled `false` rights without restrictions are preserved in export and pack paths |
+| 25 | Form.xml | wrapper `55` table items extract and pack `UseAlternationRowColor` through the existing property bag |
+| 25 | Object metadata XML | `Document` metadata emits numbering settings, standard command flag and default form refs |
+| 25 | InformationRegister metadata XML | `DefaultRecordForm` and `DefaultListForm` refs are resolved from owner metadata form indexes |
+| 25 | Configuration.xml | root scalar application/compatibility properties are emitted in native-shaped metadata XML |
+| 25 | MXL templates | SpreadsheetDocument text nodes keep literal quotes while still escaping XML structural characters |
+| 25 | Source staging readiness | `Predefined.xml` readiness reports precise base-blob blockers for row order, parent/type slots and trailing fields |
 | 24 | Role Rights.xml | role rights objects are exported and packed against base slots in object UUID order |
 | 24 | Form.xml | table child items extract and pack `SkipOnInput`, including wrapper `55` layouts |
 | 24 | Object metadata XML | `Document` metadata emits `StandardAttributes` with number-type-aware `Number` fill value |

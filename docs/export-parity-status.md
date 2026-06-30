@@ -29,8 +29,8 @@ The full JSON report is retained at
 `E:\ibcmd_lab\full_diff_20260630_184120\diff_full_source_only.json`.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
-Candidate: `ibcmd-rs` full export snapshot generated before the round 22 and
-round 23 incremental verified fixes listed below.
+Candidate: `ibcmd-rs` full export snapshot generated before the round 22 through
+round 25 incremental verified fixes listed below.
 
 Raw source-only summary:
 
@@ -126,6 +126,13 @@ Verification history:
 | Round 24 DCS template slice | unit-level template body verification | DataCompositionSchema template bodies rewrite known `v8:TypeId` values through the metadata type index to source-style current-config `v8:Type` references |
 | Round 24 ExchangePlan Content.xml slice | unit-level source asset verification | `AutoRecord` values now map as `0=Deny`, `1=Allow`, `2=Auto` |
 | Round 24 source staging readiness slice | unit-level readiness audit verification | `BusinessProcess/Ext/Flowchart.xml` remains base-dependent, but readiness now reports precise blockers for item table order, type-code slots, events, explanations and nested payload shape |
+| Round 25 Role Rights.xml slice | unit-level extractor/packer verification | explicit disabled `false` rights without restrictions are preserved instead of being dropped |
+| Round 25 Form.xml slice | unit-level extractor/packer verification | wrapper `55` table items extract and pack `UseAlternationRowColor` through property bag key `9` |
+| Round 25 object metadata slice | unit-level metadata XML verification | `Document` metadata emits numbering settings, standard command flag and default object/list/choice form refs |
+| Round 25 InformationRegister metadata slice | unit-level metadata XML verification | `DefaultRecordForm` and `DefaultListForm` refs are resolved through owner metadata form indexes |
+| Round 25 MXL template slice | unit-level template body verification | SpreadsheetDocument text-node quotes remain literal while XML structural characters stay escaped |
+| Round 25 Configuration.xml slice | unit-level metadata XML verification | root scalar application/compatibility properties are emitted in native-shaped metadata XML |
+| Round 25 source staging readiness slice | unit-level readiness audit verification | `Catalog/Ext/Predefined.xml` and `ChartOfCharacteristicTypes/Ext/Predefined.xml` remain base-dependent, but readiness reports precise blockers for row order, parent/type slots and trailing fields |
 
 Performance note for selected extraction:
 
@@ -281,5 +288,12 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | ExchangePlan `Content.xml` `AutoRecord` mapping | merged to `master` in round 24 |
 | #21 | precise BusinessProcess `Flowchart.xml` base-free staging blocker audit | merged to `master` in round 24 |
 | #22 | CommonAttribute native content pair parsing | merged to `master` in round 24 |
+| #13 | explicit disabled Role Rights.xml entries | merged to `master` in round 25 |
+| #15 | Document numbering settings, standard command flag and default form refs | merged to `master` in round 25 |
+| #16 | Form.xml wrapper `55` table `UseAlternationRowColor` extraction and packing | merged to `master` in round 25 |
+| #17 | SpreadsheetDocument text-node quote escaping | merged to `master` in round 25 |
+| #18 | InformationRegister default record/list form refs | merged to `master` in round 25 |
+| #21 | precise Predefined.xml base-free staging blocker audit | merged to `master` in round 25 |
+| #22 | root Configuration.xml scalar application/compatibility properties | merged to `master` in round 25 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
