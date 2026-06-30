@@ -4471,11 +4471,15 @@ fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
         return Some("BinaryData");
     };
     let text = text.trim_start_matches('\u{feff}').trim_start();
-    if text.starts_with("<?xml") && text.contains("data-composition-system/appearance-template") {
+    let xml_text = text
+        .starts_with("<?xml")
+        .then_some(text)
+        .or_else(|| text.find("<?xml").map(|index| &text[index..]));
+    if xml_text.is_some_and(|xml| xml.contains("data-composition-system/appearance-template")) {
         Some("DataCompositionAppearanceTemplate")
-    } else if text.starts_with("<?xml") && text.contains("data-composition-system/schema") {
+    } else if xml_text.is_some_and(|xml| xml.contains("data-composition-system/schema")) {
         Some("DataCompositionSchema")
-    } else if text.starts_with("<?xml") && text.contains("8.3/xcf/scheme") {
+    } else if xml_text.is_some_and(|xml| xml.contains("8.3/xcf/scheme")) {
         Some("GraphicalSchema")
     } else if text.starts_with("<!DOCTYPE")
         || text.starts_with("<html")
@@ -26904,6 +26908,25 @@ mod tests {
         let (path, kind) = template_body_source_asset("DataCompositionSchema").unwrap();
         assert_eq!(path, "Template.xml");
         assert!(matches!(kind, SourceAssetKind::DataCompositionSchema));
+    }
+
+    #[test]
+    fn detects_data_composition_schema_template_body_with_container_prefix() {
+        let body = deflate_for_test(
+            concat!(
+                "\0\0\0\0\0\0\0\0",
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                "<SchemaFile xmlns=\"\">\r\n",
+                "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n",
+                "</SchemaFile>"
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            infer_template_type_from_body(&body),
+            Some("DataCompositionSchema")
+        );
     }
 
     #[test]
