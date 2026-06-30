@@ -16319,6 +16319,7 @@ struct DocumentProperties {
     auxiliary_object_form: Option<String>,
     auxiliary_list_form: Option<String>,
     auxiliary_choice_form: Option<String>,
+    include_help_in_contents: bool,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
@@ -18742,6 +18743,8 @@ fn parse_document_properties_from_text(
             fields.get(header_index + 19).copied(),
             form_refs,
         ),
+        include_help_in_contents: parse_1c_bool_field(fields.get(header_index + 20).copied())
+            .unwrap_or(false),
         child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_document_template_names_in_text_order(
             text,
@@ -22756,6 +22759,10 @@ fn format_document_source_xml(
             "AuxiliaryChoiceForm",
             document.auxiliary_choice_form.as_deref(),
         );
+        properties.push_str(&format!(
+            "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+            xml_bool(document.include_help_in_contents)
+        ));
         xml.insert_str(index, &properties);
     }
     if !document.child_forms.is_empty() || !document.child_templates.is_empty() {
@@ -40583,6 +40590,58 @@ mod tests {
         );
         assert!(
             xml.find("<StandardAttributes>").unwrap() < xml.find("<DefaultObjectForm>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_document_include_help_in_contents_to_metadata_xml() {
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let object_type_id = "11111111-1111-4111-8111-111111111111";
+        let object_value_id = "11111111-1111-4111-8111-111111111112";
+        let ref_type_id = "22222222-2222-4222-8222-222222222221";
+        let ref_value_id = "22222222-2222-4222-8222-222222222222";
+        let manager_type_id = "33333333-3333-4333-8333-333333333331";
+        let manager_value_id = "33333333-3333-4333-8333-333333333332";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let owner_fields = [
+            "1", "0", "1", "9", "1", "4", "0", "0", "0", "0", "0", "0", "0", zero_uuid, zero_uuid,
+            zero_uuid, zero_uuid, zero_uuid, zero_uuid, "1",
+        ]
+        .join(",");
+        let document_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &document_blob,
+            document_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+        assert!(
+            xml.find("<AuxiliaryChoiceForm/>").unwrap()
+                < xml
+                    .find("<IncludeHelpInContents>true</IncludeHelpInContents>")
+                    .unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<IncludeHelpInContents>true</IncludeHelpInContents>")
+                .unwrap()
+                < xml.find("</Properties>").unwrap(),
             "{xml}"
         );
     }
