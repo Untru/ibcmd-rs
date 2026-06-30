@@ -15952,10 +15952,19 @@ struct MetadataChildProperties {
     fill_from_filling_value: bool,
     fill_value: Option<MetadataChildFillValue>,
     fill_checking: &'static str,
+    choice_folders_and_items: Option<&'static str>,
     choice_parameter_links_empty: bool,
     choice_parameters_empty: bool,
+    quick_choice: Option<&'static str>,
+    create_on_input: Option<&'static str>,
+    choice_form_empty: bool,
     choice_history_on_input: Option<&'static str>,
+    use_mode: Option<&'static str>,
+    indexing: Option<&'static str>,
+    full_text_search: Option<&'static str>,
     data_history: Option<&'static str>,
+    update_data_history_immediately_after_write: Option<bool>,
+    execute_after_write_data_history_version_processing: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -17792,7 +17801,13 @@ fn parse_attribute_tabular_section_child_objects(
             Vec::new()
         };
         let properties = if tag == "Attribute" {
-            parse_metadata_child_properties(text, marker_start, &header.uuid, &value_types)
+            parse_metadata_child_properties(
+                owner_kind,
+                text,
+                marker_start,
+                &header.uuid,
+                &value_types,
+            )
         } else {
             None
         };
@@ -17850,6 +17865,7 @@ fn parse_metadata_child_value_types(
 }
 
 fn parse_metadata_child_properties(
+    owner_kind: &str,
     text: &str,
     marker_start: usize,
     child_uuid: &str,
@@ -17881,18 +17897,69 @@ fn parse_metadata_child_properties(
             value_types,
         ),
         fill_checking: metadata_fill_checking_xml(fields.get(header_index + 13).copied()),
+        choice_folders_and_items: fields
+            .get(header_index + 14)
+            .and_then(|field| metadata_choice_folders_and_items_xml(field.trim())),
         choice_parameter_links_empty: metadata_child_collection_is_empty(
             fields.get(header_index + 15).copied(),
         ),
         choice_parameters_empty: metadata_child_collection_is_empty(
             fields.get(header_index + 16).copied(),
         ),
+        quick_choice: fields
+            .get(header_index + 17)
+            .and_then(|field| metadata_quick_choice_xml(field.trim())),
+        create_on_input: fields
+            .get(header_index + 18)
+            .and_then(|field| metadata_create_on_input_xml(field.trim())),
+        choice_form_empty: metadata_child_choice_form_is_empty(
+            fields.get(header_index + 19).copied(),
+        ),
         choice_history_on_input: fields
             .get(header_index + 21)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim())),
+        use_mode: if owner_kind == "Catalog" {
+            fields
+                .get(header_index + 22)
+                .and_then(|field| metadata_attribute_use_mode_xml(field.trim()))
+        } else {
+            None
+        },
+        indexing: if matches!(owner_kind, "Catalog" | "Document") {
+            fields
+                .get(header_index + 23)
+                .and_then(|field| metadata_attribute_indexing_xml(field.trim()))
+        } else {
+            None
+        },
+        full_text_search: if matches!(owner_kind, "Catalog" | "Document") {
+            fields
+                .get(header_index + 24)
+                .and_then(|field| metadata_attribute_full_text_search_xml(field.trim()))
+        } else {
+            None
+        },
         data_history: fields
             .get(header_index + 25)
             .and_then(|field| metadata_data_history_xml(field.trim())),
+        update_data_history_immediately_after_write: if matches!(owner_kind, "Catalog" | "Document")
+        {
+            fields
+                .get(header_index + 26)
+                .and_then(|field| parse_1c_bool_flag(field.trim()))
+        } else {
+            None
+        },
+        execute_after_write_data_history_version_processing: if matches!(
+            owner_kind,
+            "Catalog" | "Document"
+        ) {
+            fields
+                .get(header_index + 27)
+                .and_then(|field| parse_1c_bool_flag(field.trim()))
+        } else {
+            None
+        },
     })
 }
 
@@ -17924,6 +17991,40 @@ fn metadata_child_collection_is_empty(field: Option<&str>) -> bool {
     matches!(field.map(str::trim), Some("{0}") | Some("0"))
 }
 
+fn metadata_child_choice_form_is_empty(field: Option<&str>) -> bool {
+    matches!(
+        field.map(str::trim),
+        Some("0") | Some("00000000-0000-0000-0000-000000000000")
+    )
+}
+
+fn metadata_choice_folders_and_items_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Items"),
+        "1" => Some("Folders"),
+        "2" => Some("FoldersAndItems"),
+        _ => None,
+    }
+}
+
+fn metadata_quick_choice_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Auto"),
+        "1" => Some("Use"),
+        "2" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+fn metadata_create_on_input_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Auto"),
+        "1" => Some("DontUse"),
+        "2" => Some("Use"),
+        _ => None,
+    }
+}
+
 fn metadata_choice_history_on_input_xml(value: &str) -> Option<&'static str> {
     match value {
         "1" => Some("DontUse"),
@@ -17936,6 +18037,32 @@ fn metadata_data_history_xml(value: &str) -> Option<&'static str> {
     match value {
         "1" => Some("Use"),
         "0" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+fn metadata_attribute_use_mode_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("ForItem"),
+        "1" => Some("ForFolder"),
+        "2" => Some("ForFolderAndItem"),
+        _ => None,
+    }
+}
+
+fn metadata_attribute_indexing_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontIndex"),
+        "1" => Some("Index"),
+        "2" => Some("IndexWithAdditionalOrder"),
+        _ => None,
+    }
+}
+
+fn metadata_attribute_full_text_search_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Use"),
+        "1" => Some("DontUse"),
         _ => None,
     }
 }
@@ -23139,20 +23266,63 @@ fn push_metadata_child_properties_xml(
         "{indent}<FillChecking>{}</FillChecking>\r\n",
         properties.fill_checking
     ));
+    if let Some(choice_folders_and_items) = properties.choice_folders_and_items {
+        xml.push_str(&format!(
+            "{indent}<ChoiceFoldersAndItems>{choice_folders_and_items}</ChoiceFoldersAndItems>\r\n"
+        ));
+    }
     if properties.choice_parameter_links_empty {
         xml.push_str(&format!("{indent}<ChoiceParameterLinks/>\r\n"));
     }
     if properties.choice_parameters_empty {
         xml.push_str(&format!("{indent}<ChoiceParameters/>\r\n"));
     }
+    if let Some(quick_choice) = properties.quick_choice {
+        xml.push_str(&format!(
+            "{indent}<QuickChoice>{quick_choice}</QuickChoice>\r\n"
+        ));
+    }
+    if let Some(create_on_input) = properties.create_on_input {
+        xml.push_str(&format!(
+            "{indent}<CreateOnInput>{create_on_input}</CreateOnInput>\r\n"
+        ));
+    }
+    if properties.choice_form_empty {
+        xml.push_str(&format!("{indent}<ChoiceForm/>\r\n"));
+    }
     if let Some(choice_history_on_input) = properties.choice_history_on_input {
         xml.push_str(&format!(
             "{indent}<ChoiceHistoryOnInput>{choice_history_on_input}</ChoiceHistoryOnInput>\r\n"
         ));
     }
+    if let Some(use_mode) = properties.use_mode {
+        xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
+    }
+    if let Some(indexing) = properties.indexing {
+        xml.push_str(&format!("{indent}<Indexing>{indexing}</Indexing>\r\n"));
+    }
+    if let Some(full_text_search) = properties.full_text_search {
+        xml.push_str(&format!(
+            "{indent}<FullTextSearch>{full_text_search}</FullTextSearch>\r\n"
+        ));
+    }
     if let Some(data_history) = properties.data_history {
         xml.push_str(&format!(
             "{indent}<DataHistory>{data_history}</DataHistory>\r\n"
+        ));
+    }
+    if let Some(update_data_history) = properties.update_data_history_immediately_after_write {
+        xml.push_str(&format!(
+            "{indent}<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n",
+            xml_bool(update_data_history)
+        ));
+    }
+    if let Some(execute_after_write) =
+        properties.execute_after_write_data_history_version_processing
+    {
+        xml.push_str(&format!(
+            "{indent}<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+            xml_bool(execute_after_write)
         ));
     }
 }
@@ -40249,6 +40419,80 @@ mod tests {
         assert!(tabular_xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
         assert!(
             tabular_xml.contains("<v8:Type>cfg:CatalogRef.Prices</v8:Type>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_nested_tabular_section_attribute_tail_scalars() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
+22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
+2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
+{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
+{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,1}}}}}},\
+{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"PriceCode\",{{1,\"en\",\"Price code\"}},\"\"}},\
+0,{{0}},{{0}},{{1,\"en\",\"Price code tooltip\"}},0,\"\",0,0,{{0}},{{0}},0,{{0}},1,0,{{0}},{{0}},1,1,0,0,0,0,2,0,1,0,0}}\r\n}}\
+}}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let tabular_start = xml
+            .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+            .unwrap();
+        let tabular_end = tabular_start + xml[tabular_start..].find("</TabularSection>").unwrap();
+        let tabular_xml = &xml[tabular_start..tabular_end];
+        let attribute_start = tabular_xml
+            .find(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#)
+            .unwrap();
+        let attribute_end =
+            attribute_start + tabular_xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &tabular_xml[attribute_start..attribute_end];
+
+        assert!(attribute_xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
+        assert!(attribute_xml.contains("<QuickChoice>Use</QuickChoice>"));
+        assert!(attribute_xml.contains("<CreateOnInput>DontUse</CreateOnInput>"));
+        assert!(attribute_xml.contains("<ChoiceForm/>"));
+        assert!(attribute_xml.contains("<Use>ForItem</Use>"));
+        assert!(attribute_xml.contains("<Indexing>IndexWithAdditionalOrder</Indexing>"));
+        assert!(attribute_xml.contains("<FullTextSearch>Use</FullTextSearch>"));
+        assert!(attribute_xml.contains("<DataHistory>Use</DataHistory>"));
+        assert!(attribute_xml.contains(
+            "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>"
+        ));
+        assert!(attribute_xml.contains(
+            "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
+        ));
+        assert!(
+            attribute_xml.find("<FillChecking>").unwrap()
+                < attribute_xml.find("<ChoiceFoldersAndItems>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceForm/>").unwrap()
+                < attribute_xml.find("<ChoiceHistoryOnInput>").unwrap(),
             "{xml}"
         );
     }
