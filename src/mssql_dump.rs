@@ -2705,7 +2705,10 @@ const XSI_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
 const XS_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema";
 const DCS_SETTINGS_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
 
-fn normalize_data_composition_schema_template_xml(inflated: &[u8]) -> Option<Vec<u8>> {
+fn normalize_data_composition_schema_template_xml(
+    inflated: &[u8],
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<u8>> {
     let xml_start = find_bytes(inflated, b"<?xml")?;
     let text = std::str::from_utf8(&inflated[xml_start..]).ok()?;
     let documents = split_embedded_xml_documents(text);
@@ -2713,6 +2716,7 @@ fn normalize_data_composition_schema_template_xml(inflated: &[u8]) -> Option<Vec
         document.contains("<SchemaFile") && document.contains("dataCompositionSchema")
     })?;
     let mut xml = canonicalize_data_composition_schema_document(schema_doc)?;
+    rewrite_data_composition_type_ids(&mut xml, type_index);
     if let Some(settings_doc) = documents
         .iter()
         .find(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
@@ -2721,6 +2725,48 @@ fn normalize_data_composition_schema_template_xml(inflated: &[u8]) -> Option<Vec
         insert_data_composition_settings(&mut xml, &settings);
     }
     Some(xml.into_bytes())
+}
+
+fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<String, String>) {
+    const OPEN: &str = "<v8:TypeId>";
+    const CLOSE: &str = "</v8:TypeId>";
+    const CFG_PREFIX: &str = "cfg:";
+    const DCS_CFG_PREFIX: &str = "d5p1";
+    const CURRENT_CONFIG_NS: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
+
+    let mut rewritten = String::with_capacity(xml.len());
+    let mut cursor = 0usize;
+    while let Some(relative_start) = xml[cursor..].find(OPEN) {
+        let start = cursor + relative_start;
+        let value_start = start + OPEN.len();
+        let Some(relative_end) = xml[value_start..].find(CLOSE) else {
+            break;
+        };
+        let value_end = value_start + relative_end;
+        let type_id = xml[value_start..value_end].trim();
+        let replacement = type_index
+            .get(type_id)
+            .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
+            .map(|reference| {
+                format!(
+                    "<v8:Type xmlns:{DCS_CFG_PREFIX}=\"{CURRENT_CONFIG_NS}\">{DCS_CFG_PREFIX}:{}</v8:Type>",
+                    escape_xml_text(reference)
+                )
+            });
+        if let Some(replacement) = replacement {
+            rewritten.push_str(&xml[cursor..start]);
+            rewritten.push_str(&replacement);
+            cursor = value_end + CLOSE.len();
+        } else {
+            rewritten.push_str(&xml[cursor..value_end + CLOSE.len()]);
+            cursor = value_end + CLOSE.len();
+        }
+    }
+    if cursor == 0 {
+        return;
+    }
+    rewritten.push_str(&xml[cursor..]);
+    *xml = rewritten;
 }
 
 fn extract_ws_definition_xml(inflated: &[u8]) -> Option<Vec<u8>> {
@@ -3265,7 +3311,8 @@ fn write_source_asset(
                 )
             })?;
             let content =
-                normalize_data_composition_schema_template_xml(&inflated).unwrap_or(inflated);
+                normalize_data_composition_schema_template_xml(&inflated, context.type_index)
+                    .unwrap_or(inflated);
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -29066,7 +29113,11 @@ mod tests {
             "\t\t\t<title xmlns:d5p1=\"http://v8.1c.ru/8.1/data/core\" xsi:type=\"d5p1:LocalStringType\">\r\n",
             "\t\t\t\t<d5p1:item><d5p1:lang>ru</d5p1:lang><d5p1:content>Сумма</d5p1:content></d5p1:item>\r\n",
             "\t\t\t</title>\r\n",
+            "\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">11111111-1111-4111-8111-111111111111</TypeId></valueType>\r\n",
             "\t\t\t<role><dimension xmlns=\"http://v8.1c.ru/8.1/data-composition-system/common\">true</dimension></role>\r\n",
+            "\t\t</field>\r\n",
+            "\t\t<field xsi:type=\"DataSetFieldField\">\r\n",
+            "\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">22222222-2222-4222-8222-222222222222</TypeId></valueType>\r\n",
             "\t\t</field>\r\n",
             "\t\t<settingsVariant>\r\n",
             "\t\t\t<name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Основной</name>\r\n",
@@ -29081,8 +29132,12 @@ mod tests {
             "</Settings>"
         );
 
+        let type_index = BTreeMap::from([(
+            "11111111-1111-4111-8111-111111111111".to_string(),
+            "cfg:CatalogRef.Products".to_string(),
+        )]);
         let xml = String::from_utf8(
-            normalize_data_composition_schema_template_xml(raw.as_bytes()).unwrap(),
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
         )
         .unwrap();
 
@@ -29099,6 +29154,12 @@ mod tests {
             xml.contains("<v8:item><v8:lang>ru</v8:lang><v8:content>Сумма</v8:content></v8:item>")
         );
         assert!(xml.contains("<role><dcscom:dimension>true</dcscom:dimension></role>"));
+        assert!(
+            xml.contains(
+                r#"<v8:Type xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d5p1:CatalogRef.Products</v8:Type>"#
+            )
+        );
+        assert!(xml.contains("<v8:TypeId>22222222-2222-4222-8222-222222222222</v8:TypeId>"));
         assert!(xml.contains("<dcsset:name>Основной</dcsset:name>"));
         assert!(xml.contains("<dcsset:settings xmlns:style="));
         assert!(xml.contains(r#"<dcsset:item xsi:type="dcsset:SelectedItemField">"#));
