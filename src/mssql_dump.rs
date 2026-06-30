@@ -15280,6 +15280,9 @@ struct DataProcessorProperties {
     use_standard_commands: bool,
     default_form: Option<String>,
     auxiliary_form: Option<String>,
+    include_help_in_contents: bool,
+    extended_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
@@ -17179,6 +17182,14 @@ fn parse_data_processor_properties_from_text(
     push_generated_type_entry(
         &mut generated_types,
         &fields,
+        1,
+        2,
+        &format!("DataProcessorObject.{}", header.name),
+        "Object",
+    );
+    push_generated_type_entry(
+        &mut generated_types,
+        &fields,
         7,
         8,
         &format!("DataProcessorManager.{}", header.name),
@@ -17190,6 +17201,9 @@ fn parse_data_processor_properties_from_text(
         use_standard_commands: parse_1c_bool_field(fields.get(5).copied()).unwrap_or(true),
         default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
         auxiliary_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
+        include_help_in_contents: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(false),
+        extended_presentation: parse_1c_synonyms(fields.get(10).copied().unwrap_or("{0}")),
+        explanation: parse_1c_synonyms(fields.get(11).copied().unwrap_or("{0}")),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_data_processor_template_names_in_text_order(
             text,
@@ -20927,6 +20941,22 @@ fn format_data_processor_source_xml(
             "\t\t\t",
             "AuxiliaryForm",
             data_processor.auxiliary_form.as_deref(),
+        );
+        properties.push_str(&format!(
+            "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+            xml_bool(data_processor.include_help_in_contents)
+        ));
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedPresentation",
+            &data_processor.extended_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "Explanation",
+            &data_processor.explanation,
         );
         xml.insert_str(index, &properties);
     }
@@ -36857,11 +36887,13 @@ mod tests {
         let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let default_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
         let auxiliary_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let object_type_id = "33333333-3333-4333-8333-333333333333";
+        let object_value_id = "44444444-4444-4444-8444-444444444444";
         let manager_type_id = "11111111-1111-4111-8111-111111111111";
         let manager_value_id = "22222222-2222-4222-8222-222222222222";
         let data_processor_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}}\r\n}}"
+                "{{1,\r\n{{17,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,1,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{1,\"en\",\"Loader extended\"}},{{1,\"en\",\"Loads data\"}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -36911,6 +36943,14 @@ mod tests {
             );
             assert!(
                 xml.contains(
+                    r#"<xr:GeneratedType name="DataProcessorObject.Loader" category="Object">"#
+                ),
+                "{xml}"
+            );
+            assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
+            assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
+            assert!(
+                xml.contains(
                     r#"<xr:GeneratedType name="DataProcessorManager.Loader" category="Manager">"#
                 ),
                 "{xml}"
@@ -36921,6 +36961,20 @@ mod tests {
             assert!(xml.contains(
                 "<AuxiliaryForm>DataProcessor.Loader.Form.AssistantForm</AuxiliaryForm>"
             ));
+            assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+            assert!(xml.contains("<ExtendedPresentation>"));
+            assert!(xml.contains("<v8:content>Loader extended</v8:content>"));
+            assert!(xml.contains("<Explanation>"));
+            assert!(xml.contains("<v8:content>Loads data</v8:content>"));
+            assert!(
+                xml.find("<AuxiliaryForm>").unwrap() < xml.find("<IncludeHelpInContents>").unwrap(),
+                "{xml}"
+            );
+            assert!(
+                xml.find("<IncludeHelpInContents>").unwrap()
+                    < xml.find("<ExtendedPresentation>").unwrap(),
+                "{xml}"
+            );
         }
     }
 
