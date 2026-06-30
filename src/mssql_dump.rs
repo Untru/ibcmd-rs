@@ -18936,7 +18936,7 @@ fn parse_catalog_properties_from_text(
             text,
             uuid,
             type_index,
-            &BTreeMap::new(),
+            object_refs,
         ),
         child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_catalog_template_names_in_text_order(
@@ -43088,6 +43088,116 @@ mod tests {
         assert!(tabular_xml.contains(r#"<Attribute uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd">"#));
         assert!(
             tabular_xml.contains("<v8:Type>cfg:CatalogRef.Prices</v8:Type>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_catalog_child_attribute_property_tail_and_choice_parameters() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let status_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let single_parameter_value = [
+            r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,"##,
+            status_uuid,
+            "}}",
+        ]
+        .concat();
+        let choice_parameters = [r#"{0,1,"Filter.Status","#, &single_parameter_value, "}"].concat();
+        let catalog_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
+22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
+2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
+{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"RequiredFlag\",{{1,\"en\",\"Required flag\"}},\"\"}},\
+0,{{1,\"en\",\"Flag format\"}},{{0}},{{1,\"en\",\"Flag tooltip\"}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},\
+{choice_parameters},\
+1,2,0,{{0}},0,2,2,0,1,0,0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([(
+            status_uuid.to_string(),
+            "Enum.Statuses.EnumValue.Open".to_string(),
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &catalog_blob,
+            catalog_uuid,
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(
+            attribute_xml.contains("<v8:Type>xs:boolean</v8:Type>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<PasswordMode>false</PasswordMode>"));
+        assert!(attribute_xml.contains("<Format>"));
+        assert!(attribute_xml.contains("<v8:content>Flag format</v8:content>"));
+        assert!(attribute_xml.contains("<ToolTip>"));
+        assert!(attribute_xml.contains("<v8:content>Flag tooltip</v8:content>"));
+        assert!(attribute_xml.contains(r#"<FillValue xsi:type="xs:boolean">false</FillValue>"#));
+        assert!(attribute_xml.contains("<FillChecking>ShowError</FillChecking>"));
+        assert!(attribute_xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
+        assert!(attribute_xml.contains("<ChoiceParameterLinks/>"));
+        assert!(attribute_xml.contains(r#"<app:item name="Filter.Status">"#));
+        assert!(attribute_xml.contains(
+            r#"<app:value xsi:type="xr:DesignTimeRef">Enum.Statuses.EnumValue.Open</app:value>"#
+        ));
+        assert!(attribute_xml.contains("<QuickChoice>Use</QuickChoice>"));
+        assert!(attribute_xml.contains("<CreateOnInput>Use</CreateOnInput>"));
+        assert!(attribute_xml.contains("<ChoiceForm/>"));
+        assert!(attribute_xml.contains("<LinkByType/>"));
+        assert!(attribute_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+        assert!(attribute_xml.contains("<Use>ForFolderAndItem</Use>"));
+        assert!(attribute_xml.contains("<Indexing>IndexWithAdditionalOrder</Indexing>"));
+        assert!(attribute_xml.contains("<FullTextSearch>Use</FullTextSearch>"));
+        assert!(attribute_xml.contains("<DataHistory>Use</DataHistory>"));
+        assert!(attribute_xml.contains(
+            "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>"
+        ));
+        assert!(attribute_xml.contains(
+            "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
+        ));
+        assert!(
+            attribute_xml.find("<Type>").unwrap() < attribute_xml.find("<PasswordMode>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<FillValue").unwrap()
+                < attribute_xml.find("<FillChecking>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceParameters>").unwrap()
+                < attribute_xml.find("<QuickChoice>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceHistoryOnInput>").unwrap()
+                < attribute_xml.find("<Use>").unwrap(),
             "{xml}"
         );
     }
