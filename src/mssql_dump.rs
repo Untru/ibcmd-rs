@@ -16271,7 +16271,7 @@ struct MetadataChildProperties {
     fill_checking: &'static str,
     choice_folders_and_items: Option<&'static str>,
     choice_parameter_links_empty: bool,
-    choice_parameters_empty: bool,
+    choice_parameters: Option<Vec<MetadataChoiceParameter>>,
     quick_choice: Option<&'static str>,
     create_on_input: Option<&'static str>,
     choice_form_empty: bool,
@@ -16283,6 +16283,12 @@ struct MetadataChildProperties {
     data_history: Option<&'static str>,
     update_data_history_immediately_after_write: Option<bool>,
     execute_after_write_data_history_version_processing: Option<bool>,
+}
+
+#[derive(Clone)]
+struct MetadataChoiceParameter {
+    name: String,
+    value_refs: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -17880,6 +17886,7 @@ fn parse_exchange_plan_child_objects(
                 marker_start,
                 &header.uuid,
                 &value_types,
+                &BTreeMap::new(),
             );
             Some(MetadataChildObject {
                 tag,
@@ -18007,6 +18014,7 @@ fn parse_register_properties_from_text(
                 marker_start,
                 &header.uuid,
                 &value_types,
+                &BTreeMap::new(),
             );
             Some(MetadataChildObject {
                 tag,
@@ -18259,6 +18267,7 @@ fn parse_attribute_tabular_section_child_objects(
     text: &str,
     owner_uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Vec<MetadataChildObject> {
     let mut roots = Vec::<MetadataChildObject>::new();
     let mut tabular_section_indexes = BTreeMap::<String, usize>::new();
@@ -18288,6 +18297,7 @@ fn parse_attribute_tabular_section_child_objects(
                 marker_start,
                 &header.uuid,
                 &value_types,
+                object_refs,
             )
         } else {
             None
@@ -18357,6 +18367,7 @@ fn parse_metadata_child_properties(
     marker_start: usize,
     child_uuid: &str,
     value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
         if let Some(properties) = parse_metadata_child_properties_from_fields(
@@ -18364,6 +18375,7 @@ fn parse_metadata_child_properties(
             &fields,
             child_uuid,
             value_types,
+            object_refs,
         ) {
             return Some(properties);
         }
@@ -18376,6 +18388,7 @@ fn parse_metadata_child_properties_from_fields(
     fields: &[&str],
     child_uuid: &str,
     value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     let header_index = metadata_header_field_index(&fields, child_uuid)?;
     if fields.len() <= header_index + 13 {
@@ -18407,8 +18420,9 @@ fn parse_metadata_child_properties_from_fields(
         choice_parameter_links_empty: metadata_child_collection_is_empty(
             fields.get(header_index + 15).copied(),
         ),
-        choice_parameters_empty: metadata_child_collection_is_empty(
+        choice_parameters: parse_metadata_child_choice_parameters(
             fields.get(header_index + 16).copied(),
+            object_refs,
         ),
         quick_choice: fields
             .get(header_index + 17)
@@ -18814,6 +18828,7 @@ fn parse_catalog_properties_from_text(
             text,
             uuid,
             type_index,
+            &BTreeMap::new(),
         ),
         child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_catalog_template_names_in_text_order(
@@ -19147,6 +19162,7 @@ fn parse_data_processor_properties_from_text(
             text,
             uuid,
             type_index,
+            object_refs,
         ),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_data_processor_template_names_in_text_order(
@@ -20044,6 +20060,45 @@ fn parse_constant_choice_parameters(
     parameters
 }
 
+fn parse_metadata_child_choice_parameters(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameter>> {
+    let field = field?;
+    if metadata_child_collection_is_empty(Some(field)) {
+        return Some(Vec::new());
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    let count = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if count == 0 {
+        return Some(Vec::new());
+    }
+
+    let mut parameters = Vec::new();
+    let mut index = 2usize;
+    for _ in 0..count {
+        let (Some(name), Some(value)) = (fields.get(index), fields.get(index + 1)) else {
+            break;
+        };
+        if let Some(name) = parse_1c_quoted_string(name.trim()) {
+            let value_refs = parse_design_time_references(value, object_refs);
+            if !value_refs.is_empty() {
+                parameters.push(MetadataChoiceParameter { name, value_refs });
+            }
+        }
+        index += 2;
+    }
+
+    if parameters.is_empty() {
+        None
+    } else {
+        Some(parameters)
+    }
+}
+
 fn parse_design_time_reference(
     text: &str,
     object_refs: &BTreeMap<String, String>,
@@ -20053,6 +20108,13 @@ fn parse_design_time_reference(
         .rev()
         .filter_map(|uuid| object_refs.get(&uuid).cloned())
         .next()
+}
+
+fn parse_design_time_references(text: &str, object_refs: &BTreeMap<String, String>) -> Vec<String> {
+    uuid_like_values(text)
+        .into_iter()
+        .filter_map(|uuid| object_refs.get(&uuid).cloned())
+        .collect()
 }
 
 fn parse_constant_bound_value(field: Option<&str>) -> Option<String> {
@@ -24145,8 +24207,8 @@ fn push_metadata_child_properties_xml(
     if properties.choice_parameter_links_empty {
         xml.push_str(&format!("{indent}<ChoiceParameterLinks/>\r\n"));
     }
-    if properties.choice_parameters_empty {
-        xml.push_str(&format!("{indent}<ChoiceParameters/>\r\n"));
+    if let Some(choice_parameters) = &properties.choice_parameters {
+        push_metadata_child_choice_parameters_xml(xml, indent, choice_parameters);
     }
     if let Some(quick_choice) = properties.quick_choice {
         xml.push_str(&format!(
@@ -24199,6 +24261,44 @@ fn push_metadata_child_properties_xml(
             xml_bool(execute_after_write)
         ));
     }
+}
+
+fn push_metadata_child_choice_parameters_xml(
+    xml: &mut String,
+    indent: &str,
+    parameters: &[MetadataChoiceParameter],
+) {
+    if parameters.is_empty() {
+        xml.push_str(&format!("{indent}<ChoiceParameters/>\r\n"));
+        return;
+    }
+
+    xml.push_str(&format!("{indent}<ChoiceParameters>\r\n"));
+    for parameter in parameters {
+        xml.push_str(&format!(
+            "{indent}\t<app:item name=\"{}\">\r\n",
+            escape_xml_text(&parameter.name)
+        ));
+        if parameter.value_refs.len() == 1 {
+            xml.push_str(&format!(
+                "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
+                escape_xml_element_text(&parameter.value_refs[0])
+            ));
+        } else {
+            xml.push_str(&format!(
+                "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n"
+            ));
+            for value_ref in &parameter.value_refs {
+                xml.push_str(&format!(
+                    "{indent}\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">{}</v8:Value>\r\n",
+                    escape_xml_element_text(value_ref)
+                ));
+            }
+            xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
+        }
+        xml.push_str(&format!("{indent}\t</app:item>\r\n"));
+    }
+    xml.push_str(&format!("{indent}</ChoiceParameters>\r\n"));
 }
 
 fn push_metadata_tabular_section_properties_xml(
@@ -42020,6 +42120,133 @@ mod tests {
         assert!(
             attribute_xml.find("<LinkByType/>").unwrap()
                 < attribute_xml.find("<ChoiceHistoryOnInput>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_data_processor_child_attribute_choice_parameters() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let status_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+        let mode_one_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+        let mode_two_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+        let single_parameter_value = [
+            r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,e9aecab4-da2b-4a51-b13c-fb8ca3924bce,"##,
+            status_uuid,
+            "}}",
+        ]
+        .concat();
+        let fixed_array_parameter_value = [
+            r##"{"#",4500381b-db30-4a10-9db4-990038032acf,{0,"##,
+            mode_one_uuid,
+            ",",
+            mode_two_uuid,
+            "}}",
+        ]
+        .concat();
+        let choice_parameters = [
+            r#"{0,2,"Filter.Status","#,
+            &single_parameter_value,
+            r#","Filter.Mode","#,
+            &fixed_array_parameter_value,
+            "}",
+        ]
+        .concat();
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{27,\r\n{{2,0,{{\"Pattern\",{{\"#\",eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"\"}},\
+0,{{0}},{{0}},{{0}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},\
+{choice_parameters},\
+0,0,0,0,0,0,0,0,0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let type_index = BTreeMap::from([(
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".to_string(),
+            "cfg:CatalogRef.Products".to_string(),
+        )]);
+        let object_refs = BTreeMap::from([
+            (
+                status_uuid.to_string(),
+                "Enum.Statuses.EnumValue.Open".to_string(),
+            ),
+            (
+                mode_one_uuid.to_string(),
+                "Enum.Modes.EnumValue.Auto".to_string(),
+            ),
+            (
+                mode_two_uuid.to_string(),
+                "Enum.Modes.EnumValue.Manual".to_string(),
+            ),
+        ]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &type_index,
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(attribute_xml.contains("<ChoiceParameters>"), "{xml}");
+        assert!(
+            attribute_xml.contains(r#"<app:item name="Filter.Status">"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(
+                r#"<app:value xsi:type="xr:DesignTimeRef">Enum.Statuses.EnumValue.Open</app:value>"#
+            ),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(r#"<app:item name="Filter.Mode">"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(r#"<app:value xsi:type="v8:FixedArray">"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(
+                r#"<v8:Value xsi:type="xr:DesignTimeRef">Enum.Modes.EnumValue.Auto</v8:Value>"#
+            ),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(
+                r#"<v8:Value xsi:type="xr:DesignTimeRef">Enum.Modes.EnumValue.Manual</v8:Value>"#
+            ),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceParameterLinks/>").unwrap()
+                < attribute_xml.find("<ChoiceParameters>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.find("<ChoiceParameters>").unwrap()
+                < attribute_xml.find("<QuickChoice>").unwrap(),
             "{xml}"
         );
     }
