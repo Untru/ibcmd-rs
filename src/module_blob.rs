@@ -16057,6 +16057,7 @@ fn role_child_object_tag(tag: &str) -> Option<&'static str> {
         "AddressingAttribute" => Some("AddressingAttribute"),
         "Attribute" => Some("Attribute"),
         "Dimension" => Some("Dimension"),
+        "Form" => Some("Form"),
         "Resource" => Some("Resource"),
         "URLTemplate" => Some("URLTemplate"),
         _ => None,
@@ -30732,7 +30733,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         std::fs::create_dir_all(root.join("InformationRegisters"))?;
         std::fs::write(
             root.join("Catalogs/Products.xml"),
-            br#"<MetaDataObject><Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Products</Name></Properties></Catalog></MetaDataObject>"#,
+            br#"<MetaDataObject><Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Products</Name></Properties><ChildObjects><Form uuid="ffffffff-ffff-4fff-8fff-ffffffffffff"><Properties><Name>ItemForm</Name></Properties></Form></ChildObjects></Catalog></MetaDataObject>"#,
         )?;
         std::fs::write(
             root.join("DataProcessors/Loader.xml"),
@@ -30744,7 +30745,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )?;
         let source = super::MetadataSourceContext::new(root.clone());
         let base = super::deflate_raw(
-            b"{10,{5,{{1,dddddddd-dddd-4ddd-8ddd-dddddddddddd,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,0,0},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,287b74b8-3a66-4a76-ba27-4f1f6a93770e,-1}}},{0},0,1,0,4294967295}",
+            b"{10,{6,{{1,dddddddd-dddd-4ddd-8ddd-dddddddddddd,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee,0,0},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}},{{1,ffffffff-ffff-4fff-8fff-ffffffffffff,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,-1}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,287b74b8-3a66-4a76-ba27-4f1f6a93770e,-1}}},{0},0,1,0,4294967295}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
@@ -30761,6 +30762,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	</object>
 	<object>
 		<name>DataProcessor.Loader.Command.Run</name>
+		<right><name>View</name><value>true</value></right>
+	</object>
+	<object>
+		<name>Catalog.Products.Form.ItemForm</name>
 		<right><name>View</name><value>true</value></right>
 	</object>
 	<object>
@@ -30785,6 +30790,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         ));
         assert!(text.contains(
             "{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,1,1},{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,1}"
+        ));
+        assert!(text.contains(
+            "{1,ffffffff-ffff-4fff-8fff-ffffffffffff,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}"
         ));
         assert!(text.contains(
             "{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}"
