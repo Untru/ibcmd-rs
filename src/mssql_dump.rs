@@ -15499,10 +15499,11 @@ fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
     let mut areas = Vec::with_capacity(count);
     for index in 0..count {
         let name = parse_1c_string(fields.get(index * 2 + 1)?)?;
-        let area = parse_moxel_area(fields.get(index * 2 + 2)?, name)?;
-        areas.push(area);
+        if let Some(area) = parse_moxel_area(fields.get(index * 2 + 2)?, name) {
+            areas.push(area);
+        }
     }
-    Some(areas)
+    (!areas.is_empty()).then_some(areas)
 }
 
 fn parse_moxel_area(text: &str, name: String) -> Option<MoxelArea> {
@@ -34929,6 +34930,25 @@ mod tests {
         assert!(xml.contains(
             "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<height>30</height>\r\n\t\t<textColor>#009646</textColor>\r\n\t</format>"
         ));
+    }
+
+    #[test]
+    fn parses_moxel_named_area_list_with_drawing_items() {
+        let areas = parse_moxel_area_list(
+            "{3,\"Заголовок\",{1,{1,-1,4,-1,6,00000000-0000-0000-0000-000000000000},0},\"КартинкаШтрихкода\",{2,10},\"Подвал\",{1,{1,-1,11,-1,42,00000000-0000-0000-0000-000000000000},0}}",
+        )
+        .unwrap();
+
+        assert_eq!(areas.len(), 2);
+        assert_eq!(areas[0].name, "Заголовок");
+        assert_eq!(areas[0].area_type, "Rows");
+        assert_eq!(areas[0].begin_row, 4);
+        assert_eq!(areas[0].end_row, 6);
+        assert_eq!(areas[0].begin_column, -1);
+        assert_eq!(areas[0].end_column, -1);
+        assert_eq!(areas[1].name, "Подвал");
+        assert_eq!(areas[1].begin_row, 11);
+        assert_eq!(areas[1].end_row, 42);
     }
 
     #[test]
