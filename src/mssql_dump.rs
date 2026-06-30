@@ -14453,6 +14453,11 @@ struct EventSubscriptionProperties {
     handler: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct XdtoPackageProperties {
+    namespace: String,
+}
+
 struct StyleBodyItem {
     name: String,
     standard_order: Option<usize>,
@@ -15103,6 +15108,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "IntegrationService" {
         let service = parse_integration_service_properties_from_text(text, uuid)?;
         format_integration_service_source_xml(&header, &service, source_version).into_bytes()
+    } else if kind == "XDTOPackage" {
+        let package = parse_xdto_package_properties_from_text(text, uuid)?;
+        format_xdto_package_source_xml(&header, &package, source_version).into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
@@ -16317,6 +16325,23 @@ fn parse_integration_service_properties_from_text(
             .unwrap_or_default(),
         channels,
     })
+}
+
+fn parse_xdto_package_properties_from_text(
+    text: &str,
+    uuid: &str,
+) -> Option<XdtoPackageProperties> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("1")
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+    {
+        return None;
+    }
+    let namespace = fields
+        .get(2)
+        .and_then(|field| parse_1c_quoted_string(field.trim()))
+        .unwrap_or_default();
+    Some(XdtoPackageProperties { namespace })
 }
 
 fn parse_integration_service_channels_from_text(
@@ -19475,6 +19500,23 @@ fn format_functional_options_parameter_source_xml(
         }
         insert.push_str("\t\t\t</Use>\r\n");
     }
+    let marker = "\t\t</Properties>\r\n";
+    if let Some(index) = xml.find(marker) {
+        xml.insert_str(index, &insert);
+    }
+    xml
+}
+
+fn format_xdto_package_source_xml(
+    header: &MetadataHeader,
+    package: &XdtoPackageProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("XDTOPackage", header, source_version);
+    let insert = format!(
+        "\t\t\t<Namespace>{}</Namespace>\r\n",
+        escape_xml_element_text(&package.namespace)
+    );
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
@@ -30102,6 +30144,27 @@ mod tests {
             assert_eq!(extracted.relative_path, expected_path);
             assert_eq!(properties.kind, expected_kind);
             assert_eq!(properties.uuid, uuid);
+            if expected_kind == "XDTOPackage" {
+                let xml = String::from_utf8(extracted.xml.clone()).unwrap();
+                assert!(xml.contains("<Namespace>http://example.com/exchange</Namespace>"));
+                assert!(xml.contains(r#"version="2.20""#));
+                let extracted_v21 = extract_metadata_source_xml_with_refs(
+                    blob,
+                    uuid,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    InfobaseConfigSourceVersion::V2_21,
+                )
+                .unwrap();
+                let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
+                assert!(xml_v21.contains("<Namespace>http://example.com/exchange</Namespace>"));
+                assert!(xml_v21.contains(r#"version="2.21""#));
+                assert!(!xml_v21.contains(r#"version="2.20""#));
+            }
             assert!(!repacked.blob.is_empty());
         }
     }
