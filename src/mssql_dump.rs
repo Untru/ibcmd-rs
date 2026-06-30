@@ -14453,6 +14453,7 @@ struct DataProcessorProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     default_form: Option<String>,
     auxiliary_form: Option<String>,
+    child_forms: Vec<String>,
 }
 
 struct DocumentProperties {
@@ -15872,6 +15873,7 @@ fn parse_data_processor_properties_from_text(
         generated_types,
         default_form: parse_catalog_form_ref(fields.get(4).copied(), form_refs),
         auxiliary_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
+        child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
     })
 }
 
@@ -16076,14 +16078,19 @@ fn is_owned_enum_child_path(path: &Path, enum_name: &str, child_folder: &str) ->
         && parts.get(2) == Some(&child_folder)
 }
 
-fn is_owned_report_child_path(path: &Path, report_name: &str, child_folder: &str) -> bool {
+fn is_owned_metadata_child_path(
+    path: &Path,
+    owner_folder: &str,
+    owner_name: &str,
+    child_folder: &str,
+) -> bool {
     let parts = path
         .iter()
         .filter_map(|part| part.to_str())
         .collect::<Vec<_>>();
     parts.len() == 4
-        && parts.first() == Some(&"Reports")
-        && parts.get(1) == Some(&report_name)
+        && parts.first() == Some(&owner_folder)
+        && parts.get(1) == Some(&owner_name)
         && parts.get(2) == Some(&child_folder)
 }
 
@@ -16210,6 +16217,23 @@ fn owned_report_form_names_in_text_order(
     report_name: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Vec<String> {
+    owned_metadata_form_names_in_text_order(text, "Reports", report_name, form_refs)
+}
+
+fn owned_data_processor_form_names_in_text_order(
+    text: &str,
+    data_processor_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Vec<String> {
+    owned_metadata_form_names_in_text_order(text, "DataProcessors", data_processor_name, form_refs)
+}
+
+fn owned_metadata_form_names_in_text_order(
+    text: &str,
+    owner_folder: &str,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = BTreeSet::new();
     if let Some(form_uuids) = owned_form_uuid_values_in_text_order(text) {
@@ -16218,7 +16242,12 @@ fn owned_report_form_names_in_text_order(
                 continue;
             };
             if form_ref.kind != "Form"
-                || !is_owned_report_child_path(&form_ref.relative_path, report_name, "Forms")
+                || !is_owned_metadata_child_path(
+                    &form_ref.relative_path,
+                    owner_folder,
+                    owner_name,
+                    "Forms",
+                )
             {
                 continue;
             }
@@ -16235,7 +16264,12 @@ fn owned_report_form_names_in_text_order(
         .values()
         .filter(|form_ref| {
             form_ref.kind == "Form"
-                && is_owned_report_child_path(&form_ref.relative_path, report_name, "Forms")
+                && is_owned_metadata_child_path(
+                    &form_ref.relative_path,
+                    owner_folder,
+                    owner_name,
+                    "Forms",
+                )
         })
         .filter_map(|form_ref| {
             source_path_file_stem(&form_ref.relative_path)
@@ -19028,6 +19062,19 @@ fn format_data_processor_source_xml(
             data_processor.auxiliary_form.as_deref(),
         );
         xml.insert_str(index, &properties);
+    }
+    if !data_processor.child_forms.is_empty() {
+        let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+        for form in &data_processor.child_forms {
+            child_objects.push_str(&format!(
+                "\t\t\t<Form>{}</Form>\r\n",
+                escape_xml_element_text(form)
+            ));
+        }
+        child_objects.push_str("\t\t</ChildObjects>\r\n");
+        if let Some(index) = xml.find("\t</DataProcessor>") {
+            xml.insert_str(index, &child_objects);
+        }
     }
     xml
 }
@@ -32293,6 +32340,84 @@ mod tests {
             assert!(xml.contains(
                 "<AuxiliaryForm>DataProcessor.Loader.Form.AssistantForm</AuxiliaryForm>"
             ));
+        }
+    }
+
+    #[test]
+    fn extracts_data_processor_child_forms_to_metadata_xml() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let default_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let auxiliary_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let extra_form_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let form_list_marker = FORM_LIST_MARKERS[0];
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}},{{{form_list_marker},2,{extra_form_uuid},{default_form_uuid}}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let form_refs = BTreeMap::from([
+            (
+                default_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/MainForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                auxiliary_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/AssistantForm.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                extra_form_uuid.to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("DataProcessors/Loader/Forms/ExtraForm.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &data_processor_blob,
+                data_processor_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &form_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8(extracted.xml).unwrap();
+
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<ChildObjects>"));
+            assert!(xml.contains("<Form>ExtraForm</Form>"));
+            assert!(xml.contains("<Form>MainForm</Form>"));
+            assert!(xml.contains("<Form>AssistantForm</Form>"));
+            assert!(
+                xml.find("<Form>ExtraForm</Form>").unwrap()
+                    < xml.find("<Form>MainForm</Form>").unwrap()
+            );
+            assert!(
+                xml.find("<Form>MainForm</Form>").unwrap()
+                    < xml.find("<Form>AssistantForm</Form>").unwrap()
+            );
+            assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
+            assert!(
+                xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap(),
+                "{xml}"
+            );
         }
     }
 
