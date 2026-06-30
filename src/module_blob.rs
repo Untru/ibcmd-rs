@@ -15004,23 +15004,46 @@ fn role_right_value_replacements(
         ));
     }
 
-    let mut replacements = Vec::new();
+    let mut base_entries = Vec::with_capacity(base_count);
     for object_index in 0..base_count {
-        let object = objects.get(base_count - object_index - 1).ok_or_else(|| {
-            anyhow!("Role Rights.xml has no object for base entry {object_index}")
-        })?;
         let entry_range = object_fields[object_index + 1].clone();
         let entry_fields = scan_braced_fields(plain, entry_range.start)?;
+        let object_ref_range = entry_fields.get(0).ok_or_else(|| {
+            anyhow!("base Role object rights entry {object_index} has no object reference")
+        })?;
+        let object_uuid = role_object_ref_uuid(plain, object_ref_range.clone())
+            .with_context(|| format!("base Role object rights entry {object_index}"))?;
         let rights_range = entry_fields.get(1).ok_or_else(|| {
             anyhow!("base Role object rights entry {object_index} has no rights payload")
         })?;
+        base_entries.push((object_uuid, rights_range.clone()));
+    }
+    base_entries.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut replacements = Vec::new();
+    for (object_index, (_, rights_range)) in base_entries.into_iter().enumerate() {
+        let object = objects.get(object_index).ok_or_else(|| {
+            anyhow!("Role Rights.xml has no object for sorted base entry {object_index}")
+        })?;
         replacements.extend(role_object_right_value_replacements(
             plain,
-            rights_range.clone(),
+            rights_range,
             object,
         )?);
     }
     Ok(replacements)
+}
+
+fn role_object_ref_uuid(plain: &str, object_ref_range: Range<usize>) -> Result<String> {
+    let fields = scan_braced_fields(plain, object_ref_range.start)?;
+    let uuid_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("object reference has no UUID field"))?;
+    let uuid = plain[uuid_range.clone()].trim();
+    if !is_uuid_text(uuid) {
+        return Err(anyhow!("object reference has invalid UUID {uuid}"));
+    }
+    Ok(uuid.to_string())
 }
 
 fn role_restriction_template_value_replacements(
@@ -28751,7 +28774,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_role_rights_xml_preserving_base_identifiers() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            b"{10,{2,{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}},{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,499e8968-ca89-43f0-9955-8756058b1b53,-1,1,{499e8968-ca89-43f0-9955-8756058b1b53,{1,{1,\"WHERE OLD\"}}}}}},{1,{\"OldTemplate\",\"WHERE OLD TEMPLATE\"}},4294967295,0,0,4294967295}",
+            b"{10,{2,{{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,0},{1,1,499e8968-ca89-43f0-9955-8756058b1b53,-1,1,{499e8968-ca89-43f0-9955-8756058b1b53,{1,{1,\"WHERE OLD\"}}}}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}}},{1,{\"OldTemplate\",\"WHERE OLD TEMPLATE\"}},4294967295,0,0,4294967295}",
         )?;
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
@@ -28759,18 +28782,18 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<setForAttributesByDefault>false</setForAttributesByDefault>
 	<independentRightsOfChildObjects>true</independentRightsOfChildObjects>
 	<object>
+		<name>Catalog.Products</name>
+		<right><name>View</name><value>true</value></right>
+		<right><name>Read</name><value>false</value></right>
+		<right><name>Update</name><value>true</value></right>
+	</object>
+	<object>
 		<name>InformationRegister.Prices</name>
 		<right>
 			<name>Get</name>
 			<value>true</value>
 			<restrictionByCondition><condition>WHERE TRUE</condition></restrictionByCondition>
 		</right>
-	</object>
-	<object>
-		<name>Catalog.Products</name>
-		<right><name>View</name><value>true</value></right>
-		<right><name>Read</name><value>false</value></right>
-		<right><name>Update</name><value>true</value></right>
 	</object>
 	<restrictionTemplate>
 		<name>NewTemplate</name>

@@ -3845,6 +3845,7 @@ struct RoleRights {
 }
 
 struct RoleObjectRights {
+    object_uuid: String,
     name: String,
     rights: Vec<RoleRight>,
 }
@@ -6013,12 +6014,13 @@ fn parse_role_rights_blob(
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
         objects.push(RoleObjectRights {
+            object_uuid: object_uuid.to_string(),
             name: object_name,
             rights,
         });
     }
 
-    objects.reverse();
+    objects.sort_by(|left, right| left.object_uuid.cmp(&right.object_uuid));
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
     let set_for_attributes_by_default = parse_role_bool_field_or_default(&fields, 4, true)?;
@@ -30499,8 +30501,13 @@ mod tests {
         assert!(!xml.ends_with("\r\n"));
         assert!(xml.contains(r#"<Rights xmlns="http://v8.1c.ru/8.2/roles""#));
         assert!(
-            xml.find("<name>InformationRegister.Prices</name>").unwrap()
+            xml.find("<name>WebService.RemoteApi.Operation.Ping</name>")
+                .unwrap()
                 < xml.find("<name>Catalog.Products</name>").unwrap()
+        );
+        assert!(
+            xml.find("<name>Catalog.Products</name>").unwrap()
+                < xml.find("<name>InformationRegister.Prices</name>").unwrap()
         );
         assert!(xml.contains("<name>Configuration.DemoApp</name>"));
         assert!(xml.contains("<name>MainWindowModeNormal</name>"));
@@ -30552,6 +30559,7 @@ mod tests {
             set_for_attributes_by_default: true,
             independent_rights_of_child_objects: false,
             objects: vec![RoleObjectRights {
+                object_uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
                 name: "Document.Invoice".to_string(),
                 rights: vec![
                     RoleRight {
@@ -30583,6 +30591,38 @@ mod tests {
         assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
         assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
         assert!(!xml.contains("<name>Edit</name>"));
+    }
+
+    #[test]
+    fn role_rights_objects_follow_object_uuid_order() {
+        let object_a = "11111111-1111-4111-8111-111111111111";
+        let object_b = "22222222-2222-4222-8222-222222222222";
+        let object_c = "33333333-3333-4333-8333-333333333333";
+        let rights_text = format!(
+            "{{10,{{3,\
+{{{{1,{object_c},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_a},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_b},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([
+            (object_a.to_string(), "Catalog.Alpha".to_string()),
+            (object_b.to_string(), "Catalog.Beta".to_string()),
+            (object_c.to_string(), "Catalog.Gamma".to_string()),
+        ]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec!["Catalog.Alpha", "Catalog.Beta", "Catalog.Gamma"]
+        );
     }
 
     #[test]
