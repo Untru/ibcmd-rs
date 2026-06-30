@@ -16267,10 +16267,26 @@ struct CommonAttributeProperties {
     property_details: Option<CommonAttributePropertyDetails>,
     auto_use: &'static str,
     content: Vec<CommonAttributeContentItem>,
+    separation: Option<CommonAttributeSeparationProperties>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct CommonAttributePropertyDetails;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CommonAttributeSeparationProperties {
+    data_separation: &'static str,
+    separated_data_use: &'static str,
+    data_separation_value: Option<String>,
+    data_separation_use: Option<String>,
+    conditional_separation: Option<String>,
+    users_separation: &'static str,
+    authentication_separation: &'static str,
+    configuration_extensions_separation: &'static str,
+    indexing: &'static str,
+    full_text_search: &'static str,
+    data_history: &'static str,
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct CommonAttributeContentItem {
@@ -19541,6 +19557,7 @@ fn parse_common_attribute_properties_from_text(
         property_details: parse_common_attribute_property_details(&fields),
         auto_use,
         content,
+        separation: parse_common_attribute_separation_properties(&fields, object_refs),
     })
 }
 
@@ -19548,6 +19565,36 @@ fn parse_common_attribute_property_details(
     fields: &[&str],
 ) -> Option<CommonAttributePropertyDetails> {
     (fields.len() > 3).then_some(CommonAttributePropertyDetails)
+}
+
+fn parse_common_attribute_separation_properties(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<CommonAttributeSeparationProperties> {
+    Some(CommonAttributeSeparationProperties {
+        data_separation: common_attribute_use_xml(fields.get(3)?.trim())?,
+        separated_data_use: common_attribute_separated_data_use_xml(fields.get(4)?.trim())?,
+        users_separation: common_attribute_reversed_use_xml(fields.get(5)?.trim())?,
+        authentication_separation: common_attribute_reversed_use_xml(fields.get(6)?.trim())?,
+        data_separation_value: parse_common_attribute_optional_ref(fields.get(7)?, object_refs),
+        data_separation_use: parse_common_attribute_optional_ref(fields.get(8)?, object_refs),
+        conditional_separation: parse_common_attribute_optional_ref(fields.get(9)?, object_refs),
+        configuration_extensions_separation: common_attribute_use_xml(fields.get(10)?.trim())?,
+        indexing: common_attribute_indexing_xml(fields.get(11)?.trim())?,
+        full_text_search: common_attribute_full_text_search_xml(fields.get(12)?.trim())?,
+        data_history: common_attribute_use_xml(fields.get(14)?.trim())?,
+    })
+}
+
+fn parse_common_attribute_optional_ref(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    let uuid = fields
+        .get(1)
+        .and_then(|field| parse_non_zero_uuid(field.trim()))?;
+    object_refs.get(&uuid).cloned()
 }
 
 fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<&'static str> {
@@ -19561,6 +19608,44 @@ fn common_attribute_auto_use_xml(value: &str) -> Option<&'static str> {
         "0" => Some("DontUse"),
         "1" => Some("Use"),
         "2" => Some("AutoUse"),
+        _ => None,
+    }
+}
+
+fn common_attribute_use_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        _ => None,
+    }
+}
+
+fn common_attribute_reversed_use_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Use"),
+        "1" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+fn common_attribute_separated_data_use_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "1" => Some("Independently"),
+        _ => None,
+    }
+}
+
+fn common_attribute_indexing_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontIndex"),
+        _ => None,
+    }
+}
+
+fn common_attribute_full_text_search_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Use"),
+        "1" => Some("DontUse"),
         _ => None,
     }
 }
@@ -23945,6 +24030,12 @@ fn format_common_attribute_source_xml(
             escape_xml_text(common_attribute.auto_use)
         ),
     );
+    if let Some(separation) = &common_attribute.separation {
+        insert_metadata_properties_xml(
+            &mut xml,
+            &format_common_attribute_separation_xml(separation),
+        );
+    }
     xml
 }
 
@@ -23969,6 +24060,55 @@ fn format_common_attribute_property_details_xml() -> &'static str {
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
 \t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n"
+}
+
+fn format_common_attribute_separation_xml(
+    properties: &CommonAttributeSeparationProperties,
+) -> String {
+    format!(
+        "\t\t\t<DataSeparation>{}</DataSeparation>\r\n\
+\t\t\t<SeparatedDataUse>{}</SeparatedDataUse>\r\n\
+\t\t\t{}\r\n\
+\t\t\t{}\r\n\
+\t\t\t{}\r\n\
+\t\t\t<UsersSeparation>{}</UsersSeparation>\r\n\
+\t\t\t<AuthenticationSeparation>{}</AuthenticationSeparation>\r\n\
+\t\t\t<ConfigurationExtensionsSeparation>{}</ConfigurationExtensionsSeparation>\r\n\
+\t\t\t<Indexing>{}</Indexing>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n\
+\t\t\t<DataHistory>{}</DataHistory>\r\n",
+        escape_xml_text(properties.data_separation),
+        escape_xml_text(properties.separated_data_use),
+        format_common_attribute_optional_ref_xml(
+            "DataSeparationValue",
+            properties.data_separation_value.as_deref()
+        ),
+        format_common_attribute_optional_ref_xml(
+            "DataSeparationUse",
+            properties.data_separation_use.as_deref()
+        ),
+        format_common_attribute_optional_ref_xml(
+            "ConditionalSeparation",
+            properties.conditional_separation.as_deref()
+        ),
+        escape_xml_text(properties.users_separation),
+        escape_xml_text(properties.authentication_separation),
+        escape_xml_text(properties.configuration_extensions_separation),
+        escape_xml_text(properties.indexing),
+        escape_xml_text(properties.full_text_search),
+        escape_xml_text(properties.data_history)
+    )
+}
+
+fn format_common_attribute_optional_ref_xml(name: &str, value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!(
+            "<{name}>{}</{name}>",
+            escape_xml_element_text(value),
+            name = name
+        ),
+        None => format!("<{name}/>"),
+    }
 }
 
 fn format_functional_options_parameter_source_xml(
@@ -36885,6 +37025,102 @@ mod tests {
             assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
             assert!(xml.contains("<Content/>"));
             assert!(xml.contains("<AutoUse>Use</AutoUse>"));
+            assert!(!xml.contains("ConfigDumpInfo"));
+        }
+    }
+
+    #[test]
+    fn extracts_common_attribute_xml_with_native_separation_tail() {
+        let uuid = "33333333-3333-4333-8333-333333333333";
+        let data_value_uuid = "44444444-4444-4444-8444-444444444444";
+        let data_use_uuid = "55555555-5555-4555-8555-555555555555";
+        let conditional_uuid = "66666666-6666-4666-8666-666666666666";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let plain = r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"SeparatedScope",
+{1,"en","Separated scope"},"",0,0,@ZERO_UUID@,0},
+{"Pattern",
+{"S",20,1}
+}
+}
+},
+{1,0},0,1,1,1,
+{1,@DATA_VALUE_UUID@},
+{1,@DATA_USE_UUID@},
+{1,@CONDITIONAL_UUID@},0,0,0,0,1},0}"#
+            .replace("@UUID@", uuid)
+            .replace("@DATA_VALUE_UUID@", data_value_uuid)
+            .replace("@DATA_USE_UUID@", data_use_uuid)
+            .replace("@CONDITIONAL_UUID@", conditional_uuid)
+            .replace("@ZERO_UUID@", zero_uuid);
+        let blob = deflate_for_test(plain.as_bytes());
+        let object_refs = BTreeMap::from([
+            (
+                data_value_uuid.to_string(),
+                "CommonAttribute.DataArea".to_string(),
+            ),
+            (
+                data_use_uuid.to_string(),
+                "CommonAttribute.DataUse".to_string(),
+            ),
+            (
+                conditional_uuid.to_string(),
+                "CommonAttribute.SeparateByCompany".to_string(),
+            ),
+        ]);
+
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let extracted = extract_metadata_source_xml_with_refs(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &object_refs,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                source_version,
+            )
+            .unwrap();
+            let xml = String::from_utf8_lossy(&extracted.xml);
+
+            assert_eq!(
+                extracted.relative_path,
+                PathBuf::from("CommonAttributes").join("SeparatedScope.xml")
+            );
+            assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+            assert!(xml.contains("<AutoUse>Use</AutoUse>"));
+            assert!(xml.contains("<DataSeparation>DontUse</DataSeparation>"));
+            assert!(xml.contains("<SeparatedDataUse>Independently</SeparatedDataUse>"));
+            assert!(
+                xml.contains("<DataSeparationValue>CommonAttribute.DataArea</DataSeparationValue>")
+            );
+            assert!(xml.contains("<DataSeparationUse>CommonAttribute.DataUse</DataSeparationUse>"));
+            assert!(xml.contains(
+                "<ConditionalSeparation>CommonAttribute.SeparateByCompany</ConditionalSeparation>"
+            ));
+            assert!(xml.contains("<UsersSeparation>DontUse</UsersSeparation>"));
+            assert!(xml.contains("<AuthenticationSeparation>DontUse</AuthenticationSeparation>"));
+            assert!(xml.contains(
+                "<ConfigurationExtensionsSeparation>DontUse</ConfigurationExtensionsSeparation>"
+            ));
+            assert!(xml.contains("<Indexing>DontIndex</Indexing>"));
+            assert!(xml.contains("<FullTextSearch>Use</FullTextSearch>"));
+            assert!(xml.contains("<DataHistory>Use</DataHistory>"));
+            assert!(
+                xml.find("<AutoUse>Use</AutoUse>").unwrap()
+                    < xml
+                        .find("<DataSeparation>DontUse</DataSeparation>")
+                        .unwrap()
+            );
+            assert!(!xml.contains(data_value_uuid));
             assert!(!xml.contains("ConfigDumpInfo"));
         }
     }
