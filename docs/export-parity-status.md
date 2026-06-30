@@ -48,6 +48,10 @@ Incremental selected verification after this snapshot:
 | Round 11 Role Rights.xml slice | unit-level rights packer verification | omitted false/no-restriction rights are treated as false while preserving base table shape |
 | Round 11 InformationRegister metadata slice | unit-level metadata XML verification | `InformationRegister` emits generated type `InternalInfo` entries |
 | Round 11 source staging readiness slice | unit-level staging verification | common/object/nested command module bodies are prepared without active module blobs |
+| Round 12 AccumulationRegister metadata slice | unit-level metadata XML verification | `AccumulationRegister` emits generated type `InternalInfo` entries |
+| Round 12 Form.xml slice | unit-level packer verification | `Pages` / `Page` layout items support additional creation and patch properties |
+| Round 12 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits nested `CommonModule` child object headers |
+| Round 12 source staging readiness slice | unit-level staging verification | `ExchangePlan/Ext/Content.xml` rows are prepared without active Config blobs |
 
 Performance note for selected extraction:
 
@@ -148,5 +152,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #13 | omitted false Role Rights.xml entries | merged to `master` in round 11 |
 | #18 | InformationRegister generated type InternalInfo | merged to `master` in round 11 |
 | #21 | module body staging without active module blobs | merged to `master` in round 11 |
+| #18 | AccumulationRegister generated type InternalInfo | merged to `master` in round 12 |
+| #16 | Form.xml `Pages` / `Page` layout properties | merged to `master` in round 12 |
+| #22 | Configuration.xml nested CommonModule child headers | merged to `master` in round 12 |
+| #21 | ExchangePlan Content.xml staging without active Config query | merged to `master` in round 12 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
