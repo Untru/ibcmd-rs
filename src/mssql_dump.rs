@@ -14717,6 +14717,7 @@ struct SubsystemProperties {
 
 struct ExchangePlanProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
 }
 
 struct RegisterProperties {
@@ -16040,7 +16041,12 @@ fn parse_exchange_plan_properties_from_text(
         "Manager",
     );
 
-    Some(ExchangePlanProperties { generated_types })
+    let use_standard_commands = parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true);
+
+    Some(ExchangePlanProperties {
+        generated_types,
+        use_standard_commands,
+    })
 }
 
 fn parse_register_properties_from_text(
@@ -19400,6 +19406,15 @@ fn format_exchange_plan_source_xml(
     let internal_info = format_generated_types_internal_info_xml(&exchange_plan.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        xml.insert_str(
+            index,
+            &format!(
+                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(exchange_plan.use_standard_commands)
+            ),
+        );
     }
     xml
 }
@@ -30857,6 +30872,13 @@ mod tests {
         assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
         assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
         assert!(xml.find("\t\t<InternalInfo>").unwrap() < xml.find("\t\t<Properties>").unwrap());
+        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+        assert!(
+            xml.find("<Comment>exchange comment</Comment>").unwrap()
+                < xml
+                    .find("<UseStandardCommands>false</UseStandardCommands>")
+                    .unwrap()
+        );
     }
 
     #[test]
