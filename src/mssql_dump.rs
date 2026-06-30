@@ -13203,7 +13203,9 @@ fn format_form_child_item_xml(
             escape_xml_text(group)
         ));
     }
-    if let Some(scroll_on_compress) = item.scroll_on_compress {
+    if let Some(scroll_on_compress) =
+        form_bool_when_not_native_default(item.scroll_on_compress, false)
+    {
         xml.push_str(&format!(
             "{tab}\t<ScrollOnCompress>{}</ScrollOnCompress>\r\n",
             if scroll_on_compress { "true" } else { "false" }
@@ -13446,6 +13448,10 @@ fn format_form_list_settings_standard_section_xml(
     }
     xml.push_str(&format!("\t\t\t\t\t</dcsset:{name}>\r\n"));
     xml
+}
+
+fn form_bool_when_not_native_default(value: Option<bool>, native_default: bool) -> Option<bool> {
+    value.filter(|value| *value != native_default)
 }
 
 fn format_form_parameters_xml(parameters: &[FormParameter]) -> String {
@@ -29842,8 +29848,29 @@ mod tests {
         assert!(xml.contains("<v8:content>Pages tip</v8:content>"));
         assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
         assert!(xml.contains("<Group>HorizontalIfPossible</Group>"));
-        assert!(xml.contains("<ScrollOnCompress>false</ScrollOnCompress>"));
+        assert!(!xml.contains("<ScrollOnCompress>false</ScrollOnCompress>"));
         assert!(xml.contains("<v8:content>Page tip</v8:content>"));
+    }
+
+    #[test]
+    fn extracts_form_page_scroll_on_compress_true() {
+        let item = parse_form_child_item(
+            r#"{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,0},{1,0},3,1,1}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.scroll_on_compress, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+
+        assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
+        assert!(xml.contains("<ScrollOnCompress>true</ScrollOnCompress>"));
     }
 
     #[test]
@@ -30049,7 +30076,7 @@ mod tests {
             form_xml
                 .matches("<ScrollOnCompress>false</ScrollOnCompress>")
                 .count(),
-            4,
+            0,
             "{}",
             form_xml
         );
