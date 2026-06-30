@@ -40,8 +40,9 @@ use crate::cli::{
 };
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, command_interface_xml_can_pack_without_base, form_body_base_free_blockers,
-    hex_sha256, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
+    VersionReplacement, business_process_flowchart_base_free_blockers,
+    command_interface_xml_can_pack_without_base, form_body_base_free_blockers, hex_sha256,
+    module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
@@ -1004,17 +1005,29 @@ fn metadata_body_bootstrap_rows(
             properties,
             object_path,
         )),
-        "BusinessProcess" => rows.extend(optional_body_bootstrap_row(
-            source_root,
-            properties,
-            object_path,
-            infer_business_process_flowchart_body_path(xml_path),
-            "7",
-            "flowchart_body",
-            BootstrapGeneration::RequiresBaseBlob,
-            true,
-            "Flowchart.xml packer preserves existing flowchart item shape and identifiers from the base blob",
-        )),
+        "BusinessProcess" => {
+            let body_path = infer_business_process_flowchart_body_path(xml_path);
+            if body_path.exists() {
+                let reason = business_process_flowchart_base_free_blocker_reason(&body_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to audit BusinessProcess Flowchart base-free blockers for {}",
+                            body_path.display()
+                        )
+                    })?;
+                rows.push(bootstrap_row_report(
+                    "metadata_object",
+                    &properties.kind,
+                    object_path,
+                    source_relative_path(source_root, &body_path),
+                    format!("{}.7", properties.uuid),
+                    "flowchart_body",
+                    BootstrapGeneration::RequiresBaseBlob,
+                    true,
+                    &reason,
+                ));
+            }
+        }
         "Catalog" | "ChartOfCharacteristicTypes" => rows.extend(optional_body_bootstrap_row(
             source_root,
             properties,
@@ -1301,6 +1314,20 @@ fn role_rights_base_free_blocker_reason(body_path: &Path) -> Result<String> {
     let blockers = role_rights_base_free_blockers(&xml)?;
     Ok(format!(
         "Role Rights.xml requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn business_process_flowchart_base_free_blocker_reason(body_path: &Path) -> Result<String> {
+    let xml = fs::read(body_path).with_context(|| {
+        format!(
+            "failed to read BusinessProcess Flowchart XML {}",
+            body_path.display()
+        )
+    })?;
+    let blockers = business_process_flowchart_base_free_blockers(&xml)?;
+    Ok(format!(
+        "BusinessProcess Flowchart.xml requires active base blob: {}",
         blockers.join("; ")
     ))
 }
@@ -7746,6 +7773,86 @@ mod tests {
         assert!(row.reason.contains("platform right UUID slots"));
         assert!(row.reason.contains("restricted-right payload shape"));
         assert!(row.reason.contains("restriction templates"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_business_process_flowchart_body_with_precise_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-flowchart-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let process_xml = root.join("BusinessProcesses").join("Approval.xml");
+        let flowchart_path = root
+            .join("BusinessProcesses")
+            .join("Approval")
+            .join("Ext")
+            .join("Flowchart.xml");
+        fs::create_dir_all(flowchart_path.parent().unwrap()).unwrap();
+        fs::write(
+            &process_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <BusinessProcess uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Approval</Name></Properties>
+  </BusinessProcess>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &flowchart_path,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/gsrc" version="2.20">
+	<Items>
+		<Start id="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+			<Properties>
+				<Name>Start</Name>
+				<TabOrder>0</TabOrder>
+				<Event name="BeforeStart">BeforeStartHandler</Event>
+			</Properties>
+		</Start>
+		<Activity id="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+			<Properties>
+				<Name>Approve</Name>
+				<TabOrder>1</TabOrder>
+				<Explanation>Approve the request</Explanation>
+				<TaskDescription>Review and approve</TaskDescription>
+				<Event name="OnExecute">OnExecuteHandler</Event>
+			</Properties>
+		</Activity>
+	</Items>
+</GraphicalSchema>"#,
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&process_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "flowchart_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(
+            row.source_path,
+            "BusinessProcesses/Approval/Ext/Flowchart.xml"
+        );
+        assert!(
+            row.reason
+                .contains("BusinessProcess Flowchart.xml requires active base blob")
+        );
+        assert!(row.reason.contains("Activity=1"));
+        assert!(row.reason.contains("Start=1"));
+        assert!(row.reason.contains("serialized item table order"));
+        assert!(row.reason.contains("event handlers"));
+        assert!(row.reason.contains("task descriptions"));
 
         let _ = fs::remove_dir_all(root);
     }

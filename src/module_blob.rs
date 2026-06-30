@@ -616,6 +616,7 @@ struct PredefinedDataXmlItem {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FlowchartXmlItem {
+    kind: String,
     id: String,
     name: String,
     tab_order: String,
@@ -14983,6 +14984,53 @@ pub fn pack_business_process_flowchart_blob_from_xml(
     })
 }
 
+pub fn business_process_flowchart_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+    let items = parse_flowchart_xml(xml)?;
+    let mut kind_counts = BTreeMap::<String, usize>::new();
+    let mut event_count = 0usize;
+    let mut explanation_count = 0usize;
+    let mut task_description_count = 0usize;
+    for item in &items {
+        *kind_counts.entry(item.kind.clone()).or_default() += 1;
+        event_count += item.events.len();
+        if item.explanation.is_some() {
+            explanation_count += 1;
+        }
+        if item.task_description.is_some() {
+            task_description_count += 1;
+        }
+    }
+    let kind_summary = if kind_counts.is_empty() {
+        "none".to_string()
+    } else {
+        kind_counts
+            .iter()
+            .map(|(kind, count)| format!("{kind}={count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut blockers = Vec::new();
+    blockers.push(format!(
+        "source XML has {} flowchart items ({kind_summary}) addressed by id/name, but the Config row owns the serialized item table order and per-item type code slots",
+        items.len()
+    ));
+    blockers.push(
+        "source XML carries editable values only; staging currently patches the existing base item payloads to preserve platform-owned geometry, connector, and nested field shapes"
+            .to_string(),
+    );
+    if event_count > 0 {
+        blockers.push(format!(
+            "source XML has {event_count} event handlers, but handler positions are selected from the base event slot table for each flowchart item type"
+        ));
+    }
+    if explanation_count > 0 || task_description_count > 0 {
+        blockers.push(format!(
+            "source XML has {explanation_count} explanations and {task_description_count} task descriptions, but their serialized field positions are preserved from the base blob"
+        ));
+    }
+    Ok(blockers)
+}
+
 fn role_right_value_replacements(
     plain: &str,
     objects_range: Range<usize>,
@@ -16451,6 +16499,7 @@ fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
                     let id = xml_attr_value(&event, "id")
                         .ok_or_else(|| anyhow!("Flowchart item has no id attribute"))?;
                     current = Some(FlowchartXmlItem {
+                        kind: local.clone(),
                         id,
                         name: String::new(),
                         tab_order: String::new(),
@@ -28935,6 +28984,63 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             blockers
                 .iter()
                 .any(|blocker| blocker.contains("trailing field positions"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn audits_business_process_flowchart_as_base_dependent_with_precise_blockers()
+    -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/gsrc" version="2.20">
+	<Items>
+		<Start id="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+			<Properties>
+				<Name>Start</Name>
+				<TabOrder>0</TabOrder>
+				<Event name="BeforeStart">BeforeStartHandler</Event>
+			</Properties>
+		</Start>
+		<Activity id="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+			<Properties>
+				<Name>Review</Name>
+				<TabOrder>1</TabOrder>
+				<Explanation>Review the request</Explanation>
+				<TaskDescription>Approve or reject</TaskDescription>
+				<Event name="OnExecute">OnExecuteHandler</Event>
+			</Properties>
+		</Activity>
+	</Items>
+</GraphicalSchema>
+"#;
+
+        let blockers = super::business_process_flowchart_base_free_blockers(xml)?;
+
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("Activity=1") && blocker.contains("Start=1"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("serialized item table order"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("geometry, connector, and nested field shapes"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("2 event handlers"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("1 explanations and 1 task descriptions"))
         );
 
         Ok(())
