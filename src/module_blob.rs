@@ -15764,6 +15764,7 @@ fn role_child_object_reference(reference: &str) -> Option<(&str, &str, &str)> {
 
 fn role_child_object_tag(tag: &str) -> Option<&'static str> {
     match tag {
+        "AddressingAttribute" => Some("AddressingAttribute"),
         "Attribute" => Some("Attribute"),
         "Dimension" => Some("Dimension"),
         "Resource" => Some("Resource"),
@@ -30300,6 +30301,44 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         ));
         assert!(text.contains(
             "{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0,0},{0,287b74b8-3a66-4a76-ba27-4f1f6a93770e,1}"
+        ));
+
+        let _ = std::fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn packs_role_rights_task_addressing_attribute_by_source_ref() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-role-rights-task-addressing-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Tasks"))?;
+        std::fs::write(
+            root.join("Tasks/ExecutorTask.xml"),
+            br#"<MetaDataObject><Task uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"><Properties><Name>ExecutorTask</Name></Properties><ChildObjects><AddressingAttribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"><Properties><Name>Assignee</Name></Properties></AddressingAttribute></ChildObjects></Task></MetaDataObject>"#,
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let base = super::deflate_raw(
+            b"{10,{1,{{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}}},{0},0,1,0,4294967295}",
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Rights xmlns="http://v8.1c.ru/8.2/roles" version="2.20">
+	<setForNewObjects>false</setForNewObjects>
+	<setForAttributesByDefault>true</setForAttributesByDefault>
+	<independentRightsOfChildObjects>false</independentRightsOfChildObjects>
+	<object>
+		<name>Task.ExecutorTask.AddressingAttribute.Assignee</name>
+		<right><name>View</name><value>true</value></right>
+	</object>
+</Rights>
+"#;
+
+        let packed = super::pack_role_rights_blob_from_xml_with_source(&base, xml, Some(&source))?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(
+            "{1,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,0,0},{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}"
         ));
 
         let _ = std::fs::remove_dir_all(root);

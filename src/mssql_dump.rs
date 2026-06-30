@@ -4948,6 +4948,15 @@ fn standalone_child_reference(
     {
         return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
     }
+    if owner_kind == "Task"
+        && is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "Task.{owner_name}.AddressingAttribute.{}",
+            child.name
+        ));
+    }
     if owner_kind == "DataProcessor"
         && is_offset_inside_metadata_object_code(text, marker_start, 27)
         && is_offset_inside_tabular_section_attribute_list(text, marker_start)
@@ -38390,6 +38399,36 @@ mod tests {
         .unwrap();
 
         assert_eq!(reference, "Task.ExecutorTask.Attribute.StartDate");
+    }
+
+    #[test]
+    fn resolves_task_code4_code27_addressing_attribute_reference() {
+        let attribute_uuid = "11111111-2222-4222-8222-111111111111";
+        let text = format!(
+            "{{4,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Assignee\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Assignee".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "Task",
+            "ExecutorTask",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, "Task.ExecutorTask.AddressingAttribute.Assignee");
     }
 
     #[test]
