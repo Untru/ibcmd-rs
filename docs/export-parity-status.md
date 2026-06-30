@@ -40,6 +40,10 @@ Incremental selected verification after this snapshot:
 | Round 9 DataProcessor metadata slice | unit-level metadata XML verification | owned `DataProcessor` template child refs are emitted in `<ChildObjects>` |
 | Round 9 source staging readiness slice | unit-level staging verification | `CommonPicture` and configuration picture rows are prepared without reading active `Config` blobs |
 | Round 9 selected command-interface performance slice | unit-level selected export verification | selected `.9` command refs can use targeted owner metadata rows and keep broad fallback |
+| Round 10 Form.xml slice | unit-level packer verification | `TextDocumentField/Width` now patches existing and newly created form layout items |
+| Round 10 MXL template slice | unit-level formatter verification | Moxel system style `-13` is emitted as `style:FieldTextColor` |
+| Round 10 Configuration.xml slice | unit-level metadata XML verification | root `Configuration.xml` emits nested `CommonAttribute` child object headers |
+| Round 10 source staging readiness slice | unit-level staging verification | object/form `Help.xml` rows use deterministic body ids without querying active `Config` |
 
 Performance note for selected extraction:
 
@@ -132,5 +136,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #15 | DataProcessor owned template child refs | merged to `master` in round 9 |
 | #19 | selected command-interface targeted owner refs | merged to `master` in round 9; issue stays open pending real lab timing |
 | #21 | CommonPicture/configuration picture staging without base blob fetch | merged to `master` in round 9 |
+| #16 | Form.xml `TextDocumentField/Width` layout packing | merged to `master` in round 10 |
+| #17 | MXL `style:FieldTextColor` extraction | merged to `master` in round 10 |
+| #22 | Configuration.xml nested CommonAttribute child headers | merged to `master` in round 10 |
+| #21 | Help.xml staging without active Config query | merged to `master` in round 10 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
