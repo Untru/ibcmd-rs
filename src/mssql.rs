@@ -53,8 +53,8 @@ use crate::module_blob::{
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
     patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
-    raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
-    raw_deflated_plain_sha256, role_rights_base_free_blockers,
+    predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
+    raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -1028,17 +1028,32 @@ fn metadata_body_bootstrap_rows(
                 ));
             }
         }
-        "Catalog" | "ChartOfCharacteristicTypes" => rows.extend(optional_body_bootstrap_row(
-            source_root,
-            properties,
-            object_path,
-            infer_predefined_data_body_path(xml_path),
-            predefined_data_body_suffix(&properties.kind).unwrap_or(""),
-            "predefined_data_body",
-            BootstrapGeneration::RequiresBaseBlob,
-            true,
-            "Predefined.xml packer maps source items onto the existing predefined data table in the base blob",
-        )),
+        "Catalog" | "ChartOfCharacteristicTypes" => {
+            let body_path = infer_predefined_data_body_path(xml_path);
+            if body_path.exists() {
+                let reason = predefined_data_base_free_blocker_reason(&body_path).with_context(|| {
+                    format!(
+                        "failed to audit PredefinedData base-free blockers for {}",
+                        body_path.display()
+                    )
+                })?;
+                rows.push(bootstrap_row_report(
+                    "metadata_object",
+                    &properties.kind,
+                    object_path,
+                    source_relative_path(source_root, &body_path),
+                    format!(
+                        "{}.{}",
+                        properties.uuid,
+                        predefined_data_body_suffix(&properties.kind).unwrap_or("")
+                    ),
+                    "predefined_data_body",
+                    BootstrapGeneration::RequiresBaseBlob,
+                    true,
+                    &reason,
+                ));
+            }
+        }
         "ExchangePlan" => rows.extend(optional_body_bootstrap_row(
             source_root,
             properties,
@@ -1314,6 +1329,16 @@ fn role_rights_base_free_blocker_reason(body_path: &Path) -> Result<String> {
     let blockers = role_rights_base_free_blockers(&xml)?;
     Ok(format!(
         "Role Rights.xml requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn predefined_data_base_free_blocker_reason(body_path: &Path) -> Result<String> {
+    let xml = fs::read(body_path)
+        .with_context(|| format!("failed to read PredefinedData XML {}", body_path.display()))?;
+    let blockers = predefined_data_base_free_blockers(&xml)?;
+    Ok(format!(
+        "Predefined.xml requires active base blob: {}",
         blockers.join("; ")
     ))
 }
@@ -7590,6 +7615,82 @@ mod tests {
         assert_eq!(row.source_path, "ExchangePlans/Sync/Ext/Content.xml");
         assert!(!row.current_staging_fetches_base_blob);
         assert!(row.reason.contains("without reading the active Config row"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_predefined_data_with_precise_base_blocker() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-predefined-readiness-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let catalog_xml = root.join("Catalogs").join("Products.xml");
+        let predefined_path = root
+            .join("Catalogs")
+            .join("Products")
+            .join("Ext")
+            .join("Predefined.xml");
+        fs::create_dir_all(predefined_path.parent().unwrap()).unwrap();
+        fs::write(
+            &catalog_xml,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Products</Name></Properties>
+  </Catalog>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            &predefined_path,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<PredefinedData xmlns="http://v8.1c.ru/8.3/xcf/predef" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CatalogPredefinedItems" version="2.20">
+	<Item id="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+		<Name>Folder</Name>
+		<Code>F</Code>
+		<Description>Folder description</Description>
+		<IsFolder>true</IsFolder>
+		<ChildItems>
+			<Item id="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+				<Name>Item</Name>
+				<Code>I</Code>
+				<Description>Item description</Description>
+				<IsFolder>false</IsFolder>
+			</Item>
+		</ChildItems>
+	</Item>
+</PredefinedData>
+"#,
+        )
+        .unwrap();
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&catalog_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "predefined_data_body")
+            .unwrap();
+
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(
+            row.config_file_name,
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1c"
+        );
+        assert_eq!(row.source_path, "Catalogs/Products/Ext/Predefined.xml");
+        assert!(
+            row.reason
+                .contains("Predefined.xml requires active base blob")
+        );
+        assert!(row.reason.contains("2 predefined items"));
+        assert!(row.reason.contains("patches existing base rows"));
+        assert!(row.reason.contains("type UUID slots"));
 
         let _ = fs::remove_dir_all(root);
     }

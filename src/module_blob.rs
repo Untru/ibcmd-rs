@@ -14953,6 +14953,27 @@ pub fn pack_predefined_data_blob_from_xml(
     })
 }
 
+pub fn predefined_data_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+    let items = parse_predefined_data_xml(xml)?;
+    let flat = flatten_predefined_xml_items(&items)?;
+    let folders = flat.values().filter(|item| item.is_folder).count();
+    let child_links = flat.len().saturating_sub(items.len());
+    let folder_word = if folders == 1 { "folder" } else { "folders" };
+    let child_link_word = if child_links == 1 {
+        "nested child link"
+    } else {
+        "nested child links"
+    };
+    Ok(vec![
+        format!(
+            "source XML has {} predefined items ({folders} {folder_word}, {child_links} {child_link_word}) addressed by UUID, but the Config row owns the serialized predefined table order and parent/children rowset shape",
+            flat.len()
+        ),
+        "source XML carries editable item values only; staging currently patches existing base rows and fails for source items missing from the base blob".to_string(),
+        "base PredefinedData row preserves type UUID slots, parent reference slots, value count, and trailing fields that are not fully represented in Predefined.xml".to_string(),
+    ])
+}
+
 pub fn pack_business_process_flowchart_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
@@ -29302,6 +29323,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains(r#"{"S","NI"}"#));
         assert!(text.contains(r#"{"S","New item description"}"#));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn audits_predefined_data_as_base_dependent_with_precise_blockers() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<PredefinedData xmlns="http://v8.1c.ru/8.3/xcf/predef" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CatalogPredefinedItems" version="2.20">
+	<Item id="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
+		<Name>Folder</Name>
+		<Code>F</Code>
+		<Description>Folder description</Description>
+		<IsFolder>true</IsFolder>
+		<ChildItems>
+			<Item id="cccccccc-cccc-4ccc-cccc-cccccccccccc">
+				<Name>Item</Name>
+				<Code>I</Code>
+				<Description>Item description</Description>
+				<IsFolder>false</IsFolder>
+			</Item>
+		</ChildItems>
+	</Item>
+</PredefinedData>
+"#;
+
+        let blockers = super::predefined_data_base_free_blockers(xml)?;
+
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("2 predefined items"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("1 folder") && blocker.contains("1 nested"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("patches existing base rows"))
+        );
+        assert!(
+            blockers
+                .iter()
+                .any(|blocker| blocker.contains("type UUID slots"))
+        );
 
         Ok(())
     }
