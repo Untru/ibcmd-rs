@@ -3125,7 +3125,6 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
     const CLOSE: &str = "</v8:TypeId>";
     const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
     const CFG_PREFIX: &str = "cfg:";
-    const DCS_CFG_PREFIX: &str = "d5p1";
     const CURRENT_CONFIG_NS: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
 
     let mut rewritten = String::with_capacity(xml.len());
@@ -3138,9 +3137,10 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
         };
         let value_end = value_start + relative_end;
         let type_id = xml[value_start..value_end].trim();
+        let dcs_cfg_prefix = data_composition_current_config_prefix(xml, start);
         let replacement = if type_id.eq_ignore_ascii_case(ANY_IB_REF_TYPE_ID) {
             Some(format!(
-                "<v8:TypeSet xmlns:{DCS_CFG_PREFIX}=\"{CURRENT_CONFIG_NS}\">{DCS_CFG_PREFIX}:AnyIBRef</v8:TypeSet>"
+                "<v8:TypeSet xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_NS}\">{dcs_cfg_prefix}:AnyIBRef</v8:TypeSet>"
             ))
         } else {
             type_index
@@ -3148,7 +3148,7 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
                 .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
                 .map(|reference| {
                     format!(
-                        "<v8:Type xmlns:{DCS_CFG_PREFIX}=\"{CURRENT_CONFIG_NS}\">{DCS_CFG_PREFIX}:{}</v8:Type>",
+                        "<v8:Type xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_NS}\">{dcs_cfg_prefix}:{}</v8:Type>",
                         escape_xml_text(reference)
                     )
                 })
@@ -3167,6 +3167,117 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
     }
     rewritten.push_str(&xml[cursor..]);
     *xml = rewritten;
+}
+
+#[derive(Debug)]
+struct DcsXmlStackEntry<'a> {
+    name: &'a str,
+    xsi_type: Option<&'a str>,
+}
+
+fn data_composition_current_config_prefix(xml: &str, position: usize) -> &'static str {
+    let mut stack = Vec::<DcsXmlStackEntry<'_>>::new();
+    let mut cursor = 0usize;
+    let bytes = xml.as_bytes();
+    let limit = position.min(xml.len());
+    while cursor < limit {
+        let Some(relative_start) = xml[cursor..limit].find('<') else {
+            break;
+        };
+        let start = cursor + relative_start;
+        if xml[start..].starts_with("<!--") {
+            let Some(relative_end) = xml[start + 4..limit].find("-->") else {
+                break;
+            };
+            cursor = start + 4 + relative_end + 3;
+            continue;
+        }
+        if xml[start..].starts_with("<![CDATA[") {
+            let Some(relative_end) = xml[start + 9..limit].find("]]>") else {
+                break;
+            };
+            cursor = start + 9 + relative_end + 3;
+            continue;
+        }
+        let Some(end) = find_xml_tag_end(bytes, start + 1, limit) else {
+            break;
+        };
+        let tag = xml[start + 1..end].trim();
+        if tag.starts_with('?') || tag.starts_with('!') {
+            cursor = end + 1;
+            continue;
+        }
+        if let Some(end_name) = tag.strip_prefix('/') {
+            let end_name = dcs_xml_tag_name(end_name);
+            if let Some(index) = stack.iter().rposition(|entry| entry.name == end_name) {
+                stack.truncate(index);
+            }
+        } else {
+            let self_closing = tag.ends_with('/');
+            let tag = tag.strip_suffix('/').unwrap_or(tag).trim_end();
+            let name = dcs_xml_tag_name(tag);
+            if !self_closing && !name.is_empty() {
+                stack.push(DcsXmlStackEntry {
+                    name,
+                    xsi_type: dcs_xml_attribute_value(tag, "xsi:type"),
+                });
+            }
+        }
+        cursor = end + 1;
+    }
+
+    if stack.iter().any(|entry| entry.name == "parameter") {
+        "d4p1"
+    } else if stack
+        .iter()
+        .any(|entry| entry.name == "item" && entry.xsi_type == Some("DataSetObject"))
+    {
+        "d6p1"
+    } else {
+        "d5p1"
+    }
+}
+
+fn find_xml_tag_end(bytes: &[u8], mut cursor: usize, limit: usize) -> Option<usize> {
+    let mut quote = None::<u8>;
+    while cursor < limit {
+        let byte = bytes[cursor];
+        if quote == Some(byte) {
+            quote = None;
+        } else if quote.is_none() && matches!(byte, b'"' | b'\'') {
+            quote = Some(byte);
+        } else if quote.is_none() && byte == b'>' {
+            return Some(cursor);
+        }
+        cursor += 1;
+    }
+    None
+}
+
+fn dcs_xml_tag_name(tag: &str) -> &str {
+    tag.split_whitespace().next().unwrap_or("")
+}
+
+fn dcs_xml_attribute_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = tag;
+    loop {
+        let index = rest.find(name)?;
+        let candidate = &rest[index + name.len()..];
+        let before_is_name_char = index > 0 && rest.as_bytes()[index - 1].is_ascii_alphanumeric()
+            || index > 0 && matches!(rest.as_bytes()[index - 1], b':' | b'_' | b'-');
+        if before_is_name_char || !candidate.trim_start().starts_with('=') {
+            rest = &candidate[1.min(candidate.len())..];
+            continue;
+        }
+        let after_equals = candidate.trim_start().strip_prefix('=')?.trim_start();
+        let quote = after_equals.as_bytes().first().copied()?;
+        if !matches!(quote, b'"' | b'\'') {
+            return None;
+        }
+        let value_start = 1;
+        let value_end = after_equals[value_start..].find(quote as char)? + value_start;
+        return Some(&after_equals[value_start..value_end]);
+    }
 }
 
 fn extract_ws_definition_xml(inflated: &[u8]) -> Option<Vec<u8>> {
@@ -32343,6 +32454,72 @@ mod tests {
 
         assert!(xml.contains(
             r#"<v8:Type xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d5p1:CatalogRef.Номенклатура</v8:Type>"#
+        ));
+        assert!(!xml.contains("<v8:TypeId>"));
+    }
+
+    #[test]
+    fn normalizes_dcs_parameter_type_id_with_parameter_current_config_prefix() {
+        let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+        let type_index = BTreeMap::from([(
+            type_id.to_string(),
+            "cfg:CatalogRef.СтруктураПредприятия".to_string(),
+        )]);
+        let raw = format!(
+            "\0\0\0\0\
+\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<parameter>\r\n\
+\t\t\t<name>Подразделение</name>\r\n\
+\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{type_id}</TypeId></valueType>\r\n\
+\t\t</parameter>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(
+            r#"<v8:Type xmlns:d4p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d4p1:CatalogRef.СтруктураПредприятия</v8:Type>"#
+        ));
+        assert!(!xml.contains("<v8:TypeId>"));
+    }
+
+    #[test]
+    fn normalizes_dcs_dataset_object_type_id_with_nested_current_config_prefix() {
+        let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+        let type_index = BTreeMap::from([(
+            type_id.to_string(),
+            "cfg:CatalogRef.Номенклатура".to_string(),
+        )]);
+        let raw = format!(
+            "\0\0\0\0\
+\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<dataSet xsi:type=\"DataSetQuery\">\r\n\
+\t\t\t<item xsi:type=\"DataSetObject\">\r\n\
+\t\t\t\t<field xsi:type=\"DataSetFieldField\">\r\n\
+\t\t\t\t\t<dataPath>Номенклатура</dataPath>\r\n\
+\t\t\t\t\t<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{type_id}</TypeId></valueType>\r\n\
+\t\t\t\t</field>\r\n\
+\t\t\t</item>\r\n\
+\t\t</dataSet>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(
+            r#"<v8:Type xmlns:d6p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d6p1:CatalogRef.Номенклатура</v8:Type>"#
         ));
         assert!(!xml.contains("<v8:TypeId>"));
     }
