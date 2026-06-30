@@ -248,6 +248,8 @@ struct FormXmlChildItem {
     enable_start_drag: Option<bool>,
     enable_drag: Option<bool>,
     file_drag_mode: Option<String>,
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
     location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
     default_button: Option<bool>,
@@ -4738,6 +4740,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
+                    || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
                     || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
@@ -5165,6 +5169,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
+                    || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
+                    || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
                     || path_ends_with_for_child_command_name(&path, &current_child_items)
@@ -6457,6 +6463,27 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.file_drag_mode = Some(text_value.trim().to_string());
                         }
                     }
+                    "HorizontalAlign"
+                        if path_ends_with_for_child_horizontal_align(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.horizontal_align =
+                                Some(parse_form_horizontal_align_xml(text_value.trim())?);
+                        }
+                    }
+                    "Autofill"
+                        if path_ends_with_for_child_autofill(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.autofill = Some(parse_form_xml_bool(
+                                "ChildItem/Autofill",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "DefaultButton"
                         if path_ends_with_for_child_default_button(&path, &current_child_items) =>
                     {
@@ -7093,6 +7120,8 @@ fn parse_form_child_item_xml(
         enable_start_drag: None,
         enable_drag: None,
         file_drag_mode: None,
+        horizontal_align: None,
+        autofill: None,
         button_representation: None,
         location_in_command_bar: None,
         default_button: None,
@@ -7787,6 +7816,20 @@ fn path_ends_with_for_child_file_drag_mode(path: &[String], items: &[FormXmlChil
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "FileDragMode"])
+}
+
+fn path_ends_with_for_child_horizontal_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "AutoCommandBar" && path_ends_with(path, &[item.tag.as_str(), "HorizontalAlign"])
+}
+
+fn path_ends_with_for_child_autofill(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "AutoCommandBar" && path_ends_with(path, &[item.tag.as_str(), "Autofill"])
 }
 
 fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
@@ -10083,6 +10126,21 @@ fn format_form_layout_new_group_item(
             "0",
         );
     }
+    if item.tag == "AutoCommandBar" && (item.horizontal_align.is_some() || item.autofill.is_some())
+    {
+        return format_form_layout_new_extended_group_with_child_span(
+            item,
+            item_uuid,
+            commands,
+            attribute_ids_by_name,
+            table_ids_by_name,
+            table_column_ids_by_name,
+            command_uuids,
+            source,
+            "0",
+            "0",
+        );
+    }
 
     let group_type = form_group_child_item_type_code(&item.tag).unwrap_or("5");
     let group = item.group.and_then(form_child_group_code).unwrap_or("0");
@@ -10295,6 +10353,19 @@ fn form_new_extended_group_options(item: &FormXmlChildItem) -> Result<String> {
     if item.tag == "UsualGroup" && (item.behavior.is_some() || item.representation.is_some()) {
         return patch_form_layout_usual_group_extended_options(DEFAULT_USUAL_GROUP_OPTIONS, item)?
             .ok_or_else(|| anyhow!("failed to build Form UsualGroup extended options"));
+    }
+    if item.tag == "AutoCommandBar" && (item.horizontal_align.is_some() || item.autofill.is_some())
+    {
+        let horizontal_align = item
+            .horizontal_align
+            .map(form_horizontal_align_code)
+            .unwrap_or("0");
+        let autofill = if item.autofill.unwrap_or(true) {
+            "1"
+        } else {
+            "0"
+        };
+        return Ok(format!("{{1,{horizontal_align},{autofill},0}}"));
     }
     Ok("{4,0,{0},2,0,0}".to_string())
 }
@@ -10820,6 +10891,17 @@ fn patch_form_layout_child_item_entry(
                 })?
     {
         replacements.push((options_range, options));
+    }
+    if item.tag == "AutoCommandBar"
+        && (item.horizontal_align.is_some() || item.autofill.is_some())
+        && let Some(settings_range) = fields.get(20)
+        && let Some(settings) = format_form_auto_command_bar_settings(
+            &text[settings_range.clone()],
+            item.horizontal_align,
+            item.autofill,
+        )?
+    {
+        replacements.push((settings_range.clone(), settings));
     }
     if item.tag == "UsualGroup"
         && let Some(behavior) = item.behavior
@@ -23300,6 +23382,65 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[bar_fields[21].clone()], "1");
         assert_eq!(&parsed.layout[button_fields[0].clone()], "34");
         assert_eq!(&parsed.layout[button_fields[5].clone()], r#""NewButton""#);
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_child_auto_command_bar_settings() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{27,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,0,1,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<AutoCommandBar name="RowsBar" id="27">
+			<HorizontalAlign>Right</HorizontalAlign>
+			<Autofill>false</Autofill>
+		</AutoCommandBar>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[bar_fields[5].clone()], "9");
+        assert_eq!(&parsed.layout[bar_fields[20].clone()], "{1,2,0,0}");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_child_auto_command_bar_settings() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<AutoCommandBar name="RowsBar" id="27">
+			<HorizontalAlign>Right</HorizontalAlign>
+			<Autofill>false</Autofill>
+		</AutoCommandBar>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[layout_fields[1].clone()], "1");
+        assert_eq!(&parsed.layout[bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[bar_fields[5].clone()], "9");
+        assert_eq!(&parsed.layout[bar_fields[6].clone()], r#""RowsBar""#);
+        assert_eq!(&parsed.layout[bar_fields[20].clone()], "{1,2,0,0}");
+        assert_eq!(&parsed.layout[bar_fields[21].clone()], "0");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
