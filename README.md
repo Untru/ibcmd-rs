@@ -59,6 +59,10 @@ Latest verified incremental slices after the full snapshot:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 15 | Form.xml | `InputField` `DataPath` is packed for existing and new layout entries |
+| 15 | Partial metadata XML | `ExchangePlan` and related partial families emit owned `Form`/`Template` child refs |
+| 15 | Simple metadata XML | `DocumentJournal` emits owned `Form`/`Template` child refs |
+| 15 | Source staging readiness | HTMLDocument template rows are covered as base-free help-style blobs |
 | 14 | Form.xml | new `InputField` items preserve explicit `ReadOnly` values |
 | 14 | BusinessProcess metadata XML | generated type `InternalInfo` entries are emitted |
 | 14 | Task metadata XML | owned `Form` and `Template` child object headers are emitted |

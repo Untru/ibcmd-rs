@@ -60,6 +60,10 @@ Incremental selected verification after this snapshot:
 | Round 14 BusinessProcess metadata slice | unit-level metadata XML verification | `BusinessProcess` emits generated type `InternalInfo` entries |
 | Round 14 Task metadata slice | unit-level metadata XML verification | `Task` metadata emits owned `Form` and `Template` child object headers |
 | Round 14 source staging readiness slice | unit-level staging verification | `Style/Ext/Style.xml` rows are prepared without active Config blobs |
+| Round 15 Form.xml slice | unit-level packer verification | `InputField` `DataPath` is packed for existing and new layout entries |
+| Round 15 partial metadata slice | unit-level metadata XML verification | `ExchangePlan` and related partial families emit owned `Form` and `Template` child object refs |
+| Round 15 simple metadata slice | unit-level metadata XML verification | `DocumentJournal` emits owned `Form` and `Template` child object refs |
+| Round 15 source staging readiness slice | unit-level staging verification | HTMLDocument template rows are covered as base-free help-style blobs |
 
 Performance note for selected extraction:
 
@@ -172,5 +176,9 @@ properties are still tracked as Issue #22 follow-up work.
 | #18 | BusinessProcess generated type InternalInfo | merged to `master` in round 14 |
 | #14 | Task owned Form/Template child refs | merged to `master` in round 14 |
 | #21 | Style.xml staging without active Config query | merged to `master` in round 14 |
+| #16 | Form.xml `InputField/DataPath` packing | merged to `master` in round 15 |
+| #18 | partial metadata owned Form/Template child refs | merged to `master` in round 15 |
+| #14 | DocumentJournal owned Form/Template child refs | merged to `master` in round 15 |
+| #21 | HTMLDocument template staging coverage without base blob fetch | merged to `master` in round 15 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.
