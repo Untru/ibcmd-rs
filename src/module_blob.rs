@@ -7507,7 +7507,8 @@ fn path_ends_with_for_child_width(path: &[String], items: &[FormXmlChildItem]) -
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "Width"])
+    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
+        && path_ends_with(path, &[item.tag.as_str(), "Width"])
 }
 
 fn path_ends_with_for_child_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -9684,15 +9685,17 @@ fn format_form_layout_new_text_document_field_item(
         .as_deref()
         .and_then(|data_path| format_form_attribute_data_path(data_path, attribute_ids_by_name))
         .unwrap_or_else(|| "{0}".to_string());
+    let width = item.width.as_deref().unwrap_or("0");
     let height = item.height.as_deref().unwrap_or("0");
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,{},0",
+        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
         title_location,
         format_1c_synonyms(&item.title),
         data_path,
+        width,
         height
     );
     text.push_str(&format_form_layout_events_tail(&item.events));
@@ -10237,6 +10240,12 @@ fn patch_form_layout_child_item_entry(
         && let Some(height_range) = fields.get(13)
     {
         replacements.push((height_range.clone(), height.to_string()));
+    }
+    if item.tag == "TextDocumentField"
+        && let Some(width) = &item.width
+        && let Some(width_range) = fields.get(22)
+    {
+        replacements.push((width_range.clone(), width.to_string()));
     }
     if item.tag == "TextDocumentField"
         && let Some(height) = &item.height
@@ -25448,6 +25457,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<TextDocumentField name="ProcedureEditor" id="20">
 			<DataPath>ProcedureText</DataPath>
 			<TitleLocation>None</TitleLocation>
+			<Width>18</Width>
 			<Height>5</Height>
 		</TextDocumentField>
 	</ChildItems>
@@ -25469,6 +25479,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         assert_eq!(&parsed.layout[text_fields[7].clone()], "0");
         assert_eq!(&parsed.layout[text_fields[11].clone()], "{1,{8}}");
+        assert_eq!(&parsed.layout[text_fields[22].clone()], "18");
+        assert_eq!(&parsed.layout[text_fields[23].clone()], "5");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_new_text_document_field_width() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<TextDocumentField name="ProcedureEditor" id="20">
+			<Width>18</Width>
+			<Height>5</Height>
+		</TextDocumentField>
+	</ChildItems>
+</Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let text_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+        assert_eq!(
+            &parsed.layout[text_fields[6].clone()],
+            r#""ProcedureEditor""#
+        );
+        assert_eq!(&parsed.layout[text_fields[22].clone()], "18");
         assert_eq!(&parsed.layout[text_fields[23].clone()], "5");
         assert_eq!(parsed.module_text, "Old module");
 
