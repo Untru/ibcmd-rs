@@ -714,7 +714,14 @@ fn dump_table_rows_with_options(
         .iter()
         .map(|row| row.file_name.clone())
         .collect::<BTreeSet<_>>();
-    let metadata_texts = if extract_metadata_xml || extract_module_text {
+    let needs_standalone_refs =
+        file_names_have_standalone_content_asset(file_names_owned.iter().map(String::as_str));
+    let standalone_required_refs = if needs_standalone_refs && !extract_metadata_xml {
+        standalone_content_reference_uuids_from_config_rows(&rows)
+    } else {
+        BTreeSet::new()
+    };
+    let metadata_texts = if extract_metadata_xml || extract_module_text || needs_standalone_refs {
         build_metadata_text_rows(&rows)
     } else {
         Vec::new()
@@ -743,23 +750,32 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let form_refs = if extract_metadata_xml {
+    let refs_for_standalone = extract_metadata_xml || needs_standalone_refs;
+    let form_refs = if refs_for_standalone {
         build_form_source_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let template_refs = if extract_metadata_xml {
+    let template_refs = if refs_for_standalone {
         build_template_source_reference_index_from_texts(&rows, &metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let subsystem_refs = if extract_metadata_xml {
+    let subsystem_refs = if refs_for_standalone {
         build_subsystem_source_reference_index_from_texts(&metadata_texts)
     } else {
         BTreeMap::new()
     };
     let object_refs = if extract_metadata_xml {
         build_metadata_object_reference_index_from_texts(&metadata_texts)
+    } else if needs_standalone_refs {
+        build_standalone_object_reference_index_from_texts(
+            &metadata_texts,
+            &standalone_required_refs,
+            &form_refs,
+            &template_refs,
+            &subsystem_refs,
+        )
     } else {
         BTreeMap::new()
     };
@@ -796,18 +812,29 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let standalone_refs = if extract_metadata_xml
+    let standalone_refs = if needs_standalone_refs
         && source_assets
             .values()
             .any(|asset| matches!(asset.kind, SourceAssetKind::StandaloneContent))
     {
-        build_standalone_content_references(
-            &metadata_texts,
-            &object_refs,
-            &form_refs,
-            &template_refs,
-            &subsystem_refs,
-        )
+        if extract_metadata_xml {
+            build_standalone_content_references(
+                &metadata_texts,
+                &object_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            )
+        } else {
+            build_standalone_content_references_for_uuids(
+                &metadata_texts,
+                &standalone_required_refs,
+                &object_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            )
+        }
     } else {
         StandaloneContentReferences::default()
     };
@@ -930,6 +957,13 @@ fn dump_table_rows_streamed(
         .iter()
         .map(|row| row.file_name.clone())
         .collect::<BTreeSet<_>>();
+    let needs_standalone_refs =
+        file_names_have_standalone_content_asset(file_names.iter().map(String::as_str));
+    let standalone_body_file_names = if needs_standalone_refs && !extract_metadata_xml {
+        standalone_content_asset_file_names(file_names.iter().map(String::as_str))
+    } else {
+        BTreeSet::new()
+    };
     let metadata_file_names = file_names
         .iter()
         .filter(|file_name| !file_name.contains('.'))
@@ -937,7 +971,8 @@ fn dump_table_rows_streamed(
         .collect::<BTreeSet<_>>();
     let metadata_fetch_started = Instant::now();
     let mut metadata_fetch_used_bcp = false;
-    let mut metadata_rows = if extract_metadata_xml || extract_module_text {
+    let mut metadata_rows = if extract_metadata_xml || extract_module_text || needs_standalone_refs
+    {
         if selected_file_names.is_empty() {
             metadata_fetch_used_bcp = true;
             fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?
@@ -963,21 +998,46 @@ fn dump_table_rows_streamed(
     if metadata_fetch_used_bcp {
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
     }
-    let selected_metadata_rows = if extract_metadata_xml || extract_module_text {
-        metadata_rows
-            .iter()
-            .filter(|row| metadata_file_names.contains(&row.file_name))
-            .cloned()
-            .collect::<Vec<_>>()
+    let standalone_body_rows = if !standalone_body_file_names.is_empty() {
+        let metadata_fetch_started = Instant::now();
+        let rows = fetch_config_rows_bcp(
+            sqlcmd,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &standalone_body_file_names,
+        )?;
+        let elapsed = elapsed_ms(metadata_fetch_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
+        rows
     } else {
         Vec::new()
     };
+    let standalone_required_refs = if needs_standalone_refs && !extract_metadata_xml {
+        standalone_content_reference_uuids_from_config_rows(&standalone_body_rows)
+    } else {
+        BTreeSet::new()
+    };
+    let selected_metadata_rows =
+        if extract_metadata_xml || extract_module_text || needs_standalone_refs {
+            metadata_rows
+                .iter()
+                .filter(|row| metadata_file_names.contains(&row.file_name))
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
     let metadata_texts_started = Instant::now();
-    let selected_metadata_texts = if extract_metadata_xml || extract_module_text {
-        build_metadata_text_rows(&selected_metadata_rows)
-    } else {
-        Vec::new()
-    };
+    let selected_metadata_texts =
+        if extract_metadata_xml || extract_module_text || needs_standalone_refs {
+            build_metadata_text_rows(&selected_metadata_rows)
+        } else {
+            Vec::new()
+        };
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
     let selected_configuration_index_needs =
         selected_configuration_source_asset_index_needs(&file_names);
@@ -991,6 +1051,7 @@ fn dump_table_rows_streamed(
             .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata_without_command_refs)
         || selected_metadata_index_needs
             .is_some_and(SourceReferenceIndexNeeds::needs_broad_metadata)
+        || needs_standalone_refs
         || (selected_configuration_index_needs.is_none()
             && selected_metadata_index_needs.is_none()
             && selected_export_needs_broad_metadata_indexes(
@@ -1092,17 +1153,18 @@ fn dump_table_rows_streamed(
     }
     let write_index_rows = rows_for_source_indexes(&headers, &selected_metadata_rows);
     let metadata_texts_started = Instant::now();
-    let index_metadata_texts = if extract_metadata_xml || extract_module_text {
-        if broad_metadata_indexes {
-            build_metadata_text_rows(&metadata_rows)
-        } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
-            build_metadata_text_rows(&metadata_rows)
+    let index_metadata_texts =
+        if extract_metadata_xml || extract_module_text || needs_standalone_refs {
+            if broad_metadata_indexes {
+                build_metadata_text_rows(&metadata_rows)
+            } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
+                build_metadata_text_rows(&metadata_rows)
+            } else {
+                build_metadata_text_rows(&selected_metadata_rows)
+            }
         } else {
-            build_metadata_text_rows(&selected_metadata_rows)
-        }
-    } else {
-        Vec::new()
-    };
+            Vec::new()
+        };
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
     let reference_indexes_started = Instant::now();
     let metadata_texts_by_file_name = index_metadata_texts
@@ -1140,21 +1202,26 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_type_index_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let form_refs = if extract_metadata_xml && source_reference_needs.form_refs {
-        build_form_source_reference_index_from_texts(&index_metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
+    let form_refs =
+        if (extract_metadata_xml && source_reference_needs.form_refs) || needs_standalone_refs {
+            build_form_source_reference_index_from_texts(&index_metadata_texts)
+        } else {
+            BTreeMap::new()
+        };
     timings.prepare_form_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let template_refs = if extract_metadata_xml && source_reference_needs.template_refs {
+    let template_refs = if (extract_metadata_xml && source_reference_needs.template_refs)
+        || needs_standalone_refs
+    {
         build_template_source_reference_index_from_texts(&metadata_rows, &index_metadata_texts)
     } else {
         BTreeMap::new()
     };
     timings.prepare_template_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let subsystem_refs = if extract_metadata_xml && source_reference_needs.subsystem_refs {
+    let subsystem_refs = if (extract_metadata_xml && source_reference_needs.subsystem_refs)
+        || needs_standalone_refs
+    {
         build_subsystem_source_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
@@ -1163,6 +1230,14 @@ fn dump_table_rows_streamed(
     let index_part_started = Instant::now();
     let object_refs = if extract_metadata_xml && source_reference_needs.object_refs {
         build_metadata_object_reference_index_from_texts(&index_metadata_texts)
+    } else if needs_standalone_refs {
+        build_standalone_object_reference_index_from_texts(
+            &index_metadata_texts,
+            &standalone_required_refs,
+            &form_refs,
+            &template_refs,
+            &subsystem_refs,
+        )
     } else {
         BTreeMap::new()
     };
@@ -1215,19 +1290,30 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_help_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let standalone_refs = if extract_metadata_xml
-        && source_reference_needs.standalone_refs
+    let standalone_refs = if (needs_standalone_refs
+        || (extract_metadata_xml && source_reference_needs.standalone_refs))
         && source_assets
             .values()
             .any(|asset| matches!(asset.kind, SourceAssetKind::StandaloneContent))
     {
-        build_standalone_content_references(
-            &index_metadata_texts,
-            &object_refs,
-            &form_refs,
-            &template_refs,
-            &subsystem_refs,
-        )
+        if extract_metadata_xml {
+            build_standalone_content_references(
+                &index_metadata_texts,
+                &object_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            )
+        } else {
+            build_standalone_content_references_for_uuids(
+                &index_metadata_texts,
+                &standalone_required_refs,
+                &object_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            )
+        }
     } else {
         StandaloneContentReferences::default()
     };
@@ -1924,6 +2010,108 @@ fn configuration_module_groups(file_names: &BTreeSet<String>) -> BTreeSet<String
         })
         .map(|(metadata_id, _)| metadata_id.to_string())
         .collect()
+}
+
+fn file_names_have_standalone_content_asset<'a>(
+    file_names: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    !standalone_content_asset_file_names(file_names).is_empty()
+}
+
+fn standalone_content_asset_file_names<'a>(
+    file_names: impl IntoIterator<Item = &'a str>,
+) -> BTreeSet<String> {
+    let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for file_name in file_names {
+        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            continue;
+        };
+        if metadata_id.is_empty() {
+            continue;
+        }
+        suffixes_by_id
+            .entry(metadata_id)
+            .or_default()
+            .insert(suffix);
+    }
+
+    suffixes_by_id
+        .into_iter()
+        .filter(|(_, suffixes)| suffixes.contains("f") && is_configuration_module_group(suffixes))
+        .map(|(metadata_id, _)| format!("{metadata_id}.f"))
+        .collect()
+}
+
+fn standalone_content_reference_uuids_from_config_rows(rows: &[ConfigRow]) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    for row in rows {
+        if !row.file_name.ends_with(".f") {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        refs.extend(standalone_content_reference_uuids_from_blob(&bytes));
+    }
+    refs
+}
+
+fn standalone_content_reference_uuids_from_blob(bytes: &[u8]) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    let Ok(inflated) = inflate_raw_deflate(bytes) else {
+        return refs;
+    };
+    let Ok(text) = String::from_utf8(inflated) else {
+        return refs;
+    };
+    let Some(fields) = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0) else {
+        return refs;
+    };
+    if fields.first().map(|field| field.trim()) != Some("2") {
+        return refs;
+    }
+    let Some(count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return refs;
+    };
+    if fields.len() < 2 + count {
+        return refs;
+    }
+    refs.extend(
+        fields
+            .iter()
+            .skip(2)
+            .take(count)
+            .filter_map(|field| parse_non_zero_uuid(field.trim())),
+    );
+
+    let mut index = 2 + count;
+    let Some(child_count) = fields
+        .get(index)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return refs;
+    };
+    index += 1;
+    if fields.len() < index + child_count {
+        return refs;
+    }
+    refs.extend(
+        fields
+            .iter()
+            .skip(index)
+            .take(child_count)
+            .filter_map(|field| parse_non_zero_uuid(field.trim())),
+    );
+    refs.extend(
+        fields
+            .iter()
+            .skip(index + child_count)
+            .filter_map(|field| parse_non_zero_uuid(field.trim())),
+    );
+    refs
 }
 
 fn dynamic_source_asset(
@@ -4295,6 +4483,133 @@ fn build_standalone_content_references(
                 .and_then(template_source_reference_name)
             {
                 standalone_object_refs.insert(uuid, reference);
+            }
+        }
+    }
+
+    StandaloneContentReferences {
+        object_refs: standalone_object_refs,
+    }
+}
+
+fn build_standalone_object_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    required_refs: &BTreeSet<String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    if required_refs.is_empty() {
+        return index;
+    }
+
+    for row in rows {
+        if required_refs.contains(&row.file_name) {
+            if let Some(name) = parse_configuration_reference_text(&row.text) {
+                index.insert(row.file_name.clone(), format!("Configuration.{name}"));
+                continue;
+            }
+            let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+                continue;
+            };
+            let reference = if kind == "Subsystem" {
+                subsystem_refs
+                    .get(&header.uuid)
+                    .and_then(subsystem_source_reference_name)
+                    .unwrap_or_else(|| format!("{kind}.{}", header.name))
+            } else {
+                format!("{kind}.{}", header.name)
+            };
+            index.insert(row.file_name.clone(), reference);
+        }
+
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        if kind == "Enum" {
+            for value in parse_enum_values_from_text(&row.text) {
+                if required_refs.contains(&value.uuid) {
+                    index.insert(
+                        value.uuid,
+                        format!("Enum.{}.EnumValue.{}", header.name, value.name),
+                    );
+                }
+            }
+        }
+        for (child, marker_start) in
+            nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, required_refs)
+        {
+            if index.contains_key(&child.uuid) {
+                continue;
+            }
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) {
+                index.insert(child.uuid, reference);
+            }
+        }
+    }
+
+    index
+}
+
+fn build_standalone_content_references_for_uuids(
+    rows: &[MetadataTextRow],
+    required_refs: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> StandaloneContentReferences {
+    let mut standalone_object_refs = object_refs.clone();
+    for uuid in required_refs {
+        if standalone_object_refs.contains_key(uuid) {
+            continue;
+        }
+        if let Some(reference) = form_refs.get(uuid).and_then(form_source_reference_name) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        } else if let Some(reference) = template_refs
+            .get(uuid)
+            .and_then(template_source_reference_name)
+        {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        } else if let Some(reference) = subsystem_refs
+            .get(uuid)
+            .and_then(subsystem_source_reference_name)
+        {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+
+    for row in rows {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        for (child, marker_start) in
+            nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, required_refs)
+        {
+            if standalone_object_refs.contains_key(&child.uuid) {
+                continue;
+            }
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) {
+                standalone_object_refs.insert(child.uuid, reference);
             }
         }
     }
@@ -26093,6 +26408,52 @@ mod tests {
             xml.find("Role.ReadOnlyUsers").unwrap()
                 < xml.find("CommonCommand.OpenAllReports").unwrap()
         );
+    }
+
+    #[test]
+    fn source_asset_only_dump_resolves_standalone_content_refs() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-standalone-content-source-only-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let configuration_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let role_uuid = "0014cc2a-b5ed-427d-8ac6-116e92aaa9a4";
+        let module = pack_module_blob_bytes(b"", None, None).unwrap().blob;
+        let parent_configurations = deflate_for_test(b"{6,0}");
+        let standalone = deflate_for_test(format!("{{2,1,{role_uuid},0}}").as_bytes());
+        let role_metadata = deflate_for_test(
+            format!(
+                "{{1,\r\n{{6,\r\n{{3,\r\n{{1,0,{role_uuid}}},\"TargetMetrics\",{{1,\"en\",\"Target metrics\"}},\"\"}},0}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let row = |file_name: String, data: Vec<u8>| ConfigRow {
+            file_name,
+            part_no: 0,
+            data_size: data.len() as i64,
+            binary_hex: encode_hex_for_test(&data),
+        };
+        let rows = vec![
+            row(format!("{configuration_uuid}.0"), module.clone()),
+            row(format!("{configuration_uuid}.5"), module.clone()),
+            row(format!("{configuration_uuid}.6"), module.clone()),
+            row(format!("{configuration_uuid}.7"), module),
+            row(format!("{configuration_uuid}.4"), parent_configurations),
+            row(format!("{configuration_uuid}.f"), standalone),
+            row(role_uuid.to_string(), role_metadata),
+        ];
+
+        let dumped = dump_table_rows(&root, "Config", rows, false, false, false).unwrap();
+
+        assert_eq!(dumped.metadata_xml_rows, 0);
+        assert_eq!(dumped.source_asset_rows, 2);
+        let xml = fs::read_to_string(root.join("Ext/StandaloneConfigurationContent.bin")).unwrap();
+        assert!(xml.contains("<Metadata>Role.TargetMetrics</Metadata>"));
+        assert!(!xml.contains(role_uuid));
+        assert!(!root.join("ConfigDumpInfo.xml").exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
