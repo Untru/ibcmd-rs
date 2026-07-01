@@ -24,6 +24,8 @@ against native `ibcmd`; incremental verified fixes after that snapshot are
 listed in the status document until the next full diff is regenerated.
 Recommended parallel-agent ownership by object family is tracked in
 [docs/metadata-agent-slicing.md](docs/metadata-agent-slicing.md).
+The Form.xml mapping workflow is tracked in
+[docs/form-diff-matrix.md](docs/form-diff-matrix.md).
 
 EDT XML exporter/importer plugin findings are summarized in
 [docs/edt-xml-layer-analysis.md](docs/edt-xml-layer-analysis.md). The short
@@ -61,6 +63,12 @@ Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 42 | Form.xml tooling | `form-diff-candidates` compares controlled Form.xml/blob pairs and suggests `XML path -> layout path` mappings for matrix-driven pack/unpack tests |
+| 42 | Form.xml | newly synthesized `Table` child items now preserve XML `<DataPath>` in the native layout |
+| 42 | MXL templates | MOXCEL vertical alignment code `48` now exports and packs as `Bottom` |
+| 42 | Catalog metadata XML | root create/history tail properties now come from native fields instead of fixed defaults |
+| 42 | Source staging readiness | metadata XML base dependency audit reports direct property counts and child-object kind breakdowns |
+| 42 | Refactor | selected-export planning helpers moved from `src/mssql_dump/mod.rs` to `src/mssql_dump/selected.rs` |
 | 41 | Form.xml | new `CheckBoxField` items now pack explicit `ShowInHeader` through the extended layout shape |
 | 41 | MXL templates | MOXCEL number-format string tables now export and pack `document/format/format/v8:item` references |
 | 41 | Workflow metadata XML | `BusinessProcess` and `Task` now emit `UseStandardCommands` from the native owner field |

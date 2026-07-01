@@ -18,7 +18,7 @@ reason instead of widening the patch.
 
 ## Tasks
 
-- [ ] Task A - Issue #16, Form.xml packer parity
+- [x] Task A - Issue #16, Form.xml packer parity
 
   Agent: `019f1af2-095b-7302-be49-76a5a574e8ee`
 
@@ -41,7 +41,7 @@ reason instead of widening the patch.
   - `cargo test <focused-filter> --lib`, `cargo fmt --check`,
     and `git diff --check`.
 
-- [ ] Task B - Issue #17, MXL/template body parity
+- [x] Task B - Issue #17, MXL/template body parity
 
   Agent: `019f1af2-7b4e-7ce3-9385-2aa3ea4878e9`
 
@@ -67,7 +67,7 @@ reason instead of widening the patch.
   - `cargo test moxel --lib` and/or `cargo test spreadsheet --lib`;
   - `cargo fmt --check` and `git diff --check`.
 
-- [ ] Task C - Issue #18/#15/#22, metadata XML parity
+- [x] Task C - Issue #18/#15/#22, metadata XML parity
 
   Agent: `019f1af2-ebee-74c3-b084-48df4f03aa06`
 
@@ -90,7 +90,7 @@ reason instead of widening the patch.
   - `cargo test <focused-filter> --lib`, `cargo fmt --check`,
     and `git diff --check`.
 
-- [ ] Task D - Issue #21, existing-base staging readiness
+- [x] Task D - Issue #21, existing-base staging readiness
 
   Agent: `019f1af3-5f19-7c30-9962-e76b90e9ebf0`
 
@@ -112,7 +112,7 @@ reason instead of widening the patch.
   - focused staging/readiness tests;
   - `cargo fmt --check` and `git diff --check`.
 
-- [ ] Task E - Issue #24, mssql_dump split follow-up
+- [x] Task E - Issue #24, mssql_dump split follow-up
 
   Agent: `019f1af3-db54-7ca3-a1da-3357aee67deb`
 
@@ -134,3 +134,14 @@ reason instead of widening the patch.
   - public API remains stable;
   - `cargo check`, focused selected-export/index-needs tests if applicable,
     `cargo fmt --check`, and `git diff --check`.
+
+## Integrated Results
+
+- #16: new `Table` child items preserve XML `<DataPath>` in the native layout.
+- #16 tooling: `form-diff-candidates` provides the first matrix-driven
+  XML/blob diff candidate workflow for Form.xml property mapping.
+- #17: MOXCEL vertical alignment code `48` extracts and packs as `Bottom`.
+- #15: Catalog root create/history tail properties parse from native fields.
+- #21: metadata XML base dependency audit now includes direct property counts
+  and child-object kind breakdowns.
+- #24: selected-export planning helpers moved to `src/mssql_dump/selected.rs`.

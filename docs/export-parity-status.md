@@ -51,6 +51,12 @@ Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 42 Form.xml tooling slice | CLI and unit-level mapping verification | `form-diff-candidates` compares baseline/variant Form.xml and raw Form body blobs, diffs the parsed layout brace tree, and emits candidate `XML path -> layout path` mappings |
+| Round 42 Form.xml slice | unit-level packer verification | new `Table` child items preserve XML `<DataPath>` by using the wider native layout shape |
+| Round 42 MXL template slice | unit-level extractor/packer verification | MOXCEL vertical alignment code `48` round-trips as `Bottom` |
+| Round 42 Catalog metadata slice | unit-level metadata XML verification | `CreateOnInput`, `ChoiceHistoryOnInput`, `DataHistory`, `UpdateDataHistoryImmediatelyAfterWrite`, and `ExecuteAfterWriteDataHistoryVersionProcessing` are parsed from native root fields and emitted after `Explanation` |
+| Round 42 source staging readiness slice | unit-level readiness audit verification | metadata XML base-dependency blockers include direct `Properties` child counts plus `ChildObjects` kind breakdowns |
+| Round 42 mssql_dump split slice | compile and focused selected-export verification | selected-export planning helpers are isolated in `src/mssql_dump/selected.rs` without changing dump behavior |
 | Round 41 Form.xml slice | unit-level packer verification | new `CheckBoxField` child items can carry explicit `ShowInHeader` through the extended layout shape |
 | Round 41 MXL template slice | unit-level extractor/packer verification | MOXCEL number-format string tables round-trip through `document/format/format/v8:item` references |
 | Round 41 workflow metadata slice | unit-level metadata XML verification | `BusinessProcess` and `Task` metadata XML emit `UseStandardCommands` from the native owner field |
@@ -533,5 +539,10 @@ Deeper root properties are still tracked as Issue #22 follow-up work.
 | #18 | BusinessProcess/Task `UseStandardCommands` metadata XML | merged to `master` in round 41 |
 | #21 | precise `Predefined.xml` native-shape base dependency audit | merged to `master` in round 41 |
 | #24 | SQL/BCP fetch helpers extracted to `src/mssql_dump/fetch.rs` | merged to `master` in round 41 |
+| #16 | Form.xml `Table/DataPath` generation and matrix-diff candidate tooling | merged to `master` in round 42 |
+| #17 | MOXCEL `verticalAlignment=Bottom` extraction and packing | merged to `master` in round 42 |
+| #15 | Catalog root create/history tail metadata XML | merged to `master` in round 42 |
+| #21 | precise metadata XML shape evidence for base dependency audit | merged to `master` in round 42 |
+| #24 | selected-export planning helpers extracted to `src/mssql_dump/selected.rs` | merged to `master` in round 42 |
 
 Worker result on #18: one selected subsystem `Ext/CommandInterface.xml` is byte-identical now, but the `Subsystems` group is still partial.

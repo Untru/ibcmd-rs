@@ -72,20 +72,23 @@ Rust path choice:
    These are low-risk because they have clear boundaries and few dependencies
    on metadata/MXL/Form internals.
 
-2. Extract `source_assets::dcs`, `source_assets::moxel`, and `form_xml.rs`.
+2. Extract selected-export planning helpers. Done in round 42 as
+   `src/mssql_dump/selected.rs`.
+
+3. Extract `source_assets::dcs`, `source_assets::moxel`, and `form_xml.rs`.
    These are the main parity-agent conflict zones. Moving them early lets future
    agents own separate files.
 
-3. Extract `metadata_xml` in two passes:
+4. Extract `metadata_xml` in two passes:
    first shared model/helpers, then family-specific parsers/formatters.
    Do not split individual object families before shared child-tail helpers are
    isolated, otherwise imports will become circular.
 
-4. Extract `indexes.rs` and `selected.rs`.
+5. Extract `indexes.rs`.
    These depend on metadata/source asset models, so doing them after the model
    split is cleaner.
 
-5. Move tests only after code modules compile cleanly.
+6. Move tests only after code modules compile cleanly.
    Initially keep tests in `mssql_dump/mod.rs` so mechanical moves do not also
    fight test fixture visibility.
 
@@ -124,3 +127,16 @@ Moved:
 This reduced the central file and gives a template for later format-specific
 moves without touching parity behavior. The next practical split is
 `form_xml.rs`, followed by MXL/source-asset modules.
+
+## Completed Selected Split
+
+Round 42 added:
+
+```text
+src/mssql_dump/
+  selected.rs
+```
+
+Moved selected-export planning helpers, selected source-reference index needs,
+direct selected metadata reference scanning, and selected command-interface
+reference helpers. This was mechanical and kept tests in `mod.rs`.

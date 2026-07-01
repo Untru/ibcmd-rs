@@ -3017,6 +3017,31 @@ mod tests {
             other => panic!("unexpected command: {other:?}"),
         }
 
+        let form_diff = Cli::parse_from([
+            "ibcmd-rs",
+            "form-diff-candidates",
+            "--base-xml",
+            r"C:\forms\base.xml",
+            "--variant-xml",
+            r"C:\forms\variant.xml",
+            "--base-blob",
+            r"C:\forms\base.bin",
+            "--variant-blob",
+            r"C:\forms\variant.bin",
+            "-o",
+            r"C:\audit\form-diff.json",
+        ]);
+        match form_diff.command {
+            Commands::FormDiffCandidates(args) => {
+                assert_eq!(args.base_xml, PathBuf::from(r"C:\forms\base.xml"));
+                assert_eq!(args.variant_xml, PathBuf::from(r"C:\forms\variant.xml"));
+                assert_eq!(args.base_blob, PathBuf::from(r"C:\forms\base.bin"));
+                assert_eq!(args.variant_blob, PathBuf::from(r"C:\forms\variant.bin"));
+                assert_eq!(args.output, Some(PathBuf::from(r"C:\audit\form-diff.json")));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
         let load_coverage = Cli::parse_from([
             "ibcmd-rs",
             "audit-source-load-coverage",
