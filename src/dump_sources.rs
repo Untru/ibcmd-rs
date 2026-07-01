@@ -282,7 +282,7 @@ fn first_value(cli: Option<&str>, settings: Option<String>) -> Option<String> {
         .or(settings)
 }
 
-fn resolve_ibcmd(explicit: Option<&Path>) -> Result<PathBuf> {
+pub(crate) fn resolve_ibcmd(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = explicit {
         if path.is_file() {
             return absolute_path(path);
@@ -375,15 +375,15 @@ fn make_temp_dir(prefix: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-struct ProcessOutput {
-    success: bool,
-    timed_out: bool,
-    exit_code: Option<i32>,
-    stdout: String,
-    stderr: String,
+pub(crate) struct ProcessOutput {
+    pub(crate) success: bool,
+    pub(crate) timed_out: bool,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
 }
 
-fn run_with_timeout(mut command: Command, timeout: Duration) -> Result<ProcessOutput> {
+pub(crate) fn run_with_timeout(mut command: Command, timeout: Duration) -> Result<ProcessOutput> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().context("failed to start ibcmd")?;
 

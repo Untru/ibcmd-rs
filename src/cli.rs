@@ -203,6 +203,10 @@ pub enum InfobaseConfigCommands {
     Export(InfobaseConfigExportArgs),
     /// Import source files into infobase configuration staging.
     Import(InfobaseConfigImportArgs),
+    /// Clone, direct-export, direct-import, apply, direct-export and diff one MSSQL infobase roundtrip.
+    Roundtrip(InfobaseConfigRoundtripArgs),
+    /// Run a representative family-by-family scoped MSSQL roundtrip sweep and emit a compact JSON report.
+    Sweep(InfobaseConfigSweepArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -299,10 +303,10 @@ pub struct InfobaseConfigImportArgs {
     /// Database name.
     #[arg(long)]
     pub db_name: Option<String>,
-    /// Database user for SQL authentication. Accepted by the compatible CLI; importer SQL-auth is still pending.
+    /// Database user for SQL authentication.
     #[arg(long)]
     pub db_user: Option<String>,
-    /// Database password. Accepted by the compatible CLI; importer SQL-auth is still pending.
+    /// Database password. Prefer --db-pwd-env for shell history.
     #[arg(long)]
     pub db_pwd: Option<String>,
     /// Environment variable containing the database password.
@@ -337,6 +341,161 @@ pub struct InfobaseConfigImportArgs {
     pub script_output: Option<PathBuf>,
     /// Root directory with hierarchical XML sources.
     pub source_dir: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct InfobaseConfigRoundtripArgs {
+    /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
+    #[arg(long)]
+    pub settings: Option<PathBuf>,
+    /// Source format. Can also be set in settings as format/config-format.
+    #[arg(long)]
+    pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. 2.20 matches 1C 8.3.27, 2.21 matches 1C 8.5.1. Can also be set in settings.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
+    /// DBMS type. Currently MSSQLServer is supported by the direct roundtrip.
+    #[arg(long)]
+    pub dbms: Option<String>,
+    /// Reference database server.
+    #[arg(long)]
+    pub db_server: Option<String>,
+    /// Reference database name.
+    #[arg(long)]
+    pub db_name: Option<String>,
+    /// Database user for SQL authentication.
+    #[arg(long)]
+    pub db_user: Option<String>,
+    /// Database password. Prefer --db-pwd-env for shell history.
+    #[arg(long)]
+    pub db_pwd: Option<String>,
+    /// Environment variable containing the database password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub db_pwd_env: String,
+    /// Infobase user passed to ibcmd check/apply when needed.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase password passed to ibcmd check/apply. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase user password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// ibcmd executable path. Auto-detects a recent 8.3 build when omitted.
+    #[arg(long)]
+    pub ibcmd: Option<PathBuf>,
+    /// Optional target clone database name. Defaults to <db-name>_roundtrip_<timestamp>.
+    #[arg(long)]
+    pub target_db: Option<String>,
+    /// Optional backup path used by clone.
+    #[arg(long)]
+    pub backup: Option<PathBuf>,
+    /// Root directory for roundtrip artifacts.
+    #[arg(long, default_value = "E:\\ibcmd_lab\\roundtrip")]
+    pub work_dir: PathBuf,
+    /// Reuse an existing source tree instead of exporting a fresh baseline from the reference database.
+    #[arg(long)]
+    pub source_dir: Option<PathBuf>,
+    /// Reuse a dedicated ibcmd --data directory instead of a generated one.
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+    /// Replace existing target database and artifact directory when needed.
+    #[arg(long, alias = "force")]
+    pub overwrite: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Kill ibcmd check/apply after this many seconds.
+    #[arg(long, default_value_t = 600)]
+    pub timeout_sec: u64,
+    /// Optional maximum number of staged XML objects per SQL batch.
+    #[arg(long)]
+    pub batch_size: Option<usize>,
+    /// Optional source path prefix to import and compare. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
+    /// Optional base path for generated staging SQL scripts.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct InfobaseConfigSweepArgs {
+    /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
+    #[arg(long)]
+    pub settings: Option<PathBuf>,
+    /// Source format. Can also be set in settings as format/config-format.
+    #[arg(long)]
+    pub format: Option<InfobaseConfigFormat>,
+    /// Source XML version. 2.20 matches 1C 8.3.27, 2.21 matches 1C 8.5.1. Can also be set in settings.
+    #[arg(long, value_enum)]
+    pub source_version: Option<InfobaseConfigSourceVersion>,
+    /// DBMS type. Currently MSSQLServer is supported by the direct sweep.
+    #[arg(long)]
+    pub dbms: Option<String>,
+    /// Reference database server.
+    #[arg(long)]
+    pub db_server: Option<String>,
+    /// Reference database name.
+    #[arg(long)]
+    pub db_name: Option<String>,
+    /// Database user for SQL authentication.
+    #[arg(long)]
+    pub db_user: Option<String>,
+    /// Database password. Prefer --db-pwd-env for shell history.
+    #[arg(long)]
+    pub db_pwd: Option<String>,
+    /// Environment variable containing the database password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub db_pwd_env: String,
+    /// Infobase user passed to ibcmd check/apply when needed.
+    #[arg(long, short = 'u')]
+    pub user: Option<String>,
+    /// Infobase password passed to ibcmd check/apply. Prefer --password-env for shell history.
+    #[arg(long, short = 'P')]
+    pub password: Option<String>,
+    /// Environment variable containing the infobase user password.
+    #[arg(long, default_value = "IBCMD_USER_PSW")]
+    pub password_env: String,
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// ibcmd executable path. Auto-detects a recent 8.3 build when omitted.
+    #[arg(long)]
+    pub ibcmd: Option<PathBuf>,
+    /// Root directory for sweep artifacts.
+    #[arg(long, default_value = "E:\\ibcmd_lab\\roundtrip")]
+    pub work_dir: PathBuf,
+    /// Reuse an existing source tree instead of exporting a fresh baseline from the reference database.
+    #[arg(long)]
+    pub source_dir: Option<PathBuf>,
+    /// Replace existing target databases and artifact directories when needed.
+    #[arg(long, alias = "force")]
+    pub overwrite: bool,
+    /// Required confirmation for non-lab destructive runs.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Kill ibcmd check/apply after this many seconds.
+    #[arg(long, default_value_t = 600)]
+    pub timeout_sec: u64,
+    /// Optional maximum number of staged XML objects per SQL batch.
+    #[arg(long)]
+    pub batch_size: Option<usize>,
+    /// Explicit source path prefixes to sweep. Can be repeated. When omitted, one representative prefix per family is selected automatically.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
+    /// Restrict automatic selection to these top-level source families, for example Catalogs or Documents.
+    #[arg(long)]
+    pub family: Vec<String>,
+    /// Limit the number of automatically selected prefixes.
+    #[arg(long)]
+    pub max_prefixes: Option<usize>,
+    /// Optional base path for generated staging SQL scripts.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -839,6 +998,15 @@ pub struct MssqlStageCommonModuleArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -867,6 +1035,15 @@ pub struct MssqlStageCommonModulesArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -892,6 +1069,15 @@ pub struct MssqlStageCommonModuleMetadataArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -920,6 +1106,15 @@ pub struct MssqlStageCommonModuleObjectArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -951,6 +1146,15 @@ pub struct MssqlStageCommonModuleObjectsArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -976,6 +1180,15 @@ pub struct MssqlStageMetadataObjectsArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -1004,6 +1217,15 @@ pub struct MssqlStageSourceMetadataObjectsArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -1029,6 +1251,15 @@ pub struct MssqlStageSourceCommonModuleObjectsArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -1054,6 +1285,15 @@ pub struct MssqlStageSourceObjectsArgs {
     /// SQL Server name passed to sqlcmd -S.
     #[arg(long, default_value = "localhost")]
     pub server: String,
+    /// SQL login passed to sqlcmd -U. Uses integrated auth when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL password passed to sqlcmd -P. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
     /// Target database name.
     #[arg(long)]
     pub database: String,
@@ -3378,6 +3618,149 @@ mod tests {
     }
 
     #[test]
+    fn parses_infobase_config_roundtrip_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "infobase",
+            "config",
+            "roundtrip",
+            "--db-server",
+            "localhost",
+            "--db-name",
+            "ut_ibcmd",
+            "--db-user",
+            "sa",
+            "--db-pwd",
+            "dummy-sql-value-for-parser-test",
+            "--ibcmd",
+            r"C:\Program Files\1cv8\8.3.27.1989\bin\ibcmd.exe",
+            "--target-db",
+            "ut_ibcmd_roundtrip_test",
+            "--work-dir",
+            r"E:\ibcmd_lab\roundtrip",
+            "--source-dir",
+            r"E:\ibcmd_lab\roundtrip\baseline",
+            "--allow-non-lab",
+            "--batch-size",
+            "25",
+            "--path-prefix",
+            "Catalogs/Валюты",
+            "--timeout-sec",
+            "900",
+            "--overwrite",
+        ]);
+
+        match cli.command {
+            Commands::Infobase(args) => match args.command {
+                InfobaseCommands::Config(config) => match config.command {
+                    InfobaseConfigCommands::Roundtrip(args) => {
+                        assert_eq!(args.db_server.as_deref(), Some("localhost"));
+                        assert_eq!(args.db_name.as_deref(), Some("ut_ibcmd"));
+                        assert_eq!(args.db_user.as_deref(), Some("sa"));
+                        assert_eq!(
+                            args.db_pwd.as_deref(),
+                            Some("dummy-sql-value-for-parser-test")
+                        );
+                        assert_eq!(
+                            args.ibcmd,
+                            Some(PathBuf::from(
+                                r"C:\Program Files\1cv8\8.3.27.1989\bin\ibcmd.exe"
+                            ))
+                        );
+                        assert_eq!(args.target_db.as_deref(), Some("ut_ibcmd_roundtrip_test"));
+                        assert_eq!(args.work_dir, PathBuf::from(r"E:\ibcmd_lab\roundtrip"));
+                        assert_eq!(
+                            args.source_dir,
+                            Some(PathBuf::from(r"E:\ibcmd_lab\roundtrip\baseline"))
+                        );
+                        assert!(args.allow_non_lab);
+                        assert_eq!(args.batch_size, Some(25));
+                        assert_eq!(args.path_prefix, vec!["Catalogs/Валюты"]);
+                        assert_eq!(args.timeout_sec, 900);
+                        assert!(args.overwrite);
+                    }
+                    other => panic!("unexpected config command: {other:?}"),
+                },
+            },
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_infobase_config_sweep_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "infobase",
+            "config",
+            "sweep",
+            "--db-server",
+            "localhost",
+            "--db-name",
+            "ut_ibcmd",
+            "--db-user",
+            "sa",
+            "--db-pwd",
+            "dummy-sql-value-for-parser-test",
+            "--ibcmd",
+            r"C:\Program Files\1cv8\8.3.27.1989\bin\ibcmd.exe",
+            "--work-dir",
+            r"E:\ibcmd_lab\roundtrip",
+            "--source-dir",
+            r"E:\ibcmd_lab\roundtrip\baseline",
+            "--allow-non-lab",
+            "--batch-size",
+            "25",
+            "--family",
+            "Catalogs",
+            "--family",
+            "Documents",
+            "--max-prefixes",
+            "3",
+            "--path-prefix",
+            "Catalogs/Валюты",
+            "--timeout-sec",
+            "900",
+            "--overwrite",
+        ]);
+
+        match cli.command {
+            Commands::Infobase(args) => match args.command {
+                InfobaseCommands::Config(config) => match config.command {
+                    InfobaseConfigCommands::Sweep(args) => {
+                        assert_eq!(args.db_server.as_deref(), Some("localhost"));
+                        assert_eq!(args.db_name.as_deref(), Some("ut_ibcmd"));
+                        assert_eq!(args.db_user.as_deref(), Some("sa"));
+                        assert_eq!(
+                            args.db_pwd.as_deref(),
+                            Some("dummy-sql-value-for-parser-test")
+                        );
+                        assert_eq!(
+                            args.ibcmd,
+                            Some(PathBuf::from(
+                                r"C:\Program Files\1cv8\8.3.27.1989\bin\ibcmd.exe"
+                            ))
+                        );
+                        assert_eq!(args.work_dir, PathBuf::from(r"E:\ibcmd_lab\roundtrip"));
+                        assert_eq!(
+                            args.source_dir,
+                            Some(PathBuf::from(r"E:\ibcmd_lab\roundtrip\baseline"))
+                        );
+                        assert!(args.allow_non_lab);
+                        assert_eq!(args.batch_size, Some(25));
+                        assert_eq!(args.family, vec!["Catalogs", "Documents"]);
+                        assert_eq!(args.max_prefixes, Some(3));
+                        assert_eq!(args.path_prefix, vec!["Catalogs/Валюты"]);
+                        assert_eq!(args.timeout_sec, 900);
+                        assert!(args.overwrite);
+                    }
+                    other => panic!("unexpected config command: {other:?}"),
+                },
+            },
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_mssql_dump_config_command() {
         let cli = Cli::parse_from([
             "ibcmd-rs",
@@ -3454,6 +3837,135 @@ mod tests {
                     args.output,
                     Some(PathBuf::from(r"E:\ibcmd_lab\perf\timing-summary.json"))
                 );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_mssql_stage_source_objects_with_sql_auth() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-source-objects",
+            "--server",
+            "sql01",
+            "--sql-user",
+            "stage-user",
+            "--sql-pwd",
+            "stage-secret",
+            "--database",
+            "ut_ibcmd",
+            "--source-root",
+            r"D:\src\ut_ibcmd",
+            "--replace-config-save",
+            "--allow-non-lab",
+            "--batch-size",
+            "250",
+            "--source-version",
+            "2.21",
+            "--path-prefix",
+            "Catalogs/Валюты",
+            "--script-output",
+            r"C:\temp\source-stage.sql",
+        ]);
+
+        match cli.command {
+            Commands::MssqlStageSourceObjects(args) => {
+                assert_eq!(args.server, "sql01");
+                assert_eq!(args.sql_user.as_deref(), Some("stage-user"));
+                assert_eq!(args.sql_pwd.as_deref(), Some("stage-secret"));
+                assert_eq!(args.database, "ut_ibcmd");
+                assert_eq!(args.source_root, PathBuf::from(r"D:\src\ut_ibcmd"));
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+                assert_eq!(args.batch_size, Some(250));
+                assert_eq!(
+                    args.source_version,
+                    Some(InfobaseConfigSourceVersion::V2_21)
+                );
+                assert_eq!(args.path_prefix, vec!["Catalogs/Валюты".to_string()]);
+                assert_eq!(
+                    args.script_output,
+                    Some(PathBuf::from(r"C:\temp\source-stage.sql"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_mssql_stage_metadata_objects_with_sql_auth() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-metadata-objects",
+            "--server",
+            "sql02",
+            "--sql-user",
+            "meta-user",
+            "--sql-pwd",
+            "meta-secret",
+            "--database",
+            "ut_ibcmd",
+            "--xml",
+            r"Constants\SomeConstant.xml",
+            "--source-root",
+            r"D:\src\ut_ibcmd",
+            "--replace-config-save",
+            "--allow-non-lab",
+        ]);
+
+        match cli.command {
+            Commands::MssqlStageMetadataObjects(args) => {
+                assert_eq!(args.server, "sql02");
+                assert_eq!(args.sql_user.as_deref(), Some("meta-user"));
+                assert_eq!(args.sql_pwd.as_deref(), Some("meta-secret"));
+                assert_eq!(args.database, "ut_ibcmd");
+                assert_eq!(
+                    args.xmls,
+                    vec![PathBuf::from(r"Constants\SomeConstant.xml")]
+                );
+                assert_eq!(args.source_root, Some(PathBuf::from(r"D:\src\ut_ibcmd")));
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_mssql_stage_common_module_object_with_sql_auth() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-stage-common-module-object",
+            "--server",
+            "sql03",
+            "--sql-user",
+            "module-user",
+            "--sql-pwd",
+            "module-secret",
+            "--database",
+            "ut_ibcmd",
+            "--xml",
+            r"CommonModules\Module.xml",
+            "--text",
+            r"CommonModules\Module\Ext\Module.bsl",
+            "--replace-config-save",
+            "--allow-non-lab",
+        ]);
+
+        match cli.command {
+            Commands::MssqlStageCommonModuleObject(args) => {
+                assert_eq!(args.server, "sql03");
+                assert_eq!(args.sql_user.as_deref(), Some("module-user"));
+                assert_eq!(args.sql_pwd.as_deref(), Some("module-secret"));
+                assert_eq!(args.database, "ut_ibcmd");
+                assert_eq!(args.xml, PathBuf::from(r"CommonModules\Module.xml"));
+                assert_eq!(
+                    args.text,
+                    Some(PathBuf::from(r"CommonModules\Module\Ext\Module.bsl"))
+                );
+                assert!(args.replace_config_save);
+                assert!(args.allow_non_lab);
             }
             other => panic!("unexpected command: {other:?}"),
         }

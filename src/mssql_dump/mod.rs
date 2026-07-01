@@ -841,14 +841,117 @@ fn dump_table_rows_streamed(
                 timings.prepare_metadata_fetch_ms += elapsed;
                 timings.prepare_metadata_fetch_bcp_ms += elapsed;
                 let metadata_texts_started = Instant::now();
-                if let Some(owner_rows) = selected_command_owner_metadata_rows(
+                let (owner_rows, resolved_uuids) = selected_owner_metadata_rows_for_uuids(
                     &broad_metadata_rows,
                     &unresolved_command_refs,
-                ) {
+                );
+                if !owner_rows.is_empty() {
                     metadata_rows = merge_config_rows_by_file_name(metadata_rows, owner_rows);
-                } else {
+                }
+                if !unresolved_command_refs.is_subset(&resolved_uuids) {
                     metadata_rows = broad_metadata_rows;
                     broad_metadata_indexes = true;
+                }
+                timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+            }
+        }
+    }
+    if !selected_file_names.is_empty()
+        && !broad_metadata_indexes
+        && !selected_metadata_rows.is_empty()
+    {
+        let metadata_texts_started = Instant::now();
+        let direct_metadata_file_names = selected_metadata_direct_reference_file_names(
+            &build_metadata_text_rows(&selected_metadata_rows),
+        );
+        timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+        if !direct_metadata_file_names.is_empty() {
+            let metadata_fetch_started = Instant::now();
+            let direct_metadata_rows = fetch_config_rows_bcp(
+                sqlcmd,
+                server,
+                user,
+                password,
+                database,
+                table,
+                &direct_metadata_file_names,
+            )?;
+            let elapsed = elapsed_ms(metadata_fetch_started);
+            timings.prepare_metadata_fetch_ms += elapsed;
+            timings.prepare_metadata_fetch_bcp_ms += elapsed;
+            let resolved = direct_metadata_rows
+                .iter()
+                .map(|row| row.file_name.clone())
+                .collect::<BTreeSet<_>>();
+            let unresolved = direct_metadata_file_names
+                .into_iter()
+                .filter(|file_name| !resolved.contains(file_name))
+                .collect::<BTreeSet<_>>();
+            metadata_rows = merge_config_rows_by_file_name(metadata_rows, direct_metadata_rows);
+            if !unresolved.is_empty() {
+                let metadata_fetch_started = Instant::now();
+                let broad_metadata_rows =
+                    fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                let elapsed = elapsed_ms(metadata_fetch_started);
+                timings.prepare_metadata_fetch_ms += elapsed;
+                timings.prepare_metadata_fetch_bcp_ms += elapsed;
+                let metadata_texts_started = Instant::now();
+                let (owner_rows, _) =
+                    selected_owner_metadata_rows_for_uuids(&broad_metadata_rows, &unresolved);
+                if !owner_rows.is_empty() {
+                    metadata_rows = merge_config_rows_by_file_name(metadata_rows, owner_rows);
+                }
+                timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+            }
+        }
+    }
+    if !selected_file_names.is_empty() && !broad_metadata_indexes {
+        let fetch_selected_rows_started = Instant::now();
+        let selected_body_rows =
+            fetch_config_rows_bcp(sqlcmd, server, user, password, database, table, &file_names)?;
+        let elapsed = elapsed_ms(fetch_selected_rows_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
+
+        let metadata_texts_started = Instant::now();
+        let direct_body_metadata_file_names =
+            selected_body_direct_reference_file_names(&selected_body_rows);
+        timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+        if !direct_body_metadata_file_names.is_empty() {
+            let metadata_fetch_started = Instant::now();
+            let direct_metadata_rows = fetch_config_rows_bcp(
+                sqlcmd,
+                server,
+                user,
+                password,
+                database,
+                table,
+                &direct_body_metadata_file_names,
+            )?;
+            let elapsed = elapsed_ms(metadata_fetch_started);
+            timings.prepare_metadata_fetch_ms += elapsed;
+            timings.prepare_metadata_fetch_bcp_ms += elapsed;
+            let resolved = direct_metadata_rows
+                .iter()
+                .map(|row| row.file_name.clone())
+                .collect::<BTreeSet<_>>();
+            let unresolved = direct_body_metadata_file_names
+                .into_iter()
+                .filter(|file_name| !resolved.contains(file_name))
+                .collect::<BTreeSet<_>>();
+            metadata_rows = merge_config_rows_by_file_name(metadata_rows, direct_metadata_rows);
+            if !unresolved.is_empty() {
+                let metadata_fetch_started = Instant::now();
+                let broad_metadata_rows =
+                    fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                let elapsed = elapsed_ms(metadata_fetch_started);
+                timings.prepare_metadata_fetch_ms += elapsed;
+                timings.prepare_metadata_fetch_bcp_ms += elapsed;
+                let metadata_texts_started = Instant::now();
+                let (owner_rows, _) =
+                    selected_owner_metadata_rows_for_uuids(&broad_metadata_rows, &unresolved);
+                if !owner_rows.is_empty() {
+                    metadata_rows = merge_config_rows_by_file_name(metadata_rows, owner_rows);
                 }
                 timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
             }
@@ -887,14 +990,19 @@ fn dump_table_rows_streamed(
     let source_reference_needs = selected_configuration_index_needs
         .or(selected_metadata_index_needs)
         .unwrap_or_else(SourceReferenceIndexNeeds::full);
-    let command_refs = if extract_metadata_xml && source_reference_needs.command_refs {
+    let build_selected_local_refs = extract_metadata_xml && !selected_file_names.is_empty();
+    let command_refs = if extract_metadata_xml
+        && (source_reference_needs.command_refs || build_selected_local_refs)
+    {
         build_command_interface_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
     timings.prepare_command_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let metadata_refs = if extract_metadata_xml && source_reference_needs.metadata_refs {
+    let metadata_refs = if extract_metadata_xml
+        && (source_reference_needs.metadata_refs || build_selected_local_refs)
+    {
         build_metadata_command_reference_index_from_texts(&index_metadata_texts)
     } else {
         BTreeMap::new()
@@ -902,7 +1010,7 @@ fn dump_table_rows_streamed(
     timings.prepare_metadata_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let type_index = if (extract_metadata_xml || needs_source_layout_refs)
-        && source_reference_needs.type_index
+        && (source_reference_needs.type_index || build_selected_local_refs)
     {
         build_metadata_type_index_from_texts(&index_metadata_texts)
     } else {
@@ -911,7 +1019,9 @@ fn dump_table_rows_streamed(
     timings.prepare_type_index_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let form_refs = if (extract_metadata_xml
-        && (source_reference_needs.form_refs || source_reference_needs.object_refs))
+        && (source_reference_needs.form_refs
+            || source_reference_needs.object_refs
+            || build_selected_local_refs))
         || needs_standalone_refs
     {
         build_form_source_reference_index_from_texts(&index_metadata_texts)
@@ -920,7 +1030,8 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_form_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let template_refs = if (extract_metadata_xml && source_reference_needs.template_refs)
+    let template_refs = if (extract_metadata_xml
+        && (source_reference_needs.template_refs || build_selected_local_refs))
         || needs_standalone_refs
     {
         build_template_source_reference_index_from_texts(&metadata_rows, &index_metadata_texts)
@@ -939,7 +1050,7 @@ fn dump_table_rows_streamed(
     timings.prepare_subsystem_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let object_refs = if (extract_metadata_xml || needs_source_layout_refs)
-        && source_reference_needs.object_refs
+        && (source_reference_needs.object_refs || build_selected_local_refs)
     {
         build_metadata_object_reference_index_from_texts(&index_metadata_texts)
     } else if needs_standalone_refs {
@@ -1040,7 +1151,9 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_standalone_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let body_owners = if extract_metadata_xml && source_reference_needs.body_owners {
+    let body_owners = if extract_metadata_xml
+        && (source_reference_needs.body_owners || build_selected_local_refs)
+    {
         build_body_owner_source_index_from_texts(&index_metadata_texts, &subsystem_refs)
     } else {
         BTreeMap::new()
@@ -33832,6 +33945,53 @@ mod tests {
     }
 
     #[test]
+    fn live_pack_extract_repro_preserves_avansovy_report_template_shape() -> anyhow::Result<()> {
+        let template_path = std::path::PathBuf::from(
+            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
+        );
+        if !template_path.is_file() {
+            return Ok(());
+        }
+
+        let original = std::fs::read_to_string(&template_path)?;
+        let packed = pack_moxel_spreadsheet_blob_from_xml(original.as_bytes())?;
+        let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob)?)?;
+        let body_start = inflated.find("{8,").context("missing MOXCEL body start")?;
+        let spreadsheet = parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new())
+            .context("failed to parse packed MOXCEL")?;
+        let extracted =
+            extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
+
+        assert!(
+            spreadsheet.column_formats.len() + spreadsheet.formats.len() >= 100,
+            "column_formats={} formats={} lines={} pictures={}",
+            spreadsheet.column_formats.len(),
+            spreadsheet.formats.len(),
+            spreadsheet.lines.len(),
+            spreadsheet.pictures.len(),
+        );
+        assert!(spreadsheet.lines.len() >= 2);
+        assert!(spreadsheet.pictures.len() >= 1);
+        assert_eq!(
+            original.matches("\t<format>\r\n").count()
+                + original.matches("\t<format/>\r\n").count(),
+            extracted.matches("\t<format>\r\n").count()
+                + extracted.matches("\t<format/>\r\n").count(),
+        );
+        assert_eq!(
+            original.matches("<line width=\"1\"").count(),
+            extracted.matches("<line width=\"1\"").count(),
+        );
+        assert_eq!(
+            original.matches("<picture>").count(),
+            extracted.matches("<picture>").count(),
+        );
+        assert!(extracted.contains("<beginColumn>-1</beginColumn>"));
+
+        Ok(())
+    }
+
+    #[test]
     fn formats_moxel_trims_trailing_empty_rows_outside_named_areas() {
         let spreadsheet = parse_moxel_spreadsheet_text(
             "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,16,0,0,0,1,1,1,0,{16,2,{1,1,{\"ru\",\"Движения документа [СсылкаНаДокумент]\"}},0},2,3,0,3,0,0,4,4,0,5,0,0,6,0,0,7,0,0,8,0,0,9,0,0,10,0,0,11,0,0,12,0,0,13,0,0,14,0,0,15,0,0,{1,0,00000000-0000-0000-0000-000000000000,1,0,5},5,0,0,0,0,0,0,0,0,{0},{0},{0},{2,\"ОбластьЗаголовок\",{1,{1,-1,1,-1,1,00000000-0000-0000-0000-000000000000},0},\"ПустаяОбласть\",{1,{1,-1,4,-1,4,00000000-0000-0000-0000-000000000000},0}},\"\",{{0,6,6,{\"N\",1000},7,{\"N\",1000},8,{\"N\",1000},9,{\"N\",1000},10,{\"N\",1000},11,{\"N\",1000}}},{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,5,{1025,0,2},{558081,0,2,2,1},{1089,0,30,2},{64,30},{128,567},1,{7,0,575,180,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},0,0,0,3,{3,3,{-1}},{3,3,{-3}},{3,0,{4625920}},0,0,0,\"\",0,{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},{0},0,0,0,1,0,0,0}",
@@ -40111,6 +40271,19 @@ mod tests {
         assert!(!subsystems_order.command_refs);
         assert!(!subsystems_order.needs_broad_metadata());
 
+        let metadata_and_modules =
+            selected_configuration_source_asset_index_needs(&BTreeSet::from([
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0".to_string(),
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.1".to_string(),
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.15".to_string(),
+                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.16".to_string(),
+            ]))
+            .expect("metadata id with self-contained module rows");
+        assert!(!metadata_and_modules.command_refs);
+        assert!(!metadata_and_modules.metadata_refs);
+        assert!(!metadata_and_modules.needs_broad_metadata());
+
         assert!(
             selected_configuration_source_asset_index_needs(&BTreeSet::from([
                 "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.f".to_string(),
@@ -40217,9 +40390,16 @@ mod tests {
             &BTreeSet::from([command_uuid.to_string()]),
         )
         .unwrap();
+        let (generic_owners, resolved_uuids) = selected_owner_metadata_rows_for_uuids(
+            &rows,
+            &BTreeSet::from([command_uuid.to_string()]),
+        );
 
         assert_eq!(owners.len(), 1);
         assert_eq!(owners[0].file_name, owner_uuid);
+        assert_eq!(generic_owners.len(), 1);
+        assert_eq!(generic_owners[0].file_name, owner_uuid);
+        assert!(resolved_uuids.contains(command_uuid));
         assert!(
             selected_command_owner_metadata_rows(
                 &rows,

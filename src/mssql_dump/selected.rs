@@ -4,8 +4,9 @@ use super::{
     ConfigRow, MetadataCommandReference, MetadataTextRow, command_interface_placement_name,
     command_interface_reference_entries_from_text, command_interface_standard_command, decode_hex,
     inflate_raw_deflate, is_uuid_text, metadata_kind_needs_form_template_reference_indexes,
-    metadata_text_row_from_text, parse_command_interface_common_flag, split_1c_braced_fields,
-    uuid_like_values,
+    metadata_text_row_from_text, nested_command_headers_from_text,
+    parse_command_interface_common_flag, parse_generated_type_entries_from_text,
+    split_1c_braced_fields, uuid_like_values,
 };
 
 pub(super) fn selected_export_needs_broad_metadata_indexes(
@@ -119,13 +120,16 @@ pub(super) fn selected_configuration_source_asset_index_needs(
             continue;
         }
         let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+            if is_uuid_text(file_name) {
+                continue;
+            }
             return None;
         };
         if metadata_id.is_empty() {
             return None;
         }
         match suffix {
-            "2" | "4" | "10" | "b" | "c" => {}
+            "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "10" | "b" | "c" | "15" | "16" => {}
             "8" => {
                 needs.form_refs = true;
             }
@@ -189,6 +193,58 @@ pub(super) fn selected_configuration_direct_metadata_reference_file_names(
             continue;
         };
         file_names.extend(uuid_like_values(&text));
+    }
+    file_names
+}
+
+pub(super) fn selected_metadata_direct_reference_file_names(
+    rows: &[MetadataTextRow],
+) -> BTreeSet<String> {
+    let selected = rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut file_names = BTreeSet::new();
+    for row in rows {
+        for value in uuid_like_values(&row.text) {
+            if !selected.contains(value.as_str()) {
+                file_names.insert(value);
+            }
+        }
+    }
+    file_names
+}
+
+pub(super) fn selected_body_direct_reference_file_names(rows: &[ConfigRow]) -> BTreeSet<String> {
+    let selected = rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut file_names = BTreeSet::new();
+    for row in rows {
+        let Some((_, suffix)) = row.file_name.rsplit_once('.') else {
+            continue;
+        };
+        if !matches!(
+            suffix,
+            "0" | "1" | "2" | "3" | "5" | "6" | "7" | "8" | "9" | "a" | "15" | "16"
+        ) {
+            continue;
+        }
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        for value in uuid_like_values(&text) {
+            if !selected.contains(value.as_str()) {
+                file_names.insert(value);
+            }
+        }
     }
     file_names
 }
@@ -363,6 +419,7 @@ fn command_interface_reference_is_resolved(
         || reference.code == "1"
 }
 
+#[allow(dead_code)]
 pub(super) fn selected_command_owner_metadata_rows(
     rows: &[ConfigRow],
     unresolved_command_refs: &BTreeSet<String>,
@@ -404,6 +461,56 @@ pub(super) fn selected_command_owner_metadata_rows(
     } else {
         None
     }
+}
+
+pub(super) fn selected_owner_metadata_rows_for_uuids(
+    rows: &[ConfigRow],
+    unresolved_uuids: &BTreeSet<String>,
+) -> (Vec<ConfigRow>, BTreeSet<String>) {
+    let mut found = BTreeSet::new();
+    let mut owner_rows = Vec::new();
+    for row in rows {
+        let Ok(bytes) = decode_hex(&row.binary_hex) else {
+            continue;
+        };
+        let Ok(inflated) = inflate_raw_deflate(&bytes) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(inflated) else {
+            continue;
+        };
+        let text = text.trim_start_matches('\u{feff}').to_string();
+        if !unresolved_uuids.iter().any(|uuid| text.contains(uuid)) {
+            continue;
+        }
+        let Some(text_row) = metadata_text_row_from_text(&row.file_name, text) else {
+            continue;
+        };
+        let generated_type_matches = parse_generated_type_entries_from_text(&text_row)
+            .into_iter()
+            .flatten()
+            .filter_map(|(type_id, _)| unresolved_uuids.contains(&type_id).then_some(type_id))
+            .collect::<BTreeSet<_>>();
+        let nested_command_matches =
+            nested_command_headers_from_text(&text_row.text, &text_row.file_name)
+                .into_iter()
+                .filter_map(|header| {
+                    unresolved_uuids
+                        .contains(&header.uuid)
+                        .then_some(header.uuid)
+                })
+                .collect::<BTreeSet<_>>();
+        let matches = generated_type_matches
+            .into_iter()
+            .chain(nested_command_matches.into_iter())
+            .collect::<BTreeSet<_>>();
+        if matches.is_empty() {
+            continue;
+        }
+        found.extend(matches);
+        owner_rows.push(row.clone());
+    }
+    (owner_rows, found)
 }
 
 fn selected_body_suffix_is_self_contained(

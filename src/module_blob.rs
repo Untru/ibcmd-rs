@@ -1771,12 +1771,10 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     fields.extend(format_spreadsheet_number_formats_for_moxel(
         &number_format_refs,
     ));
-    if !spreadsheet.pictures.is_empty() {
-        fields.push(format_spreadsheet_pictures_for_moxel(
-            &spreadsheet.pictures,
-            source,
-        )?);
-    }
+    fields.extend(format_spreadsheet_pictures_for_moxel(
+        &spreadsheet.pictures,
+        source,
+    )?);
     fields.push("2".to_string());
     fields.push("{0,1}".to_string());
 
@@ -3319,10 +3317,7 @@ fn format_spreadsheet_area_bounds_for_moxel(area: &SpreadsheetDocumentXmlArea) -
         .unwrap_or("00000000-0000-0000-0000-000000000000");
     format!(
         "{{{area_type},{},{},{},{},{columns_id}}}",
-        area.begin_column.max(0),
-        area.begin_row.max(0),
-        area.end_column.max(area.begin_column).max(0),
-        area.end_row.max(area.begin_row).max(0)
+        area.begin_column, area.begin_row, area.end_column, area.end_row
     )
 }
 
@@ -3466,11 +3461,25 @@ fn format_spreadsheet_formats_for_moxel(
     let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
     let mut number_format_refs = Vec::<SpreadsheetNumberFormatSlot>::new();
     let mut format_fields = Vec::with_capacity(count + 1);
+    let mut body_format_indexes = Vec::with_capacity(body_format_count);
+    let mut drawing_format_indexes = Vec::new();
     format_fields.push(count.to_string());
     for global_index in column_format_slots + 1..=source_format_count {
+        if spreadsheet
+            .formats
+            .get(global_index.saturating_sub(1))
+            .is_some_and(|format| format.drawing_border.is_some())
+        {
+            drawing_format_indexes.push(global_index);
+        } else {
+            body_format_indexes.push(global_index);
+        }
+    }
+    for global_index in body_format_indexes {
         format_fields.push(format_spreadsheet_format_index_for_moxel(
             spreadsheet,
             global_index,
+            false,
             &mut style_refs,
             &mut number_format_refs,
         ));
@@ -3479,6 +3488,16 @@ fn format_spreadsheet_formats_for_moxel(
         format_fields.push(format_spreadsheet_format_index_for_moxel(
             spreadsheet,
             global_index,
+            false,
+            &mut style_refs,
+            &mut number_format_refs,
+        ));
+    }
+    for global_index in drawing_format_indexes {
+        format_fields.push(format_spreadsheet_format_index_for_moxel(
+            spreadsheet,
+            global_index,
+            true,
             &mut style_refs,
             &mut number_format_refs,
         ));
@@ -3487,13 +3506,14 @@ fn format_spreadsheet_formats_for_moxel(
         .iter()
         .map(format_spreadsheet_style_ref_slot_for_moxel)
         .collect::<Vec<_>>();
-    fields.push(format!("{{{}}}", format_fields.join(",")));
+    fields.extend(format_fields);
     (fields, number_format_refs)
 }
 
 fn format_spreadsheet_format_index_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     global_index: usize,
+    drawing_slot: bool,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
     number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> String {
@@ -3501,7 +3521,12 @@ fn format_spreadsheet_format_index_for_moxel(
         .formats
         .get(global_index.saturating_sub(1))
         .and_then(|format| {
-            format_spreadsheet_format_for_moxel(format, style_refs, number_format_refs)
+            format_spreadsheet_format_for_moxel(
+                format,
+                drawing_slot,
+                style_refs,
+                number_format_refs,
+            )
         })
         .unwrap_or_else(spreadsheet_empty_format_for_moxel)
 }
@@ -3522,12 +3547,15 @@ struct SpreadsheetNumberFormatSlot(Vec<LocalizedString>);
 
 fn format_spreadsheet_format_for_moxel(
     format: &SpreadsheetDocumentXmlFormat,
+    drawing_slot: bool,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
     number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> Option<String> {
     let mut values = Vec::<(u8, usize)>::new();
     push_spreadsheet_format_value(&mut values, 0, format.font);
-    if let Some(border) = format.border {
+    if drawing_slot {
+        push_spreadsheet_format_value(&mut values, 1, format.drawing_border);
+    } else if let Some(border) = format.border {
         for bit in [1, 2, 3, 4] {
             push_spreadsheet_format_value(&mut values, bit, Some(border));
         }
@@ -3896,13 +3924,16 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
 fn format_spreadsheet_pictures_for_moxel(
     pictures: &[SpreadsheetDocumentXmlPicture],
     source: Option<&MetadataSourceContext>,
-) -> Result<String> {
+) -> Result<Vec<String>> {
+    if pictures.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut fields = Vec::with_capacity(pictures.len() + 1);
     fields.push(pictures.len().to_string());
     for picture in pictures {
         fields.push(format_spreadsheet_picture_for_moxel(picture, source)?);
     }
-    Ok(format!("{{{}}}", fields.join(",")))
+    Ok(fields)
 }
 
 fn format_spreadsheet_picture_for_moxel(
@@ -23979,7 +24010,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(
-            text.contains(r#"{1,"Header",{1,{1,0,4,0,6,00000000-0000-0000-0000-000000000000},0}}"#)
+            text.contains(
+                r#"{1,"Header",{1,{1,-1,4,-1,6,00000000-0000-0000-0000-000000000000},0}}"#
+            )
         );
         assert!(!text.contains("BarcodePicture"));
         assert_eq!(packed.plain_bytes, text.len());
@@ -24324,6 +24357,72 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn live_parse_repro_counts_avansovy_report_template_sections() -> anyhow::Result<()> {
+        let template_path = std::path::PathBuf::from(
+            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
+        );
+        if !template_path.is_file() {
+            return Ok(());
+        }
+
+        let xml = std::fs::read(&template_path)?;
+        let parsed = super::parse_spreadsheet_document_xml(&xml)?;
+        let original = String::from_utf8(xml)?;
+        let non_empty_formats = parsed
+            .formats
+            .iter()
+            .filter(|format| {
+                format.font.is_some()
+                    || format.border.is_some()
+                    || format.left_border.is_some()
+                    || format.top_border.is_some()
+                    || format.right_border.is_some()
+                    || format.bottom_border.is_some()
+                    || format.height.is_some()
+                    || format.border_color.is_some()
+                    || format.width.is_some()
+                    || format.horizontal_alignment.is_some()
+                    || format.vertical_alignment.is_some()
+                    || format.back_color.is_some()
+                    || format.text_color.is_some()
+                    || format.text_placement.is_some()
+                    || format.text_orientation.is_some()
+                    || format.fill_type.is_some()
+                    || !format.number_format.is_empty()
+                    || format.drawing_border.is_some()
+                    || format.by_selected_columns.is_some()
+                    || format.details_use.is_some()
+                    || format.hyper_link.is_some()
+                    || format.protection.is_some()
+                    || format.indent.is_some()
+                    || format.auto_indent.is_some()
+                    || format.mask.is_some()
+                    || format.pic_index.is_some()
+                    || format.picture_size_mode.is_some()
+                    || format.pic_horizontal_alignment.is_some()
+                    || format.pic_vertical_alignment.is_some()
+            })
+            .count();
+
+        assert!(
+            parsed.formats.len() >= 100,
+            "formats={}",
+            parsed.formats.len()
+        );
+        assert!(
+            non_empty_formats >= 100,
+            "non_empty_formats={non_empty_formats}"
+        );
+        assert_eq!(
+            parsed.lines.len(),
+            original.matches("<line width=\"1\"").count()
+        );
+        assert_eq!(parsed.pictures.len(), original.matches("<picture>").count());
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_spreadsheet_fonts() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
@@ -24514,7 +24613,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,0,1,1,0}"));
-        assert!(text.contains("{1,{4,0}}"));
+        assert!(text.contains(",1,{4,0},2,{0,1}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -24563,7 +24662,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml_with_source(xml, Some(&source))?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{1,{4,0,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}}"));
+        assert!(text.contains(",1,{4,0,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}},2,{0,1}"));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())

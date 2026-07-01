@@ -64,6 +64,21 @@ use crate::source_audit::{
     SourceLoadCoverageAuditReport, audit_source_load_coverage_from_manifest,
 };
 
+#[derive(Clone, Copy)]
+struct SqlAuth<'a> {
+    user: Option<&'a str>,
+    password: Option<&'a str>,
+}
+
+impl<'a> SqlAuth<'a> {
+    fn integrated() -> Self {
+        Self {
+            user: None,
+            password: None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlCompareReport {
     pub left: String,
@@ -602,6 +617,7 @@ pub fn audit_source_parity(
                 prepare_metadata_object_stage(
                     &args.sqlcmd,
                     &args.server,
+                    SqlAuth::integrated(),
                     &args.database,
                     xml.clone(),
                     Some(&source),
@@ -623,6 +639,7 @@ pub fn audit_source_parity(
                 prepare_common_module_object_stage(
                     &args.sqlcmd,
                     &args.server,
+                    SqlAuth::integrated(),
                     &args.database,
                     xml.clone(),
                     None,
@@ -2005,9 +2022,19 @@ pub fn import_delta_bundle(args: &MssqlDeltaImportArgs) -> Result<DeltaBundleImp
 
 pub fn stage_common_module(args: &MssqlStageCommonModuleArgs) -> Result<StageCommonModuleReport> {
     require_non_lab_confirmation(args.allow_non_lab, "common module staging")?;
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
     let report = stage_common_module_specs(
         &args.sqlcmd,
         &args.server,
+        sql_auth,
         &args.database,
         vec![CommonModuleStageSpec {
             module_id: args.module_id.clone(),
@@ -2040,10 +2067,20 @@ pub fn stage_common_modules(
     args: &MssqlStageCommonModulesArgs,
 ) -> Result<StageCommonModulesReport> {
     require_non_lab_confirmation(args.allow_non_lab, "common module batch staging")?;
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
     let specs = parse_common_module_specs(&args.modules)?;
     stage_common_module_specs(
         &args.sqlcmd,
         &args.server,
+        sql_auth,
         &args.database,
         specs,
         args.replace_config_save,
@@ -2060,12 +2097,26 @@ pub fn stage_common_module_metadata(
         ));
     }
     require_non_lab_confirmation(args.allow_non_lab, "common module metadata staging")?;
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
 
     let module_id = normalize_uuid_arg(&args.module_id)?;
     let xml = fs::read(&args.xml)
         .with_context(|| format!("failed to read XML {}", args.xml.display()))?;
-    let base_metadata_blob =
-        fetch_config_blob(&args.sqlcmd, &args.server, &args.database, &module_id)?;
+    let base_metadata_blob = fetch_config_blob_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        &module_id,
+    )?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     if packed_metadata.properties.uuid != module_id {
         return Err(anyhow!(
@@ -2075,10 +2126,22 @@ pub fn stage_common_module_metadata(
         ));
     }
 
-    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let versions_blob = fetch_config_blob_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "versions",
+    )?;
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &[module_id.clone()], true)?;
 
-    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let before = storage_table_stats_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "ConfigSave",
+    )?;
     let script = args.script_output.clone().unwrap_or_else(|| {
         default_stage_script_path(
             &args.database,
@@ -2096,9 +2159,15 @@ pub fn stage_common_module_metadata(
         &patched_versions.blob,
     );
     fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-    run_sql_file(&args.sqlcmd, &args.server, &script)?;
+    run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
 
-    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let after = storage_table_stats_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "ConfigSave",
+    )?;
 
     Ok(StageCommonModuleMetadataReport {
         database: args.database.clone(),
@@ -2125,9 +2194,19 @@ pub fn stage_common_module_object(
     args: &MssqlStageCommonModuleObjectArgs,
 ) -> Result<StageCommonModuleObjectReport> {
     require_non_lab_confirmation(args.allow_non_lab, "common module object staging")?;
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
     let prepared = prepare_common_module_object_stage(
         &args.sqlcmd,
         &args.server,
+        sql_auth,
         &args.database,
         args.xml.clone(),
         args.text.clone(),
@@ -2152,6 +2231,7 @@ pub fn stage_common_module_object(
     let report = stage_prepared_common_module_objects(
         &args.sqlcmd,
         &args.server,
+        sql_auth,
         &args.database,
         vec![prepared],
         args.replace_config_save,
@@ -2190,6 +2270,15 @@ pub fn stage_common_module_objects(
         return Err(anyhow!("at least one common module XML must be staged"));
     }
     require_non_lab_confirmation(args.allow_non_lab, "common module object batch staging")?;
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
 
     let prepared = parallel::install(|| {
         args.xmls
@@ -2198,6 +2287,7 @@ pub fn stage_common_module_objects(
                 prepare_common_module_object_stage(
                     &args.sqlcmd,
                     &args.server,
+                    sql_auth,
                     &args.database,
                     xml.clone(),
                     None,
@@ -2210,6 +2300,7 @@ pub fn stage_common_module_objects(
     stage_prepared_common_module_objects(
         &args.sqlcmd,
         &args.server,
+        sql_auth,
         &args.database,
         prepared,
         args.replace_config_save,
@@ -2230,6 +2321,15 @@ pub fn stage_metadata_objects(
     if args.xmls.is_empty() {
         return Err(anyhow!("at least one metadata XML must be staged"));
     }
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
 
     let source = args.source_root.clone().map(MetadataSourceContext::new);
     let prepared = parallel::install(|| {
@@ -2239,6 +2339,7 @@ pub fn stage_metadata_objects(
                 prepare_metadata_object_stage(
                     &args.sqlcmd,
                     &args.server,
+                    sql_auth,
                     &args.database,
                     xml.clone(),
                     source.as_ref(),
@@ -2248,7 +2349,13 @@ pub fn stage_metadata_objects(
     })??;
     ensure_unique_metadata_object_ids(&prepared)?;
 
-    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let versions_blob = fetch_config_blob_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "versions",
+    )?;
     let changes = prepared
         .iter()
         .flat_map(|object| {
@@ -2259,7 +2366,13 @@ pub fn stage_metadata_objects(
     let patched_versions =
         patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
-    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let before = storage_table_stats_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "ConfigSave",
+    )?;
     let script = args.script_output.clone().unwrap_or_else(|| {
         default_stage_script_path(
             &args.database,
@@ -2272,9 +2385,15 @@ pub fn stage_metadata_objects(
     }
     let sql = build_stage_metadata_objects_sql(&args.database, &prepared, &patched_versions.blob);
     fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-    run_sql_file(&args.sqlcmd, &args.server, &script)?;
+    run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
 
-    let after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let after = storage_table_stats_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "ConfigSave",
+    )?;
     let objects = prepared
         .into_iter()
         .map(staged_metadata_object_report)
@@ -2307,6 +2426,9 @@ pub fn stage_source_metadata_objects(
         .collect::<Vec<_>>();
     let stage_args = MssqlStageMetadataObjectsArgs {
         server: args.server.clone(),
+        sql_user: args.sql_user.clone(),
+        sql_pwd: args.sql_pwd.clone(),
+        sql_pwd_env: args.sql_pwd_env.clone(),
         database: args.database.clone(),
         xmls,
         source_root: Some(args.source_root.clone()),
@@ -2331,6 +2453,9 @@ pub fn stage_source_common_module_objects(
         .collect::<Vec<_>>();
     let stage_args = MssqlStageCommonModuleObjectsArgs {
         server: args.server.clone(),
+        sql_user: args.sql_user.clone(),
+        sql_pwd: args.sql_pwd.clone(),
+        sql_pwd_env: args.sql_pwd_env.clone(),
         database: args.database.clone(),
         xmls,
         sqlcmd: args.sqlcmd.clone(),
@@ -2370,6 +2495,15 @@ pub fn stage_source_objects(
     }
 
     let source = MetadataSourceContext::new(args.source_root.clone());
+    let sql_password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let sql_auth = SqlAuth {
+        user: args.sql_user.as_deref(),
+        password: sql_password.as_deref(),
+    };
     let metadata_objects = parallel::install(|| {
         metadata_xmls
             .par_iter()
@@ -2377,6 +2511,7 @@ pub fn stage_source_objects(
                 prepare_metadata_object_stage(
                     &args.sqlcmd,
                     &args.server,
+                    sql_auth,
                     &args.database,
                     xml.clone(),
                     Some(&source),
@@ -2392,6 +2527,7 @@ pub fn stage_source_objects(
                 prepare_common_module_object_stage(
                     &args.sqlcmd,
                     &args.server,
+                    sql_auth,
                     &args.database,
                     xml.clone(),
                     None,
@@ -2402,7 +2538,13 @@ pub fn stage_source_objects(
     let common_module_count = common_modules.len();
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
 
-    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
+    let versions_blob = fetch_config_blob_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "versions",
+    )?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
     let patched_versions =
         patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
@@ -2410,7 +2552,13 @@ pub fn stage_source_objects(
     let batch_size = args.batch_size.unwrap_or(500).max(1);
     let batches =
         build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size);
-    let before = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+    let before = storage_table_stats_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        "ConfigSave",
+    )?;
     let mut scripts = Vec::with_capacity(batches.len());
     let mut running_rows = 0usize;
     let mut after = before.clone();
@@ -2440,8 +2588,14 @@ pub fn stage_source_objects(
             batch_report.expected_total_rows,
         );
         fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-        run_sql_file(&args.sqlcmd, &args.server, &script)?;
-        after = storage_table_stats(&args.sqlcmd, &args.server, &args.database, "ConfigSave")?;
+        run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
+        after = storage_table_stats_with_auth(
+            &args.sqlcmd,
+            &args.server,
+            sql_auth,
+            &args.database,
+            "ConfigSave",
+        )?;
         scripts.push(script);
     }
 
@@ -2503,17 +2657,42 @@ pub fn stage_source_objects(
 pub fn stage_exchange_plan_object(
     args: &MssqlStageExchangePlanObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
+}
+
+fn integrated_single_xml_metadata_stage_args(
+    server: &str,
+    database: &str,
+    xml: &Path,
+    source_root: Option<PathBuf>,
+    sqlcmd: &Path,
+    replace_config_save: bool,
+    allow_non_lab: bool,
+    script_output: Option<PathBuf>,
+) -> MssqlStageMetadataObjectsArgs {
+    MssqlStageMetadataObjectsArgs {
+        server: server.to_string(),
+        sql_user: None,
+        sql_pwd: None,
+        sql_pwd_env: "IBCMD_DB_PSW".to_string(),
+        database: database.to_string(),
+        xmls: vec![xml.to_path_buf()],
+        source_root,
+        sqlcmd: sqlcmd.to_path_buf(),
+        replace_config_save,
+        allow_non_lab,
+        script_output,
+    }
 }
 
 fn is_root_metadata_xml(path: &str) -> bool {
@@ -2618,350 +2797,350 @@ fn is_root_common_module_xml(path: &str) -> bool {
 pub fn stage_business_process_object(
     args: &MssqlStageBusinessProcessObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_document_journal_object(
     args: &MssqlStageDocumentJournalObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_report_object(
     args: &MssqlStageReportObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_data_processor_object(
     args: &MssqlStageDataProcessorObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_catalog_object(
     args: &MssqlStageCatalogObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_information_register_object(
     args: &MssqlStageInformationRegisterObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_scheduled_job_object(
     args: &MssqlStageScheduledJobObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_xdtopackage_object(
     args: &MssqlStageXdtopackageObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_role_object(args: &MssqlStageRoleObjectArgs) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_constant_object(
     args: &MssqlStageConstantObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_defined_type_object(
     args: &MssqlStageDefinedTypeObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_session_parameter_object(
     args: &MssqlStageSessionParameterObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_settings_storage_object(
     args: &MssqlStageSettingsStorageObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_functional_option_object(
     args: &MssqlStageFunctionalOptionObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_functional_options_parameter_object(
     args: &MssqlStageFunctionalOptionsParameterObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_event_subscription_object(
     args: &MssqlStageEventSubscriptionObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_http_service_object(
     args: &MssqlStageHTTPServiceObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_web_service_object(
     args: &MssqlStageWebServiceObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_common_attribute_object(
     args: &MssqlStageCommonAttributeObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_language_object(
     args: &MssqlStageLanguageObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_style_item_object(
     args: &MssqlStageStyleItemObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 macro_rules! passthrough_metadata_stage {
     ($fn_name:ident, $args_ty:ty) => {
         pub fn $fn_name(args: &$args_ty) -> Result<StageMetadataObjectsReport> {
-            let metadata_args = MssqlStageMetadataObjectsArgs {
-                server: args.server.clone(),
-                database: args.database.clone(),
-                xmls: vec![args.xml.clone()],
-                source_root: args.source_root.clone(),
-                sqlcmd: args.sqlcmd.clone(),
-                replace_config_save: args.replace_config_save,
-                allow_non_lab: args.allow_non_lab,
-                script_output: args.script_output.clone(),
-            };
+            let metadata_args = integrated_single_xml_metadata_stage_args(
+                &args.server,
+                &args.database,
+                &args.xml,
+                args.source_root.clone(),
+                &args.sqlcmd,
+                args.replace_config_save,
+                args.allow_non_lab,
+                args.script_output.clone(),
+            );
             stage_metadata_objects(&metadata_args)
         }
     };
@@ -2981,276 +3160,277 @@ passthrough_metadata_stage!(stage_sequence_object, MssqlStageSequenceObjectArgs)
 passthrough_metadata_stage!(stage_ws_reference_object, MssqlStageWSReferenceObjectArgs);
 
 pub fn stage_task_object(args: &MssqlStageTaskObjectArgs) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_subsystem_object(
     args: &MssqlStageSubsystemObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_command_group_object(
     args: &MssqlStageCommandGroupObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_enum_object(args: &MssqlStageEnumObjectArgs) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_document_object(
     args: &MssqlStageDocumentObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_filter_criteria_object(
     args: &MssqlStageFilterCriteriaObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_accounting_register_object(
     args: &MssqlStageAccountingRegisterObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_accumulation_register_object(
     args: &MssqlStageAccumulationRegisterObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_calculation_register_object(
     args: &MssqlStageCalculationRegisterObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_chart_of_characteristic_types_object(
     args: &MssqlStageChartOfCharacteristicTypesObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_chart_of_accounts_object(
     args: &MssqlStageChartOfAccountsObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_chart_of_calculation_types_object(
     args: &MssqlStageChartOfCalculationTypesObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_chart_of_calculation_registers_object(
     args: &MssqlStageChartOfCalculationRegistersObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_common_command_object(
     args: &MssqlStageCommonCommandObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_common_form_object(
     args: &MssqlStageCommonFormObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_common_picture_object(
     args: &MssqlStageCommonPictureObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 pub fn stage_common_template_object(
     args: &MssqlStageCommonTemplateObjectArgs,
 ) -> Result<StageMetadataObjectsReport> {
-    let metadata_args = MssqlStageMetadataObjectsArgs {
-        server: args.server.clone(),
-        database: args.database.clone(),
-        xmls: vec![args.xml.clone()],
-        source_root: args.source_root.clone(),
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        script_output: args.script_output.clone(),
-    };
+    let metadata_args = integrated_single_xml_metadata_stage_args(
+        &args.server,
+        &args.database,
+        &args.xml,
+        args.source_root.clone(),
+        &args.sqlcmd,
+        args.replace_config_save,
+        args.allow_non_lab,
+        args.script_output.clone(),
+    );
     stage_metadata_objects(&metadata_args)
 }
 
 fn prepare_metadata_object_stage(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: PathBuf,
     source: Option<&MetadataSourceContext>,
@@ -3259,7 +3439,8 @@ fn prepare_metadata_object_stage(
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
     let properties = parse_simple_metadata_xml_properties(&xml)?;
     let object_id = properties.uuid.clone();
-    let base_metadata_blob = fetch_config_blob(sqlcmd, server, database, &object_id)?;
+    let base_metadata_blob =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &object_id)?;
     let packed_metadata =
         pack_simple_metadata_blob_from_xml_with_source(&base_metadata_blob, &xml, source)?;
     if packed_metadata.properties.uuid != object_id {
@@ -3272,6 +3453,7 @@ fn prepare_metadata_object_stage(
     let body_rows = prepare_metadata_body_rows(
         sqlcmd,
         server,
+        sql_auth,
         database,
         &xml_path,
         &xml,
@@ -3294,6 +3476,7 @@ fn prepare_metadata_object_stage(
 fn prepare_metadata_body_rows(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     xml: &[u8],
@@ -3327,24 +3510,24 @@ fn prepare_metadata_body_rows(
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
         }
-        "Configuration" => {
-            prepare_configuration_asset_body_rows(sqlcmd, server, database, xml_path, properties)
-        }
-        "BusinessProcess" => prepare_business_process_flowchart_body_row(
-            sqlcmd, server, database, xml_path, properties,
+        "Configuration" => prepare_configuration_asset_body_rows(
+            sqlcmd, server, sql_auth, database, xml_path, properties,
         ),
-        "Catalog" | "ChartOfCharacteristicTypes" => {
-            prepare_predefined_data_body_row(sqlcmd, server, database, xml_path, properties)
-        }
+        "BusinessProcess" => prepare_business_process_flowchart_body_row(
+            sqlcmd, server, sql_auth, database, xml_path, properties,
+        ),
+        "Catalog" | "ChartOfCharacteristicTypes" => prepare_predefined_data_body_row(
+            sqlcmd, server, sql_auth, database, xml_path, properties,
+        ),
         "ExchangePlan" => prepare_exchange_plan_content_body_row(
             sqlcmd, server, database, xml_path, properties, source,
         ),
-        "Form" | "CommonForm" => {
-            prepare_form_body_row(sqlcmd, server, database, xml_path, properties, source)
-        }
-        "Role" => {
-            prepare_role_rights_body_row(sqlcmd, server, database, xml_path, properties, source)
-        }
+        "Form" | "CommonForm" => prepare_form_body_row(
+            sqlcmd, server, sql_auth, database, xml_path, properties, source,
+        ),
+        "Role" => prepare_role_rights_body_row(
+            sqlcmd, server, sql_auth, database, xml_path, properties, source,
+        ),
         _ => Ok(Vec::new()),
     }?;
     rows.extend(prepare_object_help_body_row(
@@ -3357,7 +3540,7 @@ fn prepare_metadata_body_rows(
         sqlcmd, server, database, xml_path, xml, properties,
     )?);
     rows.extend(prepare_command_interface_body_row(
-        sqlcmd, server, database, xml_path, properties,
+        sqlcmd, server, sql_auth, database, xml_path, properties,
     )?);
     rows.extend(prepare_additional_indexes_body_row(
         sqlcmd, server, database, xml_path, properties,
@@ -3635,6 +3818,7 @@ fn prepare_common_picture_body_row(
 fn prepare_configuration_asset_body_rows(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -3678,6 +3862,7 @@ fn prepare_configuration_asset_body_rows(
     rows.extend(prepare_configuration_command_interface_body_row(
         sqlcmd,
         server,
+        sql_auth,
         database,
         properties,
         infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
@@ -3686,6 +3871,7 @@ fn prepare_configuration_asset_body_rows(
     rows.extend(prepare_configuration_command_interface_body_row(
         sqlcmd,
         server,
+        sql_auth,
         database,
         properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
@@ -3768,6 +3954,7 @@ fn prepare_configuration_ext_picture_body_row(
 fn prepare_configuration_command_interface_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     properties: &SimpleMetadataXmlProperties,
     body_path: PathBuf,
@@ -3797,7 +3984,7 @@ fn prepare_configuration_command_interface_body_row(
             blob_sha256: packed.output_sha256,
         }]);
     }
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
     let packed = pack_command_interface_blob_from_xml(&base_body, &xml).with_context(|| {
         format!(
             "failed to pack Configuration CommandInterface {}",
@@ -3888,6 +4075,7 @@ fn prepare_exchange_plan_content_body_row(
 fn prepare_predefined_data_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -3900,7 +4088,7 @@ fn prepare_predefined_data_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read PredefinedData {}", body_path.display()))?;
     let packed = pack_predefined_data_blob_from_xml(&base_body, &xml)
@@ -3916,6 +4104,7 @@ fn prepare_predefined_data_body_row(
 fn prepare_business_process_flowchart_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -3925,7 +4114,7 @@ fn prepare_business_process_flowchart_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.7", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read BusinessProcess Flowchart {}",
@@ -3950,6 +4139,7 @@ fn prepare_business_process_flowchart_body_row(
 fn prepare_form_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -3961,7 +4151,7 @@ fn prepare_form_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
     let form_xml = if form_path.exists() {
         fs::read(&form_path)
             .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
@@ -4000,6 +4190,7 @@ fn prepare_form_body_row(
 fn prepare_role_rights_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -4010,7 +4201,7 @@ fn prepare_role_rights_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
     let packed = pack_role_rights_blob_from_xml_with_source(&base_body, &xml, source)
@@ -4026,6 +4217,7 @@ fn prepare_role_rights_body_row(
 fn prepare_command_interface_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -4058,7 +4250,7 @@ fn prepare_command_interface_body_row(
             blob_sha256: packed.output_sha256,
         }]);
     }
-    let base_body = fetch_config_blob(sqlcmd, server, database, &body_id)?;
+    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
     let packed = pack_command_interface_blob_from_xml(&base_body, &xml)
         .with_context(|| format!("failed to pack CommandInterface {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
@@ -4520,6 +4712,7 @@ fn path_ends_with_for_stage(path: &[String], suffix: &[&str]) -> bool {
 fn prepare_common_module_object_stage(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: PathBuf,
     text_path: Option<PathBuf>,
@@ -4540,7 +4733,8 @@ fn prepare_common_module_object_stage(
         }
     };
 
-    let base_metadata_blob = fetch_config_blob(sqlcmd, server, database, &module_id)?;
+    let base_metadata_blob =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &module_id)?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     let module_body_id = format!("{module_id}.0");
     let packed_module = pack_module_body_source(&text_path)?;
@@ -4563,6 +4757,7 @@ fn prepare_common_module_object_stage(
 fn stage_prepared_common_module_objects(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     prepared: Vec<PreparedCommonModuleObjectStage>,
     replace_config_save: bool,
@@ -4579,14 +4774,15 @@ fn stage_prepared_common_module_objects(
     }
     ensure_unique_common_module_object_ids(&prepared)?;
 
-    let versions_blob = fetch_config_blob(sqlcmd, server, database, "versions")?;
+    let versions_blob =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, "versions")?;
     let changes = prepared
         .iter()
         .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()])
         .collect::<Vec<_>>();
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
-    let before = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let before = storage_table_stats_with_auth(sqlcmd, server, sql_auth, database, "ConfigSave")?;
     let script =
         script_output.unwrap_or_else(|| default_stage_script_path(database, default_script_name));
     if let Some(parent) = script.parent() {
@@ -4595,9 +4791,9 @@ fn stage_prepared_common_module_objects(
     }
     let sql = build_stage_common_module_objects_sql(database, &prepared, &patched_versions.blob);
     fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-    run_sql_file(sqlcmd, server, &script)?;
+    run_sql_file_with_auth(sqlcmd, server, sql_auth, &script)?;
 
-    let after = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let after = storage_table_stats_with_auth(sqlcmd, server, sql_auth, database, "ConfigSave")?;
     let modules = prepared
         .into_iter()
         .map(|module| StagedCommonModuleObjectReport {
@@ -4636,6 +4832,7 @@ fn stage_prepared_common_module_objects(
 fn stage_common_module_specs(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     specs: Vec<CommonModuleStageSpec>,
     replace_config_save: bool,
@@ -4670,14 +4867,15 @@ fn stage_common_module_specs(
             .collect::<Result<Vec<_>>>()
     })??;
 
-    let versions_blob = fetch_config_blob(sqlcmd, server, database, "versions")?;
+    let versions_blob =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, "versions")?;
     let changes = prepared
         .iter()
         .flat_map(|module| [module.spec.module_id.clone(), module.module_body_id.clone()])
         .collect::<Vec<_>>();
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
-    let before = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let before = storage_table_stats_with_auth(sqlcmd, server, sql_auth, database, "ConfigSave")?;
     let script = script_output.unwrap_or_else(|| {
         default_stage_script_path(database, &format!("common_modules_{}", prepared.len()))
     });
@@ -4687,9 +4885,9 @@ fn stage_common_module_specs(
     }
     let sql = build_stage_common_modules_sql(database, &prepared, &patched_versions.blob);
     fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-    run_sql_file(sqlcmd, server, &script)?;
+    run_sql_file_with_auth(sqlcmd, server, sql_auth, &script)?;
 
-    let after = storage_table_stats(sqlcmd, server, database, "ConfigSave")?;
+    let after = storage_table_stats_with_auth(sqlcmd, server, sql_auth, database, "ConfigSave")?;
     let modules = prepared
         .into_iter()
         .map(|module| StagedCommonModuleReport {
@@ -4986,13 +5184,23 @@ fn storage_table_stats(
     database: &str,
     table: &str,
 ) -> Result<StorageTableManifest> {
+    storage_table_stats_with_auth(sqlcmd, server, SqlAuth::integrated(), database, table)
+}
+
+fn storage_table_stats_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    database: &str,
+    table: &str,
+) -> Result<StorageTableManifest> {
     let sql = format!(
         "SET NOCOUNT ON; USE {db}; SELECT N'{table}' AS table_name, COUNT_BIG(*) AS row_count, ISNULL(SUM(CONVERT(bigint, DATALENGTH(BinaryData))), 0) AS binary_bytes, CONVERT(bigint, CHECKSUM_AGG(BINARY_CHECKSUM(*))) AS row_checksum FROM {table_ident} FOR JSON PATH;",
         db = quote_ident(database),
         table = quote_string(table),
         table_ident = quote_ident(table),
     );
-    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let stdout = run_sql_capture_with_auth(sqlcmd, server, sql_auth, &sql)?;
     let json = extract_json_array(&stdout, &format!("storage_table_stats({table})"))?;
     let mut values: Vec<StorageTableManifest> = serde_json::from_str(&json)
         .with_context(|| format!("failed to parse storage stats JSON for {table}"))?;
@@ -5076,6 +5284,16 @@ fn fetch_config_blob(
     database: &str,
     file_name: &str,
 ) -> Result<Vec<u8>> {
+    fetch_config_blob_with_auth(sqlcmd, server, SqlAuth::integrated(), database, file_name)
+}
+
+fn fetch_config_blob_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    database: &str,
+    file_name: &str,
+) -> Result<Vec<u8>> {
     let sql = format!(
         "SET NOCOUNT ON; USE {db};\n\
          SELECT COALESCE((\n\
@@ -5089,7 +5307,7 @@ fn fetch_config_blob(
         db = quote_ident(database),
         file_name = quote_string(file_name),
     );
-    let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    let stdout = run_sql_capture_with_auth(sqlcmd, server, sql_auth, &sql)?;
     let json = extract_json_array(&stdout, &format!("fetch_config_blob({file_name})"))?;
     let mut rows: Vec<BinaryBlobRow> = serde_json::from_str(&json)
         .with_context(|| format!("failed to parse Config blob JSON for {file_name}"))?;
@@ -5117,6 +5335,18 @@ fn database_exists(sqlcmd: &Path, server: &str, database: &str) -> Result<bool> 
     Ok(first_i32(&stdout).unwrap_or_default() > 0)
 }
 
+fn resolve_sqlcmd_password(
+    user: Option<&str>,
+    password: Option<&str>,
+    password_env: &str,
+) -> Option<String> {
+    user?;
+    password
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| std::env::var(password_env).ok())
+}
+
 fn by_table_name(tables: &[TableShape]) -> BTreeMap<String, &TableShape> {
     tables
         .iter()
@@ -5125,7 +5355,11 @@ fn by_table_name(tables: &[TableShape]) -> BTreeMap<String, &TableShape> {
 }
 
 fn run_sql(sqlcmd: &Path, server: &str, sql: &str) -> Result<()> {
-    let output = sqlcmd_command(sqlcmd, server, sql)
+    run_sql_with_auth(sqlcmd, server, SqlAuth::integrated(), sql)
+}
+
+fn run_sql_with_auth(sqlcmd: &Path, server: &str, sql_auth: SqlAuth<'_>, sql: &str) -> Result<()> {
+    let output = sqlcmd_command_with_auth(sqlcmd, server, sql_auth, sql)
         .output()
         .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if output.status.success() {
@@ -5140,7 +5374,16 @@ fn run_sql(sqlcmd: &Path, server: &str, sql: &str) -> Result<()> {
 }
 
 fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
-    let output = sqlcmd_command(sqlcmd, server, sql)
+    run_sql_capture_with_auth(sqlcmd, server, SqlAuth::integrated(), sql)
+}
+
+fn run_sql_capture_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    sql: &str,
+) -> Result<String> {
+    let output = sqlcmd_command_with_auth(sqlcmd, server, sql_auth, sql)
         .output()
         .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if !output.status.success() {
@@ -5153,8 +5396,13 @@ fn run_sql_capture(sqlcmd: &Path, server: &str, sql: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn run_sql_file(sqlcmd: &Path, server: &str, script: &Path) -> Result<()> {
-    let output = sqlcmd_file_command(sqlcmd, server, script)
+fn run_sql_file_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    script: &Path,
+) -> Result<()> {
+    let output = sqlcmd_file_command_with_auth(sqlcmd, server, sql_auth, script)
         .output()
         .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
     if output.status.success() {
@@ -5234,12 +5482,26 @@ fn run_bcp(mut command: Command) -> Result<()> {
     ))
 }
 
-fn sqlcmd_command(sqlcmd: &Path, server: &str, sql: &str) -> Command {
+fn sqlcmd_command_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    sql: &str,
+) -> Command {
     let mut command = Command::new(sqlcmd);
+    command.arg("-S").arg(server);
+    match sql_auth.user {
+        Some(user) => {
+            command.arg("-U").arg(user);
+            if let Some(password) = sql_auth.password {
+                command.arg("-P").arg(password);
+            }
+        }
+        None => {
+            command.arg("-E");
+        }
+    }
     command
-        .arg("-S")
-        .arg(server)
-        .arg("-E")
         .arg("-C")
         .arg("-f")
         .arg("65001")
@@ -5255,12 +5517,26 @@ fn sqlcmd_command(sqlcmd: &Path, server: &str, sql: &str) -> Command {
     command
 }
 
-fn sqlcmd_file_command(sqlcmd: &Path, server: &str, script: &Path) -> Command {
+fn sqlcmd_file_command_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    script: &Path,
+) -> Command {
     let mut command = Command::new(sqlcmd);
+    command.arg("-S").arg(server);
+    match sql_auth.user {
+        Some(user) => {
+            command.arg("-U").arg(user);
+            if let Some(password) = sql_auth.password {
+                command.arg("-P").arg(password);
+            }
+        }
+        None => {
+            command.arg("-E");
+        }
+    }
     command
-        .arg("-S")
-        .arg(server)
-        .arg("-E")
         .arg("-C")
         .arg("-f")
         .arg("65001")
@@ -6428,7 +6704,7 @@ mod tests {
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use crate::v8_container::{V8Element, build_v8_container, make_v8_element_header};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_simple_metadata_properties(
@@ -6459,6 +6735,55 @@ mod tests {
             server_call: false,
             privileged: false,
             return_values_reuse: ReturnValuesReuse::DontUse,
+        }
+    }
+
+    fn test_metadata_stage_object(
+        kind: &str,
+        uuid: &str,
+        name: &str,
+        xml: &str,
+        body_paths: &[&str],
+    ) -> PreparedMetadataObjectStage {
+        PreparedMetadataObjectStage {
+            object_id: uuid.to_string(),
+            kind: kind.to_string(),
+            xml: PathBuf::from(xml),
+            properties: test_simple_metadata_properties(kind, uuid, name),
+            metadata_plain_bytes: 1,
+            metadata_blob: vec![0x10, 0x20, 0x30],
+            metadata_blob_sha256: "meta".to_string(),
+            body_rows: body_paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| PreparedMetadataBodyStage {
+                    body_id: format!("{uuid}.{index}"),
+                    path: PathBuf::from(path),
+                    blob: vec![index as u8, 0xAA],
+                    blob_sha256: format!("body-{index}"),
+                })
+                .collect(),
+        }
+    }
+
+    fn test_common_module_stage_object(
+        uuid: &str,
+        name: &str,
+        xml: &str,
+        text: &str,
+    ) -> PreparedCommonModuleObjectStage {
+        PreparedCommonModuleObjectStage {
+            module_id: uuid.to_string(),
+            module_body_id: format!("{uuid}.0"),
+            xml: PathBuf::from(xml),
+            text: PathBuf::from(text),
+            properties: test_common_module_properties(uuid, name),
+            metadata_plain_bytes: 1,
+            metadata_blob: vec![0x40, 0x50],
+            metadata_blob_sha256: "module-meta".to_string(),
+            text_bytes: 4,
+            module_blob: vec![0x60, 0x70, 0x80],
+            module_blob_sha256: "module-body".to_string(),
         }
     }
 
@@ -7488,6 +7813,162 @@ mod tests {
         assert!(!reports[1].include_stable_rows);
         assert!(reports[1].include_versions_row);
         assert_eq!(reports[1].expected_total_rows, 7);
+    }
+
+    #[test]
+    fn reports_source_stage_batch_accounting_across_three_batches() {
+        let metadata_objects = vec![
+            test_metadata_stage_object(
+                "Catalog",
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                "A",
+                "Catalogs/A.xml",
+                &["Catalogs/A/Ext/Predefined.xml", "Catalogs/A/Ext/Help.xml"],
+            ),
+            test_metadata_stage_object(
+                "Catalog",
+                "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+                "B",
+                "Catalogs/B.xml",
+                &["Catalogs/B/Ext/Help.xml"],
+            ),
+            test_metadata_stage_object(
+                "Enum",
+                "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+                "C",
+                "Catalogs/C.xml",
+                &[],
+            ),
+        ];
+        let common_modules = vec![
+            test_common_module_stage_object(
+                "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+                "D",
+                "CommonModules/D.xml",
+                "CommonModules/D/Ext/Module.bsl",
+            ),
+            test_common_module_stage_object(
+                "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+                "E",
+                "CommonModules/E.xml",
+                "CommonModules/E/Ext/Module.bsl",
+            ),
+        ];
+
+        let batches = build_source_stage_batches(metadata_objects, common_modules, 2);
+        let reports = source_stage_batch_reports(&batches);
+
+        assert_eq!(reports.len(), 3);
+
+        assert_eq!(reports[0].staged_rows, 5);
+        assert_eq!(reports[0].running_staged_rows, 5);
+        assert!(reports[0].include_stable_rows);
+        assert!(!reports[0].include_versions_row);
+        assert_eq!(reports[0].expected_total_rows, 7);
+
+        assert_eq!(reports[1].staged_rows, 3);
+        assert_eq!(reports[1].running_staged_rows, 8);
+        assert!(!reports[1].include_stable_rows);
+        assert!(!reports[1].include_versions_row);
+        assert_eq!(reports[1].expected_total_rows, 8);
+
+        assert_eq!(reports[2].staged_rows, 2);
+        assert_eq!(reports[2].running_staged_rows, 10);
+        assert!(!reports[2].include_stable_rows);
+        assert!(reports[2].include_versions_row);
+        assert_eq!(reports[2].expected_total_rows, 11);
+    }
+
+    #[test]
+    fn builds_source_tree_stage_sql_with_correct_multi_batch_guards() {
+        let metadata_objects = vec![
+            test_metadata_stage_object(
+                "Catalog",
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                "A",
+                "Catalogs/A.xml",
+                &["Catalogs/A/Ext/Predefined.xml", "Catalogs/A/Ext/Help.xml"],
+            ),
+            test_metadata_stage_object(
+                "Catalog",
+                "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+                "B",
+                "Catalogs/B.xml",
+                &["Catalogs/B/Ext/Help.xml"],
+            ),
+            test_metadata_stage_object(
+                "Enum",
+                "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+                "C",
+                "Catalogs/C.xml",
+                &[],
+            ),
+        ];
+        let common_modules = vec![
+            test_common_module_stage_object(
+                "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+                "D",
+                "CommonModules/D.xml",
+                "CommonModules/D/Ext/Module.bsl",
+            ),
+            test_common_module_stage_object(
+                "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+                "E",
+                "CommonModules/E.xml",
+                "CommonModules/E/Ext/Module.bsl",
+            ),
+        ];
+
+        let batches = build_source_stage_batches(metadata_objects, common_modules, 2);
+        let reports = source_stage_batch_reports(&batches);
+        let versions_blob = [0xDE, 0xAD, 0xBE, 0xEF];
+
+        let first_sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &batches[0].metadata_objects,
+            &batches[0].common_modules,
+            &versions_blob,
+            reports[0].include_stable_rows,
+            reports[0].include_versions_row,
+            reports[0].expected_total_rows,
+        );
+        let middle_sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &batches[1].metadata_objects,
+            &batches[1].common_modules,
+            &versions_blob,
+            reports[1].include_stable_rows,
+            reports[1].include_versions_row,
+            reports[1].expected_total_rows,
+        );
+        let last_sql = super::build_stage_source_objects_sql(
+            "TestDb",
+            &batches[2].metadata_objects,
+            &batches[2].common_modules,
+            &versions_blob,
+            reports[2].include_stable_rows,
+            reports[2].include_versions_row,
+            reports[2].expected_total_rows,
+        );
+
+        assert!(first_sql.contains("DELETE FROM ConfigSave;"));
+        assert!(first_sql.contains("WHERE FileName IN (N'root', N'version')"));
+        assert!(!first_sql.contains("N'versions'"));
+        assert!(first_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 7"));
+
+        assert!(!middle_sql.contains("DELETE FROM ConfigSave;"));
+        assert!(!middle_sql.contains("WHERE FileName IN (N'root', N'version')"));
+        assert!(!middle_sql.contains("N'versions'"));
+        assert!(middle_sql.contains("N'cccccccc-cccc-4ccc-cccc-cccccccccccc'"));
+        assert!(middle_sql.contains("N'dddddddd-dddd-4ddd-dddd-dddddddddddd.0'"));
+        assert!(middle_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 8"));
+
+        assert!(!last_sql.contains("DELETE FROM ConfigSave;"));
+        assert!(!last_sql.contains("WHERE FileName IN (N'root', N'version')"));
+        assert!(last_sql.contains("N'versions'"));
+        assert!(last_sql.contains("0xDEADBEEF"));
+        assert!(last_sql.contains("N'eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0'"));
+        assert!(last_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 11"));
     }
 
     #[test]
@@ -9512,6 +9993,7 @@ mod tests {
         let rows = super::prepare_metadata_body_rows(
             PathBuf::from("missing-sqlcmd-for-xdto-package-test").as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &xml_path,
             xml,
@@ -10135,6 +10617,7 @@ mod tests {
         let rows = super::prepare_configuration_asset_body_rows(
             PathBuf::from("missing-sqlcmd-for-main-section-picture-test").as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &root.join("Configuration.xml"),
             &properties,
@@ -10218,6 +10701,7 @@ mod tests {
         let rows = super::prepare_configuration_asset_body_rows(
             PathBuf::from("missing-sqlcmd-for-configuration-binary-test").as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &configuration_xml,
             &properties,
@@ -10393,6 +10877,7 @@ mod tests {
         let rows = super::prepare_command_interface_body_row(
             PathBuf::from("missing-sqlcmd-for-command-interface-test").as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &subsystem_xml,
             &properties,
@@ -10436,6 +10921,7 @@ mod tests {
         let rows = super::prepare_command_interface_body_row(
             PathBuf::from("missing-sqlcmd-for-common-command-interface-test").as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &common_command_xml,
             &properties,
@@ -10522,6 +11008,7 @@ mod tests {
         let rows = super::prepare_configuration_command_interface_body_row(
             PathBuf::from("missing-sqlcmd-for-configuration-command-interface-test").as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &properties,
             body_path.clone(),
@@ -10612,6 +11099,7 @@ mod tests {
             PathBuf::from("missing-sqlcmd-for-configuration-main-section-command-interface-test")
                 .as_path(),
             "missing-server",
+            super::SqlAuth::integrated(),
             "missing-database",
             &properties,
             body_path.clone(),
@@ -11652,5 +12140,44 @@ mod tests {
     fn rejects_non_lab_destructive_actions_without_confirmation() {
         let error = require_non_lab_confirmation(false, "storage import").unwrap_err();
         assert!(error.to_string().contains("--allow-non-lab"));
+    }
+
+    #[test]
+    fn sqlcmd_command_uses_integrated_auth_by_default() {
+        let command = super::sqlcmd_command_with_auth(
+            Path::new("sqlcmd"),
+            "localhost",
+            super::SqlAuth::integrated(),
+            "SELECT 1",
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(args.contains(&"-E".to_string()));
+        assert!(!args.contains(&"-U".to_string()));
+        assert!(!args.contains(&"-P".to_string()));
+    }
+
+    #[test]
+    fn sqlcmd_command_switches_to_sql_auth_when_user_is_present() {
+        let command = super::sqlcmd_command_with_auth(
+            Path::new("sqlcmd"),
+            "localhost",
+            super::SqlAuth {
+                user: Some("stage-user"),
+                password: Some("stage-secret"),
+            },
+            "SELECT 1",
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(!args.contains(&"-E".to_string()));
+        assert!(args.windows(2).any(|pair| pair == ["-U", "stage-user"]));
+        assert!(args.windows(2).any(|pair| pair == ["-P", "stage-secret"]));
     }
 }

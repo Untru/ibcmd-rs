@@ -19,6 +19,14 @@ fn main() -> Result<()> {
                     let report = ibcmd_rs::infobase::import_config(&args)?;
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 }
+                InfobaseConfigCommands::Roundtrip(args) => {
+                    let report = ibcmd_rs::infobase::roundtrip_config(&args)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                InfobaseConfigCommands::Sweep(args) => {
+                    let report = ibcmd_rs::infobase::sweep_config(&args)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
             },
         },
         Commands::Probe(args) => {

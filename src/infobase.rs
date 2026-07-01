@@ -1,16 +1,25 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
+use quick_xml::Reader;
+use quick_xml::events::Event;
 use serde::Serialize;
 use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::cli::{
     InfobaseConfigExportArgs, InfobaseConfigFormat, InfobaseConfigImportArgs,
-    InfobaseConfigSourceVersion, MssqlDumpConfigArgs, MssqlStageSourceObjectsArgs,
+    InfobaseConfigRoundtripArgs, InfobaseConfigSourceVersion, InfobaseConfigSweepArgs,
+    MssqlCloneArgs, MssqlDumpConfigArgs, MssqlStageSourceObjectsArgs,
 };
+use crate::module_blob::{
+    parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
+};
+use crate::source::scan_sources_with_prefixes;
 
 #[derive(Debug, Serialize)]
 pub struct InfobaseConfigExportReport {
@@ -49,6 +58,78 @@ pub struct InfobaseConfigImportReport {
     pub scripts: Vec<PathBuf>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct InfobaseConfigRoundtripReport {
+    pub operation: &'static str,
+    pub backend_export: &'static str,
+    pub backend_import: &'static str,
+    pub dbms: String,
+    pub db_server: String,
+    pub source_db: String,
+    pub target_db: String,
+    pub db_user: Option<String>,
+    pub work_dir: PathBuf,
+    pub baseline_dir: PathBuf,
+    pub after_apply_dir: PathBuf,
+    pub path_prefix: Vec<String>,
+    pub reused_source_dir: bool,
+    pub selected_after_apply_file_names: usize,
+    pub clone: crate::mssql::MssqlCloneReport,
+    pub baseline_export: Option<InfobaseConfigExportReport>,
+    pub import: InfobaseConfigImportReport,
+    pub check: IbcmdConfigStepReport,
+    pub apply: IbcmdConfigStepReport,
+    pub after_apply_export: InfobaseConfigExportReport,
+    pub diff_output: PathBuf,
+    pub diff: crate::plan::SourceDiffReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InfobaseConfigSweepReport {
+    pub operation: &'static str,
+    pub dbms: String,
+    pub db_server: String,
+    pub source_db: String,
+    pub work_dir: PathBuf,
+    pub baseline_dir: PathBuf,
+    pub generated_prefixes: bool,
+    pub prefixes: Vec<String>,
+    pub results: Vec<InfobaseConfigSweepEntryReport>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InfobaseConfigSweepEntryReport {
+    pub path_prefix: String,
+    pub target_db: String,
+    pub status: &'static str,
+    pub work_dir: PathBuf,
+    pub selected_after_apply_file_names: Option<usize>,
+    pub raw_rows: Option<usize>,
+    pub exported_files: Option<usize>,
+    pub check_duration_ms: Option<u128>,
+    pub apply_duration_ms: Option<u128>,
+    pub diff_summary: Option<SourceDiffSummary>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SourceDiffSummary {
+    pub left_only: usize,
+    pub right_only: usize,
+    pub different: usize,
+    pub unchanged: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IbcmdConfigStepReport {
+    pub command: String,
+    pub data_dir: PathBuf,
+    pub duration_ms: u128,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
 #[derive(Debug)]
 struct ConnectionConfig {
     dbms: String,
@@ -74,20 +155,37 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         &args.db_pwd_env,
     )?;
     ensure_mssql(&config.dbms)?;
+    export_config_report(
+        &config,
+        &args.sqlcmd,
+        &args.db_pwd_env,
+        &args.output_dir,
+        args.overwrite,
+        Vec::new(),
+    )
+}
 
-    let output_dir = absolute_path(&args.output_dir)?;
-    prepare_output_dir(&output_dir, args.overwrite)?;
+fn export_config_report(
+    config: &ConnectionConfig,
+    sqlcmd: &Path,
+    db_pwd_env: &str,
+    output_dir_arg: &Path,
+    overwrite: bool,
+    file_names: Vec<String>,
+) -> Result<InfobaseConfigExportReport> {
+    let output_dir = absolute_path(output_dir_arg)?;
+    prepare_output_dir(&output_dir, overwrite)?;
     let dump_args = MssqlDumpConfigArgs {
-        sqlcmd: args.sqlcmd.clone(),
+        sqlcmd: sqlcmd.to_path_buf(),
         server: config.db_server.clone(),
         sql_user: config.db_user.clone(),
         sql_pwd: config.db_pwd.clone(),
-        sql_pwd_env: args.db_pwd_env.clone(),
+        sql_pwd_env: db_pwd_env.to_string(),
         database: config.db_name.clone(),
         output_dir: output_dir.clone(),
         overwrite: false,
         include_config_save: false,
-        file_names: Vec::new(),
+        file_names,
         file_name_lists: Vec::new(),
         inflate: false,
         extract_module_text: true,
@@ -106,11 +204,11 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         backend: "mssql-config-direct",
         format: format_name(config.format),
         source_version: config.source_version.as_str(),
-        dbms: config.dbms,
-        db_server: config.db_server,
-        db_name: config.db_name,
-        db_user: config.db_user,
-        password_source: config.password_source,
+        dbms: config.dbms.clone(),
+        db_server: config.db_server.clone(),
+        db_name: config.db_name.clone(),
+        db_user: config.db_user.clone(),
+        password_source: config.password_source.clone(),
         output_dir,
         temp_dump_dir: dump_args.output_dir,
         exported_files,
@@ -136,18 +234,7 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
     )?;
     ensure_mssql(&config.dbms)?;
 
-    let stage_args = MssqlStageSourceObjectsArgs {
-        server: config.db_server.clone(),
-        database: config.db_name.clone(),
-        source_root: absolute_path(&args.source_dir)?,
-        sqlcmd: args.sqlcmd.clone(),
-        replace_config_save: args.replace_config_save,
-        allow_non_lab: args.allow_non_lab,
-        batch_size: args.batch_size,
-        source_version: Some(config.source_version),
-        path_prefix: args.path_prefix.clone(),
-        script_output: args.script_output.clone(),
-    };
+    let stage_args = build_import_stage_args(&config, args)?;
     let report = crate::mssql::stage_source_objects(&stage_args)?;
 
     Ok(InfobaseConfigImportReport {
@@ -163,6 +250,865 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
         staged_rows_before: report.before.row_count,
         staged_rows_after: report.after.row_count,
         scripts: report.scripts,
+    })
+}
+
+pub fn roundtrip_config(
+    args: &InfobaseConfigRoundtripArgs,
+) -> Result<InfobaseConfigRoundtripReport> {
+    let config = resolve_connection(
+        args.settings.as_deref(),
+        args.format,
+        args.source_version,
+        args.dbms.as_deref(),
+        args.db_server.as_deref(),
+        args.db_name.as_deref(),
+        args.db_user.as_deref(),
+        args.db_pwd.as_deref(),
+        &args.db_pwd_env,
+    )?;
+    ensure_mssql(&config.dbms)?;
+
+    let settings = match args.settings.as_deref() {
+        Some(path) => Some(read_settings(path)?),
+        None => None,
+    };
+    let infobase_user = first_value(
+        args.user.as_deref(),
+        settings_string_at(&settings, &["ibcmd-rs", "ib-user"])
+            .or_else(|| settings_string_at(&settings, &["ibcmd-rs", "user"]))
+            .or_else(|| settings_string_at(&settings, &["ibcmd-rs", "usr"]))
+            .or_else(|| settings_value(&settings, "ib-user"))
+            .or_else(|| settings_value(&settings, "user"))
+            .or_else(|| settings_value(&settings, "usr")),
+    );
+    let infobase_password = resolve_optional_password(
+        infobase_user.as_deref(),
+        args.password.as_deref(),
+        &args.password_env,
+    )?;
+
+    let ibcmd = crate::dump_sources::resolve_ibcmd(args.ibcmd.as_deref())?;
+    let work_root = absolute_path(&args.work_dir)?;
+    fs::create_dir_all(&work_root)
+        .with_context(|| format!("failed to create {}", work_root.display()))?;
+    let target_db = args
+        .target_db
+        .clone()
+        .unwrap_or_else(|| default_roundtrip_target_db(&config.db_name));
+    let run_dir = work_root.join(&target_db);
+    prepare_output_dir(&run_dir, args.overwrite)?;
+
+    let baseline_dir = match &args.source_dir {
+        Some(path) => absolute_path(path)?,
+        None => run_dir.join("baseline"),
+    };
+    let after_apply_dir = run_dir.join("after_apply");
+    let diff_output = run_dir.join("source-diff.json");
+    let data_dir = match &args.data_dir {
+        Some(path) => absolute_path(path)?,
+        None => run_dir.join("ibcmd-data"),
+    };
+    prepare_output_dir(&data_dir, args.overwrite)?;
+
+    let baseline_export = if args.source_dir.is_some() {
+        None
+    } else {
+        Some(export_config(&InfobaseConfigExportArgs {
+            settings: args.settings.clone(),
+            format: args.format,
+            source_version: args.source_version,
+            dbms: Some(config.dbms.clone()),
+            db_server: Some(config.db_server.clone()),
+            db_name: Some(config.db_name.clone()),
+            db_user: config.db_user.clone(),
+            db_pwd: config.db_pwd.clone(),
+            db_pwd_env: args.db_pwd_env.clone(),
+            user: infobase_user.clone(),
+            password: infobase_password.clone(),
+            password_env: args.password_env.clone(),
+            sqlcmd: args.sqlcmd.clone(),
+            overwrite: args.overwrite,
+            output_dir: baseline_dir.clone(),
+        })?)
+    };
+
+    let clone = crate::mssql::clone_database(&MssqlCloneArgs {
+        server: config.db_server.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        source: config.db_name.clone(),
+        target: target_db.clone(),
+        backup: args.backup.clone(),
+        overwrite: args.overwrite,
+        allow_non_lab: args.allow_non_lab,
+    })?;
+
+    let import = import_config(&InfobaseConfigImportArgs {
+        settings: args.settings.clone(),
+        format: args.format,
+        source_version: args.source_version,
+        dbms: Some(config.dbms.clone()),
+        db_server: Some(config.db_server.clone()),
+        db_name: Some(target_db.clone()),
+        db_user: config.db_user.clone(),
+        db_pwd: config.db_pwd.clone(),
+        db_pwd_env: args.db_pwd_env.clone(),
+        user: infobase_user.clone(),
+        password: infobase_password.clone(),
+        password_env: args.password_env.clone(),
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: true,
+        allow_non_lab: args.allow_non_lab,
+        batch_size: args.batch_size,
+        path_prefix: args.path_prefix.clone(),
+        script_output: args.script_output.clone(),
+        source_dir: baseline_dir.clone(),
+    })?;
+
+    let check = run_ibcmd_config_step(
+        &ibcmd,
+        "check",
+        &config,
+        &target_db,
+        infobase_user.as_deref(),
+        infobase_password.as_deref(),
+        &data_dir,
+        Duration::from_secs(args.timeout_sec),
+    )?;
+    let apply = run_ibcmd_config_step(
+        &ibcmd,
+        "apply",
+        &config,
+        &target_db,
+        infobase_user.as_deref(),
+        infobase_password.as_deref(),
+        &data_dir,
+        Duration::from_secs(args.timeout_sec),
+    )?;
+
+    let selected_after_apply_file_names = if !args.path_prefix.is_empty() {
+        let file_names =
+            build_selected_dump_file_names_from_source(&baseline_dir, &args.path_prefix)
+                .with_context(|| {
+                    format!(
+                        "failed to resolve selected dump file names from {} for path prefixes {:?}",
+                        baseline_dir.display(),
+                        args.path_prefix
+                    )
+                })?;
+        if file_names.is_empty() {
+            bail!(
+                "selected dump file name resolution returned no Config rows for {} and path prefixes {:?}",
+                baseline_dir.display(),
+                args.path_prefix
+            );
+        }
+        file_names
+    } else {
+        Vec::new()
+    };
+    let selected_after_apply_file_name_count = selected_after_apply_file_names.len();
+    let after_apply_export = export_config_report(
+        &ConnectionConfig {
+            dbms: config.dbms.clone(),
+            db_server: config.db_server.clone(),
+            db_name: target_db.clone(),
+            db_user: config.db_user.clone(),
+            db_pwd: config.db_pwd.clone(),
+            password_source: config.password_source.clone(),
+            format: config.format,
+            source_version: config.source_version,
+        },
+        &args.sqlcmd,
+        &args.db_pwd_env,
+        &after_apply_dir,
+        args.overwrite,
+        selected_after_apply_file_names,
+    )?;
+
+    let diff = crate::plan::diff_source_trees(&baseline_dir, &after_apply_dir, &args.path_prefix)?;
+    crate::plan::write_source_diff(&diff, &diff_output)?;
+
+    Ok(InfobaseConfigRoundtripReport {
+        operation: "infobase config roundtrip",
+        backend_export: "mssql-config-direct",
+        backend_import: "mssql-configsave-stage",
+        dbms: config.dbms,
+        db_server: config.db_server,
+        source_db: config.db_name,
+        target_db,
+        db_user: config.db_user,
+        work_dir: run_dir,
+        baseline_dir,
+        after_apply_dir,
+        path_prefix: args.path_prefix.clone(),
+        reused_source_dir: args.source_dir.is_some(),
+        selected_after_apply_file_names: selected_after_apply_file_name_count,
+        clone,
+        baseline_export,
+        import,
+        check,
+        apply,
+        after_apply_export,
+        diff_output,
+        diff,
+    })
+}
+
+pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSweepReport> {
+    let config = resolve_connection(
+        args.settings.as_deref(),
+        args.format,
+        args.source_version,
+        args.dbms.as_deref(),
+        args.db_server.as_deref(),
+        args.db_name.as_deref(),
+        args.db_user.as_deref(),
+        args.db_pwd.as_deref(),
+        &args.db_pwd_env,
+    )?;
+    ensure_mssql(&config.dbms)?;
+
+    let work_dir = absolute_path(&args.work_dir)?;
+    fs::create_dir_all(&work_dir)
+        .with_context(|| format!("failed to create {}", work_dir.display()))?;
+    let baseline_dir = match &args.source_dir {
+        Some(path) => absolute_path(path)?,
+        None => work_dir.join(format!("{}_sweep_baseline", config.db_name)),
+    };
+
+    if args.source_dir.is_none() {
+        export_config(&InfobaseConfigExportArgs {
+            settings: args.settings.clone(),
+            format: args.format,
+            source_version: args.source_version,
+            dbms: Some(config.dbms.clone()),
+            db_server: Some(config.db_server.clone()),
+            db_name: Some(config.db_name.clone()),
+            db_user: config.db_user.clone(),
+            db_pwd: config.db_pwd.clone(),
+            db_pwd_env: args.db_pwd_env.clone(),
+            user: args.user.clone(),
+            password: args.password.clone(),
+            password_env: args.password_env.clone(),
+            sqlcmd: args.sqlcmd.clone(),
+            overwrite: args.overwrite,
+            output_dir: baseline_dir.clone(),
+        })?;
+    }
+
+    let generated_prefixes = args.path_prefix.is_empty();
+    let prefixes = if generated_prefixes {
+        representative_sweep_prefixes(&baseline_dir, &args.family, args.max_prefixes)?
+    } else {
+        args.path_prefix.clone()
+    };
+    if prefixes.is_empty() {
+        bail!(
+            "no representative source prefixes found under {}",
+            baseline_dir.display()
+        );
+    }
+
+    let mut results = Vec::with_capacity(prefixes.len());
+    for (index, prefix) in prefixes.iter().enumerate() {
+        let target_db = format!("{}_sweep_{:02}", config.db_name, index + 1);
+        let roundtrip_args = InfobaseConfigRoundtripArgs {
+            settings: args.settings.clone(),
+            format: args.format,
+            source_version: args.source_version,
+            dbms: Some(config.dbms.clone()),
+            db_server: Some(config.db_server.clone()),
+            db_name: Some(config.db_name.clone()),
+            db_user: config.db_user.clone(),
+            db_pwd: config.db_pwd.clone(),
+            db_pwd_env: args.db_pwd_env.clone(),
+            user: args.user.clone(),
+            password: args.password.clone(),
+            password_env: args.password_env.clone(),
+            sqlcmd: args.sqlcmd.clone(),
+            ibcmd: args.ibcmd.clone(),
+            target_db: Some(target_db.clone()),
+            backup: None,
+            work_dir: work_dir.clone(),
+            source_dir: Some(baseline_dir.clone()),
+            data_dir: None,
+            overwrite: args.overwrite,
+            allow_non_lab: args.allow_non_lab,
+            timeout_sec: args.timeout_sec,
+            batch_size: args.batch_size,
+            path_prefix: vec![prefix.clone()],
+            script_output: args.script_output.clone(),
+        };
+        match roundtrip_config(&roundtrip_args) {
+            Ok(report) => results.push(InfobaseConfigSweepEntryReport {
+                path_prefix: prefix.clone(),
+                target_db: report.target_db.clone(),
+                status: if report.diff.summary.different == 0
+                    && report.diff.summary.left_only == 0
+                    && report.diff.summary.right_only == 0
+                {
+                    "ok"
+                } else {
+                    "diff"
+                },
+                work_dir: report.work_dir.clone(),
+                selected_after_apply_file_names: Some(report.selected_after_apply_file_names),
+                raw_rows: Some(report.after_apply_export.raw_rows),
+                exported_files: Some(report.after_apply_export.exported_files),
+                check_duration_ms: Some(report.check.duration_ms),
+                apply_duration_ms: Some(report.apply.duration_ms),
+                diff_summary: Some(SourceDiffSummary {
+                    left_only: report.diff.summary.left_only,
+                    right_only: report.diff.summary.right_only,
+                    different: report.diff.summary.different,
+                    unchanged: report.diff.summary.unchanged,
+                }),
+                error: None,
+            }),
+            Err(error) => results.push(InfobaseConfigSweepEntryReport {
+                path_prefix: prefix.clone(),
+                target_db,
+                status: "error",
+                work_dir: work_dir.join(format!("{}_sweep_{:02}", config.db_name, index + 1)),
+                selected_after_apply_file_names: None,
+                raw_rows: None,
+                exported_files: None,
+                check_duration_ms: None,
+                apply_duration_ms: None,
+                diff_summary: None,
+                error: Some(format!("{error:#}")),
+            }),
+        }
+    }
+
+    Ok(InfobaseConfigSweepReport {
+        operation: "infobase config sweep",
+        dbms: config.dbms,
+        db_server: config.db_server,
+        source_db: config.db_name,
+        work_dir,
+        baseline_dir,
+        generated_prefixes,
+        prefixes,
+        results,
+    })
+}
+
+fn representative_sweep_prefixes(
+    source_root: &Path,
+    families: &[String],
+    max_prefixes: Option<usize>,
+) -> Result<Vec<String>> {
+    let manifest = crate::source::scan_sources(source_root)?;
+    let requested = if families.is_empty() {
+        DEFAULT_SWEEP_FAMILIES
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+    } else {
+        families.to_vec()
+    };
+    let requested_set = requested
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut selected = std::collections::BTreeMap::<String, String>::new();
+    for file in manifest.files {
+        let relative = file.path.replace('\\', "/");
+        if relative == "Configuration.xml"
+            || relative.matches('/').count() != 1
+            || !relative.ends_with(".xml")
+        {
+            continue;
+        }
+        let mut parts = relative.split('/');
+        let Some(family) = parts.next() else {
+            continue;
+        };
+        let Some(name) = parts.next() else {
+            continue;
+        };
+        if !requested_set.contains(&family.to_ascii_lowercase()) {
+            continue;
+        }
+        let prefix = format!("{family}/{}", name.trim_end_matches(".xml"));
+        selected
+            .entry(family.to_string())
+            .and_modify(|current| {
+                if prefix < *current {
+                    *current = prefix.clone();
+                }
+            })
+            .or_insert(prefix);
+    }
+
+    let mut prefixes = Vec::new();
+    for family in requested {
+        if let Some(prefix) = selected.get(&family) {
+            prefixes.push(prefix.clone());
+        }
+    }
+    if let Some(limit) = max_prefixes {
+        prefixes.truncate(limit);
+    }
+    Ok(prefixes)
+}
+
+const DEFAULT_SWEEP_FAMILIES: &[&str] = &[
+    "Catalogs",
+    "Documents",
+    "Reports",
+    "DataProcessors",
+    "InformationRegisters",
+    "AccumulationRegisters",
+    "AccountingRegisters",
+    "CalculationRegisters",
+    "Enums",
+    "CommonModules",
+    "CommonCommands",
+];
+
+fn build_import_stage_args(
+    config: &ConnectionConfig,
+    args: &InfobaseConfigImportArgs,
+) -> Result<MssqlStageSourceObjectsArgs> {
+    Ok(MssqlStageSourceObjectsArgs {
+        server: config.db_server.clone(),
+        sql_user: config.db_user.clone(),
+        sql_pwd: config.db_pwd.clone(),
+        sql_pwd_env: args.db_pwd_env.clone(),
+        database: config.db_name.clone(),
+        source_root: absolute_path(&args.source_dir)?,
+        sqlcmd: args.sqlcmd.clone(),
+        replace_config_save: args.replace_config_save,
+        allow_non_lab: args.allow_non_lab,
+        batch_size: args.batch_size,
+        source_version: Some(config.source_version),
+        path_prefix: args.path_prefix.clone(),
+        script_output: args.script_output.clone(),
+    })
+}
+
+#[derive(Clone)]
+struct SelectedSourceOwner {
+    kind: String,
+    uuid: String,
+    is_common_module: bool,
+}
+
+fn build_selected_dump_file_names_from_source(
+    source_root: &Path,
+    path_prefix: &[String],
+) -> Result<Vec<String>> {
+    let manifest = scan_sources_with_prefixes(source_root, path_prefix)?;
+    let mut cache = std::collections::BTreeMap::<PathBuf, Option<SelectedSourceOwner>>::new();
+    let mut selected = std::collections::BTreeSet::<String>::new();
+    for file in &manifest.files {
+        let relative = PathBuf::from(&file.path);
+        for file_name in selected_dump_file_names_for_path(source_root, &relative, &mut cache)? {
+            selected.insert(file_name);
+        }
+    }
+    Ok(selected.into_iter().collect())
+}
+
+fn selected_dump_file_names_for_path(
+    source_root: &Path,
+    relative: &Path,
+    cache: &mut std::collections::BTreeMap<PathBuf, Option<SelectedSourceOwner>>,
+) -> Result<Vec<String>> {
+    let path = relative.to_string_lossy().replace('\\', "/");
+    let file_name = relative
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+
+    if path == "Configuration.xml" {
+        return Ok(Vec::new());
+    }
+
+    if file_name.eq_ignore_ascii_case("Module.bsl")
+        && path.ends_with("/Ext/Form/Module.bsl")
+        && let Some(owner) = load_selected_source_owner(source_root, relative, cache)?
+    {
+        return Ok(vec![owner.uuid.clone(), format!("{}.0", owner.uuid)]);
+    }
+
+    if file_name.eq_ignore_ascii_case("Form.xml")
+        && path.ends_with("/Ext/Form.xml")
+        && let Some(owner) = load_selected_source_owner(source_root, relative, cache)?
+    {
+        return Ok(vec![owner.uuid.clone(), format!("{}.0", owner.uuid)]);
+    }
+
+    if path.contains("/Ext/Help/")
+        || (file_name.eq_ignore_ascii_case("Help.xml") && path.ends_with("/Ext/Help.xml"))
+    {
+        if let Some(owner) = load_selected_source_owner(source_root, relative, cache)? {
+            return Ok(vec![
+                owner.uuid.clone(),
+                infer_help_body_id_for_owner(&owner.kind, &owner.uuid),
+            ]);
+        }
+    }
+
+    if file_name.eq_ignore_ascii_case("Template.xml")
+        || file_name.eq_ignore_ascii_case("Template.bin")
+        || file_name.eq_ignore_ascii_case("Template.txt")
+    {
+        if path.contains("/Ext/Template.") {
+            if let Some(owner) = load_selected_source_owner(source_root, relative, cache)? {
+                return Ok(vec![owner.uuid.clone(), format!("{}.0", owner.uuid)]);
+            }
+        }
+    }
+
+    if file_name.eq_ignore_ascii_case("CommandModule.bsl")
+        && path.contains("/Commands/")
+        && let Some(file_names) = selected_nested_command_file_names(source_root, relative)?
+    {
+        return Ok(file_names);
+    }
+
+    if file_name.ends_with(".bsl") && path.contains("/Ext/") {
+        if let Some(owner) = load_selected_source_owner(source_root, relative, cache)? {
+            if file_name.eq_ignore_ascii_case("CommandModule.bsl") {
+                return Ok(vec![owner.uuid.clone(), format!("{}.2", owner.uuid)]);
+            }
+            if owner.is_common_module && file_name.eq_ignore_ascii_case("Module.bsl") {
+                return Ok(vec![owner.uuid.clone(), format!("{}.0", owner.uuid)]);
+            }
+            if let Some(suffix) = object_module_body_suffix_for_file(&owner.kind, file_name) {
+                return Ok(vec![
+                    owner.uuid.clone(),
+                    format!("{}.{}", owner.uuid, suffix),
+                ]);
+            }
+        }
+        return Err(anyhow!(
+            "unsupported source module path for selected dump: {}",
+            relative.display()
+        ));
+    }
+
+    if file_name.ends_with(".xml") && !path.contains("/Ext/") {
+        let bytes = fs::read(source_root.join(relative))
+            .with_context(|| format!("failed to read {}", source_root.join(relative).display()))?;
+        if path.starts_with("CommonModules/") {
+            let properties = parse_common_module_xml_properties(&bytes)?;
+            return Ok(vec![properties.uuid]);
+        }
+        let properties = parse_simple_metadata_xml_properties(&bytes)?;
+        return Ok(vec![properties.uuid]);
+    }
+
+    Ok(Vec::new())
+}
+
+fn selected_nested_command_file_names(
+    source_root: &Path,
+    relative: &Path,
+) -> Result<Option<Vec<String>>> {
+    let parts = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    let Some(commands_index) = parts
+        .iter()
+        .position(|part| part.eq_ignore_ascii_case("Commands"))
+    else {
+        return Ok(None);
+    };
+    if commands_index == 0 || commands_index + 3 >= parts.len() {
+        return Ok(None);
+    }
+    let command_name = parts[commands_index + 1].clone();
+    let mut owner_parts = parts[..commands_index].to_vec();
+    let Some(owner_name) = owner_parts.last_mut() else {
+        return Ok(None);
+    };
+    *owner_name = format!("{owner_name}.xml");
+    let owner_relative = PathBuf::from_iter(owner_parts.iter().map(PathBuf::from));
+    let owner_path = source_root.join(&owner_relative);
+    if !owner_path.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&owner_path)
+        .with_context(|| format!("failed to read {}", owner_path.display()))?;
+    let Some(uuid) = find_nested_command_uuid(&bytes, &command_name)? else {
+        return Ok(None);
+    };
+    Ok(Some(vec![uuid.clone(), format!("{uuid}.2")]))
+}
+
+fn find_nested_command_uuid(bytes: &[u8], command_name: &str) -> Result<Option<String>> {
+    let mut reader = Reader::from_reader(bytes);
+    let mut buf = Vec::new();
+    let mut in_command = false;
+    let mut current_uuid = None::<String>;
+    let mut current_name = None::<String>;
+    let mut reading_name = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(event)) => {
+                let local = event.local_name();
+                if local.as_ref() == b"Command" {
+                    in_command = true;
+                    current_name = None;
+                    current_uuid = event.attributes().flatten().find_map(|attr| {
+                        (attr.key.local_name().as_ref() == b"uuid")
+                            .then(|| String::from_utf8_lossy(attr.value.as_ref()).to_string())
+                    });
+                } else if in_command && local.as_ref() == b"Name" {
+                    reading_name = true;
+                }
+            }
+            Ok(Event::End(event)) => {
+                let local = event.local_name();
+                if local.as_ref() == b"Name" {
+                    reading_name = false;
+                } else if local.as_ref() == b"Command" {
+                    if current_name.as_deref() == Some(command_name) {
+                        return Ok(current_uuid);
+                    }
+                    in_command = false;
+                    current_uuid = None;
+                    current_name = None;
+                    reading_name = false;
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if in_command && reading_name {
+                    current_name = Some(String::from_utf8_lossy(text.as_ref()).to_string());
+                }
+            }
+            Ok(Event::Eof) => return Ok(None),
+            Err(error) => {
+                return Err(anyhow!(
+                    "failed to parse nested command metadata XML: {error}"
+                ));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn load_selected_source_owner(
+    source_root: &Path,
+    relative: &Path,
+    cache: &mut std::collections::BTreeMap<PathBuf, Option<SelectedSourceOwner>>,
+) -> Result<Option<SelectedSourceOwner>> {
+    let Some(owner_relative) = owner_metadata_relative_path(relative) else {
+        return Ok(None);
+    };
+    if let Some(cached) = cache.get(&owner_relative) {
+        return Ok(cached.clone());
+    }
+    let owner_path = source_root.join(&owner_relative);
+    if !owner_path.is_file() {
+        cache.insert(owner_relative, None);
+        return Ok(None);
+    }
+    let bytes = fs::read(&owner_path)
+        .with_context(|| format!("failed to read {}", owner_path.display()))?;
+    let owner = if owner_relative
+        .to_string_lossy()
+        .replace('\\', "/")
+        .starts_with("CommonModules/")
+    {
+        let properties = parse_common_module_xml_properties(&bytes)?;
+        Some(SelectedSourceOwner {
+            kind: "CommonModule".to_string(),
+            uuid: properties.uuid,
+            is_common_module: true,
+        })
+    } else {
+        let properties = parse_simple_metadata_xml_properties(&bytes)?;
+        Some(SelectedSourceOwner {
+            kind: properties.kind,
+            uuid: properties.uuid,
+            is_common_module: false,
+        })
+    };
+    cache.insert(owner_relative, owner.clone());
+    Ok(owner)
+}
+
+fn owner_metadata_relative_path(relative: &Path) -> Option<PathBuf> {
+    let parts = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    let ext_index = parts
+        .iter()
+        .position(|part| part.eq_ignore_ascii_case("Ext"))?;
+    if ext_index == 0 {
+        return None;
+    }
+    let owner_name = parts.get(ext_index - 1)?.clone();
+    let mut owner_parts = parts[..ext_index].to_vec();
+    *owner_parts.last_mut()? = format!("{owner_name}.xml");
+    Some(owner_parts.into_iter().collect())
+}
+
+fn infer_help_body_id_for_owner(kind: &str, uuid: &str) -> String {
+    let suffix = if matches!(kind, "Form" | "CommonForm") {
+        "1"
+    } else {
+        "5"
+    };
+    format!("{uuid}.{suffix}")
+}
+
+fn object_module_body_suffix_for_file(kind: &str, file_name: &str) -> Option<&'static str> {
+    match (kind, file_name) {
+        ("Bot", "Module.bsl") => Some("1"),
+        ("CommonCommand", "CommandModule.bsl") => Some("2"),
+        ("Constant", "ValueManagerModule.bsl") => Some("0"),
+        ("Constant", "ManagerModule.bsl") => Some("1"),
+        ("FilterCriterion", "ManagerModule.bsl") => Some("0"),
+        ("SettingsStorage", "ManagerModule.bsl") => Some("8"),
+        ("Sequence", "RecordSetModule.bsl") => Some("0"),
+        ("Catalog", "ObjectModule.bsl") => Some("0"),
+        ("Catalog", "ManagerModule.bsl") => Some("3"),
+        ("Report", "ObjectModule.bsl")
+        | ("DataProcessor", "ObjectModule.bsl")
+        | ("Document", "ObjectModule.bsl") => Some("0"),
+        ("Report", "ManagerModule.bsl")
+        | ("DataProcessor", "ManagerModule.bsl")
+        | ("Document", "ManagerModule.bsl") => Some("2"),
+        ("Enum", "ManagerModule.bsl") => Some("0"),
+        ("ExchangePlan", "ObjectModule.bsl") => Some("2"),
+        ("ExchangePlan", "ManagerModule.bsl") => Some("3"),
+        ("AccumulationRegister", "RecordSetModule.bsl")
+        | ("AccountingRegister", "RecordSetModule.bsl")
+        | ("CalculationRegister", "RecordSetModule.bsl")
+        | ("InformationRegister", "RecordSetModule.bsl") => Some("1"),
+        ("AccumulationRegister", "ManagerModule.bsl")
+        | ("AccountingRegister", "ManagerModule.bsl")
+        | ("CalculationRegister", "ManagerModule.bsl")
+        | ("InformationRegister", "ManagerModule.bsl") => Some("2"),
+        ("DocumentJournal", "ManagerModule.bsl") => Some("1"),
+        ("Task", "ObjectModule.bsl") => Some("6"),
+        ("Task", "ManagerModule.bsl") => Some("7"),
+        ("BusinessProcess", "ObjectModule.bsl") => Some("6"),
+        ("BusinessProcess", "ManagerModule.bsl") => Some("8"),
+        ("ChartOfCharacteristicTypes", "ObjectModule.bsl") => Some("15"),
+        ("ChartOfCharacteristicTypes", "ManagerModule.bsl") => Some("16"),
+        ("HTTPService", "Module.bsl")
+        | ("WebService", "Module.bsl")
+        | ("IntegrationService", "Module.bsl") => Some("0"),
+        _ => None,
+    }
+}
+
+fn default_roundtrip_target_db(source_db: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or_default();
+    format!("{source_db}_roundtrip_{now}")
+}
+
+fn resolve_optional_password(
+    user: Option<&str>,
+    cli_password: Option<&str>,
+    password_env: &str,
+) -> Result<Option<String>> {
+    if user.is_none() {
+        return Ok(None);
+    }
+    if let Some(value) = cli_password.filter(|value| !value.is_empty()) {
+        return Ok(Some(value.to_string()));
+    }
+    if let Ok(value) = env::var(password_env) {
+        return Ok(Some(value));
+    }
+    Ok(None)
+}
+
+fn render_command(program: &Path, command: &Command) -> String {
+    let mut parts = vec![program.display().to_string()];
+    parts.extend(
+        command
+            .get_args()
+            .map(|value| value.to_string_lossy().to_string()),
+    );
+    parts.join(" ")
+}
+
+fn tool_path_arg(path: &Path) -> String {
+    let raw = path.to_string_lossy().to_string();
+    raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string()
+}
+
+fn run_ibcmd_config_step(
+    ibcmd: &Path,
+    action: &str,
+    config: &ConnectionConfig,
+    target_db: &str,
+    infobase_user: Option<&str>,
+    infobase_password: Option<&str>,
+    data_dir: &Path,
+    timeout: Duration,
+) -> Result<IbcmdConfigStepReport> {
+    let mut command = Command::new(ibcmd);
+    command
+        .arg("infobase")
+        .arg("config")
+        .arg(action)
+        .arg(format!("--dbms={}", config.dbms))
+        .arg(format!("--db-server={}", config.db_server))
+        .arg(format!("--db-name={target_db}"))
+        .arg(format!("--data={}", tool_path_arg(data_dir)));
+    if let Some(user) = &config.db_user {
+        command.arg(format!("--db-user={user}"));
+    }
+    if let Some(password) = &config.db_pwd {
+        command.arg(format!("--db-pwd={password}"));
+    }
+    if let Some(user) = infobase_user {
+        command.arg(format!("--user={user}"));
+    }
+    if let Some(password) = infobase_password {
+        command.arg(format!("--password={password}"));
+    }
+    if action.eq_ignore_ascii_case("apply") {
+        command
+            .arg("--dynamic=disable")
+            .arg("--session-terminate=force");
+    }
+
+    let rendered = render_command(ibcmd, &command);
+    let started = SystemTime::now();
+    let output = crate::dump_sources::run_with_timeout(command, timeout)
+        .with_context(|| format!("failed to run ibcmd config {action}"))?;
+    let duration_ms = started.elapsed()?.as_millis();
+    if output.timed_out {
+        bail!(
+            "ibcmd config {action} timed out after {} seconds",
+            timeout.as_secs()
+        );
+    }
+    if !output.success {
+        bail!(
+            "ibcmd config {action} failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.exit_code,
+            output.stdout,
+            output.stderr
+        );
+    }
+
+    Ok(IbcmdConfigStepReport {
+        command: rendered,
+        data_dir: data_dir.to_path_buf(),
+        duration_ms,
+        exit_code: output.exit_code,
+        stdout: output.stdout,
+        stderr: output.stderr,
     })
 }
 
@@ -401,6 +1347,19 @@ fn count_files(root: &Path) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::InfobaseConfigImportArgs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root(prefix: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("{prefix}-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
 
     #[test]
     fn reads_format_from_top_level_settings() {
@@ -435,5 +1394,195 @@ mod tests {
             "Constants/UseFeature.xml"
         )));
         assert!(!is_internal_dump_path(Path::new("ConfigDumpInfo.xml")));
+    }
+
+    #[test]
+    fn builds_import_stage_args_with_sql_auth() {
+        let config = ConnectionConfig {
+            dbms: "MSSQLServer".to_string(),
+            db_server: "localhost".to_string(),
+            db_name: "ut_ibcmd".to_string(),
+            db_user: Some("sa_import".to_string()),
+            db_pwd: Some("secret".to_string()),
+            password_source: Some("--db-pwd".to_string()),
+            format: InfobaseConfigFormat::Xml,
+            source_version: InfobaseConfigSourceVersion::V2_21,
+        };
+        let args = InfobaseConfigImportArgs {
+            settings: None,
+            format: Some(InfobaseConfigFormat::Xml),
+            source_version: Some(InfobaseConfigSourceVersion::V2_21),
+            dbms: Some("MSSQLServer".to_string()),
+            db_server: Some("localhost".to_string()),
+            db_name: Some("ut_ibcmd".to_string()),
+            db_user: Some("sa_import".to_string()),
+            db_pwd: Some("secret".to_string()),
+            db_pwd_env: "IMPORT_SQL_PWD".to_string(),
+            user: None,
+            password: None,
+            password_env: "IBCMD_USER_PSW".to_string(),
+            sqlcmd: PathBuf::from("sqlcmd"),
+            replace_config_save: true,
+            allow_non_lab: true,
+            batch_size: Some(250),
+            path_prefix: vec!["Catalogs/Валюты".to_string()],
+            script_output: Some(PathBuf::from(r"C:\temp\stage.sql")),
+            source_dir: PathBuf::from(r".\fixtures\source"),
+        };
+
+        let stage_args = build_import_stage_args(&config, &args).unwrap();
+
+        assert_eq!(stage_args.server, "localhost");
+        assert_eq!(stage_args.sql_user.as_deref(), Some("sa_import"));
+        assert_eq!(stage_args.sql_pwd.as_deref(), Some("secret"));
+        assert_eq!(stage_args.sql_pwd_env, "IMPORT_SQL_PWD");
+        assert_eq!(stage_args.database, "ut_ibcmd");
+        assert_eq!(stage_args.batch_size, Some(250));
+        assert_eq!(
+            stage_args.source_version,
+            Some(InfobaseConfigSourceVersion::V2_21)
+        );
+        assert_eq!(stage_args.path_prefix, vec!["Catalogs/Валюты".to_string()]);
+        assert_eq!(
+            stage_args.script_output,
+            Some(PathBuf::from(r"C:\temp\stage.sql"))
+        );
+    }
+
+    #[test]
+    fn default_roundtrip_target_db_keeps_source_prefix() {
+        let target = default_roundtrip_target_db("ut_ibcmd");
+        assert!(target.starts_with("ut_ibcmd_roundtrip_"));
+    }
+
+    #[test]
+    fn strips_extended_windows_prefix_for_external_tools() {
+        assert_eq!(
+            tool_path_arg(Path::new(r"\\?\E:\ibcmd_lab\roundtrip\ibcmd-data")),
+            r"E:\ibcmd_lab\roundtrip\ibcmd-data"
+        );
+    }
+
+    #[test]
+    fn builds_selected_dump_file_names_from_source_prefix() {
+        let root = temp_root("ibcmd-rs-selected-dump-names");
+        fs::create_dir_all(root.join("Catalogs/Products/Ext")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products/Ext/Help")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products/Forms/ItemForm/Ext/Form")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products/Commands/Open/Ext")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products/Templates/Print/Ext")).unwrap();
+        fs::create_dir_all(root.join("CommonModules/Utils/Ext")).unwrap();
+
+        fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"><Properties><Name>Products</Name></Properties><ChildObjects><Command uuid="cccccccc-cccc-4ccc-cccc-cccccccccccc"><Properties><Name>Open</Name></Properties></Command></ChildObjects></Catalog></MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(root.join("Catalogs/Products/Ext/ObjectModule.bsl"), b"").unwrap();
+        fs::write(root.join("Catalogs/Products/Ext/Help.xml"), b"<Help/>").unwrap();
+        fs::write(root.join("Catalogs/Products/Ext/Help/ru.html"), b"help").unwrap();
+
+        fs::write(
+            root.join("Catalogs/Products/Forms/ItemForm.xml"),
+            br#"<MetaDataObject><Form uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"><Properties><Name>ItemForm</Name></Properties></Form></MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("Catalogs/Products/Forms/ItemForm/Ext/Form.xml"),
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"/>"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("Catalogs/Products/Forms/ItemForm/Ext/Form/Module.bsl"),
+            b"",
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("Catalogs/Products/Commands/Open/Ext/CommandModule.bsl"),
+            b"",
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("Catalogs/Products/Templates/Print.xml"),
+            br#"<MetaDataObject><Template uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd"><Properties><Name>Print</Name></Properties></Template></MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("Catalogs/Products/Templates/Print/Ext/Template.xml"),
+            b"<Template/>",
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("CommonModules/Utils.xml"),
+            br#"<MetaDataObject><CommonModule uuid="eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee"><Properties><Name>Utils</Name><Global>false</Global><ClientManagedApplication>false</ClientManagedApplication><Server>true</Server><ExternalConnection>false</ExternalConnection><ClientOrdinaryApplication>false</ClientOrdinaryApplication><ServerCall>false</ServerCall><Privileged>false</Privileged><ReturnValuesReuse>DontUse</ReturnValuesReuse></Properties></CommonModule></MetaDataObject>"#,
+        )
+        .unwrap();
+        fs::write(root.join("CommonModules/Utils/Ext/Module.bsl"), b"").unwrap();
+
+        let selected =
+            build_selected_dump_file_names_from_source(&root, &["Catalogs/Products".to_string()])
+                .unwrap();
+
+        assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()));
+        assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string()));
+        assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5".to_string()));
+        assert!(selected.contains(&"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string()));
+        assert!(selected.contains(&"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string()));
+        assert!(selected.contains(&"cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string()));
+        assert!(selected.contains(&"cccccccc-cccc-4ccc-cccc-cccccccccccc.2".to_string()));
+        assert!(selected.contains(&"dddddddd-dddd-4ddd-dddd-dddddddddddd".to_string()));
+        assert!(selected.contains(&"dddddddd-dddd-4ddd-dddd-dddddddddddd.0".to_string()));
+
+        let common_module =
+            build_selected_dump_file_names_from_source(&root, &["CommonModules/Utils".to_string()])
+                .unwrap();
+        assert!(common_module.contains(&"eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee".to_string()));
+        assert!(common_module.contains(&"eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0".to_string()));
+    }
+
+    #[test]
+    fn selects_representative_sweep_prefixes_by_family() {
+        let root = temp_root("ibcmd-rs-sweep-prefixes");
+        fs::create_dir_all(root.join("Catalogs")).unwrap();
+        fs::create_dir_all(root.join("Documents")).unwrap();
+        fs::create_dir_all(root.join("CommonModules")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products/Ext")).unwrap();
+
+        fs::write(root.join("Configuration.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Catalogs/Alpha.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Catalogs/Zeta.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Documents/Sales.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("CommonModules/Utils.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Catalogs/Products/Ext/ignored.txt"), b"").unwrap();
+
+        let selected = representative_sweep_prefixes(
+            &root,
+            &["Catalogs".to_string(), "Documents".to_string()],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            selected,
+            vec!["Catalogs/Alpha".to_string(), "Documents/Sales".to_string()]
+        );
+
+        let limited = representative_sweep_prefixes(
+            &root,
+            &[
+                "Catalogs".to_string(),
+                "Documents".to_string(),
+                "CommonModules".to_string(),
+            ],
+            Some(2),
+        )
+        .unwrap();
+        assert_eq!(
+            limited,
+            vec!["Catalogs/Alpha".to_string(), "Documents/Sales".to_string()]
+        );
     }
 }
