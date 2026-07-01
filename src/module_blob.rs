@@ -528,6 +528,12 @@ pub struct LocalizedString {
     pub content: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SpreadsheetNumberFormatHint {
+    pub slots: Vec<Vec<LocalizedString>>,
+    pub format_slot_indices: Vec<Option<usize>>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SimpleMetadataXmlProperties {
     pub kind: String,
@@ -1705,14 +1711,23 @@ fn hash_bytes(hasher: &mut Sha256, bytes: &[u8]) {
 }
 
 pub fn pack_moxel_spreadsheet_blob_from_xml(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
-    pack_moxel_spreadsheet_blob_from_xml_with_source(xml, None)
+    pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(xml, None, None)
 }
 
 pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     xml: &[u8],
     source: Option<&MetadataSourceContext>,
 ) -> Result<PackedRawDeflatedBlob> {
-    let spreadsheet = parse_spreadsheet_document_xml(xml)?;
+    pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(xml, source, None)
+}
+
+pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
+) -> Result<PackedRawDeflatedBlob> {
+    let mut spreadsheet = parse_spreadsheet_document_xml(xml)?;
+    normalize_canonical_spreadsheet_format_order(&mut spreadsheet);
     let column_count = spreadsheet.column_count.max(
         spreadsheet
             .rows
@@ -1721,15 +1736,33 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
             .max()
             .unwrap_or(1),
     );
-    let column_format_slots = spreadsheet_column_format_slots(&spreadsheet, column_count);
-    let format_offset = column_format_slots.saturating_sub(1);
+    let sparse_source_format_refs = spreadsheet_uses_sparse_source_format_refs(&spreadsheet);
+    let column_format_offset = spreadsheet_column_format_offset(&spreadsheet);
+    let column_format_slots = if sparse_source_format_refs {
+        spreadsheet_column_format_slots(&spreadsheet, column_count)
+            .saturating_sub(column_format_offset)
+            .max(1)
+    } else {
+        spreadsheet_column_format_slots(&spreadsheet, column_count)
+    };
+    let format_offset = if sparse_source_format_refs {
+        column_format_offset
+    } else {
+        column_format_slots.saturating_sub(1)
+    };
     let declared_columns = column_count.saturating_sub(1);
+    let default_format_width =
+        spreadsheet_default_format_width_for_moxel(&spreadsheet).unwrap_or_default();
     let mut fields = vec![
         "8".to_string(),
         "1".to_string(),
         declared_columns.to_string(),
         r#"{"ru","ru",0,1,"ru","Русский","Русский",0}"#.to_string(),
-        "{0}".to_string(),
+        if default_format_width > 0 {
+            format!("{{128,{default_format_width}}}")
+        } else {
+            "{0}".to_string()
+        },
         "{0}".to_string(),
     ];
     for row in &spreadsheet.rows {
@@ -1765,7 +1798,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
     fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
     let (format_fields, number_format_refs) =
-        format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots);
+        format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots, number_format_hint);
     fields.extend(format_fields);
     fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
     fields.extend(format_spreadsheet_number_formats_for_moxel(
@@ -1787,6 +1820,15 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn spreadsheet_default_format_width_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+) -> Option<usize> {
+    spreadsheet
+        .default_format_index
+        .and_then(|index| spreadsheet.formats.get(index.saturating_sub(1)))
+        .and_then(|format| format.width)
 }
 
 #[derive(Debug, Default)]
@@ -3065,6 +3107,56 @@ fn spreadsheet_column_format_slots(
         .max(1)
 }
 
+fn spreadsheet_max_row_or_cell_format_index(spreadsheet: &SpreadsheetDocumentXml) -> usize {
+    spreadsheet.rows.iter().fold(0usize, |max_index, row| {
+        let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
+            cell_max.max(cell.format_index)
+        });
+        max_index.max(row_max)
+    })
+}
+
+fn spreadsheet_column_format_offset(spreadsheet: &SpreadsheetDocumentXml) -> usize {
+    spreadsheet
+        .column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .map(|column| column.format_index)
+        .min()
+        .unwrap_or(1)
+        .saturating_sub(1)
+}
+
+fn spreadsheet_uses_sparse_source_format_refs(spreadsheet: &SpreadsheetDocumentXml) -> bool {
+    let column_count = spreadsheet.column_count.max(
+        spreadsheet
+            .rows
+            .iter()
+            .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
+            .max()
+            .unwrap_or(1),
+    );
+    spreadsheet.default_format_index.is_none()
+        && spreadsheet_column_format_offset(spreadsheet) > 0
+        && spreadsheet_max_row_or_cell_format_index(spreadsheet)
+            > spreadsheet_column_format_slots(spreadsheet, column_count)
+}
+
+fn normalize_canonical_spreadsheet_format_order(spreadsheet: &mut SpreadsheetDocumentXml) {
+    if spreadsheet.formats.is_empty() {
+        return;
+    }
+    let should_normalize = spreadsheet.default_format_index.is_some();
+    if !should_normalize {
+        return;
+    }
+    let offset = spreadsheet_column_format_offset(spreadsheet);
+    if offset == 0 || offset >= spreadsheet.formats.len() {
+        return;
+    }
+    spreadsheet.formats.rotate_left(offset);
+}
+
 fn row_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
     if format_index <= 1 {
         0
@@ -3446,6 +3538,7 @@ fn bool_to_usize(value: bool) -> usize {
 fn format_spreadsheet_formats_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     column_format_slots: usize,
+    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
 ) -> (Vec<String>, Vec<SpreadsheetNumberFormatSlot>) {
     if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
         return (Vec::new(), Vec::new());
@@ -3459,10 +3552,20 @@ fn format_spreadsheet_formats_for_moxel(
     let column_placeholder_count = column_format_slots.max(1);
     let count = body_format_count + column_placeholder_count;
     let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
-    let mut number_format_refs = Vec::<SpreadsheetNumberFormatSlot>::new();
+    let mut number_format_refs = number_format_hint
+        .map(|hint| {
+            hint.slots
+                .iter()
+                .cloned()
+                .map(SpreadsheetNumberFormatSlot)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut format_fields = Vec::with_capacity(count + 1);
     let mut body_format_indexes = Vec::with_capacity(body_format_count);
     let mut drawing_format_indexes = Vec::new();
+    let mut raw_format_position = 0usize;
+    let style_ref_base = format_spreadsheet_lines_for_moxel(&spreadsheet.lines).len();
     format_fields.push(count.to_string());
     for global_index in column_format_slots + 1..=source_format_count {
         if spreadsheet
@@ -3480,33 +3583,45 @@ fn format_spreadsheet_formats_for_moxel(
             spreadsheet,
             global_index,
             false,
+            style_ref_base,
             &mut style_refs,
+            raw_format_position,
+            number_format_hint,
             &mut number_format_refs,
         ));
+        raw_format_position += 1;
     }
     for global_index in 1..=column_placeholder_count {
         format_fields.push(format_spreadsheet_format_index_for_moxel(
             spreadsheet,
             global_index,
             false,
+            style_ref_base,
             &mut style_refs,
+            raw_format_position,
+            number_format_hint,
             &mut number_format_refs,
         ));
+        raw_format_position += 1;
     }
     for global_index in drawing_format_indexes {
         format_fields.push(format_spreadsheet_format_index_for_moxel(
             spreadsheet,
             global_index,
             true,
+            style_ref_base,
             &mut style_refs,
+            raw_format_position,
+            number_format_hint,
             &mut number_format_refs,
         ));
+        raw_format_position += 1;
     }
     let mut fields = style_refs
         .iter()
         .map(format_spreadsheet_style_ref_slot_for_moxel)
         .collect::<Vec<_>>();
-    fields.extend(format_fields);
+    fields.push(format!("{{{}}}", format_fields.join(",")));
     (fields, number_format_refs)
 }
 
@@ -3514,7 +3629,10 @@ fn format_spreadsheet_format_index_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     global_index: usize,
     drawing_slot: bool,
+    style_ref_base: usize,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+    raw_format_position: usize,
+    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
     number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> String {
     spreadsheet
@@ -3524,7 +3642,10 @@ fn format_spreadsheet_format_index_for_moxel(
             format_spreadsheet_format_for_moxel(
                 format,
                 drawing_slot,
+                style_ref_base,
                 style_refs,
+                raw_format_position,
+                number_format_hint,
                 number_format_refs,
             )
         })
@@ -3539,6 +3660,7 @@ fn spreadsheet_empty_format_for_moxel() -> String {
 enum SpreadsheetStyleRefSlot {
     DirectColor(u32),
     SystemStyle(i32),
+    UuidStyle(&'static str),
     WebColor(u32),
 }
 
@@ -3548,7 +3670,10 @@ struct SpreadsheetNumberFormatSlot(Vec<LocalizedString>);
 fn format_spreadsheet_format_for_moxel(
     format: &SpreadsheetDocumentXmlFormat,
     drawing_slot: bool,
+    style_ref_base: usize,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+    raw_format_position: usize,
+    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
     number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> Option<String> {
     let mut values = Vec::<(u8, usize)>::new();
@@ -3572,7 +3697,7 @@ fn format_spreadsheet_format_for_moxel(
         format
             .border_color
             .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
     );
     push_spreadsheet_format_value(&mut values, 7, format.width);
     push_spreadsheet_format_value(
@@ -3597,7 +3722,7 @@ fn format_spreadsheet_format_for_moxel(
         format
             .text_color
             .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
     );
     push_spreadsheet_format_value(
         &mut values,
@@ -3605,7 +3730,7 @@ fn format_spreadsheet_format_for_moxel(
         format
             .back_color
             .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs)),
+            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
     );
     push_spreadsheet_format_value(
         &mut values,
@@ -3627,7 +3752,12 @@ fn format_spreadsheet_format_for_moxel(
     push_spreadsheet_format_value(
         &mut values,
         24,
-        spreadsheet_number_format_index(&format.number_format, number_format_refs),
+        spreadsheet_number_format_index(
+            &format.number_format,
+            raw_format_position,
+            number_format_hint,
+            number_format_refs,
+        ),
     );
     push_spreadsheet_format_value(
         &mut values,
@@ -3700,22 +3830,40 @@ fn push_spreadsheet_format_value(values: &mut Vec<(u8, usize)>, bit: u8, value: 
 fn spreadsheet_style_ref_index(
     value: &str,
     style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
+    style_ref_base: usize,
 ) -> Option<usize> {
     let slot = spreadsheet_style_ref_slot(value)?;
     if let Some(index) = style_refs.iter().position(|existing| existing == &slot) {
-        return Some(index);
+        return Some(style_ref_base + index);
     }
-    let index = style_refs.len();
+    let index = style_ref_base + style_refs.len();
     style_refs.push(slot);
     Some(index)
 }
 
 fn spreadsheet_number_format_index(
     values: &[LocalizedString],
+    raw_format_position: usize,
+    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
     number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
 ) -> Option<usize> {
+    if let Some(hint) = number_format_hint
+        .and_then(|hint| hint.format_slot_indices.get(raw_format_position))
+        .and_then(|slot| *slot)
+        && let Some(existing) = number_format_refs.get(hint)
+    {
+        if values.is_empty() && existing.0.is_empty() {
+            return Some(hint);
+        }
+        if existing.0 == values {
+            return Some(hint);
+        }
+    }
     if values.is_empty() {
         return None;
+    }
+    if number_format_refs.is_empty() {
+        number_format_refs.push(SpreadsheetNumberFormatSlot(Vec::new()));
     }
     let slot = SpreadsheetNumberFormatSlot(values.to_vec());
     if let Some(index) = number_format_refs
@@ -3762,6 +3910,9 @@ fn spreadsheet_style_ref_slot(value: &str) -> Option<SpreadsheetStyleRefSlot> {
     if let Some(color) = spreadsheet_direct_color_code(value) {
         return Some(SpreadsheetStyleRefSlot::DirectColor(color));
     }
+    if let Some(uuid) = spreadsheet_uuid_style_ref(value) {
+        return Some(SpreadsheetStyleRefSlot::UuidStyle(uuid));
+    }
     if let Some(code) = spreadsheet_system_style_code(value) {
         return Some(SpreadsheetStyleRefSlot::SystemStyle(code));
     }
@@ -3772,6 +3923,7 @@ fn format_spreadsheet_style_ref_slot_for_moxel(slot: &SpreadsheetStyleRefSlot) -
     match slot {
         SpreadsheetStyleRefSlot::DirectColor(value) => format!("{{3,0,{{{value}}}}}"),
         SpreadsheetStyleRefSlot::SystemStyle(value) => format!("{{3,3,{{{value}}}}}"),
+        SpreadsheetStyleRefSlot::UuidStyle(uuid) => format!("{{3,3,{{0,{uuid}}}}}"),
         SpreadsheetStyleRefSlot::WebColor(value) => format!("{{3,2,{{{value}}}}}"),
     }
 }
@@ -3794,6 +3946,13 @@ fn spreadsheet_system_style_code(value: &str) -> Option<i32> {
         "style:ButtonBackColor" => Some(-7),
         "style:ButtonTextColor" => Some(-15),
         "style:ReportLineColor" => Some(-28),
+        _ => None,
+    }
+}
+
+fn spreadsheet_uuid_style_ref(value: &str) -> Option<&'static str> {
+    match value {
+        "style:FormBackColor" => Some("f527dc88-1d39-40b3-bcbb-d98b690ead68"),
         _ => None,
     }
 }
@@ -10107,9 +10266,12 @@ fn patch_form_layout_events(
     if retain_missing {
         retain_form_layout_events(layout, events)?;
     }
+    let mut occurrence_by_name = BTreeMap::<String, usize>::new();
     for event in events {
         let identifiers = form_event_layout_identifiers(&event.name);
-        let _ = patch_form_layout_event(layout, &identifiers, &event.handler)?;
+        let occurrence = occurrence_by_name.entry(event.name.clone()).or_default();
+        let _ = patch_form_layout_event(layout, &identifiers, &event.handler, *occurrence)?;
+        *occurrence += 1;
     }
     Ok(())
 }
@@ -13590,6 +13752,9 @@ fn form_layout_child_item_extended_tooltip_range(
         }
         let nested = scan_braced_fields(text, range.start)?;
         if nested.first().map(|field| text[field.clone()].trim()) == Some("12") {
+            if form_layout_child_item_tag("12", text, &nested).is_some() {
+                continue;
+            }
             return Ok(Some(range.clone()));
         }
     }
@@ -13622,14 +13787,33 @@ fn patch_form_layout_child_item_extended_tooltip(
     Ok(Some(text))
 }
 
-fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &str) -> Result<bool> {
+fn patch_form_layout_event(
+    text: &mut String,
+    identifiers: &[&str],
+    handler: &str,
+    occurrence: usize,
+) -> Result<bool> {
+    let mut matched = 0usize;
+    patch_form_layout_event_occurrence(text, identifiers, handler, occurrence, &mut matched)
+}
+
+fn patch_form_layout_event_occurrence(
+    text: &mut String,
+    identifiers: &[&str],
+    handler: &str,
+    occurrence: usize,
+    matched: &mut usize,
+) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     for window in fields.windows(2) {
         if form_event_field_matches(&text[window[0].clone()], identifiers)
             && parse_1c_quoted_string(&text[window[1].clone()]).is_ok()
         {
-            text.replace_range(window[1].clone(), &format_1c_string(handler));
-            return Ok(true);
+            if *matched == occurrence {
+                text.replace_range(window[1].clone(), &format_1c_string(handler));
+                return Ok(true);
+            }
+            *matched += 1;
         }
     }
 
@@ -13638,7 +13822,13 @@ fn patch_form_layout_event(text: &mut String, identifiers: &[&str], handler: &st
             continue;
         }
         let mut nested = text[range.clone()].to_string();
-        if patch_form_layout_event(&mut nested, identifiers, handler)? {
+        if patch_form_layout_event_occurrence(
+            &mut nested,
+            identifiers,
+            handler,
+            occurrence,
+            matched,
+        )? {
             text.replace_range(range, &nested);
             return Ok(true);
         }
@@ -24107,6 +24297,200 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    #[ignore]
+    fn debug_packs_spreadsheet_basic_formats_text() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+		<fillType>Parameter</fillType>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        println!("{text}");
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_packs_spreadsheet_sparse_format_text() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>2</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>1</index>
+			<column>
+				<formatIndex>4</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<formatIndex>5</formatIndex>
+			<c>
+				<c>
+					<f>6</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Cell</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+	<format>
+		<width>30</width>
+	</format>
+	<format>
+		<width>40</width>
+	</format>
+	<format>
+		<horizontalAlignment>Center</horizontalAlignment>
+	</format>
+	<format>
+		<verticalAlignment>Center</verticalAlignment>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        println!("{text}");
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_live_avansovy_hybrid_format_metadata() -> anyhow::Result<()> {
+        let template_path = std::path::PathBuf::from(
+            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
+        );
+        if !template_path.is_file() {
+            return Ok(());
+        }
+        let xml = std::fs::read(&template_path)?;
+        let spreadsheet = super::parse_spreadsheet_document_xml(&xml)?;
+        let mut normalized = super::parse_spreadsheet_document_xml(&xml)?;
+        super::normalize_canonical_spreadsheet_format_order(&mut normalized);
+        let column_count = spreadsheet.column_count.max(
+            spreadsheet
+                .rows
+                .iter()
+                .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
+                .max()
+                .unwrap_or(1),
+        );
+        println!("column_count={column_count}");
+        println!(
+            "column_format_slots={}",
+            super::spreadsheet_column_format_slots(&spreadsheet, column_count)
+        );
+        println!(
+            "column_format_offset={}",
+            super::spreadsheet_column_format_offset(&spreadsheet)
+        );
+        println!(
+            "sparse_source_format_refs={}",
+            super::spreadsheet_uses_sparse_source_format_refs(&spreadsheet)
+        );
+        for (index, format) in spreadsheet.formats.iter().enumerate() {
+            if format.vertical_alignment.as_deref() == Some("Top")
+                && format.back_color.as_deref() == Some("style:FieldBackColor")
+                && format.drawing_border == Some(4)
+            {
+                println!("hybrid_format_index={}", index + 1);
+            }
+        }
+        let normalized_column_count = normalized.column_count.max(
+            normalized
+                .rows
+                .iter()
+                .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
+                .max()
+                .unwrap_or(1),
+        );
+        let normalized_sparse = super::spreadsheet_uses_sparse_source_format_refs(&normalized);
+        let normalized_offset = super::spreadsheet_column_format_offset(&normalized);
+        let normalized_slots = if normalized_sparse {
+            super::spreadsheet_column_format_slots(&normalized, normalized_column_count)
+                .saturating_sub(normalized_offset)
+                .max(1)
+        } else {
+            super::spreadsheet_column_format_slots(&normalized, normalized_column_count)
+        };
+        println!("normalized_sparse_source_format_refs={normalized_sparse}");
+        println!("normalized_column_format_offset={normalized_offset}");
+        println!("normalized_column_format_slots={normalized_slots}");
+        for (index, format) in normalized.formats.iter().enumerate() {
+            if format.vertical_alignment.as_deref() == Some("Top")
+                && format.back_color.as_deref() == Some("style:FieldBackColor")
+                && format.drawing_border == Some(4)
+            {
+                println!("normalized_hybrid_format_index={}", index + 1);
+                let mut style_refs = Vec::new();
+                let mut number_format_refs = Vec::new();
+                let field = super::format_spreadsheet_format_index_for_moxel(
+                    &normalized,
+                    index + 1,
+                    true,
+                    0,
+                    &mut style_refs,
+                    0,
+                    None,
+                    &mut number_format_refs,
+                );
+                println!("normalized_hybrid_format_field={field}");
+                println!(
+                    "normalized_hybrid_style_refs={}",
+                    style_refs
+                        .iter()
+                        .map(super::format_spreadsheet_style_ref_slot_for_moxel)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn packs_spreadsheet_bottom_vertical_alignment_format() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
@@ -24207,8 +24591,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains(r#"{2,{16777216,0},{0}}"#));
-        assert!(text.contains(r#"1,{1,1,{"ru","БЛ=; БИ=√"}}"#));
+        assert!(text.contains(r#"{2,{16777216,1},{0}}"#));
+        assert!(text.contains(r#"2,{1,0},{1,1,{"ru","БЛ=; БИ=√"}}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -24357,6 +24741,35 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_spreadsheet_form_back_color_style() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<format>
+		<backColor>style:FormBackColor</backColor>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{3,3,{0,f527dc88-1d39-40b3-bcbb-d98b690ead68}}"));
+        assert!(text.contains("{1,{2048,0}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
     fn live_parse_repro_counts_avansovy_report_template_sections() -> anyhow::Result<()> {
         let template_path = std::path::PathBuf::from(
             r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
@@ -24418,6 +24831,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             original.matches("<line width=\"1\"").count()
         );
         assert_eq!(parsed.pictures.len(), original.matches("<picture>").count());
+        assert!(
+            parsed.formats.iter().any(|format| {
+                format.vertical_alignment.as_deref() == Some("Top")
+                    && format.back_color.as_deref() == Some("style:FieldBackColor")
+                    && format.drawing_border == Some(4)
+            }),
+            "parsed live template lost hybrid drawing/backColor format"
+        );
 
         Ok(())
     }
@@ -24703,7 +25124,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
-        assert!(text.contains("{4,{4,0,{-13}},{4,1,{-6}"));
+        assert!(text.contains(",4,{4,0,{-13}},{4,1,{-6}"));
         assert!(text.contains(&format!(
             "{{4,2,{{0,{}}}}}",
             super::STD_PICTURE_INFORMATION_UUID
@@ -24714,6 +25135,45 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         )));
         assert_eq!(packed.plain_bytes, text.len());
 
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_packs_spreadsheet_standard_picture_refs_text() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<picture>
+		<index>0</index>
+		<picture ref="v8ui:Print"/>
+	</picture>
+	<picture>
+		<index>1</index>
+		<picture ref="v8ui:InputFieldCalculator"/>
+	</picture>
+	<picture>
+		<index>2</index>
+		<picture ref="v8ui:Information"/>
+	</picture>
+	<picture>
+		<index>3</index>
+		<picture ref="v8ui:SaveFile"/>
+	</picture>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        println!("{text}");
         Ok(())
     }
 
@@ -25785,6 +26245,68 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             packed.plain_bytes,
             String::from_utf8(super::inflate_raw(&packed.blob)?)?.len()
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_preserves_duplicate_event_uuid_alias_handlers() -> anyhow::Result<()> {
+        let duplicate_uuid = "eba5f295-c611-4dd9-84b5-22911ad60c53";
+        let base = super::deflate_raw(
+            format!(
+                r#"{{4,{{7,{{0,"{duplicate_uuid}","OldMain"}},{{1,"{duplicate_uuid}","OldSubject"}}}},"Old module",{{0}}}}"#
+            )
+            .as_bytes(),
+        )?;
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<Events>
+		<Event name="{duplicate_uuid}">ГлавнаяЗадачаПредставлениеНажатие</Event>
+		<Event name="{duplicate_uuid}">ПредметНажатие</Event>
+	</Events>
+</Form>
+"#
+        );
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        assert!(
+            parsed.layout.contains(&format!(
+                r#""{duplicate_uuid}","ГлавнаяЗадачаПредставлениеНажатие""#
+            )),
+            "{}",
+            parsed.layout
+        );
+        assert!(
+            parsed
+                .layout
+                .contains(&format!(r#""{duplicate_uuid}","ПредметНажатие""#)),
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(
+            parsed
+                .layout
+                .matches(&format!(
+                    r#""{duplicate_uuid}","ГлавнаяЗадачаПредставлениеНажатие""#
+                ))
+                .count(),
+            1,
+            "{}",
+            parsed.layout
+        );
+        assert_eq!(
+            parsed
+                .layout
+                .matches(&format!(r#""{duplicate_uuid}","ПредметНажатие""#))
+                .count(),
+            1,
+            "{}",
+            parsed.layout
+        );
+        assert!(!parsed.layout.contains("OldMain"));
+        assert!(!parsed.layout.contains("OldSubject"));
 
         Ok(())
     }
@@ -27592,6 +28114,21 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains("{12,0,0,2,2,2,{1,0},0"));
         assert!(!parsed.layout.contains("InfoLabelExtendedTooltip"));
+        Ok(())
+    }
+
+    #[test]
+    fn form_layout_child_item_extended_tooltip_range_skips_picture_child_items()
+    -> anyhow::Result<()> {
+        let page = r#"{22,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,4,"Page",{1,0},{1,0},3,1,0,0,0,1,11111111-1111-4111-8111-111111111111,{12,{23,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,1,"InfoPicture",{1,0}},{12,{2,cccccccc-cccc-4ccc-cccc-cccccccccccc},0,0,0,0,"PageExtendedTooltip",{1,0},{1,0},1,0,0,2,2}}"#;
+        let fields = super::scan_braced_fields(page, 0)?;
+        let range = super::form_layout_child_item_extended_tooltip_range(page, &fields)?
+            .expect("expected page extended tooltip field");
+        let tooltip = &page[range.clone()];
+
+        assert!(tooltip.contains(r#""PageExtendedTooltip""#), "{}", tooltip);
+        assert!(!tooltip.contains(r#""InfoPicture""#), "{}", tooltip);
+
         Ok(())
     }
 

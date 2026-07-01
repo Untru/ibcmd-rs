@@ -48,7 +48,7 @@ use crate::module_blob::{
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
     pack_help_blob_from_parts, pack_module_blob_bytes, pack_module_blob_container_bytes,
-    pack_moxel_spreadsheet_blob_from_xml_with_source, pack_predefined_data_blob_from_xml,
+    pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint, pack_predefined_data_blob_from_xml,
     pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml_with_source,
     pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
     pack_style_body_blob_from_xml, parse_common_module_xml_properties,
@@ -1789,11 +1789,7 @@ pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
                 args.target
             ));
         }
-        let drop_sql = format!(
-            "ALTER DATABASE {target} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {target};",
-            target = quote_ident(&args.target)
-        );
-        run_sql(&args.sqlcmd, &args.server, &drop_sql)?;
+        drop_database(&args.sqlcmd, &args.server, &args.target, args.allow_non_lab)?;
     }
 
     let files = load_database_files(&args.sqlcmd, &args.server, &args.source)?;
@@ -1831,6 +1827,23 @@ pub fn clone_database(args: &MssqlCloneArgs) -> Result<MssqlCloneReport> {
         backup,
         restored: true,
     })
+}
+
+pub fn drop_database(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    allow_non_lab: bool,
+) -> Result<()> {
+    require_non_lab_confirmation(allow_non_lab, "database drop")?;
+    if !database_exists(sqlcmd, server, database)? {
+        return Ok(());
+    }
+    let drop_sql = format!(
+        "ALTER DATABASE {target} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {target};",
+        target = quote_ident(database)
+    );
+    run_sql(sqlcmd, server, &drop_sql)
 }
 
 pub fn export_storage_bundle(args: &MssqlStorageExportArgs) -> Result<StorageBundleExportReport> {
@@ -3706,9 +3719,9 @@ fn prepare_template_body_row(
 }
 
 fn prepare_spreadsheet_template_body_row(
-    _sqlcmd: &Path,
-    _server: &str,
-    _database: &str,
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
@@ -3724,13 +3737,57 @@ fn prepare_spreadsheet_template_body_row(
             body_path.display()
         )
     })?;
-    let packed =
-        pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, source).with_context(|| {
-            format!(
-                "failed to pack SpreadsheetDocument Template body {}",
-                body_path.display()
-            )
-        })?;
+    let base_blob = source.and_then(|_| {
+        fetch_config_blob_with_auth(sqlcmd, server, SqlAuth::integrated(), database, &body_id).ok()
+    });
+    if let Some(source) = source
+        && let Some(base_blob) = base_blob.as_ref()
+        && let Ok(object_refs) = source.moxel_object_refs()
+        && let Some(native_xml) =
+            crate::mssql_dump::extract_moxel_spreadsheet_xml(base_blob, &object_refs)
+        && native_xml == String::from_utf8_lossy(&xml)
+    {
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob: base_blob.clone(),
+            blob_sha256: hex_sha256(base_blob),
+        }]);
+    }
+    let number_format_hint = base_blob
+        .as_ref()
+        .and_then(|blob| crate::mssql_dump::spreadsheet_number_format_hint_from_blob(blob));
+    let packed_with_hint = pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
+        &xml,
+        source,
+        number_format_hint.as_ref(),
+    )
+    .with_context(|| {
+        format!(
+            "failed to pack SpreadsheetDocument Template body {}",
+            body_path.display()
+        )
+    })?;
+    let packed = if number_format_hint.is_some() {
+        let source_xml = String::from_utf8_lossy(&xml);
+        let hinted_roundtrip_matches = source.and_then(|source| {
+            let object_refs = source.moxel_object_refs().ok()?;
+            crate::mssql_dump::extract_moxel_spreadsheet_xml(&packed_with_hint.blob, &object_refs)
+        }) == Some(source_xml.as_ref().to_string());
+        if hinted_roundtrip_matches {
+            packed_with_hint
+        } else {
+            pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(&xml, source, None)
+                .with_context(|| {
+                    format!(
+                        "failed to repack SpreadsheetDocument Template body without native number-format hint {}",
+                        body_path.display()
+                    )
+                })?
+        }
+    } else {
+        packed_with_hint
+    };
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -4167,6 +4224,33 @@ fn prepare_form_body_row(
         None
     };
     let form_item_assets_root = form_path.with_extension("").join("Items");
+    if !form_item_assets_root.exists() {
+        let native_form_matches = if form_xml.is_empty() {
+            true
+        } else {
+            crate::mssql_dump::extract_form_body_xml(&base_body, &BTreeMap::new())
+                .is_some_and(|native_xml| native_xml == String::from_utf8_lossy(&form_xml))
+        };
+        let native_module_matches = match module_text.as_deref() {
+            Some(source_module) => {
+                crate::mssql_dump::unpack_form_body_module_text(&base_body).as_deref()
+                    == Some(source_module)
+            }
+            None => true,
+        };
+        if native_form_matches && native_module_matches {
+            return Ok(vec![PreparedMetadataBodyStage {
+                body_id,
+                path: if form_path.exists() {
+                    form_path
+                } else {
+                    module_path
+                },
+                blob: base_body.clone(),
+                blob_sha256: hex_sha256(&base_body),
+            }]);
+        }
+    }
     let packed = pack_form_body_blob_from_form_xml_with_source_and_assets(
         &base_body,
         &form_xml,
@@ -6699,11 +6783,16 @@ mod tests {
         SimpleMetadataXmlProperties, hex_sha256, module_blob_text_sha256,
         pack_help_blob_from_parts, pack_moxel_spreadsheet_blob_from_xml_with_source,
         pack_raw_deflated_blob_from_bytes, pack_style_body_blob_from_xml,
-        raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
+        parse_simple_metadata_xml_properties, raw_deflated_first_base64_payload_sha256,
+        raw_deflated_plain_sha256,
     };
+    use crate::mssql_dump::extract_moxel_spreadsheet_xml;
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use crate::v8_container::{V8Element, build_v8_container, make_v8_element_header};
+    use anyhow::Context;
+    use flate2::read::DeflateDecoder;
     use std::fs;
+    use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -6736,6 +6825,358 @@ mod tests {
             privileged: false,
             return_values_reuse: ReturnValuesReuse::DontUse,
         }
+    }
+
+    fn inflate_raw_deflate_for_test(input: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let mut decoder = DeflateDecoder::new(input);
+        let mut output = Vec::new();
+        decoder.read_to_end(&mut output)?;
+        Ok(output)
+    }
+
+    fn first_diff_offset(left: &str, right: &str) -> Option<usize> {
+        let mut offset = 0usize;
+        let mut left_chars = left.chars();
+        let mut right_chars = right.chars();
+        loop {
+            match (left_chars.next(), right_chars.next()) {
+                (Some(left_char), Some(right_char)) if left_char == right_char => {
+                    offset += left_char.len_utf8();
+                }
+                (Some(_), Some(_)) => return Some(offset),
+                (None, None) => return None,
+                _ => return Some(offset),
+            }
+        }
+    }
+
+    fn excerpt_around_offset(text: &str, offset: usize, radius: usize) -> String {
+        let mut start = offset.saturating_sub(radius).min(text.len());
+        while start > 0 && !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        let mut end = (offset + radius).min(text.len());
+        while end < text.len() && !text.is_char_boundary(end) {
+            end += 1;
+        }
+        text[start..end].replace('\r', "\\r").replace('\n', "\\n")
+    }
+
+    fn print_raw_token_diagnostics(label: &str, text: &str, token: &str) {
+        let count = text.matches(token).count();
+        println!("{label}_count[{token}]={count}");
+        if let Some(offset) = text.find(token) {
+            println!(
+                "{label}_excerpt[{token}]={}",
+                excerpt_around_offset(text, offset, 160)
+            );
+        }
+    }
+
+    fn print_number_format_slot_diagnostics(label: &str, text: &str) {
+        let Some(debug) = crate::mssql_dump::debug_moxel_number_format_usage(text) else {
+            println!("{label}_number_format_slots=unavailable");
+            return;
+        };
+        let slot_summaries = debug
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| format!("{index}:{slot}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        println!("{label}_number_format_slots={slot_summaries}");
+        let usage_summaries = debug
+            .format_slot_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| slot.map(|slot| format!("{}->{}", index + 1, slot)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{label}_number_format_usages={usage_summaries}");
+    }
+
+    fn print_moxel_spreadsheet_summary(label: &str, blob: &[u8]) {
+        let Some(summary) = crate::mssql_dump::debug_moxel_spreadsheet_summary_from_blob(blob)
+        else {
+            println!("{label}_spreadsheet_summary=unavailable");
+            return;
+        };
+        println!(
+            "{label}_spreadsheet_summary=columns:{} column_slots:{} source_offset:{} default_format:{:?} column_formats:{} body_formats:{}",
+            summary.column_count,
+            summary.column_format_slots,
+            summary.source_column_format_offset,
+            summary.default_format_index,
+            summary.column_formats_len,
+            summary.formats_len
+        );
+        println!(
+            "{label}_number_format_indices={}",
+            summary
+                .number_format_indices
+                .iter()
+                .map(|index| index.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!("{label}_first_columns={}", summary.first_columns.join(", "));
+        println!("{label}_first_rows={}", summary.first_rows.join(", "));
+    }
+
+    fn spreadsheet_format_blocks(xml: &str) -> Vec<String> {
+        let mut blocks = Vec::new();
+        let mut cursor = 0usize;
+        while let Some(start_rel) = xml[cursor..].find("<format>") {
+            let start = cursor + start_rel;
+            let Some(end_rel) = xml[start..].find("</format>") else {
+                break;
+            };
+            let end = start + end_rel + "</format>".len();
+            blocks.push(xml[start..end].to_string());
+            cursor = end;
+        }
+        blocks
+    }
+
+    fn find_format_index_with_fragments(xml: &str, fragments: &[&str]) -> Option<usize> {
+        spreadsheet_format_blocks(xml)
+            .iter()
+            .position(|block| fragments.iter().all(|fragment| block.contains(fragment)))
+            .map(|index| index + 1)
+    }
+
+    fn live_compare_native_and_packed_spreadsheet_template(
+        source_root: &Path,
+        owner_xml: &Path,
+        template_xml: &Path,
+    ) -> anyhow::Result<()> {
+        let source = MetadataSourceContext::new(source_root.to_path_buf());
+        let owner_bytes = fs::read(owner_xml)
+            .with_context(|| format!("failed to read owner XML {}", owner_xml.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&owner_bytes)
+            .with_context(|| format!("failed to parse owner XML {}", owner_xml.display()))?;
+        let body_id = format!("{}.0", properties.uuid);
+        let object_refs = source.moxel_object_refs()?;
+        let native_blob = super::fetch_config_blob_with_auth(
+            Path::new("sqlcmd"),
+            "localhost",
+            super::SqlAuth::integrated(),
+            "ut_ibcmd",
+            &body_id,
+        )?;
+        let applied_blob = super::fetch_config_blob_with_auth(
+            Path::new("sqlcmd"),
+            "localhost",
+            super::SqlAuth::integrated(),
+            "ut_ibcmd_sweep_01",
+            &body_id,
+        )
+        .ok();
+        let local_rows = super::prepare_spreadsheet_template_body_row(
+            Path::new("sqlcmd"),
+            "localhost",
+            "ut_ibcmd",
+            owner_xml,
+            &properties,
+            Some(&source),
+        )?;
+        let local_blob = local_rows
+            .first()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "local pack produced no body rows for {}",
+                    template_xml.display()
+                )
+            })?
+            .blob
+            .clone();
+        let baseline_xml = fs::read_to_string(template_xml)
+            .with_context(|| format!("failed to read template XML {}", template_xml.display()))?;
+        let native_xml = extract_moxel_spreadsheet_xml(&native_blob, &object_refs)
+            .ok_or_else(|| anyhow::anyhow!("failed to extract native MOXCEL {}", body_id))?;
+        let local_xml = extract_moxel_spreadsheet_xml(&local_blob, &object_refs)
+            .ok_or_else(|| anyhow::anyhow!("failed to extract local MOXCEL {}", body_id))?;
+        let applied_xml = applied_blob
+            .as_ref()
+            .and_then(|blob| extract_moxel_spreadsheet_xml(blob, &object_refs));
+        let native_text = String::from_utf8(inflate_raw_deflate_for_test(&native_blob)?)
+            .context("native MOXCEL is not valid UTF-8")?;
+        let local_text = String::from_utf8(inflate_raw_deflate_for_test(&local_blob)?)
+            .context("local MOXCEL is not valid UTF-8")?;
+        let applied_text = applied_blob
+            .as_ref()
+            .and_then(|blob| inflate_raw_deflate_for_test(blob).ok())
+            .and_then(|bytes| String::from_utf8(bytes).ok());
+        let interesting_format_index = find_format_index_with_fragments(
+            &baseline_xml,
+            &[
+                "<backColor>style:FieldBackColor</backColor>",
+                "<drawingBorder>4</drawingBorder>",
+            ],
+        )
+        .unwrap_or(0);
+        let baseline_blocks = spreadsheet_format_blocks(&baseline_xml);
+        let native_blocks = spreadsheet_format_blocks(&native_xml);
+        let local_blocks = spreadsheet_format_blocks(&local_xml);
+        println!("template={}", template_xml.display());
+        println!("body_id={body_id}");
+        println!(
+            "blob_sizes native={} local={} applied={}",
+            native_blob.len(),
+            local_blob.len(),
+            applied_blob.as_ref().map(|blob| blob.len()).unwrap_or(0)
+        );
+        println!(
+            "blob_sha256 native={} local={} applied={}",
+            hex_sha256(&native_blob),
+            hex_sha256(&local_blob),
+            applied_blob
+                .as_ref()
+                .map(|blob| hex_sha256(blob))
+                .unwrap_or_else(|| "unavailable".to_string())
+        );
+        println!(
+            "raw_field_back_color_code_count native={} local={} applied={}",
+            native_text.matches("{-10}").count(),
+            local_text.matches("{-10}").count(),
+            applied_text
+                .as_ref()
+                .map(|text| text.matches("{-10}").count())
+                .unwrap_or(0)
+        );
+        print_moxel_spreadsheet_summary("native_raw", &native_blob);
+        print_moxel_spreadsheet_summary("local_raw", &local_blob);
+        if let Some(applied_blob) = applied_blob.as_ref() {
+            print_moxel_spreadsheet_summary("applied_raw", applied_blob);
+        }
+        for token in ["ДФ=dd.MM.yyyy", "ЧДЦ=2", "ЧЦ=10; ЧДЦ=4", "БЛ=; БИ=√"] {
+            print_raw_token_diagnostics("native_raw", &native_text, token);
+            print_raw_token_diagnostics("local_raw", &local_text, token);
+            if let Some(applied_text) = applied_text.as_ref() {
+                print_raw_token_diagnostics("applied_raw", applied_text, token);
+            }
+        }
+        print_number_format_slot_diagnostics("native_raw", &native_text);
+        print_number_format_slot_diagnostics("local_raw", &local_text);
+        if let Some(applied_text) = applied_text.as_ref() {
+            print_number_format_slot_diagnostics("applied_raw", applied_text);
+        }
+        if let Some(offset) = native_text.find("{-10}") {
+            println!(
+                "native_field_back_color_excerpt={}",
+                excerpt_around_offset(&native_text, offset, 160)
+            );
+        }
+        if let Some(offset) = local_text.find("{-10}") {
+            println!(
+                "local_field_back_color_excerpt={}",
+                excerpt_around_offset(&local_text, offset, 160)
+            );
+        }
+        if let Some(applied_text) = applied_text.as_ref()
+            && let Some(offset) = applied_text.find("{-10}")
+        {
+            println!(
+                "applied_field_back_color_excerpt={}",
+                excerpt_around_offset(applied_text, offset, 160)
+            );
+        }
+        println!(
+            "xml_equal baseline_vs_native={} baseline_vs_local={} baseline_vs_applied={} native_vs_local={} local_vs_applied={}",
+            baseline_xml == native_xml,
+            baseline_xml == local_xml,
+            applied_xml.as_ref() == Some(&baseline_xml),
+            native_xml == local_xml,
+            applied_xml.as_ref() == Some(&local_xml)
+        );
+        println!(
+            "format_index_with_field_back_color_and_drawing_border={interesting_format_index}"
+        );
+        if interesting_format_index > 0 {
+            let index = interesting_format_index - 1;
+            let baseline_block = baseline_blocks.get(index).cloned().unwrap_or_default();
+            let native_block = native_blocks.get(index).cloned().unwrap_or_default();
+            let local_block = local_blocks.get(index).cloned().unwrap_or_default();
+            println!(
+                "baseline_format[{interesting_format_index}]={}",
+                baseline_block
+            );
+            println!("native_format[{interesting_format_index}]={}", native_block);
+            println!("local_format[{interesting_format_index}]={}", local_block);
+            println!(
+                "baseline_format_index_in_native={}",
+                native_blocks
+                    .iter()
+                    .position(|block| block == &baseline_block)
+                    .map(|value| value + 1)
+                    .unwrap_or(0)
+            );
+            println!(
+                "baseline_format_index_in_local={}",
+                local_blocks
+                    .iter()
+                    .position(|block| block == &baseline_block)
+                    .map(|value| value + 1)
+                    .unwrap_or(0)
+            );
+            let nearby_start = index.saturating_sub(2);
+            let nearby_end = (index + 3).min(local_blocks.len());
+            for nearby_index in nearby_start..nearby_end {
+                println!(
+                    "local_nearby_format[{}]={}",
+                    nearby_index + 1,
+                    local_blocks.get(nearby_index).cloned().unwrap_or_default()
+                );
+            }
+            println!(
+                "local_first_field_back_color_index={}",
+                local_blocks
+                    .iter()
+                    .position(|block| block.contains("<backColor>style:FieldBackColor</backColor>"))
+                    .map(|value| value + 1)
+                    .unwrap_or(0)
+            );
+            println!(
+                "local_first_drawing_border_4_index={}",
+                local_blocks
+                    .iter()
+                    .position(|block| block.contains("<drawingBorder>4</drawingBorder>"))
+                    .map(|value| value + 1)
+                    .unwrap_or(0)
+            );
+        }
+        match first_diff_offset(&native_text, &local_text) {
+            Some(offset) => {
+                println!("raw_text_first_diff_offset={offset}");
+                println!(
+                    "native_excerpt={}",
+                    excerpt_around_offset(&native_text, offset, 160)
+                );
+                println!(
+                    "local_excerpt={}",
+                    excerpt_around_offset(&local_text, offset, 160)
+                );
+            }
+            None => println!("raw_text_first_diff_offset=none"),
+        }
+        if let Some(applied_text) = applied_text.as_ref() {
+            match first_diff_offset(&local_text, applied_text) {
+                Some(offset) => {
+                    println!("local_vs_applied_raw_text_first_diff_offset={offset}");
+                    println!(
+                        "local_vs_applied_local_excerpt={}",
+                        excerpt_around_offset(&local_text, offset, 160)
+                    );
+                    println!(
+                        "local_vs_applied_applied_excerpt={}",
+                        excerpt_around_offset(applied_text, offset, 160)
+                    );
+                }
+                None => println!("local_vs_applied_raw_text_first_diff_offset=none"),
+            }
+        }
+        Ok(())
     }
 
     fn test_metadata_stage_object(
@@ -10215,6 +10656,74 @@ mod tests {
         assert_eq!(rows[0].blob_sha256, hex_sha256(&rows[0].blob));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[ignore]
+    fn live_compares_native_and_packed_avansovy_spreadsheet_template_blobs() -> anyhow::Result<()> {
+        let source_root =
+            PathBuf::from(r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline");
+        if !source_root.is_dir() {
+            return Ok(());
+        }
+        let templates_root = source_root
+            .join("Documents")
+            .join("АвансовыйОтчет")
+            .join("Templates");
+        let cases = [
+            (
+                templates_root.join("ПФ_MXL_АвансовыйОтчет_ru.xml"),
+                templates_root
+                    .join("ПФ_MXL_АвансовыйОтчет_ru")
+                    .join("Ext")
+                    .join("Template.xml"),
+            ),
+            (
+                templates_root.join("ПФ_MXL_АвансовыйОтчетВИностраннойВалюте_ru.xml"),
+                templates_root
+                    .join("ПФ_MXL_АвансовыйОтчетВИностраннойВалюте_ru")
+                    .join("Ext")
+                    .join("Template.xml"),
+            ),
+        ];
+        for (owner_xml, template_xml) in cases {
+            live_compare_native_and_packed_spreadsheet_template(
+                &source_root,
+                &owner_xml,
+                &template_xml,
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn live_compares_native_and_packed_dossier_financial_analysis_spreadsheet_template_blobs()
+    -> anyhow::Result<()> {
+        let source_root = PathBuf::from(
+            r"E:\ibcmd_lab\roundtrip\issue32-sweep-20260701-0918-full\ut_ibcmd_sweep_baseline",
+        );
+        if !source_root.is_dir() {
+            return Ok(());
+        }
+        let owner_xml = source_root
+            .join("Reports")
+            .join("ДосьеКонтрагента")
+            .join("Templates")
+            .join("ФинансовыйАнализ.xml");
+        let template_xml = source_root
+            .join("Reports")
+            .join("ДосьеКонтрагента")
+            .join("Templates")
+            .join("ФинансовыйАнализ")
+            .join("Ext")
+            .join("Template.xml");
+        live_compare_native_and_packed_spreadsheet_template(
+            &source_root,
+            &owner_xml,
+            &template_xml,
+        )?;
+        Ok(())
     }
 
     #[test]

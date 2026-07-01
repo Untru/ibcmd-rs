@@ -52,6 +52,31 @@ pub(super) fn fetch_binary_rows_bcp(
     selected_file_names: &BTreeSet<String>,
     use_range_filter: bool,
 ) -> Result<Vec<BinaryConfigRow>> {
+    if !selected_file_names.is_empty() && !use_range_filter {
+        let batches = split_selected_file_names_for_bcp_query(
+            database,
+            table,
+            selected_file_names,
+            BCP_INLINE_QUERY_MAX_CHARS,
+        );
+        if batches.len() > 1 {
+            let mut rows = Vec::new();
+            for batch in batches {
+                let first = batch.first().map(String::as_str).unwrap_or("<empty>");
+                let last = batch.last().map(String::as_str).unwrap_or("<empty>");
+                let query = build_fetch_binary_rows_query(database, table, &batch, false);
+                let mut batch_rows = fetch_binary_rows_bcp_query(
+                    sqlcmd, server, user, password, database, table, &query,
+                )
+                .with_context(|| {
+                    format!("failed to fetch exact bcp batch for {table} rows {first}..{last}")
+                })?;
+                rows.append(&mut batch_rows);
+            }
+            return Ok(rows);
+        }
+    }
+
     let query =
         build_fetch_binary_rows_query(database, table, selected_file_names, use_range_filter);
     fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)
@@ -160,6 +185,40 @@ pub(super) fn fetch_metadata_rows_bcp(
     Ok(config_rows_from_binary(rows))
 }
 
+pub(super) fn fetch_metadata_owner_rows_bcp(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    metadata_file_names: &BTreeSet<String>,
+) -> Result<Vec<ConfigRow>> {
+    if metadata_file_names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let batches = split_selected_file_names_for_owner_rows_query(
+        database,
+        table,
+        metadata_file_names,
+        BCP_INLINE_QUERY_MAX_CHARS,
+    );
+    let mut rows = Vec::new();
+    for batch in batches {
+        let first = batch.first().map(String::as_str).unwrap_or("<empty>");
+        let last = batch.last().map(String::as_str).unwrap_or("<empty>");
+        let query = build_fetch_metadata_owner_rows_bcp_query(database, table, &batch);
+        let mut batch_rows =
+            fetch_binary_rows_bcp_query(sqlcmd, server, user, password, database, table, &query)
+                .with_context(|| {
+                    format!("failed to fetch metadata owner rows batch {first}..{last}")
+                })?;
+        rows.append(&mut batch_rows);
+    }
+    Ok(config_rows_from_binary(rows))
+}
+
 pub(super) fn fetch_config_rows_bcp(
     sqlcmd: &Path,
     server: &str,
@@ -234,6 +293,51 @@ pub(super) fn build_fetch_binary_rows_query(
     )
 }
 
+fn split_selected_file_names_for_bcp_query(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    max_query_chars: usize,
+) -> Vec<BTreeSet<String>> {
+    if selected_file_names.is_empty() {
+        return Vec::new();
+    }
+
+    let base_query_chars = build_fetch_binary_rows_query(database, table, &BTreeSet::new(), false)
+        .chars()
+        .count();
+    let filter_wrapper_chars = "WHERE FileName IN ()\n".chars().count();
+
+    let mut batches = Vec::new();
+    let mut current = BTreeSet::new();
+    let mut current_value_chars = 0usize;
+
+    for file_name in selected_file_names {
+        let escaped = quote_string(file_name);
+        let value_chars = 3 + escaped.chars().count();
+        let separator_chars = usize::from(!current.is_empty()) * 2;
+        let next_value_chars = current_value_chars + separator_chars + value_chars;
+        let next_query_chars = base_query_chars + filter_wrapper_chars + next_value_chars;
+
+        if !current.is_empty() && next_query_chars > max_query_chars {
+            batches.push(std::mem::take(&mut current));
+            current_value_chars = 0;
+        }
+
+        if !current.is_empty() {
+            current_value_chars += 2;
+        }
+        current.insert(file_name.clone());
+        current_value_chars += value_chars;
+    }
+
+    if !current.is_empty() {
+        batches.push(current);
+    }
+
+    batches
+}
+
 pub(super) fn build_fetch_metadata_rows_bcp_query(database: &str, table: &str) -> String {
     format!(
         "SELECT FileName, PartNo, DataSize, BinaryData\n\
@@ -242,6 +346,65 @@ pub(super) fn build_fetch_metadata_rows_bcp_query(database: &str, table: &str) -
          ORDER BY FileName, PartNo",
         qualified_table = qualified_storage_table(database, table),
     )
+}
+
+pub(super) fn build_fetch_metadata_owner_rows_bcp_query(
+    database: &str,
+    table: &str,
+    metadata_file_names: &BTreeSet<String>,
+) -> String {
+    let filter = metadata_file_names
+        .iter()
+        .map(|value| {
+            let value = quote_string(value);
+            format!("FileName = N'{value}' OR FileName LIKE N'{value}.%'")
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+
+    format!(
+        "SELECT FileName, PartNo, DataSize, BinaryData\n\
+         FROM {qualified_table}\n\
+         WHERE {filter}\n\
+         ORDER BY FileName, PartNo",
+        qualified_table = qualified_storage_table(database, table),
+        filter = filter,
+    )
+}
+
+fn split_selected_file_names_for_owner_rows_query(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    max_query_chars: usize,
+) -> Vec<BTreeSet<String>> {
+    if selected_file_names.is_empty() {
+        return Vec::new();
+    }
+
+    let mut batches = Vec::new();
+    let mut current = BTreeSet::new();
+    for file_name in selected_file_names {
+        let mut candidate = current.clone();
+        candidate.insert(file_name.clone());
+        if !current.is_empty()
+            && build_fetch_metadata_owner_rows_bcp_query(database, table, &candidate)
+                .chars()
+                .count()
+                > max_query_chars
+        {
+            batches.push(current);
+            current = BTreeSet::from([file_name.clone()]);
+        } else {
+            current = candidate;
+        }
+    }
+
+    if !current.is_empty() {
+        batches.push(current);
+    }
+
+    batches
 }
 
 #[allow(dead_code)]
@@ -704,6 +867,7 @@ pub(super) const SQLCMD_BINARY_CHUNK_SIZE: usize = 16 * 1024;
 pub(super) const SQLCMD_DUMP_FILE_BATCH_SIZE: usize = 4096;
 pub(super) const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 256 * 1024 * 1024;
 pub(super) const SQLCMD_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
+pub(super) const BCP_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
 
 pub(super) fn run_sql_capture_tsv(
     sqlcmd: &Path,
@@ -775,4 +939,79 @@ pub(super) fn sql_password(
 #[cfg(test)]
 pub(super) fn normalize_sqlcmd_json(value: &str) -> String {
     value.replace(['\r', '\n'], "")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::{
+        BCP_INLINE_QUERY_MAX_CHARS, build_fetch_binary_rows_query,
+        build_fetch_metadata_owner_rows_bcp_query, split_selected_file_names_for_bcp_query,
+        split_selected_file_names_for_owner_rows_query,
+    };
+
+    #[test]
+    fn split_selected_file_names_for_bcp_query_keeps_small_selection_in_one_batch() {
+        let selected = BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+        ]);
+
+        let batches = split_selected_file_names_for_bcp_query("TestDb", "Config", &selected, 1_024);
+
+        assert_eq!(batches, vec![selected]);
+    }
+
+    #[test]
+    fn split_selected_file_names_for_bcp_query_caps_each_exact_query_length() {
+        let selected = (0..900)
+            .map(|index| format!("aaaaaaaa-aaaa-4aaa-aaaa-{index:012x}"))
+            .collect::<BTreeSet<_>>();
+
+        let batches = split_selected_file_names_for_bcp_query(
+            "TestDb",
+            "Config",
+            &selected,
+            BCP_INLINE_QUERY_MAX_CHARS,
+        );
+
+        assert!(batches.len() > 1);
+        let rebuilt = batches
+            .iter()
+            .flat_map(|batch| batch.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(rebuilt, selected);
+        for batch in &batches {
+            assert!(!batch.is_empty());
+            let query = build_fetch_binary_rows_query("TestDb", "Config", batch, false);
+            assert!(query.chars().count() <= BCP_INLINE_QUERY_MAX_CHARS);
+        }
+    }
+
+    #[test]
+    fn split_selected_file_names_for_owner_rows_query_caps_each_query_length() {
+        let selected = (0..500)
+            .map(|index| format!("bbbbbbbb-bbbb-4bbb-bbbb-{index:012x}"))
+            .collect::<BTreeSet<_>>();
+
+        let batches = split_selected_file_names_for_owner_rows_query(
+            "TestDb",
+            "Config",
+            &selected,
+            BCP_INLINE_QUERY_MAX_CHARS,
+        );
+
+        assert!(batches.len() > 1);
+        let rebuilt = batches
+            .iter()
+            .flat_map(|batch| batch.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(rebuilt, selected);
+        for batch in &batches {
+            assert!(!batch.is_empty());
+            let query = build_fetch_metadata_owner_rows_bcp_query("TestDb", "Config", batch);
+            assert!(query.chars().count() <= BCP_INLINE_QUERY_MAX_CHARS);
+        }
+    }
 }

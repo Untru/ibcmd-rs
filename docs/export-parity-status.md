@@ -5,7 +5,7 @@ Generated from:
 ```powershell
 target\release\ibcmd-rs.exe mssql-dump-config `
   --database ut_ibcmd `
-  -o E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_dump `
+  -o E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_dump `
   --overwrite `
   --inflate `
   --extract-module-text `
@@ -14,38 +14,38 @@ target\release\ibcmd-rs.exe mssql-dump-config `
   --no-binary-rows
 
 robocopy `
-  E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_dump `
-  E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_source_only `
+  E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_dump `
+  E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_source_only `
   /E /XD Config_inflated Config_raw ConfigSave_inflated ConfigSave_raw `
   /XF manifest.json *.json
 
 target\release\ibcmd-rs.exe source-diff `
-  -o E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\diff_full_source_only.json `
+  -o E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\diff_full_source_only.json `
   D:\ibcmd-rs\lab\ut_ibcmd_20260629_164647\ibcmd `
-  E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\ibcmd_rs_source_only
+  E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_source_only
 ```
 
 The full JSON report is retained at
-`E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\diff_full_source_only.json`.
-Round 36 also produced a bounded signature-mining report at
-`E:\ibcmd_lab\full_diff_20260630_234359_round33_percent\source-diff-signatures-round36.json`
+`E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\diff_full_source_only.json`.
+A matching signature-mining report for this snapshot is retained at
+`E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\source-diff-signatures.json`
 to rank repeated XML path differences for the next agent batches.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
-Candidate: `ibcmd-rs` full export snapshot generated after the round 32
-incremental verified fixes and before round 33 agent branches were merged.
+Candidate: `ibcmd-rs` full export snapshot generated from the current direct
+MSSQL export path on July 1, 2026.
 
 Raw source-only summary:
 
 | left_only | right_only | different | unchanged |
 |---:|---:|---:|---:|
-| 1 | 0 | 16864 | 32758 |
+| 1 | 0 | 16809 | 32813 |
 
 The only `left_only` file is `ConfigDumpInfo.xml`; it remains a deliberate
 scope exclusion and is not counted as parity debt.
 
-Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **66.0%**
-(`32758 / 49622` byte-identical files; 66.02% exact), with **16864** files still different.
+Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **66.1%**
+(`32813 / 49622` byte-identical files; 66.13% exact), with **16809** files still different.
 
 Verification history:
 
@@ -336,27 +336,27 @@ Diff by file kind:
 | XDTOPackages | done | 814 | 814 | 0 | 100.0 |
 | Enums | partial | 1195 | 1136 | 59 | 95.1 |
 | CommonTemplates | partial | 495 | 409 | 86 | 82.6 |
-| Reports | partial | 2362 | 1597 | 765 | 67.6 |
+| Reports | partial | 2362 | 1599 | 763 | 67.7 |
 | AccumulationRegisters | partial | 449 | 267 | 182 | 59.5 |
 | Roles | partial | 2220 | 1207 | 1013 | 54.4 |
-| ExchangePlans | partial | 366 | 190 | 176 | 51.9 |
+| ExchangePlans | partial | 366 | 191 | 175 | 52.2 |
 | HTTPServices | partial | 10 | 5 | 5 | 50.0 |
 | WebServices | partial | 36 | 18 | 18 | 50.0 |
 | DocumentJournals | partial | 121 | 60 | 61 | 49.6 |
-| DataProcessors | partial | 7058 | 3456 | 3602 | 49.0 |
+| DataProcessors | partial | 7058 | 3489 | 3569 | 49.4 |
 | Tasks | partial | 49 | 23 | 26 | 46.9 |
-| Catalogs | partial | 6705 | 3055 | 3650 | 45.6 |
+| Catalogs | partial | 6705 | 3071 | 3634 | 45.8 |
 | Documents | partial | 6219 | 2799 | 3420 | 45.0 |
 | InformationRegisters | partial | 3978 | 1751 | 2227 | 44.0 |
+| CommonAttributes | partial | 7 | 3 | 4 | 42.9 |
 | ChartsOfCharacteristicTypes | partial | 167 | 70 | 97 | 41.9 |
 | BusinessProcesses | partial | 152 | 63 | 89 | 41.4 |
 | SettingsStorages | partial | 82 | 32 | 50 | 39.0 |
 | CommonForms | partial | 1116 | 411 | 705 | 36.8 |
 | Subsystems | partial | 766 | 147 | 619 | 19.2 |
 | FilterCriteria | partial | 7 | 1 | 6 | 14.3 |
-| CommonAttributes | partial | 7 | 0 | 7 | 0.0 |
 | Configuration.xml | partial | 1 | 0 | 1 | 0.0 |
-| **Overall full snapshot** | **partial** | **49622** | **32758** | **16864** | **66.0** |
+| **Overall full snapshot** | **partial** | **49622** | **32813** | **16809** | **66.1** |
 
 ## Scope Exclusions
 

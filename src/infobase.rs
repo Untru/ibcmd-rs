@@ -93,6 +93,9 @@ pub struct InfobaseConfigSweepReport {
     pub work_dir: PathBuf,
     pub baseline_dir: PathBuf,
     pub generated_prefixes: bool,
+    pub candidate_offset: usize,
+    pub candidates_per_family: usize,
+    pub stopped_early: bool,
     pub prefixes: Vec<String>,
     pub results: Vec<InfobaseConfigSweepEntryReport>,
 }
@@ -103,13 +106,16 @@ pub struct InfobaseConfigSweepEntryReport {
     pub target_db: String,
     pub status: &'static str,
     pub work_dir: PathBuf,
+    pub diff_output: Option<PathBuf>,
     pub selected_after_apply_file_names: Option<usize>,
     pub raw_rows: Option<usize>,
     pub exported_files: Option<usize>,
     pub check_duration_ms: Option<u128>,
     pub apply_duration_ms: Option<u128>,
     pub diff_summary: Option<SourceDiffSummary>,
+    pub diff_examples: Option<Vec<SourceDiffSample>>,
     pub error: Option<String>,
+    pub cleanup_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -118,6 +124,14 @@ pub struct SourceDiffSummary {
     pub right_only: usize,
     pub different: usize,
     pub unchanged: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SourceDiffSample {
+    pub status: crate::plan::SourceDiffStatus,
+    pub path: String,
+    pub kind: Option<crate::source::SourceKind>,
+    pub object_hint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -499,7 +513,13 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
 
     let generated_prefixes = args.path_prefix.is_empty();
     let prefixes = if generated_prefixes {
-        representative_sweep_prefixes(&baseline_dir, &args.family, args.max_prefixes)?
+        representative_sweep_prefixes(
+            &baseline_dir,
+            &args.family,
+            args.max_prefixes,
+            args.candidate_offset,
+            args.candidates_per_family,
+        )?
     } else {
         args.path_prefix.clone()
     };
@@ -511,6 +531,7 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
     }
 
     let mut results = Vec::with_capacity(prefixes.len());
+    let mut stopped_early = false;
     for (index, prefix) in prefixes.iter().enumerate() {
         let target_db = format!("{}_sweep_{:02}", config.db_name, index + 1);
         let roundtrip_args = InfobaseConfigRoundtripArgs {
@@ -540,8 +561,8 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
             path_prefix: vec![prefix.clone()],
             script_output: args.script_output.clone(),
         };
-        match roundtrip_config(&roundtrip_args) {
-            Ok(report) => results.push(InfobaseConfigSweepEntryReport {
+        let mut entry = match roundtrip_config(&roundtrip_args) {
+            Ok(report) => InfobaseConfigSweepEntryReport {
                 path_prefix: prefix.clone(),
                 target_db: report.target_db.clone(),
                 status: if report.diff.summary.different == 0
@@ -553,6 +574,7 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
                     "diff"
                 },
                 work_dir: report.work_dir.clone(),
+                diff_output: Some(report.diff_output.clone()),
                 selected_after_apply_file_names: Some(report.selected_after_apply_file_names),
                 raw_rows: Some(report.after_apply_export.raw_rows),
                 exported_files: Some(report.after_apply_export.exported_files),
@@ -564,21 +586,42 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
                     different: report.diff.summary.different,
                     unchanged: report.diff.summary.unchanged,
                 }),
+                diff_examples: Some(sample_source_diff_entries(&report.diff, 8)),
                 error: None,
-            }),
-            Err(error) => results.push(InfobaseConfigSweepEntryReport {
+                cleanup_error: None,
+            },
+            Err(error) => InfobaseConfigSweepEntryReport {
                 path_prefix: prefix.clone(),
                 target_db,
                 status: "error",
                 work_dir: work_dir.join(format!("{}_sweep_{:02}", config.db_name, index + 1)),
+                diff_output: None,
                 selected_after_apply_file_names: None,
                 raw_rows: None,
                 exported_files: None,
                 check_duration_ms: None,
                 apply_duration_ms: None,
                 diff_summary: None,
+                diff_examples: None,
                 error: Some(format!("{error:#}")),
-            }),
+                cleanup_error: None,
+            },
+        };
+        if args.drop_target_db_after_run {
+            if let Err(error) = crate::mssql::drop_database(
+                &args.sqlcmd,
+                &config.db_server,
+                &entry.target_db,
+                args.allow_non_lab,
+            ) {
+                entry.cleanup_error = Some(format!("{error:#}"));
+            }
+        }
+        let stop_here = args.stop_on_first_non_ok && entry.status != "ok";
+        results.push(entry);
+        if stop_here {
+            stopped_early = index + 1 < prefixes.len();
+            break;
         }
     }
 
@@ -590,6 +633,9 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
         work_dir,
         baseline_dir,
         generated_prefixes,
+        candidate_offset: args.candidate_offset,
+        candidates_per_family: args.candidates_per_family,
+        stopped_early,
         prefixes,
         results,
     })
@@ -599,7 +645,12 @@ fn representative_sweep_prefixes(
     source_root: &Path,
     families: &[String],
     max_prefixes: Option<usize>,
+    candidate_offset: usize,
+    candidates_per_family: usize,
 ) -> Result<Vec<String>> {
+    if candidates_per_family == 0 {
+        bail!("candidates_per_family must be at least 1");
+    }
     let manifest = crate::source::scan_sources(source_root)?;
     let requested = if families.is_empty() {
         DEFAULT_SWEEP_FAMILIES
@@ -613,8 +664,9 @@ fn representative_sweep_prefixes(
         .iter()
         .map(|value| value.to_ascii_lowercase())
         .collect::<std::collections::BTreeSet<_>>();
-    let mut selected = std::collections::BTreeMap::<String, String>::new();
-    for file in manifest.files {
+    let mut candidates =
+        std::collections::BTreeMap::<String, Vec<RepresentativeSweepPrefixStats>>::new();
+    for file in &manifest.files {
         let relative = file.path.replace('\\', "/");
         if relative == "Configuration.xml"
             || relative.matches('/').count() != 1
@@ -633,26 +685,109 @@ fn representative_sweep_prefixes(
             continue;
         }
         let prefix = format!("{family}/{}", name.trim_end_matches(".xml"));
-        selected
+        let stats = representative_sweep_prefix_stats(&manifest.files, &prefix);
+        candidates
             .entry(family.to_string())
-            .and_modify(|current| {
-                if prefix < *current {
-                    *current = prefix.clone();
-                }
-            })
-            .or_insert(prefix);
+            .or_default()
+            .push(stats);
     }
 
     let mut prefixes = Vec::new();
     for family in requested {
-        if let Some(prefix) = selected.get(&family) {
-            prefixes.push(prefix.clone());
+        if let Some(candidates) = candidates.get_mut(&family) {
+            candidates.sort_by(|left, right| {
+                right
+                    .kind_weight
+                    .cmp(&left.kind_weight)
+                    .then_with(|| right.file_count.cmp(&left.file_count))
+                    .then_with(|| right.total_bytes.cmp(&left.total_bytes))
+                    .then_with(|| left.prefix.cmp(&right.prefix))
+            });
+            for selected in candidates
+                .iter()
+                .skip(candidate_offset)
+                .take(candidates_per_family)
+            {
+                prefixes.push(selected.prefix.clone());
+            }
         }
     }
     if let Some(limit) = max_prefixes {
         prefixes.truncate(limit);
     }
     Ok(prefixes)
+}
+
+fn sample_source_diff_entries(
+    diff: &crate::plan::SourceDiffReport,
+    limit: usize,
+) -> Vec<SourceDiffSample> {
+    let mut samples = Vec::new();
+    for status in [
+        crate::plan::SourceDiffStatus::Different,
+        crate::plan::SourceDiffStatus::LeftOnly,
+        crate::plan::SourceDiffStatus::RightOnly,
+    ] {
+        for entry in diff
+            .differences
+            .iter()
+            .filter(|entry| entry.status == status)
+        {
+            samples.push(SourceDiffSample {
+                status: entry.status.clone(),
+                path: entry.path.clone(),
+                kind: entry.kind.clone(),
+                object_hint: entry.object_hint.clone(),
+            });
+            if samples.len() >= limit {
+                return samples;
+            }
+        }
+    }
+    samples
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RepresentativeSweepPrefixStats {
+    prefix: String,
+    kind_weight: usize,
+    file_count: usize,
+    total_bytes: u64,
+}
+
+fn representative_sweep_prefix_stats(
+    files: &[crate::source::SourceFile],
+    prefix: &str,
+) -> RepresentativeSweepPrefixStats {
+    let prefix_dir = format!("{prefix}/");
+    let prefix_xml = format!("{prefix}.xml");
+    let mut file_count = 0usize;
+    let mut total_bytes = 0u64;
+    let mut kind_weight = 0usize;
+    for file in files {
+        let relative = file.path.replace('\\', "/");
+        if relative != prefix_xml && !relative.starts_with(&prefix_dir) {
+            continue;
+        }
+        file_count += 1;
+        total_bytes += file.size_bytes;
+        kind_weight += match file.kind {
+            crate::source::SourceKind::Form => 5,
+            crate::source::SourceKind::Template => 4,
+            crate::source::SourceKind::Module => 3,
+            crate::source::SourceKind::MetadataXml => 2,
+            crate::source::SourceKind::ConfigurationRoot => 0,
+            crate::source::SourceKind::Binary
+            | crate::source::SourceKind::OtherXml
+            | crate::source::SourceKind::Other => 1,
+        };
+    }
+    RepresentativeSweepPrefixStats {
+        prefix: prefix.to_string(),
+        kind_weight,
+        file_count,
+        total_bytes,
+    }
 }
 
 const DEFAULT_SWEEP_FAMILIES: &[&str] = &[
@@ -749,6 +884,18 @@ fn selected_dump_file_names_for_path(
             return Ok(vec![
                 owner.uuid.clone(),
                 infer_help_body_id_for_owner(&owner.kind, &owner.uuid),
+            ]);
+        }
+    }
+
+    if file_name.eq_ignore_ascii_case("Predefined.xml")
+        && path.ends_with("/Ext/Predefined.xml")
+        && let Some(owner) = load_selected_source_owner(source_root, relative, cache)?
+    {
+        if let Some(suffix) = predefined_data_body_suffix_for_owner_kind(&owner.kind) {
+            return Ok(vec![
+                owner.uuid.clone(),
+                format!("{}.{}", owner.uuid, suffix),
             ]);
         }
     }
@@ -1344,6 +1491,13 @@ fn count_files(root: &Path) -> Result<usize> {
     Ok(count)
 }
 
+fn predefined_data_body_suffix_for_owner_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Catalog" | "ChartOfCharacteristicTypes" => Some("1c"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1456,6 +1610,71 @@ mod tests {
     }
 
     #[test]
+    fn samples_source_diff_entries_prioritize_different_before_one_sided() {
+        let diff = crate::plan::SourceDiffReport {
+            left_root: "left".to_string(),
+            right_root: "right".to_string(),
+            summary: crate::plan::SourceDiffSummary {
+                left_only: 1,
+                right_only: 1,
+                different: 2,
+                unchanged: 0,
+            },
+            differences: vec![
+                crate::plan::SourceDiffEntry {
+                    status: crate::plan::SourceDiffStatus::LeftOnly,
+                    path: "Catalogs/LeftOnly.xml".to_string(),
+                    left_sha256: Some("a".to_string()),
+                    right_sha256: None,
+                    left_size_bytes: Some(1),
+                    right_size_bytes: None,
+                    kind: Some(crate::source::SourceKind::MetadataXml),
+                    object_hint: Some("Catalog.LeftOnly".to_string()),
+                },
+                crate::plan::SourceDiffEntry {
+                    status: crate::plan::SourceDiffStatus::Different,
+                    path: "Documents/DiffA.xml".to_string(),
+                    left_sha256: Some("b".to_string()),
+                    right_sha256: Some("c".to_string()),
+                    left_size_bytes: Some(2),
+                    right_size_bytes: Some(3),
+                    kind: Some(crate::source::SourceKind::Form),
+                    object_hint: Some("Document.DiffA".to_string()),
+                },
+                crate::plan::SourceDiffEntry {
+                    status: crate::plan::SourceDiffStatus::RightOnly,
+                    path: "Reports/RightOnly.xml".to_string(),
+                    left_sha256: None,
+                    right_sha256: Some("d".to_string()),
+                    left_size_bytes: None,
+                    right_size_bytes: Some(4),
+                    kind: Some(crate::source::SourceKind::MetadataXml),
+                    object_hint: Some("Report.RightOnly".to_string()),
+                },
+                crate::plan::SourceDiffEntry {
+                    status: crate::plan::SourceDiffStatus::Different,
+                    path: "Documents/DiffB.xml".to_string(),
+                    left_sha256: Some("e".to_string()),
+                    right_sha256: Some("f".to_string()),
+                    left_size_bytes: Some(5),
+                    right_size_bytes: Some(6),
+                    kind: Some(crate::source::SourceKind::Template),
+                    object_hint: Some("Document.DiffB".to_string()),
+                },
+            ],
+        };
+
+        let sample = sample_source_diff_entries(&diff, 3);
+        assert_eq!(sample.len(), 3);
+        assert_eq!(sample[0].status, crate::plan::SourceDiffStatus::Different);
+        assert_eq!(sample[0].path, "Documents/DiffA.xml");
+        assert_eq!(sample[1].status, crate::plan::SourceDiffStatus::Different);
+        assert_eq!(sample[1].path, "Documents/DiffB.xml");
+        assert_eq!(sample[2].status, crate::plan::SourceDiffStatus::LeftOnly);
+        assert_eq!(sample[2].path, "Catalogs/LeftOnly.xml");
+    }
+
+    #[test]
     fn strips_extended_windows_prefix_for_external_tools() {
         assert_eq!(
             tool_path_arg(Path::new(r"\\?\E:\ibcmd_lab\roundtrip\ibcmd-data")),
@@ -1481,6 +1700,11 @@ mod tests {
         fs::write(root.join("Catalogs/Products/Ext/ObjectModule.bsl"), b"").unwrap();
         fs::write(root.join("Catalogs/Products/Ext/Help.xml"), b"<Help/>").unwrap();
         fs::write(root.join("Catalogs/Products/Ext/Help/ru.html"), b"help").unwrap();
+        fs::write(
+            root.join("Catalogs/Products/Ext/Predefined.xml"),
+            b"<PredefinedData/>",
+        )
+        .unwrap();
 
         fs::write(
             root.join("Catalogs/Products/Forms/ItemForm.xml"),
@@ -1527,6 +1751,7 @@ mod tests {
                 .unwrap();
 
         assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()));
+        assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1c".to_string()));
         assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0".to_string()));
         assert!(selected.contains(&"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5".to_string()));
         assert!(selected.contains(&"bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string()));
@@ -1549,11 +1774,23 @@ mod tests {
         fs::create_dir_all(root.join("Catalogs")).unwrap();
         fs::create_dir_all(root.join("Documents")).unwrap();
         fs::create_dir_all(root.join("CommonModules")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Rich/Forms/Main/Ext")).unwrap();
         fs::create_dir_all(root.join("Catalogs/Products")).unwrap();
         fs::create_dir_all(root.join("Catalogs/Products/Ext")).unwrap();
 
         fs::write(root.join("Configuration.xml"), b"<MetaDataObject/>").unwrap();
         fs::write(root.join("Catalogs/Alpha.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Catalogs/Rich.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(
+            root.join("Catalogs/Rich/Forms/Main.xml"),
+            b"<MetaDataObject/>",
+        )
+        .unwrap();
+        fs::write(
+            root.join("Catalogs/Rich/Forms/Main/Ext/Form.xml"),
+            b"<Form/>",
+        )
+        .unwrap();
         fs::write(root.join("Catalogs/Zeta.xml"), b"<MetaDataObject/>").unwrap();
         fs::write(root.join("Documents/Sales.xml"), b"<MetaDataObject/>").unwrap();
         fs::write(root.join("CommonModules/Utils.xml"), b"<MetaDataObject/>").unwrap();
@@ -1563,11 +1800,13 @@ mod tests {
             &root,
             &["Catalogs".to_string(), "Documents".to_string()],
             None,
+            0,
+            1,
         )
         .unwrap();
         assert_eq!(
             selected,
-            vec!["Catalogs/Alpha".to_string(), "Documents/Sales".to_string()]
+            vec!["Catalogs/Rich".to_string(), "Documents/Sales".to_string()]
         );
 
         let limited = representative_sweep_prefixes(
@@ -1578,11 +1817,44 @@ mod tests {
                 "CommonModules".to_string(),
             ],
             Some(2),
+            0,
+            1,
         )
         .unwrap();
         assert_eq!(
             limited,
-            vec!["Catalogs/Alpha".to_string(), "Documents/Sales".to_string()]
+            vec!["Catalogs/Rich".to_string(), "Documents/Sales".to_string()]
+        );
+    }
+
+    #[test]
+    fn selects_deeper_representative_sweep_candidates_with_offset() {
+        let root = temp_root("ibcmd-rs-sweep-prefixes-offset");
+        fs::create_dir_all(root.join("Catalogs/Rich/Forms/Main/Ext")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Products/Ext")).unwrap();
+        fs::create_dir_all(root.join("Catalogs/Zeta")).unwrap();
+
+        fs::write(root.join("Configuration.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Catalogs/Rich.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(
+            root.join("Catalogs/Rich/Forms/Main.xml"),
+            b"<MetaDataObject/>",
+        )
+        .unwrap();
+        fs::write(
+            root.join("Catalogs/Rich/Forms/Main/Ext/Form.xml"),
+            b"<Form/>",
+        )
+        .unwrap();
+        fs::write(root.join("Catalogs/Products.xml"), b"<MetaDataObject/>").unwrap();
+        fs::write(root.join("Catalogs/Products/Ext/ObjectModule.bsl"), b"").unwrap();
+        fs::write(root.join("Catalogs/Zeta.xml"), b"<MetaDataObject/>").unwrap();
+
+        let selected =
+            representative_sweep_prefixes(&root, &["Catalogs".to_string()], None, 1, 2).unwrap();
+        assert_eq!(
+            selected,
+            vec!["Catalogs/Products".to_string(), "Catalogs/Zeta".to_string()]
         );
     }
 }

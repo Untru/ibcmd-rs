@@ -1137,6 +1137,185 @@ fn roundtrip_difference_message(first: &str, second: &str) -> String {
     )
 }
 
+#[cfg(test)]
+fn spreadsheet_top_level_format_summaries(xml: &str) -> Result<Vec<String>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_summary = Vec::<String>::new();
+    let mut summaries = Vec::<String>::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                path.push(local.clone());
+                if path == ["document", "format"] {
+                    current_summary.clear();
+                }
+                text.clear();
+            }
+            Ok(Event::Text(event)) => {
+                text.push_str(&event.decode()?);
+            }
+            Ok(Event::End(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                if path.len() == 3
+                    && path.first().map(String::as_str) == Some("document")
+                    && path.get(1).map(String::as_str) == Some("format")
+                    && path.get(2).map(String::as_str) == Some(local.as_str())
+                {
+                    current_summary.push(format!("{local}={}", text.trim()));
+                }
+                if path == ["document", "format"] && local == "format" {
+                    summaries.push(current_summary.join(";"));
+                }
+                text.clear();
+                let _ = path.pop();
+            }
+            Ok(Event::Empty(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                path.push(local.clone());
+                if path == ["document", "format"] {
+                    summaries.push(String::new());
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(summaries)
+}
+
+#[cfg(test)]
+fn spreadsheet_column_format_indexes(xml: &str) -> Result<Vec<usize>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = String::new();
+    let mut indexes = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(String::from_utf8_lossy(event.local_name().as_ref()).to_string());
+                text.clear();
+            }
+            Ok(Event::Text(event)) => {
+                text.push_str(&event.decode()?);
+            }
+            Ok(Event::End(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                if path
+                    == [
+                        "document",
+                        "columns",
+                        "columnsItem",
+                        "column",
+                        "formatIndex",
+                    ]
+                    && let Ok(index) = text.trim().parse::<usize>()
+                {
+                    indexes.push(index);
+                }
+                text.clear();
+                let _ = path.pop();
+                if local == "document" {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(indexes)
+}
+
+#[cfg(test)]
+fn spreadsheet_format_layout_stats(xml: &str) -> Result<(usize, Option<usize>, usize, usize)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = String::new();
+    let mut format_count = 0usize;
+    let mut default_format_index = None::<usize>;
+    let mut max_row_or_cell_format = 0usize;
+    let mut min_column_format = usize::MAX;
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(String::from_utf8_lossy(event.local_name().as_ref()).to_string());
+                text.clear();
+            }
+            Ok(Event::Empty(event)) => {
+                path.push(String::from_utf8_lossy(event.local_name().as_ref()).to_string());
+                if path == ["document", "format"] {
+                    format_count += 1;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Text(event)) => {
+                text.push_str(&event.decode()?);
+            }
+            Ok(Event::End(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                if path == ["document", "format"] && local == "format" {
+                    format_count += 1;
+                } else if path == ["document", "defaultFormatIndex"]
+                    && local == "defaultFormatIndex"
+                {
+                    default_format_index = text.trim().parse::<usize>().ok();
+                } else if path == ["document", "rowsItem", "row", "formatIndex"]
+                    && local == "formatIndex"
+                {
+                    if let Ok(index) = text.trim().parse::<usize>() {
+                        max_row_or_cell_format = max_row_or_cell_format.max(index);
+                    }
+                } else if path == ["document", "rowsItem", "row", "c", "c", "f"] && local == "f" {
+                    if let Ok(index) = text.trim().parse::<usize>() {
+                        max_row_or_cell_format = max_row_or_cell_format.max(index);
+                    }
+                } else if path
+                    == [
+                        "document",
+                        "columns",
+                        "columnsItem",
+                        "column",
+                        "formatIndex",
+                    ]
+                    && local == "formatIndex"
+                    && let Ok(index) = text.trim().parse::<usize>()
+                {
+                    min_column_format = min_column_format.min(index);
+                }
+                text.clear();
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok((
+        format_count,
+        default_format_index,
+        if min_column_format == usize::MAX {
+            0
+        } else {
+            min_column_format
+        },
+        max_row_or_cell_format,
+    ))
+}
+
 fn diff_context(text: &str, byte_offset: usize) -> String {
     let center = floor_char_boundary(text, byte_offset.min(text.len()));
     let start = text[..center]
@@ -1318,6 +1497,93 @@ mod tests {
         assert!(report.errors.is_empty());
 
         Ok(())
+    }
+
+    #[test]
+    fn live_roundtrip_repro_reports_first_diverging_avansovy_template_format_slot()
+    -> anyhow::Result<()> {
+        let root = PathBuf::from(
+            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет",
+        );
+        if !root.is_dir() {
+            return Ok(());
+        }
+        let source = MetadataSourceContext::new(root.clone());
+        let object_refs = common_picture_object_refs(&root)?;
+        let template_xml = root
+            .join("Templates")
+            .join("ПФ_MXL_АвансовыйОтчет_ru")
+            .join("Ext")
+            .join("Template.xml");
+        let xml = fs::read(&template_xml)?;
+        let first = pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(&source))?;
+        let first_extracted = extract_moxel_spreadsheet_xml(&first.blob, &object_refs)
+            .ok_or_else(|| anyhow!("failed to extract first MOXCEL"))?;
+        let second = pack_moxel_spreadsheet_blob_from_xml_with_source(
+            first_extracted.as_bytes(),
+            Some(&source),
+        )?;
+        let second_extracted = extract_moxel_spreadsheet_xml(&second.blob, &object_refs)
+            .ok_or_else(|| anyhow!("failed to extract repacked MOXCEL"))?;
+        if first_extracted == second_extracted {
+            return Ok(());
+        }
+        let first_column_indexes = spreadsheet_column_format_indexes(&first_extracted)?;
+        let second_column_indexes = spreadsheet_column_format_indexes(&second_extracted)?;
+        let first_formats = spreadsheet_top_level_format_summaries(&first_extracted)?;
+        let second_formats = spreadsheet_top_level_format_summaries(&second_extracted)?;
+        let first_stats = spreadsheet_format_layout_stats(&first_extracted)?;
+        let second_stats = spreadsheet_format_layout_stats(&second_extracted)?;
+        let mismatch_index = first_formats
+            .iter()
+            .zip(second_formats.iter())
+            .position(|(left, right)| left != right)
+            .unwrap_or_else(|| first_formats.len().min(second_formats.len()));
+        let first_summary = first_formats
+            .get(mismatch_index)
+            .cloned()
+            .unwrap_or_default();
+        let second_summary = second_formats
+            .get(mismatch_index)
+            .cloned()
+            .unwrap_or_default();
+        let first_summary_in_second = second_formats
+            .iter()
+            .position(|value| value == &first_summary)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let second_summary_in_first = first_formats
+            .iter()
+            .position(|value| value == &second_summary)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let first_head = first_formats
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let second_head = second_formats
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        panic!(
+            "{} | first_format_index={} first_summary=\"{}\" second_summary=\"{}\" | first_summary_in_second={} second_summary_in_first={} | first_columns={:?} second_columns={:?} | first_stats={:?} second_stats={:?} | first_head=\"{}\" | second_head=\"{}\"",
+            roundtrip_difference_message(&first_extracted, &second_extracted),
+            mismatch_index + 1,
+            first_summary,
+            second_summary,
+            first_summary_in_second,
+            second_summary_in_first,
+            first_column_indexes,
+            second_column_indexes,
+            first_stats,
+            second_stats,
+            first_head,
+            second_head
+        );
     }
 
     #[test]

@@ -490,9 +490,21 @@ pub struct InfobaseConfigSweepArgs {
     /// Restrict automatic selection to these top-level source families, for example Catalogs or Documents.
     #[arg(long)]
     pub family: Vec<String>,
+    /// Skip this many highest-ranked automatic candidates within each family before selecting prefixes.
+    #[arg(long, default_value_t = 0)]
+    pub candidate_offset: usize,
+    /// Select this many ranked automatic candidates per family when --path-prefix is omitted.
+    #[arg(long, default_value_t = 1)]
+    pub candidates_per_family: usize,
     /// Limit the number of automatically selected prefixes.
     #[arg(long)]
     pub max_prefixes: Option<usize>,
+    /// Stop after the first diff or error result instead of sweeping the remaining prefixes.
+    #[arg(long)]
+    pub stop_on_first_non_ok: bool,
+    /// Drop each temporary target database after its sweep entry completes to avoid disk growth during long discovery runs.
+    #[arg(long)]
+    pub drop_target_db_after_run: bool,
     /// Optional base path for generated staging SQL scripts.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
@@ -3714,10 +3726,16 @@ mod tests {
             "Catalogs",
             "--family",
             "Documents",
+            "--candidate-offset",
+            "1",
+            "--candidates-per-family",
+            "2",
             "--max-prefixes",
             "3",
             "--path-prefix",
             "Catalogs/Валюты",
+            "--stop-on-first-non-ok",
+            "--drop-target-db-after-run",
             "--timeout-sec",
             "900",
             "--overwrite",
@@ -3748,8 +3766,12 @@ mod tests {
                         assert!(args.allow_non_lab);
                         assert_eq!(args.batch_size, Some(25));
                         assert_eq!(args.family, vec!["Catalogs", "Documents"]);
+                        assert_eq!(args.candidate_offset, 1);
+                        assert_eq!(args.candidates_per_family, 2);
                         assert_eq!(args.max_prefixes, Some(3));
                         assert_eq!(args.path_prefix, vec!["Catalogs/Валюты"]);
+                        assert!(args.stop_on_first_non_ok);
+                        assert!(args.drop_target_db_after_run);
                         assert_eq!(args.timeout_sec, 900);
                         assert!(args.overwrite);
                     }

@@ -37,27 +37,41 @@ import hierarchy, not as a production runtime dependency.
 | CommandGroups, CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, DocumentNumerators, EventSubscriptions, Ext, FunctionalOptions, FunctionalOptionsParameters, IntegrationServices, Languages, ScheduledJobs, SessionParameters, StyleItems, WSReferences, XDTOPackages | done / byte-identical | 100.0% | 0 |
 | Enums | partial | 95.1% | 59 |
 | CommonTemplates | partial | 82.6% | 86 |
-| Reports | partial | 67.6% | 765 |
+| Reports | partial | 67.7% | 763 |
 | AccumulationRegisters | partial | 59.5% | 182 |
 | Roles | partial | 54.4% | 1013 |
-| ExchangePlans | partial | 51.9% | 176 |
+| ExchangePlans | partial | 52.2% | 175 |
 | HTTPServices | partial | 50.0% | 5 |
 | WebServices | partial | 50.0% | 18 |
 | DocumentJournals | partial | 49.6% | 61 |
-| DataProcessors | partial | 49.0% | 3602 |
+| DataProcessors | partial | 49.4% | 3569 |
 | Tasks | partial | 46.9% | 26 |
-| Catalogs | partial | 45.6% | 3650 |
+| Catalogs | partial | 45.8% | 3634 |
 | Documents | partial | 45.0% | 3420 |
 | InformationRegisters | partial | 44.0% | 2227 |
+| CommonAttributes | partial | 42.9% | 4 |
 | ChartsOfCharacteristicTypes | partial | 41.9% | 97 |
 | BusinessProcesses | partial | 41.4% | 89 |
 | SettingsStorages | partial | 39.0% | 50 |
 | CommonForms | partial | 36.8% | 705 |
 | Subsystems | partial | 19.2% | 619 |
 | FilterCriteria | partial | 14.3% | 6 |
-| CommonAttributes | partial | 0.0% | 7 |
 | Configuration.xml | partial | 0.0% | 1 |
-| **Overall full snapshot** | **partial** | **66.0%** | **16864** |
+| **Overall full snapshot** | **partial** | **66.1%** | **16809** |
+
+Current live `ut_ibcmd` scoped roundtrip queue status, verified alongside the
+latest full snapshot and tracked separately from the full-export parity table above:
+
+| Scoped sweep slice | Result |
+|---|---|
+| Narrowed representative queue (`CommonAttributes`, `FilterCriteria`, `Subsystems`, `CommonForms`, `Reports`, `DataProcessors`) | 100.0% green (`6 / 6` prefixes) |
+| Default-family representative pass `#1` | 100.0% green (`9 / 9` generated prefixes) |
+| Default-family representative pass `#2` | 100.0% green (`9 / 9` generated prefixes) |
+
+Note: these percentages describe the current direct MSSQL scoped roundtrip
+queue on the reference database `Srvr="localhost";Ref="ut_ibcmd"`. They are
+not a replacement for the full-snapshot export parity percentages above, which
+must only change after a fresh full diff is regenerated.
 
 Latest verified slices:
 
