@@ -3477,11 +3477,10 @@ fn write_source_asset(
             )?;
         }
         SourceAssetKind::RoleRights => {
-            let rights = parse_role_rights_blob_with_metadata_order(
+            let rights = parse_role_rights_blob(
                 bytes,
                 context.role_rights_object_refs,
                 context.field_refs,
-                context.metadata_order,
             )
             .with_context(|| {
                 format!(
@@ -4112,10 +4111,9 @@ fn build_metadata_order_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<S
         let Some(header_uuid) = parse_configuration_header_uuid(&row.text) else {
             continue;
         };
-        for (order, child) in
-            parse_configuration_child_objects(&row.text, &row.file_name, &header_uuid)
-                .into_iter()
-                .enumerate()
+        for (order, child) in parse_configuration_child_objects(&row.text, &row.file_name, &header_uuid)
+            .into_iter()
+            .enumerate()
         {
             index.entry(child.header.uuid).or_insert(order);
         }
@@ -6677,15 +6675,6 @@ fn parse_role_rights_blob(
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
 ) -> Option<RoleRights> {
-    parse_role_rights_blob_with_metadata_order(bytes, object_refs, field_refs, &BTreeMap::new())
-}
-
-fn parse_role_rights_blob_with_metadata_order(
-    bytes: &[u8],
-    object_refs: &BTreeMap<String, String>,
-    field_refs: &BTreeMap<String, String>,
-    metadata_order: &BTreeMap<String, usize>,
-) -> Option<RoleRights> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
@@ -6696,13 +6685,6 @@ fn parse_role_rights_blob_with_metadata_order(
     let count = object_fields.first()?.trim().parse::<usize>().ok()?;
     if object_fields.len() != count + 1 {
         return None;
-    }
-
-    let mut object_refs_by_name = BTreeMap::<&str, &str>::new();
-    if !metadata_order.is_empty() {
-        for (uuid, name) in object_refs {
-            object_refs_by_name.insert(name.as_str(), uuid.as_str());
-        }
     }
 
     let mut objects = Vec::with_capacity(count);
@@ -6720,14 +6702,11 @@ fn parse_role_rights_blob_with_metadata_order(
         let object_name = role_object_ref_name(&object_ref, object_refs)?;
 
         let rights = parse_role_object_rights(entry[1], field_refs)?;
-        let object_order = role_rights_object_metadata_order(
-            object_uuid,
-            &object_name,
-            metadata_order,
-            &object_refs_by_name,
-        );
+        let intra_uuid_order =
+            role_rights_object_intra_uuid_order(&object_ref, &object_name).unwrap_or(0);
         objects.push((
-            object_order,
+            object_uuid.to_string(),
+            intra_uuid_order,
             serialized_index,
             RoleObjectRights {
                 name: object_name,
@@ -6735,8 +6714,8 @@ fn parse_role_rights_blob_with_metadata_order(
             },
         ));
     }
-    objects.sort_by_key(|(object_order, serialized_index, _)| {
-        (object_order.unwrap_or(usize::MAX), *serialized_index)
+    objects.sort_by_key(|(sort_uuid, intra_uuid_order, serialized_index, _)| {
+        (sort_uuid.clone(), *intra_uuid_order, *serialized_index)
     });
 
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
@@ -6747,45 +6726,18 @@ fn parse_role_rights_blob_with_metadata_order(
         set_for_new_objects,
         set_for_attributes_by_default,
         independent_rights_of_child_objects,
-        objects: objects.into_iter().map(|(_, _, object)| object).collect(),
+        objects: objects
+            .into_iter()
+            .map(|(_, _, _, object)| object)
+            .collect(),
         restriction_templates,
     })
 }
 
-fn role_rights_object_metadata_order(
-    object_uuid: &str,
-    object_name: &str,
-    metadata_order: &BTreeMap<String, usize>,
-    object_refs_by_name: &BTreeMap<&str, &str>,
-) -> Option<usize> {
-    metadata_order.get(object_uuid).copied().or_else(|| {
-        let owner = role_rights_object_owner_reference(object_name)?;
-        let owner_uuid = object_refs_by_name.get(owner)?;
-        metadata_order.get(*owner_uuid).copied()
-    })
-}
-
-fn role_rights_object_owner_reference(object_name: &str) -> Option<&str> {
-    if let Some((owner, _)) = object_name.split_once(".StandardAttribute.") {
-        return Some(owner);
-    }
-    if let Some((owner, _)) = object_name.split_once(".Command.") {
-        return Some(owner);
-    }
-    for marker in [
-        ".AddressingAttribute.",
-        ".Attribute.",
-        ".Dimension.",
-        ".Form.",
-        ".Resource.",
-        ".TabularSection.",
-        ".URLTemplate.",
-    ] {
-        if let Some((owner, _)) = object_name.split_once(marker) {
-            return Some(owner);
-        }
-    }
-    Some(object_name)
+fn role_rights_object_intra_uuid_order(fields: &[&str], object_name: &str) -> Option<usize> {
+    let kind_code = fields.get(2).map(|field| field.trim());
+    let slot_code = fields.get(3).map(|field| field.trim())?;
+    role_standard_attribute_sort_order(object_name, kind_code, slot_code)
 }
 
 fn role_object_ref_name(fields: &[&str], object_refs: &BTreeMap<String, String>) -> Option<String> {
@@ -6810,38 +6762,112 @@ fn role_standard_attribute_ref_name(
     if kind_code != Some("1") {
         return None;
     }
-    let slot = slot_code?.parse::<usize>().ok()?;
+    let slot = role_standard_attribute_slot(slot_code?)?;
+    let slot_index = usize::try_from(slot).ok();
     let (kind, _) = base_name.split_once('.')?;
-    let attribute = match kind {
-        "Catalog" => [
-            "PredefinedDataName",
-            "Predefined",
-            "Ref",
-            "DeletionMark",
-            "IsFolder",
-            "Owner",
-            "Parent",
-            "Description",
-            "Code",
-        ]
-        .get(slot)?,
-        "Document" => ["Posted", "Ref", "DeletionMark", "Date", "Number"].get(slot)?,
-        "ExchangePlan" => [
-            "ReceivedNo",
-            "SentNo",
-            "Ref",
-            "DeletionMark",
-            "Description",
-            "Code",
-        ]
-        .get(slot)?,
-        "AccumulationRegister"
-        | "AccountingRegister"
-        | "CalculationRegister"
-        | "InformationRegister" => ["Active", "Period", "Recorder", "LineNumber"].get(slot)?,
-        _ => return None,
-    };
+    let attribute = role_standard_attribute_descriptor(kind, slot, slot_index)?.0;
     Some(format!("{base_name}.StandardAttribute.{attribute}"))
+}
+
+fn role_standard_attribute_slot(slot_code: &str) -> Option<isize> {
+    slot_code
+        .parse::<isize>()
+        .ok()
+        .or_else(|| split_1c_braced_fields(slot_code, 0)?.first()?.trim().parse::<isize>().ok())
+}
+
+fn role_standard_attribute_sort_order(
+    base_name: &str,
+    kind_code: Option<&str>,
+    slot_code: &str,
+) -> Option<usize> {
+    if kind_code != Some("1") || !slot_code.trim_start().starts_with('{') {
+        return None;
+    }
+    let slot = role_standard_attribute_slot(slot_code)?;
+    let slot_index = usize::try_from(slot).ok();
+    let (kind, _) = base_name.split_once('.')?;
+    role_standard_attribute_descriptor(kind, slot, slot_index).map(|(_, order)| order)
+}
+
+fn role_standard_attribute_descriptor(
+    kind: &str,
+    slot: isize,
+    slot_index: Option<usize>,
+) -> Option<(&'static str, usize)> {
+    match kind {
+        "Catalog" => match slot {
+            -13 => Some(("PredefinedDataName", 1)),
+            -10 => Some(("Predefined", 2)),
+            -8 => Some(("Ref", 3)),
+            -7 => Some(("DeletionMark", 4)),
+            -6 => Some(("IsFolder", 5)),
+            -5 => Some(("Owner", 6)),
+            -4 => Some(("Parent", 7)),
+            -3 => Some(("Description", 8)),
+            -2 => Some(("Code", 9)),
+            _ => [
+                ("PredefinedDataName", 1),
+                ("Predefined", 2),
+                ("Ref", 3),
+                ("DeletionMark", 4),
+                ("IsFolder", 5),
+                ("Owner", 6),
+                ("Parent", 7),
+                ("Description", 8),
+                ("Code", 9),
+            ]
+            .get(slot_index?)
+            .copied(),
+        },
+        "Document" => slot_index
+            .and_then(|index| {
+                [
+                    ("Posted", 1),
+                    ("Ref", 2),
+                    ("DeletionMark", 3),
+                    ("Date", 4),
+                    ("Number", 5),
+                ]
+                .get(index)
+                .copied()
+            })
+            .or(match slot {
+                -7 => Some(("Number", 5)),
+                -5 => Some(("Date", 4)),
+                -4 => Some(("DeletionMark", 3)),
+                -3 => Some(("Ref", 2)),
+                -2 => Some(("Posted", 1)),
+                _ => None,
+            }),
+        "ExchangePlan" => match slot {
+            -10 => Some(("ReceivedNo", 1)),
+            -9 => Some(("SentNo", 2)),
+            -6 => Some(("Ref", 3)),
+            -4 => Some(("DeletionMark", 4)),
+            -3 => Some(("Description", 5)),
+            -2 => Some(("Code", 6)),
+            _ => [
+                ("ReceivedNo", 1),
+                ("SentNo", 2),
+                ("Ref", 3),
+                ("DeletionMark", 4),
+                ("Description", 5),
+                ("Code", 6),
+            ]
+            .get(slot_index?)
+            .copied(),
+        },
+        "AccumulationRegister" | "AccountingRegister" | "CalculationRegister"
+        | "InformationRegister" => match slot {
+            0 | -5 => Some(("Active", 1)),
+            1 | -2 => Some(("Period", 4)),
+            2 | -3 => Some(("Recorder", 3)),
+            3 | -4 => Some(("LineNumber", 2)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn parse_role_object_rights(
@@ -7330,7 +7356,7 @@ fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Vec<u8
         offset = quote_end;
     }
     output.push_str(&text[offset..]);
-    output.into_bytes()
+    output.replace("\r\n", "\n").into_bytes()
 }
 
 fn predefined_data_xsi_type(kind: &str) -> Option<&'static str> {
@@ -13576,26 +13602,15 @@ fn moxel_column_format_slots(column_sets: &[MoxelColumnSet], column_count: usize
 
 fn moxel_default_format_index(
     column_sets: &[MoxelColumnSet],
-    print_settings: Option<&MoxelPrintSettings>,
+    _print_settings: Option<&MoxelPrintSettings>,
     has_default_format: bool,
     fallback: usize,
 ) -> Option<usize> {
     if has_default_format {
         return Some(fallback);
     }
-    if print_settings.is_some() && column_sets.len() > 1 {
-        return Some(
-            column_sets
-                .get(1)
-                .and_then(|column_set| {
-                    column_set
-                        .columns
-                        .iter()
-                        .map(|column| column.format_index)
-                        .max()
-                })
-                .unwrap_or(fallback),
-        );
+    if column_sets.len() > 1 {
+        return Some(fallback);
     }
     None
 }
@@ -15557,6 +15572,8 @@ fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<MoxelArea> {
 }
 
 fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
+    let output_format_indices = moxel_output_format_indices(spreadsheet);
+    let output_format_index_map = moxel_output_format_index_map(&output_format_indices);
     let mut xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
@@ -15571,20 +15588,23 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
 \t</languageSettings>\r\n",
     );
     for column_set in &spreadsheet.column_sets {
-        push_moxel_columns_xml(&mut xml, column_set);
+        push_moxel_columns_xml(&mut xml, column_set, &output_format_index_map);
     }
-    let source_format_offset = moxel_source_column_format_offset(&spreadsheet.column_sets);
     for row in &spreadsheet.rows {
-        push_moxel_row_xml(&mut xml, row, source_format_offset);
+        push_moxel_row_xml(&mut xml, row, &output_format_index_map);
     }
     if spreadsheet.empty_headers_footers {
         push_moxel_empty_headers_footers_xml(&mut xml);
     }
     xml.push_str("\t<templateMode>true</templateMode>\r\n");
     for drawing in &spreadsheet.drawings {
-        push_moxel_drawing_xml(&mut xml, drawing);
+        push_moxel_drawing_xml(&mut xml, drawing, &output_format_index_map);
     }
     if let Some(default_format_index) = spreadsheet.default_format_index {
+        let default_format_index = output_format_index_map
+            .get(&default_format_index)
+            .copied()
+            .unwrap_or(default_format_index);
         xml.push_str(&format!(
             "\t<defaultFormatIndex>{default_format_index}</defaultFormatIndex>\r\n"
         ));
@@ -15614,12 +15634,7 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for font in &spreadsheet.fonts {
         push_moxel_font_xml(&mut xml, font);
     }
-    let format_count = spreadsheet
-        .default_format_index
-        .unwrap_or(0)
-        .max(spreadsheet.column_formats.len() + spreadsheet.formats.len())
-        .max(1);
-    for format_index in 1..=format_count {
+    for format_index in output_format_indices {
         push_moxel_format_xml(&mut xml, spreadsheet, format_index);
     }
     for picture in &spreadsheet.pictures {
@@ -15629,7 +15644,83 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     xml
 }
 
-fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
+fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
+    let max_column_format_index = spreadsheet
+        .column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter().map(|column| column.format_index))
+        .max()
+        .unwrap_or(0);
+    let max_row_or_cell_format_index = spreadsheet.rows.iter().fold(0usize, |max_index, row| {
+        let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
+            cell_max.max(cell.format_index)
+        });
+        max_index.max(row_max)
+    });
+    let max_drawing_format_index = spreadsheet
+        .drawings
+        .iter()
+        .map(|drawing| drawing.format_index)
+        .max()
+        .unwrap_or(0);
+    spreadsheet
+        .default_format_index
+        .unwrap_or(0)
+        .max(spreadsheet.column_formats.len() + spreadsheet.formats.len())
+        .max(max_column_format_index)
+        .max(max_row_or_cell_format_index)
+        .max(max_drawing_format_index)
+        .max(1)
+}
+
+fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec<usize> {
+    let format_count = moxel_output_format_count(spreadsheet);
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::with_capacity(format_count);
+
+    let mut push = |format_index: usize| {
+        if format_index > 0 && format_index <= format_count && seen.insert(format_index) {
+            ordered.push(format_index);
+        }
+    };
+
+    for column_set in &spreadsheet.column_sets {
+        for column in &column_set.columns {
+            push(column.format_index);
+        }
+    }
+    for row in &spreadsheet.rows {
+        push(row.format_index);
+        for cell in &row.cells {
+            push(cell.format_index);
+        }
+    }
+    for drawing in &spreadsheet.drawings {
+        push(drawing.format_index);
+    }
+    if let Some(default_format_index) = spreadsheet.default_format_index {
+        push(default_format_index);
+    }
+    for format_index in 1..=format_count {
+        push(format_index);
+    }
+
+    ordered
+}
+
+fn moxel_output_format_index_map(output_indices: &[usize]) -> BTreeMap<usize, usize> {
+    output_indices
+        .iter()
+        .enumerate()
+        .map(|(new_index, old_index)| (*old_index, new_index + 1))
+        .collect()
+}
+
+fn push_moxel_columns_xml(
+    xml: &mut String,
+    column_set: &MoxelColumnSet,
+    output_format_index_map: &BTreeMap<usize, usize>,
+) {
     xml.push_str("\t<columns>\r\n");
     if let Some(id) = &column_set.id {
         xml.push_str(&format!("\t\t<id>{}</id>\r\n", escape_xml_text(id)));
@@ -15637,7 +15728,10 @@ fn push_moxel_columns_xml(xml: &mut String, column_set: &MoxelColumnSet) {
     xml.push_str(&format!("\t\t<size>{}</size>\r\n", column_set.size));
     for column in &column_set.columns {
         let column_index = column.index;
-        let format_index = column.source_format_index.unwrap_or(column.format_index);
+        let format_index = output_format_index_map
+            .get(&column.format_index)
+            .copied()
+            .unwrap_or(column.format_index);
         xml.push_str(&format!(
             "\t\t<columnsItem>\r\n\
 \t\t\t<index>{column_index}</index>\r\n\
@@ -15902,13 +15996,21 @@ fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     xml.push_str("\t</picture>\r\n");
 }
 
-fn push_moxel_drawing_xml(xml: &mut String, drawing: &MoxelDrawing) {
+fn push_moxel_drawing_xml(
+    xml: &mut String,
+    drawing: &MoxelDrawing,
+    output_format_index_map: &BTreeMap<usize, usize>,
+) {
     xml.push_str("\t<drawing>\r\n");
     xml.push_str("\t\t<drawingType>Picture</drawingType>\r\n");
     xml.push_str(&format!("\t\t<id>{}</id>\r\n", drawing.z_order));
+    let format_index = output_format_index_map
+        .get(&drawing.format_index)
+        .copied()
+        .unwrap_or(drawing.format_index);
     xml.push_str(&format!(
         "\t\t<formatIndex>{}</formatIndex>\r\n",
-        drawing.format_index
+        format_index
     ));
     xml.push_str(&format!(
         "\t\t<beginRow>{}</beginRow>\r\n",
@@ -16064,7 +16166,11 @@ fn push_moxel_print_area_xml(xml: &mut String, area: &MoxelArea) {
     xml.push_str("\t</printArea>\r\n");
 }
 
-fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow, source_format_offset: usize) {
+fn push_moxel_row_xml(
+    xml: &mut String,
+    row: &MoxelRow,
+    output_format_index_map: &BTreeMap<usize, usize>,
+) {
     xml.push_str(&format!(
         "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n",
         row.index
@@ -16074,7 +16180,10 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow, source_format_offset: us
     }
     xml.push_str("\t\t<row>\r\n");
     if row.format_index > 1 {
-        let format_index = row.format_index + source_format_offset;
+        let format_index = output_format_index_map
+            .get(&row.format_index)
+            .copied()
+            .unwrap_or(row.format_index);
         xml.push_str(&format!(
             "\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
         ));
@@ -16100,7 +16209,10 @@ fn push_moxel_row_xml(xml: &mut String, row: &MoxelRow, source_format_offset: us
         let cell_format_index = if cell.format_index == 0 {
             0
         } else {
-            cell.format_index + source_format_offset
+            output_format_index_map
+                .get(&cell.format_index)
+                .copied()
+                .unwrap_or(cell.format_index)
         };
         xml.push_str(&format!("\t\t\t\t\t<f>{cell_format_index}</f>\r\n"));
         if let Some(text) = &cell.text {
@@ -16954,6 +17066,7 @@ struct EnumProperties {
     use_standard_commands: bool,
     quick_choice: bool,
     choice_mode: &'static str,
+    choice_history_on_input: &'static str,
     default_list_form: Option<String>,
     default_choice_form: Option<String>,
     auxiliary_list_form: Option<String>,
@@ -17845,7 +17958,7 @@ fn extract_metadata_source_xml_from_text_row(
         let kind = form_ref
             .map(|form_ref| form_ref.kind)
             .unwrap_or("CommonForm");
-        let xml = format_form_source_xml(kind, &header).into_bytes();
+        let xml = format_form_source_xml(kind, &header, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if is_template_metadata_text(text, uuid) {
@@ -19832,6 +19945,10 @@ fn parse_enum_properties_from_text(
         use_standard_commands: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(true),
         quick_choice: parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true),
         choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(11).copied()).unwrap_or(2)),
+        choice_history_on_input: fields
+            .last()
+            .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
+            .unwrap_or("Auto"),
         default_list_form: parse_catalog_form_ref(fields.get(9).copied(), form_refs),
         default_choice_form: parse_catalog_form_ref(fields.get(10).copied(), form_refs),
         auxiliary_list_form: parse_catalog_form_ref(fields.get(13).copied(), form_refs),
@@ -23308,13 +23425,24 @@ fn format_register_source_xml(
     xml
 }
 
-fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
+fn format_form_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
+        " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""
+    } else {
+        ""
+    };
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\"{palette_namespace} xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{version}\">\r\n\
 \t<{kind} uuid=\"{uuid}\">\r\n\
 \t\t<Properties>\r\n\
 \t\t\t<Name>{name}</Name>\r\n",
+        palette_namespace = palette_namespace,
+        version = source_version.as_str(),
         uuid = escape_xml_text(&header.uuid),
         name = escape_xml_text(&header.name),
     );
@@ -23350,9 +23478,13 @@ fn format_form_source_xml(kind: &str, header: &MetadataHeader) -> String {
 \t\t\t<UsePurposes>\r\n\
 \t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>\r\n\
 \t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">MobilePlatformApplication</v8:Value>\r\n\
-\t\t\t</UsePurposes>\r\n\
-\t\t\t<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>\r\n",
+\t\t\t</UsePurposes>\r\n",
     );
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        xml.push_str(
+            "\t\t\t<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>\r\n",
+        );
+    }
     if kind == "CommonForm" {
         xml.push_str(
             "\t\t\t<UseStandardCommands>false</UseStandardCommands>\r\n\
@@ -24063,13 +24195,18 @@ fn format_enum_source_xml(
         &enumeration.extended_list_presentation,
     );
     push_localized_property(&mut xml, "\t\t\t", "Explanation", &enumeration.explanation);
-    xml.push_str("\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
+        enumeration.choice_history_on_input
+    ));
     xml.push_str("\t\t</Properties>\r\n");
 
-    if !enumeration.values.is_empty()
-        || !enumeration.child_forms.is_empty()
-        || !enumeration.child_templates.is_empty()
+    if enumeration.values.is_empty()
+        && enumeration.child_forms.is_empty()
+        && enumeration.child_templates.is_empty()
     {
+        xml.push_str("\t\t<ChildObjects/>\r\n");
+    } else {
         xml.push_str("\t\t<ChildObjects>\r\n");
         for value in &enumeration.values {
             xml.push_str(&format!(
@@ -28655,6 +28792,23 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn formats_form_metadata_for_v220_without_palette_namespace_or_compat_mode() {
+        let header = MetadataHeader {
+            uuid: "11111111-1111-4111-8111-111111111111".to_string(),
+            name: "ListForm".to_string(),
+            synonyms: vec![("en".to_string(), "List form".to_string())],
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let xml = format_form_source_xml("Form", &header, InfobaseConfigSourceVersion::V2_20);
+
+        assert!(xml.contains(r#"version="2.20""#));
+        assert!(!xml.contains("xmlns:pal="));
+        assert!(!xml.contains("<UseInInterfaceCompatibilityMode>"));
     }
 
     #[test]
@@ -33634,6 +33788,16 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_help_pages_to_lf_after_link_rewrite() {
+        let refs = BTreeMap::new();
+        let html = "<p>one</p>\r\n<p>two</p>\r\n";
+
+        let rewritten = rewrite_help_links(html.as_bytes(), &refs);
+
+        assert_eq!(rewritten, b"<p>one</p>\n<p>two</p>\n");
+    }
+
+    #[test]
     fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         let object_refs = BTreeMap::from([(
             "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
@@ -33740,8 +33904,8 @@ mod tests {
         assert!(xml.contains("<size>1</size>"));
         assert_eq!(xml.matches("<columnsItem>").count(), 1);
         assert!(xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"));
-        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
-        assert!(xml.contains("<f>5</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
+        assert!(xml.contains("<f>2</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
+        assert!(xml.contains("<f>3</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
         assert!(!xml.contains("<i>3</i>"));
         assert!(xml.contains("<defaultFormatIndex>4</defaultFormatIndex>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>509</width>\r\n\t</format>"));
@@ -33886,8 +34050,8 @@ mod tests {
             extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
 
         assert_eq!(extracted, extracted_again);
-        assert!(extracted.contains("<formatIndex>5</formatIndex>"));
-        assert!(extracted.contains("<f>6</f>"));
+        assert!(extracted.contains("<formatIndex>4</formatIndex>"));
+        assert!(extracted.contains("<f>5</f>"));
     }
 
     #[test]
@@ -33956,13 +34120,13 @@ mod tests {
 
         assert_eq!(extracted, extracted_again);
         assert!(extracted.contains(
-            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>1</formatIndex>"
         ));
         assert!(extracted.contains(
-            "<index>1</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>4</formatIndex>"
+            "<index>1</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>2</formatIndex>"
         ));
-        assert!(extracted.contains("<formatIndex>5</formatIndex>"));
-        assert!(extracted.contains("<f>6</f>"));
+        assert!(extracted.contains("<formatIndex>3</formatIndex>"));
+        assert!(extracted.contains("<f>4</f>"));
     }
 
     #[test]
@@ -34248,7 +34412,7 @@ mod tests {
             extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
 
         assert!(extracted.contains("<formatIndex>3</formatIndex>"));
-        assert!(extracted.contains("<f>5</f>"));
+        assert!(extracted.contains("<f>2</f>"));
         assert!(extracted.contains("<drawingBorder>4</drawingBorder>"));
         assert!(extracted.contains("<backColor>style:FieldBackColor</backColor>"));
     }
@@ -34659,17 +34823,20 @@ mod tests {
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        println!("{xml}");
 
         assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
         assert!(xml.contains(
-            "<index>11</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>9</formatIndex>"
+            "<index>11</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
         ));
         assert_eq!(xml.matches("<columnsItem>").count(), 12);
         assert!(xml.contains("<leftHeader>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</leftHeader>"));
         assert!(xml.contains("<rightFooter>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</rightFooter>"));
         assert!(xml.contains("<defaultFormatIndex>10</defaultFormatIndex>"));
-        assert!(xml.contains("<f>10</f>\r\n\t\t\t\t\t<parameter>Наименование</parameter>"));
-        assert!(xml.contains("<formatIndex>12</formatIndex>"));
+        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Наименование</parameter>"));
+        assert!(xml.contains(
+            "<index>3</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>9</formatIndex>"
+        ));
         assert!(xml.contains(
             "<font ref=\"style:LargeTextFont\" bold=\"false\" italic=\"false\" underline=\"true\" strikeout=\"false\" kind=\"StyleItem\"/>"
         ));
@@ -34685,6 +34852,155 @@ mod tests {
         assert!(xml.contains(
             "\t<format>\r\n\t\t<borderColor>style:ReportLineColor</borderColor>\r\n\t</format>"
         ));
+    }
+
+    #[test]
+    fn formats_moxel_renumbers_formats_by_usage_order() {
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 2,
+            column_sets: vec![MoxelColumnSet {
+                id: None,
+                size: 2,
+                columns: vec![
+                    MoxelColumn {
+                        index: 0,
+                        format_index: 4,
+                        source_format_index: None,
+                    },
+                    MoxelColumn {
+                        index: 1,
+                        format_index: 2,
+                        source_format_index: None,
+                    },
+                ],
+            }],
+            column_formats: vec![
+                MoxelFormat {
+                    width: Some(10),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(20),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(30),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(40),
+                    ..MoxelFormat::default()
+                },
+            ],
+            default_format_width: None,
+            default_format: MoxelFormat {
+                width: Some(70),
+                ..MoxelFormat::default()
+            },
+            formats: vec![
+                MoxelFormat {
+                    width: Some(50),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(60),
+                    ..MoxelFormat::default()
+                },
+            ],
+            rows: vec![MoxelRow {
+                index: 0,
+                index_to: None,
+                format_index: 6,
+                columns_id: None,
+                cells: vec![MoxelCell {
+                    column_index: 0,
+                    format_index: 5,
+                    text: Some("Cell".to_string()),
+                    parameter: None,
+                    detail_parameter: None,
+                    empty_text: false,
+                }],
+            }],
+            merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: vec![MoxelDrawing {
+                format_index: 3,
+                begin_row: 0,
+                begin_row_offset: 0,
+                end_row: 0,
+                end_row_offset: 0,
+                begin_column: 0,
+                begin_column_offset: 0,
+                end_column: 0,
+                end_column_offset: 0,
+                auto_size: true,
+                picture_size: "Auto",
+                z_order: 0,
+                picture_index: 0,
+            }],
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            default_format_index: Some(7),
+            height: 1,
+        };
+
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(moxel_output_format_indices(&spreadsheet), vec![4, 2, 6, 5, 3, 7, 1]);
+        assert!(xml.contains(
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>1</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>1</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>2</formatIndex>"
+        ));
+        assert!(xml.contains("<row>\r\n\t\t\t<formatIndex>3</formatIndex>"));
+        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<tl>"));
+        assert!(xml.contains("<drawing>\r\n\t\t<drawingType>Picture</drawingType>\r\n\t\t<id>0</id>\r\n\t\t<formatIndex>5</formatIndex>"));
+        assert!(xml.contains("<defaultFormatIndex>6</defaultFormatIndex>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<width>40</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>20</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>60</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>50</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>30</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>70</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>10</width>\r\n\t</format>"
+        ));
+    }
+
+    #[test]
+    fn formats_moxel_output_count_includes_sparse_referenced_indices() {
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 1,
+            column_sets: vec![MoxelColumnSet {
+                id: None,
+                size: 1,
+                columns: vec![MoxelColumn {
+                    index: 0,
+                    format_index: 9,
+                    source_format_index: None,
+                }],
+            }],
+            column_formats: vec![MoxelFormat::default(); 9],
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: Vec::new(),
+            rows: Vec::new(),
+            merges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            default_format_index: None,
+            height: 0,
+        };
+
+        assert_eq!(moxel_output_format_count(&spreadsheet), 9);
+        assert_eq!(moxel_output_format_indices(&spreadsheet)[0], 9);
     }
 
     #[test]
@@ -34794,17 +35110,17 @@ mod tests {
             "\t<columns>\r\n\t\t<id>9bb67b5f-5e3e-459e-98c5-618e04892d9b</id>\r\n\t\t<size>1</size>"
         ));
         assert!(xml.contains(
-            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>5</formatIndex>"
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>3</formatIndex>"
         ));
         assert!(xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<columnsID>9bb67b5f-5e3e-459e-98c5-618e04892d9b</columnsID>"));
         assert!(xml.contains("<name>Заголовок</name>"));
         assert!(xml.contains("<columnsID>9bb67b5f-5e3e-459e-98c5-618e04892d9b</columnsID>"));
         assert!(xml.contains("<defaultFormatIndex>8</defaultFormatIndex>"));
         assert!(xml.contains("\t<format>\r\n\t\t<width>465</width>\r\n\t</format>"));
-        assert!(xml.contains("<f>8</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
-        assert!(xml.contains("<formatIndex>9</formatIndex>"));
-        assert!(xml.contains("<f>10</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
-        assert!(xml.contains("<f>11</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
+        assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Описание</parameter>"));
+        assert!(xml.contains("<formatIndex>5</formatIndex>"));
+        assert!(xml.contains("<f>6</f>\r\n\t\t\t\t\t<parameter>Название</parameter>"));
+        assert!(xml.contains("<f>7</f>\r\n\t\t\t\t\t<parameter>Ошибка</parameter>"));
     }
 
     #[test]
@@ -35377,7 +35693,7 @@ mod tests {
 
         assert_eq!(
             moxel_default_format_index(&column_sets, Some(&settings), false, 21),
-            Some(6)
+            Some(21)
         );
         assert_eq!(
             moxel_default_format_index(&column_sets, Some(&settings), true, 21),
@@ -35385,7 +35701,7 @@ mod tests {
         );
         assert_eq!(
             moxel_default_format_index(&column_sets, None, false, 21),
-            None
+            Some(21)
         );
     }
 
@@ -35408,7 +35724,7 @@ mod tests {
         assert_eq!(drawing.picture_index, 1);
 
         let mut xml = String::new();
-        push_moxel_drawing_xml(&mut xml, &drawing);
+        push_moxel_drawing_xml(&mut xml, &drawing, &BTreeMap::new());
         assert!(xml.contains("<drawingType>Picture</drawingType>"));
         assert!(xml.contains("<formatIndex>31</formatIndex>"));
         assert!(xml.contains("<beginRow>20</beginRow>"));
@@ -35800,6 +36116,244 @@ mod tests {
     }
 
     #[test]
+    fn role_rights_blob_resolves_wrapped_register_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{4,\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "InformationRegister.Prices".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "InformationRegister.Prices.StandardAttribute.Active",
+                "InformationRegister.Prices.StandardAttribute.LineNumber",
+                "InformationRegister.Prices.StandardAttribute.Recorder",
+                "InformationRegister.Prices.StandardAttribute.Period",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_wrapped_catalog_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{10,\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-6,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-7,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}},\
+{{{{1,{object_uuid},1,{{-13,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-10,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-8,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "Catalog.Products".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "Catalog.Products",
+                "Catalog.Products.StandardAttribute.PredefinedDataName",
+                "Catalog.Products.StandardAttribute.Predefined",
+                "Catalog.Products.StandardAttribute.Ref",
+                "Catalog.Products.StandardAttribute.DeletionMark",
+                "Catalog.Products.StandardAttribute.IsFolder",
+                "Catalog.Products.StandardAttribute.Owner",
+                "Catalog.Products.StandardAttribute.Parent",
+                "Catalog.Products.StandardAttribute.Description",
+                "Catalog.Products.StandardAttribute.Code",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_sparse_wrapped_catalog_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{3,\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}},\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "Catalog.Products".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "Catalog.Products",
+                "Catalog.Products.StandardAttribute.Owner",
+                "Catalog.Products.StandardAttribute.Code",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_wrapped_exchange_plan_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{7,\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}},\
+{{{{1,{object_uuid},1,{{-10,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-9,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-6,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "ExchangePlan.Sync".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "ExchangePlan.Sync",
+                "ExchangePlan.Sync.StandardAttribute.ReceivedNo",
+                "ExchangePlan.Sync.StandardAttribute.SentNo",
+                "ExchangePlan.Sync.StandardAttribute.Ref",
+                "ExchangePlan.Sync.StandardAttribute.DeletionMark",
+                "ExchangePlan.Sync.StandardAttribute.Description",
+                "ExchangePlan.Sync.StandardAttribute.Code",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_wrapped_document_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{6,\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-7,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "Document.Sale".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "Document.Sale",
+                "Document.Sale.StandardAttribute.Posted",
+                "Document.Sale.StandardAttribute.Ref",
+                "Document.Sale.StandardAttribute.DeletionMark",
+                "Document.Sale.StandardAttribute.Date",
+                "Document.Sale.StandardAttribute.Number",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_wrapped_register_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{5,\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "InformationRegister.Prices".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "InformationRegister.Prices",
+                "InformationRegister.Prices.StandardAttribute.Active",
+                "InformationRegister.Prices.StandardAttribute.LineNumber",
+                "InformationRegister.Prices.StandardAttribute.Recorder",
+                "InformationRegister.Prices.StandardAttribute.Period",
+            ]
+        );
+    }
+
+    #[test]
     fn role_rights_blob_resolves_nested_subsystem_refs_from_index() {
         let parent_uuid = "11111111-1111-4111-8111-111111111111";
         let child_uuid = "22222222-2222-4222-8222-222222222222";
@@ -35977,7 +36531,7 @@ mod tests {
     }
 
     #[test]
-    fn role_rights_objects_follow_serialized_object_order() {
+    fn role_rights_objects_follow_object_uuid_order() {
         let object_a = "11111111-1111-4111-8111-111111111111";
         let object_b = "22222222-2222-4222-8222-222222222222";
         let object_c = "33333333-3333-4333-8333-333333333333";
@@ -36002,45 +36556,31 @@ mod tests {
             .map(|object| object.name.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            names,
-            vec!["Catalog.Gamma", "Catalog.Alpha", "Catalog.Beta"]
-        );
+        assert_eq!(names, vec!["Catalog.Alpha", "Catalog.Beta", "Catalog.Gamma"]);
     }
 
     #[test]
-    fn role_rights_objects_follow_metadata_order_when_available() {
-        let catalog_uuid = "11111111-1111-4111-8111-111111111111";
-        let command_uuid = "22222222-2222-4222-8222-222222222222";
-        let document_uuid = "33333333-3333-4333-8333-333333333333";
+    fn role_rights_child_refs_follow_their_own_uuid_order() {
+        let owner_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+        let command_uuid = "11111111-1111-4111-8111-111111111111";
+        let document_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         let rights_text = format!(
             "{{10,{{3,\
 {{{{1,{command_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
 {{{{1,{document_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
-{{{{1,{catalog_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
+{{{{1,{owner_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
 }},{{0}},0,1,0,4294967295}}"
         );
         let rights_blob = deflate_for_test(rights_text.as_bytes());
         let object_refs = BTreeMap::from([
-            (catalog_uuid.to_string(), "Catalog.Products".to_string()),
+            (owner_uuid.to_string(), "Catalog.Products".to_string()),
             (
                 command_uuid.to_string(),
                 "Catalog.Products.Command.Import".to_string(),
             ),
             (document_uuid.to_string(), "Document.Invoice".to_string()),
         ]);
-        let metadata_order = BTreeMap::from([
-            (catalog_uuid.to_string(), 10usize),
-            (document_uuid.to_string(), 5usize),
-        ]);
-
-        let rights = parse_role_rights_blob_with_metadata_order(
-            &rights_blob,
-            &object_refs,
-            &BTreeMap::new(),
-            &metadata_order,
-        )
-        .unwrap();
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
         let names = rights
             .objects
             .iter()
@@ -36050,11 +36590,43 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "Document.Invoice",
                 "Catalog.Products.Command.Import",
+                "Document.Invoice",
                 "Catalog.Products"
             ]
         );
+    }
+
+    #[test]
+    fn role_rights_follow_object_uuid_order_for_common_forms() {
+        let first_form_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let second_form_uuid = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+        let rights_text = format!(
+            "{{10,{{2,\
+{{{{1,{second_form_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{first_form_uuid},0,0}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([
+            (
+                first_form_uuid.to_string(),
+                "CommonForm.SharedA".to_string(),
+            ),
+            (
+                second_form_uuid.to_string(),
+                "CommonForm.SharedB".to_string(),
+            ),
+        ]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["CommonForm.SharedA", "CommonForm.SharedB"]);
     }
 
     #[test]
@@ -38312,6 +38884,64 @@ mod tests {
         assert!(v21_xml.contains(r#"version="2.21""#));
         assert!(v21_xml.contains(r#"xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette""#));
         assert!(v21_xml.contains("<Color>auto</Color>"));
+    }
+
+    #[test]
+    fn extracts_enum_choice_history_on_input_from_metadata_fields() {
+        let enum_uuid = "11111111-1111-4111-8111-111111111111";
+        let zero_uuid = "00000000-0000-0000-0000-000000000000";
+        let enum_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{20,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"\",0,0,{zero_uuid},0}}\r\n}},0,44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,{zero_uuid},{zero_uuid},2,1,{zero_uuid},{zero_uuid},{{0}},{{0}},{{0}},{{0,{{0}}}},1}},0\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &enum_blob,
+            enum_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<ChoiceHistoryOnInput>DontUse</ChoiceHistoryOnInput>"));
+    }
+
+    #[test]
+    fn formats_enum_with_empty_child_objects_as_self_closing_node() {
+        let header = MetadataHeader {
+            uuid: "11111111-1111-4111-8111-111111111111".to_string(),
+            name: "Status".to_string(),
+            synonyms: vec![("en".to_string(), "Status".to_string())],
+            comment: String::new(),
+            template_type_code: None,
+        };
+        let enumeration = EnumProperties {
+            generated_types: Vec::new(),
+            use_standard_commands: true,
+            quick_choice: true,
+            choice_mode: "BothWays",
+            choice_history_on_input: "DontUse",
+            default_list_form: None,
+            default_choice_form: None,
+            auxiliary_list_form: None,
+            auxiliary_choice_form: None,
+            list_presentation: vec![("en".to_string(), "Statuses".to_string())],
+            extended_list_presentation: vec![("en".to_string(), "Statuses".to_string())],
+            explanation: Vec::new(),
+            values: Vec::new(),
+            child_forms: Vec::new(),
+            child_templates: Vec::new(),
+        };
+
+        let xml = format_enum_source_xml(&header, &enumeration, InfobaseConfigSourceVersion::V2_20);
+
+        assert!(xml.contains("<ChoiceHistoryOnInput>DontUse</ChoiceHistoryOnInput>"));
+        assert!(xml.contains("\t\t<ChildObjects/>\r\n"));
+        assert!(!xml.contains("\t\t<ChildObjects>\r\n"));
     }
 
     #[test]
