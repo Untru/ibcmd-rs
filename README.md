@@ -19,9 +19,8 @@ They are still intended only for throwaway test databases.
 
 Current parity tracking is maintained in
 [docs/export-parity-status.md](docs/export-parity-status.md). The table below is
-the compact top-level view from the last full `ut_ibcmd` export comparison
-against native `ibcmd`; incremental verified fixes after that snapshot are
-listed in the status document until the next full diff is regenerated.
+the compact top-level view from the latest full `ut_ibcmd` export comparison
+against native `ibcmd`.
 Recommended parallel-agent ownership by object family is tracked in
 [docs/metadata-agent-slicing.md](docs/metadata-agent-slicing.md).
 The Form.xml mapping workflow is tracked in
@@ -73,17 +72,24 @@ queue on the reference database `Srvr="localhost";Ref="ut_ibcmd"`. They are
 not a replacement for the full-snapshot export parity percentages above, which
 must only change after a fresh full diff is regenerated.
 
-Latest full-run timing on July 2, 2026: `40,576` rows / `927,826,268` bytes
-(`~884.9 MiB`) exported in `130.3 s` end-to-end, or about `311.4 rows/s` and
-`6.8 MiB/s` overall. Raw BCP fetch took `11.594 s` (`76.3 MiB/s`), while the
-largest CPU buckets remained `metadata_xml_cpu_ms=388275`,
-`source_asset_form_xml_cpu_ms=137033`, and
-`source_asset_form_child_items_cpu_ms=62445`.
+Latest full-run timing on July 2, 2026 (`full_diff_20260702_0016_dp_commands`):
+`40,576` rows / `927,826,268` bytes (`~884.8 MiB`) exported in `246.829 s`
+on the dump critical path (`fetch_headers + prepare_indexes + fetch_rows +
+process_rows_wall`), which is `164.39 rows/s` and `3.58 MiB/s` overall. Raw BCP
+fetch took `73.061 s` (`12.1 MiB/s`, `10` batches, max batch `150,528,526`
+bytes), while the largest CPU buckets became `metadata_xml_cpu_ms=462108`,
+`source_asset_cpu_ms=433442`, `inflate_cpu_ms=393176`,
+`module_text_cpu_ms=306610`, `source_asset_form_cpu_ms=165214`, and
+`source_asset_form_xml_cpu_ms=158605`.
 
 Latest verified slices:
 
 | Round | Area | Verified progress |
 |---|---|---|
+| 45 | Full snapshot / timing | fresh snapshot `0016` updates overall parity to `10276` different / `39346` unchanged, `Reports` to `505` remaining, and `DataProcessors` to `3042` different / `4016` unchanged; latest release timing is `246.829 s` critical path (`164.39 rows/s`, `3.58 MiB/s`) |
+| 44 | Full snapshot / timing | fresh snapshot `0015` reconfirms overall parity at `8956` different / `40666` unchanged and DataProcessors at `1789` different / `5269` unchanged; latest release timing is `127.389 s` critical path (`318.52 rows/s`, `6.95 MiB/s`) |
+| 43 | Form.xml | property-bag `UsualGroup` items now emit native `Behavior=Usual`, `Representation`, and non-default `Group`; default root `Form/Group=Vertical` is suppressed |
+| 43 | Form.xml commands | command `Representation` / `CurrentRowUse` now derive from native command flags, picture presence, and action/name shape instead of over-emitting defaults |
 | 42 | Form.xml tooling | `form-diff-candidates` compares controlled Form.xml/blob pairs and suggests `XML path -> layout path` mappings for matrix-driven pack/unpack tests |
 | 42 | Form.xml | newly synthesized `Table` child items now preserve XML `<DataPath>` in the native layout |
 | 42 | MXL templates | MOXCEL vertical alignment code `48` now exports and packs as `Bottom` |

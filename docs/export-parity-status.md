@@ -5,7 +5,7 @@ Generated from:
 ```powershell
 target\release\ibcmd-rs.exe mssql-dump-config `
   --database ut_ibcmd `
-  -o E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_dump `
+  -o E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_dump `
   --overwrite `
   --inflate `
   --extract-module-text `
@@ -14,28 +14,28 @@ target\release\ibcmd-rs.exe mssql-dump-config `
   --no-binary-rows
 
 robocopy `
-  E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_dump `
-  E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_source_only `
+  E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_dump `
+  E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_source_only `
   /E /XD Config_inflated Config_raw ConfigSave_inflated ConfigSave_raw `
   /XF manifest.json *.json
 
 target\release\ibcmd-rs.exe source-diff `
-  -o E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\diff_full_source_only.json `
+  -o E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\diff_full_source_only.json `
   D:\ibcmd-rs\lab\ut_ibcmd_20260629_164647\ibcmd `
-  E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_source_only
+  E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_source_only
 ```
 
 The full JSON report is retained at
-`E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\diff_full_source_only.json`.
-A matching signature-mining report for this snapshot is retained at
-`E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\source-diff-signatures.json`
+`E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\diff_full_source_only.json`.
+The latest retained DataProcessors-focused signature-mining report remains at
+`E:\ibcmd_lab\full_diff_20260702_0014_dp_commands\diff_dataprocessors_signatures.json`
 to rank repeated XML path differences for the next agent batches.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated from the current direct
 MSSQL export path on July 2, 2026.
 
-Raw source-only summary:
+Direct source-only summary against the native export:
 
 | left_only | right_only | different | unchanged |
 |---:|---:|---:|---:|
@@ -47,18 +47,26 @@ scope exclusion and is not counted as parity debt.
 Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **79.3%**
 (`39346 / 49622` byte-identical files; 79.29% exact), with **10276** files still different.
 
-Latest full-run timing for this same snapshot: `40,576` rows /
-`927,826,268` bytes (`~884.9 MiB`) exported in `130.3 s` end-to-end, or about
-`311.4 rows/s` and `6.8 MiB/s` overall. Raw BCP fetch took `11.594 s`
-(`76.3 MiB/s`, `10` batches, max batch `150,528,526` bytes). The largest CPU
-buckets remained `metadata_xml_cpu_ms=388275`, `source_asset_cpu_ms=338262`,
-`source_asset_form_xml_cpu_ms=137033`, and
-`source_asset_form_child_items_cpu_ms=62445`.
+Latest full-run timing on the current tree is retained in
+`E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\report.json`:
+`40,576` rows / `927,826,268` bytes (`~884.8 MiB`) exported in `246.829 s`
+on the dump critical path (`fetch_headers + prepare_indexes + fetch_rows +
+process_rows_wall`), which is `164.39 rows/s` and `3.58 MiB/s` overall. Raw BCP
+fetch took `73.061 s` (`12.1 MiB/s`, `10` batches, max batch `150,528,526`
+bytes). The largest CPU buckets became `metadata_xml_cpu_ms=462108`,
+`source_asset_cpu_ms=433442`, `inflate_cpu_ms=393176`,
+`module_text_cpu_ms=306610`, `source_asset_form_cpu_ms=165214`, and
+`source_asset_form_xml_cpu_ms=158605`.
 
 Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 45 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0016` updates overall parity to `10276` different / `39346` unchanged, `Reports` to `505` remaining, and `DataProcessors` to `3042` different / `4016` unchanged; latest release timing is `246.829 s` critical path (`164.39 rows/s`, `3.58 MiB/s`) |
+| Round 44 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0015` reconfirms overall parity at `8956` different / `40666` unchanged and DataProcessors at `1789` different / `5269` unchanged; latest release timing is `127.389 s` critical path (`318.52 rows/s`, `6.95 MiB/s`) |
+| Round 43 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0014` reconfirms overall parity at `8956` different / `40666` unchanged and DataProcessors at `1789` different / `5269` unchanged on the current tree |
+| Round 43 Form.xml group slice | unit-level extractor verification | property-bag `UsualGroup` items emit native `Behavior=Usual`, `Representation`, and non-default `Group`, while default root `Form/Group=Vertical` is suppressed |
+| Round 43 Form.xml command slice | unit-level extractor verification | command `Representation` / `CurrentRowUse` derive from native command flags, picture presence, and action/name shape instead of over-emitting defaults |
 | Round 42 Form.xml tooling slice | CLI and unit-level mapping verification | `form-diff-candidates` compares baseline/variant Form.xml and raw Form body blobs, diffs the parsed layout brace tree, and emits candidate `XML path -> layout path` mappings |
 | Round 42 Form.xml slice | unit-level packer verification | new `Table` child items preserve XML `<DataPath>` by using the wider native layout shape |
 | Round 42 MXL template slice | unit-level extractor/packer verification | MOXCEL vertical alignment code `48` round-trips as `Bottom` |
