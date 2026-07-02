@@ -3477,17 +3477,14 @@ fn write_source_asset(
             )?;
         }
         SourceAssetKind::RoleRights => {
-            let rights = parse_role_rights_blob(
-                bytes,
-                context.role_rights_object_refs,
-                context.field_refs,
-            )
-            .with_context(|| {
-                format!(
-                    "failed to extract role rights from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+            let rights =
+                parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
+                    .with_context(|| {
+                        format!(
+                            "failed to extract role rights from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -4111,9 +4108,10 @@ fn build_metadata_order_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<S
         let Some(header_uuid) = parse_configuration_header_uuid(&row.text) else {
             continue;
         };
-        for (order, child) in parse_configuration_child_objects(&row.text, &row.file_name, &header_uuid)
-            .into_iter()
-            .enumerate()
+        for (order, child) in
+            parse_configuration_child_objects(&row.text, &row.file_name, &header_uuid)
+                .into_iter()
+                .enumerate()
         {
             index.entry(child.header.uuid).or_insert(order);
         }
@@ -4571,6 +4569,16 @@ fn standalone_child_reference(
             tabular_section.name, child.name
         ));
     }
+    if let Some(reference) = tabular_section_attribute_reference(
+        owner_kind,
+        owner_name,
+        owner_uuid,
+        text,
+        marker_start,
+        child,
+    ) {
+        return Some(reference);
+    }
     if metadata_kind_uses_register_resources(owner_kind)
         && is_offset_inside_metadata_object_code(text, marker_start, 5)
         && is_offset_inside_register_resource_list(text, marker_start)
@@ -4680,6 +4688,30 @@ fn standalone_child_reference(
         ));
     }
     None
+}
+
+fn tabular_section_attribute_reference(
+    owner_kind: &str,
+    owner_name: &str,
+    _owner_uuid: &str,
+    text: &str,
+    marker_start: usize,
+    child: &MetadataHeader,
+) -> Option<String> {
+    if !is_offset_inside_tabular_section_attribute_list(text, marker_start) {
+        return None;
+    }
+    let (tabular_section, tabular_end) =
+        preceding_metadata_header_for_code_with_bounds(text, marker_start, 11)?;
+    if tabular_section.uuid == child.uuid
+        || contains_any_metadata_header_between(text, tabular_end, marker_start)
+    {
+        return None;
+    }
+    Some(format!(
+        "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+        tabular_section.name, child.name
+    ))
 }
 
 fn metadata_kind_uses_register_resources(kind: &str) -> bool {
@@ -6717,6 +6749,11 @@ fn parse_role_rights_blob(
     objects.sort_by_key(|(sort_uuid, intra_uuid_order, serialized_index, _)| {
         (sort_uuid.clone(), *intra_uuid_order, *serialized_index)
     });
+    let mut normalized_objects = objects
+        .into_iter()
+        .map(|(_, _, _, object)| object)
+        .collect::<Vec<_>>();
+    normalize_chart_of_characteristic_type_tabular_attribute_role_refs(&mut normalized_objects);
 
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
@@ -6726,12 +6763,72 @@ fn parse_role_rights_blob(
         set_for_new_objects,
         set_for_attributes_by_default,
         independent_rights_of_child_objects,
-        objects: objects
-            .into_iter()
-            .map(|(_, _, _, object)| object)
-            .collect(),
+        objects: normalized_objects,
         restriction_templates,
     })
+}
+
+fn normalize_chart_of_characteristic_type_tabular_attribute_role_refs(
+    objects: &mut [RoleObjectRights],
+) {
+    let object_names = objects
+        .iter()
+        .map(|object| object.name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut counts = HashMap::<String, usize>::new();
+    for object in objects.iter() {
+        *counts.entry(object.name.clone()).or_insert(0) += 1;
+    }
+    let mut seen = HashMap::<String, usize>::new();
+    for object in objects {
+        let Some((owner, attribute)) =
+            chart_of_characteristic_type_attribute_role_name_parts(&object.name)
+        else {
+            continue;
+        };
+        let Some((tabular_section, rename_singleton)) =
+            chart_of_characteristic_type_tabular_section_for_role_attribute(attribute)
+        else {
+            continue;
+        };
+        let tabular_section_name =
+            format!("ChartOfCharacteristicTypes.{owner}.TabularSection.{tabular_section}");
+        if !object_names.contains(&tabular_section_name) {
+            continue;
+        }
+        let entry = seen.entry(object.name.clone()).or_insert(0);
+        let occurrence = *entry;
+        *entry += 1;
+        let total = counts.get(&object.name).copied().unwrap_or(0);
+        if rename_singleton || (total > 1 && occurrence == 0) {
+            object.name = format!("{tabular_section_name}.Attribute.{attribute}");
+        }
+    }
+}
+
+fn chart_of_characteristic_type_attribute_role_name_parts(name: &str) -> Option<(&str, &str)> {
+    let prefix = "ChartOfCharacteristicTypes.";
+    let rest = name.strip_prefix(prefix)?;
+    let (owner, remainder) = rest.split_once(".Attribute.")?;
+    (!owner.contains('.') && !remainder.contains('.')).then_some((owner, remainder))
+}
+
+fn chart_of_characteristic_type_tabular_section_for_role_attribute(
+    attribute: &str,
+) -> Option<(&'static str, bool)> {
+    match attribute {
+        "Значение" | "Свойство" | "ТекстоваяСтрока" => {
+            Some(("ДополнительныеРеквизиты", true))
+        }
+        "ХозяйственнаяОперация" => {
+            Some(("ДоступныеХозяйственныеОперации", true))
+        }
+        "ПланСчетов" => Some(("НастройкиМеждународногоУчета", true)),
+        "СчетУчета" | "Субконто1" | "Субконто2" | "Субконто3" => {
+            Some(("НастройкиМеждународногоУчета", false))
+        }
+        _ => None,
+    }
 }
 
 fn role_rights_object_intra_uuid_order(fields: &[&str], object_name: &str) -> Option<usize> {
@@ -6770,10 +6867,13 @@ fn role_standard_attribute_ref_name(
 }
 
 fn role_standard_attribute_slot(slot_code: &str) -> Option<isize> {
-    slot_code
-        .parse::<isize>()
-        .ok()
-        .or_else(|| split_1c_braced_fields(slot_code, 0)?.first()?.trim().parse::<isize>().ok())
+    slot_code.parse::<isize>().ok().or_else(|| {
+        split_1c_braced_fields(slot_code, 0)?
+            .first()?
+            .trim()
+            .parse::<isize>()
+            .ok()
+    })
 }
 
 fn role_standard_attribute_sort_order(
@@ -6820,6 +6920,30 @@ fn role_standard_attribute_descriptor(
             .get(slot_index?)
             .copied(),
         },
+        "ChartOfCharacteristicTypes" => match slot {
+            -14 => Some(("PredefinedDataName", 1)),
+            -11 => Some(("ValueType", 2)),
+            -9 => Some(("Description", 3)),
+            -8 => Some(("Code", 4)),
+            -7 => Some(("IsFolder", 5)),
+            -6 => Some(("Parent", 6)),
+            -5 => Some(("Predefined", 7)),
+            -4 => Some(("DeletionMark", 8)),
+            -2 => Some(("Ref", 9)),
+            _ => [
+                ("PredefinedDataName", 1),
+                ("ValueType", 2),
+                ("Description", 3),
+                ("Code", 4),
+                ("IsFolder", 5),
+                ("Parent", 6),
+                ("Predefined", 7),
+                ("DeletionMark", 8),
+                ("Ref", 9),
+            ]
+            .get(slot_index?)
+            .copied(),
+        },
         "Document" => slot_index
             .and_then(|index| {
                 [
@@ -6841,25 +6965,36 @@ fn role_standard_attribute_descriptor(
                 _ => None,
             }),
         "ExchangePlan" => match slot {
-            -10 => Some(("ReceivedNo", 1)),
-            -9 => Some(("SentNo", 2)),
-            -6 => Some(("Ref", 3)),
-            -4 => Some(("DeletionMark", 4)),
-            -3 => Some(("Description", 5)),
-            -2 => Some(("Code", 6)),
+            -14 => Some(("ExchangeDate", 1)),
+            -13 => Some(("ThisNode", 2)),
+            -10 => Some(("ReceivedNo", 3)),
+            -9 => Some(("SentNo", 4)),
+            -6 => Some(("Ref", 5)),
+            -4 => Some(("DeletionMark", 6)),
+            -3 => Some(("Description", 7)),
+            -2 => Some(("Code", 8)),
             _ => [
-                ("ReceivedNo", 1),
-                ("SentNo", 2),
-                ("Ref", 3),
-                ("DeletionMark", 4),
-                ("Description", 5),
-                ("Code", 6),
+                ("ExchangeDate", 1),
+                ("ThisNode", 2),
+                ("ReceivedNo", 3),
+                ("SentNo", 4),
+                ("Ref", 5),
+                ("DeletionMark", 6),
+                ("Description", 7),
+                ("Code", 8),
             ]
             .get(slot_index?)
             .copied(),
         },
-        "AccumulationRegister" | "AccountingRegister" | "CalculationRegister"
-        | "InformationRegister" => match slot {
+        "AccumulationRegister" => match slot {
+            -9 => Some(("RecordType", 1)),
+            0 | -5 => Some(("Active", 2)),
+            1 | -2 => Some(("Period", 5)),
+            2 | -3 => Some(("Recorder", 4)),
+            3 | -4 => Some(("LineNumber", 3)),
+            _ => None,
+        },
+        "AccountingRegister" | "CalculationRegister" | "InformationRegister" => match slot {
             0 | -5 => Some(("Active", 1)),
             1 | -2 => Some(("Period", 4)),
             2 | -3 => Some(("Recorder", 3)),
@@ -8260,10 +8395,11 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
         xml_bool(rights.independent_rights_of_child_objects)
     );
     for object in &rights.objects {
+        let object_rights = role_rights_for_xml(object);
         xml.push_str("\t<object>\r\n\t\t<name>");
         xml.push_str(&escape_xml_element_text(&object.name));
         xml.push_str("</name>\r\n");
-        for right in &object.rights {
+        for right in object_rights {
             xml.push_str("\t\t<right>\r\n\t\t\t<name>");
             xml.push_str(&escape_xml_element_text(&right.name));
             xml.push_str("</name>\r\n\t\t\t<value>");
@@ -8297,6 +8433,140 @@ fn format_role_rights_xml(rights: &RoleRights) -> String {
     }
     xml.push_str("</Rights>");
     xml
+}
+
+fn role_rights_for_xml(object: &RoleObjectRights) -> Vec<&RoleRight> {
+    let suppress_plain_false_when_restricted = should_suppress_plain_false_role_rights(object);
+    let suppress_configuration_modes = should_omit_default_configuration_mode_rights(object);
+
+    object
+        .rights
+        .iter()
+        .filter(|right| {
+            if suppress_configuration_modes
+                && right.value
+                && right.restriction_by_condition.is_none()
+                && is_configuration_mode_right(&right.name)
+            {
+                return false;
+            }
+            if right.value || right.restriction_by_condition.is_some() {
+                return true;
+            }
+            if suppress_plain_false_when_restricted {
+                return false;
+            }
+            if is_top_level_document_object(&object.name)
+                && matches!(
+                    right.name.as_str(),
+                    "Posting"
+                        | "UndoPosting"
+                        | "InteractiveInsert"
+                        | "Edit"
+                        | "InteractiveSetDeletionMark"
+                        | "InteractiveClearDeletionMark"
+                        | "InteractivePosting"
+                        | "InteractivePostingRegular"
+                        | "InteractiveUndoPosting"
+                        | "InteractiveChangeOfPosted"
+                        | "Delete"
+                        | "Insert"
+                        | "Update"
+                        | "View"
+                        | "InputByString"
+                        | "ReadDataHistory"
+                        | "ReadDataHistoryOfMissingData"
+                        | "UpdateDataHistory"
+                        | "UpdateDataHistoryOfMissingData"
+                        | "UpdateDataHistoryVersionComment"
+                        | "ViewDataHistory"
+                        | "EditDataHistoryVersionComment"
+                        | "SwitchToDataHistoryVersion"
+                )
+            {
+                return false;
+            }
+            if is_top_level_accumulation_register_object(&object.name)
+                && matches!(right.name.as_str(), "Edit" | "Update" | "View")
+            {
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
+fn is_top_level_role_rights_restriction_object(name: &str) -> bool {
+    [
+        "Catalog",
+        "Document",
+        "InformationRegister",
+        "AccumulationRegister",
+    ]
+    .iter()
+    .any(|kind| is_top_level_role_object_kind(name, kind))
+}
+
+fn is_top_level_document_object(name: &str) -> bool {
+    is_top_level_role_object_kind(name, "Document")
+}
+
+fn is_top_level_accumulation_register_object(name: &str) -> bool {
+    is_top_level_role_object_kind(name, "AccumulationRegister")
+}
+
+fn should_suppress_plain_false_role_rights(object: &RoleObjectRights) -> bool {
+    if !is_top_level_role_rights_restriction_object(&object.name) {
+        return false;
+    }
+    let has_restricted = object
+        .rights
+        .iter()
+        .any(|right| right.restriction_by_condition.is_some());
+    if !has_restricted {
+        return false;
+    }
+    object.rights.iter().all(|right| {
+        !right.value
+            || right.restriction_by_condition.is_some()
+            || matches!(right.name.as_str(), "View" | "InputByString")
+    })
+}
+
+fn is_top_level_role_object_kind(name: &str, kind: &str) -> bool {
+    let Some(rest) = name.strip_prefix(kind) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix('.') else {
+        return false;
+    };
+    !rest.contains('.')
+}
+
+fn should_omit_default_configuration_mode_rights(object: &RoleObjectRights) -> bool {
+    object.name.starts_with("Configuration.")
+        && object.rights.iter().any(|right| {
+            !is_configuration_mode_right(&right.name)
+                && !right.value
+                && right.restriction_by_condition.is_none()
+        })
+        && object.rights.iter().all(|right| {
+            !right.value
+                || right.restriction_by_condition.is_some()
+                || is_configuration_mode_right(&right.name)
+        })
+}
+
+fn is_configuration_mode_right(name: &str) -> bool {
+    matches!(
+        name,
+        "MainWindowModeNormal"
+            | "MainWindowModeWorkplace"
+            | "MainWindowModeEmbeddedWorkplace"
+            | "MainWindowModeFullscreenWorkplace"
+            | "MainWindowModeKiosk"
+            | "AnalyticsSystemClient"
+    )
 }
 
 struct JobSchedule {
@@ -16682,6 +16952,30 @@ fn contains_metadata_header_uuid_between(text: &str, start: usize, end: usize, u
     start < end && text[start..end].contains(&format!("{{1,0,{uuid}}}"))
 }
 
+fn contains_any_metadata_header_between(text: &str, start: usize, end: usize) -> bool {
+    if start >= end {
+        return false;
+    }
+    let mut offset = start;
+    let marker = "{1,0,";
+    while offset < end {
+        let Some(relative) = text[offset..end].find(marker) else {
+            return false;
+        };
+        let marker_start = offset + relative;
+        let uuid_start = marker_start + marker.len();
+        let uuid_end = uuid_start + 36;
+        offset = uuid_start;
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if is_uuid_text(uuid) && is_metadata_header_marker(text, uuid_end) {
+            return true;
+        }
+    }
+    false
+}
+
 fn contains_metadata_header_name_between(text: &str, start: usize, end: usize, name: &str) -> bool {
     if start >= end {
         return false;
@@ -21351,7 +21645,7 @@ fn parse_http_service_url_templates_from_text(
         .collect::<Vec<_>>();
 
     let mut seen = BTreeSet::new();
-    candidates
+    let template_candidates = candidates
         .into_iter()
         .filter_map(|candidate| {
             let template = candidate.strings.first()?.clone();
@@ -21361,20 +21655,34 @@ fn parse_http_service_url_templates_from_text(
             {
                 return None;
             }
+            Some((candidate, template))
+        })
+        .collect::<Vec<_>>();
+
+    template_candidates
+        .iter()
+        .enumerate()
+        .map(|(index, (candidate, template))| {
+            let next_template_start = template_candidates
+                .get(index + 1)
+                .map(|(next_candidate, _)| next_candidate.start)
+                .unwrap_or(usize::MAX);
             let methods = method_candidates
                 .iter()
-                .filter(|method| method.start > candidate.start && method.end < candidate.end)
+                .filter(|method| {
+                    method.start > candidate.start && method.start < next_template_start
+                })
                 .map(|method| HttpServiceMethodProperties {
                     header: method.header.clone(),
                     http_method: method.strings[0].clone(),
                     handler: method.strings[1].clone(),
                 })
                 .collect::<Vec<_>>();
-            Some(HttpServiceUrlTemplateProperties {
-                header: candidate.header,
-                template,
+            HttpServiceUrlTemplateProperties {
+                header: candidate.header.clone(),
+                template: template.clone(),
                 methods,
-            })
+            }
         })
         .collect()
 }
@@ -21398,11 +21706,23 @@ fn http_service_child_candidates_from_text(
         let Some(header_index) = metadata_header_field_index(&fields, &header.uuid) else {
             continue;
         };
-        let strings = fields
-            .iter()
-            .skip(header_index + 1)
-            .filter_map(|field| parse_1c_quoted_string(field.trim()))
-            .collect::<Vec<_>>();
+        let strings = match header_index {
+            2 => fields
+                .get(1)
+                .and_then(|field| parse_1c_quoted_string(field.trim()))
+                .map(|template| vec![template])
+                .unwrap_or_default(),
+            3 if is_http_service_method_name(&header.name) => fields
+                .get(1)
+                .and_then(|field| parse_1c_quoted_string(field.trim()))
+                .map(|handler| vec![header.name.clone(), handler])
+                .unwrap_or_default(),
+            _ => fields
+                .iter()
+                .skip(header_index + 1)
+                .filter_map(|field| parse_1c_quoted_string(field.trim()))
+                .collect::<Vec<_>>(),
+        };
         if strings.is_empty() {
             continue;
         }
@@ -34834,9 +35154,9 @@ mod tests {
         assert!(xml.contains("<rightFooter>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</rightFooter>"));
         assert!(xml.contains("<defaultFormatIndex>10</defaultFormatIndex>"));
         assert!(xml.contains("<f>4</f>\r\n\t\t\t\t\t<parameter>Наименование</parameter>"));
-        assert!(xml.contains(
-            "<index>3</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>9</formatIndex>"
-        ));
+        assert!(
+            xml.contains("<index>3</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>9</formatIndex>")
+        );
         assert!(xml.contains(
             "<font ref=\"style:LargeTextFont\" bold=\"false\" italic=\"false\" underline=\"true\" strikeout=\"false\" kind=\"StyleItem\"/>"
         ));
@@ -34951,7 +35271,10 @@ mod tests {
 
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
-        assert_eq!(moxel_output_format_indices(&spreadsheet), vec![4, 2, 6, 5, 3, 7, 1]);
+        assert_eq!(
+            moxel_output_format_indices(&spreadsheet),
+            vec![4, 2, 6, 5, 3, 7, 1]
+        );
         assert!(xml.contains(
             "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>1</formatIndex>"
         ));
@@ -36034,6 +36357,159 @@ mod tests {
     }
 
     #[test]
+    fn format_role_rights_omits_plain_false_rights_for_restriction_only_top_level_objects() {
+        let xml = format_role_rights_xml(&RoleRights {
+            set_for_new_objects: false,
+            set_for_attributes_by_default: true,
+            independent_rights_of_child_objects: false,
+            objects: vec![RoleObjectRights {
+                name: "Catalog.Products".to_string(),
+                rights: vec![
+                    RoleRight {
+                        name: "Read".to_string(),
+                        value: false,
+                        restriction_by_condition: Some(RoleRightRestriction {
+                            field: None,
+                            condition: "ГДЕ ИСТИНА".to_string(),
+                        }),
+                    },
+                    RoleRight {
+                        name: "Edit".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "InteractiveDelete".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                ],
+            }],
+            restriction_templates: Vec::new(),
+        });
+
+        assert!(xml.contains("<name>Read</name>"));
+        assert!(!xml.contains("<name>Edit</name>"));
+        assert!(!xml.contains("<name>InteractiveDelete</name>"));
+    }
+
+    #[test]
+    fn format_role_rights_omits_plain_false_rights_when_only_view_input_by_string_are_true() {
+        let xml = format_role_rights_xml(&RoleRights {
+            set_for_new_objects: false,
+            set_for_attributes_by_default: true,
+            independent_rights_of_child_objects: false,
+            objects: vec![RoleObjectRights {
+                name: "Document.Invoice".to_string(),
+                rights: vec![
+                    RoleRight {
+                        name: "Read".to_string(),
+                        value: false,
+                        restriction_by_condition: Some(RoleRightRestriction {
+                            field: None,
+                            condition: "ГДЕ ИСТИНА".to_string(),
+                        }),
+                    },
+                    RoleRight {
+                        name: "View".to_string(),
+                        value: true,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "InputByString".to_string(),
+                        value: true,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "InteractiveDelete".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                ],
+            }],
+            restriction_templates: Vec::new(),
+        });
+
+        assert!(xml.contains("<name>View</name>"));
+        assert!(xml.contains("<name>InputByString</name>"));
+        assert!(!xml.contains("<name>InteractiveDelete</name>"));
+    }
+
+    #[test]
+    fn format_role_rights_omits_non_native_top_level_accumulation_register_false_rights() {
+        let xml = format_role_rights_xml(&RoleRights {
+            set_for_new_objects: false,
+            set_for_attributes_by_default: true,
+            independent_rights_of_child_objects: false,
+            objects: vec![RoleObjectRights {
+                name: "AccumulationRegister.Stock".to_string(),
+                rights: vec![
+                    RoleRight {
+                        name: "Read".to_string(),
+                        value: true,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "Edit".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "View".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "Update".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                ],
+            }],
+            restriction_templates: Vec::new(),
+        });
+
+        assert!(xml.contains("<name>Read</name>"));
+        assert!(!xml.contains("<name>Edit</name>"));
+        assert!(!xml.contains("<name>View</name>"));
+        assert!(!xml.contains("<name>Update</name>"));
+    }
+
+    #[test]
+    fn format_role_rights_omits_default_configuration_mode_rights_when_only_admin_flags_remain() {
+        let xml = format_role_rights_xml(&RoleRights {
+            set_for_new_objects: false,
+            set_for_attributes_by_default: true,
+            independent_rights_of_child_objects: false,
+            objects: vec![RoleObjectRights {
+                name: "Configuration.DemoApp".to_string(),
+                rights: vec![
+                    RoleRight {
+                        name: "MainWindowModeNormal".to_string(),
+                        value: true,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "AnalyticsSystemClient".to_string(),
+                        value: true,
+                        restriction_by_condition: None,
+                    },
+                    RoleRight {
+                        name: "Administration".to_string(),
+                        value: false,
+                        restriction_by_condition: None,
+                    },
+                ],
+            }],
+            restriction_templates: Vec::new(),
+        });
+
+        assert!(!xml.contains("<name>MainWindowModeNormal</name>"));
+        assert!(!xml.contains("<name>AnalyticsSystemClient</name>"));
+        assert!(xml.contains("<name>Administration</name>"));
+    }
+
+    #[test]
     fn role_rights_blob_formats_disabled_attribute_rights() {
         let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let rights_text = format!(
@@ -36152,6 +36628,35 @@ mod tests {
     }
 
     #[test]
+    fn role_rights_blob_resolves_wrapped_accumulation_register_record_type_standard_attribute_ref()
+    {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{1,\
+{{{{1,{object_uuid},1,{{-9,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,-1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "AccumulationRegister.Stock".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec!["AccumulationRegister.Stock.StandardAttribute.RecordType"]
+        );
+    }
+
+    #[test]
     fn role_rights_blob_orders_wrapped_catalog_standard_attribute_refs() {
         let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
@@ -36170,10 +36675,8 @@ mod tests {
 }},{{0}},0,1,0,4294967295}}"
         );
         let rights_blob = deflate_for_test(rights_text.as_bytes());
-        let object_refs = BTreeMap::from([(
-            object_uuid.to_string(),
-            "Catalog.Products".to_string(),
-        )]);
+        let object_refs =
+            BTreeMap::from([(object_uuid.to_string(), "Catalog.Products".to_string())]);
 
         let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
         let names = rights
@@ -36211,10 +36714,8 @@ mod tests {
 }},{{0}},0,1,0,4294967295}}"
         );
         let rights_blob = deflate_for_test(rights_text.as_bytes());
-        let object_refs = BTreeMap::from([(
-            object_uuid.to_string(),
-            "Catalog.Products".to_string(),
-        )]);
+        let object_refs =
+            BTreeMap::from([(object_uuid.to_string(), "Catalog.Products".to_string())]);
 
         let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
         let names = rights
@@ -36249,10 +36750,8 @@ mod tests {
 }},{{0}},0,1,0,4294967295}}"
         );
         let rights_blob = deflate_for_test(rights_text.as_bytes());
-        let object_refs = BTreeMap::from([(
-            object_uuid.to_string(),
-            "ExchangePlan.Sync".to_string(),
-        )]);
+        let object_refs =
+            BTreeMap::from([(object_uuid.to_string(), "ExchangePlan.Sync".to_string())]);
 
         let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
         let names = rights
@@ -36276,6 +36775,98 @@ mod tests {
     }
 
     #[test]
+    fn role_rights_blob_orders_wrapped_exchange_plan_extended_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{9,\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}},\
+{{{{1,{object_uuid},1,{{-14,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-13,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-10,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-9,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-6,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs =
+            BTreeMap::from([(object_uuid.to_string(), "ExchangePlan.Sync".to_string())]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "ExchangePlan.Sync",
+                "ExchangePlan.Sync.StandardAttribute.ExchangeDate",
+                "ExchangePlan.Sync.StandardAttribute.ThisNode",
+                "ExchangePlan.Sync.StandardAttribute.ReceivedNo",
+                "ExchangePlan.Sync.StandardAttribute.SentNo",
+                "ExchangePlan.Sync.StandardAttribute.Ref",
+                "ExchangePlan.Sync.StandardAttribute.DeletionMark",
+                "ExchangePlan.Sync.StandardAttribute.Description",
+                "ExchangePlan.Sync.StandardAttribute.Code",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_wrapped_chart_of_characteristic_types_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{10,\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}},\
+{{{{1,{object_uuid},1,{{-14,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-11,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-9,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-8,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-7,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-6,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}},\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,b7bab52d-c1b1-4bd8-8276-02db08d42352,-1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "ChartOfCharacteristicTypes.Kinds".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "ChartOfCharacteristicTypes.Kinds",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.PredefinedDataName",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.ValueType",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.Description",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.Code",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.IsFolder",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.Parent",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.Predefined",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.DeletionMark",
+                "ChartOfCharacteristicTypes.Kinds.StandardAttribute.Ref",
+            ]
+        );
+    }
+
+    #[test]
     fn role_rights_blob_orders_wrapped_document_standard_attribute_refs() {
         let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
@@ -36290,10 +36881,7 @@ mod tests {
 }},{{0}},0,1,0,4294967295}}"
         );
         let rights_blob = deflate_for_test(rights_text.as_bytes());
-        let object_refs = BTreeMap::from([(
-            object_uuid.to_string(),
-            "Document.Sale".to_string(),
-        )]);
+        let object_refs = BTreeMap::from([(object_uuid.to_string(), "Document.Sale".to_string())]);
 
         let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
         let names = rights
@@ -36349,6 +36937,46 @@ mod tests {
                 "InformationRegister.Prices.StandardAttribute.LineNumber",
                 "InformationRegister.Prices.StandardAttribute.Recorder",
                 "InformationRegister.Prices.StandardAttribute.Period",
+            ]
+        );
+    }
+
+    #[test]
+    fn role_rights_blob_orders_wrapped_accumulation_register_record_type_standard_attribute_refs() {
+        let object_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let type_uuid = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
+        let rights_text = format!(
+            "{{10,{{6,\
+{{{{1,{object_uuid},1,{{-2,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-3,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-4,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-5,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},1,{{-9,{type_uuid}}},1}},{{0,aa6448f2-be0f-42ea-ba26-1af7f52b5b65,1}}}},\
+{{{{1,{object_uuid},0,0}},{{0,1c87578f-9e09-4ec0-a991-5629c87b1588,1}}}}\
+}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+        let object_refs = BTreeMap::from([(
+            object_uuid.to_string(),
+            "AccumulationRegister.Stock".to_string(),
+        )]);
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+        let names = rights
+            .objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "AccumulationRegister.Stock",
+                "AccumulationRegister.Stock.StandardAttribute.RecordType",
+                "AccumulationRegister.Stock.StandardAttribute.Active",
+                "AccumulationRegister.Stock.StandardAttribute.LineNumber",
+                "AccumulationRegister.Stock.StandardAttribute.Recorder",
+                "AccumulationRegister.Stock.StandardAttribute.Period",
             ]
         );
     }
@@ -36475,6 +37103,41 @@ mod tests {
     }
 
     #[test]
+    fn role_rights_blob_resolves_http_service_method_refs_from_real_layout_index() {
+        let service_uuid = "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let url_template_uuid = "33333333-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let method_uuid = "33333333-cccc-4ccc-8ccc-cccccccccccc";
+        let rows = vec![MetadataTextRow {
+            file_name: service_uuid.to_string(),
+            text: format!(
+                "{{1,\r\n{{2,\"edi\",\r\n{{3,\r\n{{1,0,{service_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20}},1,\r\n{{ec6896c2-9b28-42d8-9140-48491146b8ea,1,\r\n{{\r\n{{0,\"/events/newdocs\",\r\n{{3,\r\n{{1,0,{url_template_uuid}}},\"Any\",{{1,\"en\",\"Any\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},1,\r\n{{21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73,1,\r\n{{\r\n{{0,\"HandlePost\",11,\r\n{{3,\r\n{{1,0,{method_uuid}}},\"POST\",{{1,\"en\",\"POST\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            ),
+            object_code: Some(2),
+            header: Some(MetadataHeader {
+                uuid: service_uuid.to_string(),
+                name: "Api".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("HTTPService".to_string()),
+            folder: Some("HTTPServices"),
+        }];
+        let object_refs = build_metadata_object_reference_index_from_texts(&rows);
+        let rights_text = format!(
+            "{{10,{{1,{{{{1,{method_uuid},0,0}},{{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}}}}}},{{0}},0,1,0,4294967295}}"
+        );
+        let rights_blob = deflate_for_test(rights_text.as_bytes());
+
+        let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+
+        assert_eq!(
+            rights.objects[0].name,
+            "HTTPService.Api.URLTemplate.Any.Method.POST"
+        );
+    }
+
+    #[test]
     fn role_rights_blob_resolves_common_form_refs_from_index() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-mssql-dump-test-{}",
@@ -36556,7 +37219,10 @@ mod tests {
             .map(|object| object.name.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["Catalog.Alpha", "Catalog.Beta", "Catalog.Gamma"]);
+        assert_eq!(
+            names,
+            vec!["Catalog.Alpha", "Catalog.Beta", "Catalog.Gamma"]
+        );
     }
 
     #[test]
@@ -36593,6 +37259,51 @@ mod tests {
                 "Catalog.Products.Command.Import",
                 "Document.Invoice",
                 "Catalog.Products"
+            ]
+        );
+    }
+
+    #[test]
+    fn normalizes_chart_of_characteristic_types_tabular_attribute_role_refs() {
+        let mut objects = vec![
+            RoleObjectRights {
+                name: "ChartOfCharacteristicTypes.Properties.Attribute.Значение".to_string(),
+                rights: Vec::new(),
+            },
+            RoleObjectRights {
+                name: "ChartOfCharacteristicTypes.Properties.TabularSection.ДополнительныеРеквизиты"
+                    .to_string(),
+                rights: Vec::new(),
+            },
+            RoleObjectRights {
+                name: "ChartOfCharacteristicTypes.Properties.Attribute.Субконто1".to_string(),
+                rights: Vec::new(),
+            },
+            RoleObjectRights {
+                name: "ChartOfCharacteristicTypes.Properties.TabularSection.НастройкиМеждународногоУчета"
+                    .to_string(),
+                rights: Vec::new(),
+            },
+            RoleObjectRights {
+                name: "ChartOfCharacteristicTypes.Properties.Attribute.Субконто1".to_string(),
+                rights: Vec::new(),
+            },
+        ];
+
+        normalize_chart_of_characteristic_type_tabular_attribute_role_refs(&mut objects);
+
+        let names = objects
+            .iter()
+            .map(|object| object.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "ChartOfCharacteristicTypes.Properties.TabularSection.ДополнительныеРеквизиты.Attribute.Значение",
+                "ChartOfCharacteristicTypes.Properties.TabularSection.ДополнительныеРеквизиты",
+                "ChartOfCharacteristicTypes.Properties.TabularSection.НастройкиМеждународногоУчета.Attribute.Субконто1",
+                "ChartOfCharacteristicTypes.Properties.TabularSection.НастройкиМеждународногоУчета",
+                "ChartOfCharacteristicTypes.Properties.Attribute.Субконто1",
             ]
         );
     }
@@ -40836,6 +41547,40 @@ mod tests {
     }
 
     #[test]
+    fn resolves_non_dataprocessor_tabular_section_attribute_reference_from_attribute_list_marker() {
+        let tabular_uuid = "11111111-2222-4222-8222-111111111111";
+        let attribute_uuid = "33333333-4444-4444-8444-333333333333";
+        let text = format!(
+            "{{11,\r\n{{0,\r\n{{3,\r\n{{1,0,{tabular_uuid}}},\"AdditionalAttributes\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}},\r\n{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\r\n{{0,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"Value\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}}\r\n}}\r\n}}"
+        );
+        let marker_start = text.find(&format!("{{1,0,{attribute_uuid}}}")).unwrap();
+        let child = MetadataHeader {
+            uuid: attribute_uuid.to_string(),
+            name: "Value".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let reference = standalone_child_reference(
+            "ChartOfCharacteristicTypes",
+            "Properties",
+            "55555555-6666-4666-8666-555555555555",
+            &text,
+            marker_start,
+            &child,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            reference,
+            "ChartOfCharacteristicTypes.Properties.TabularSection.AdditionalAttributes.Attribute.Value"
+        );
+    }
+
+    #[test]
     fn functional_option_refs_prefer_nested_subsystem_reference() {
         let option_uuid = "11111111-1111-4111-8111-111111111111";
         let subsystem_uuid = "22222222-2222-4222-8222-222222222222";
@@ -41456,6 +42201,62 @@ mod tests {
             }
             assert!(!repacked.blob.is_empty());
         }
+    }
+
+    #[test]
+    fn extracts_http_service_xml_from_real_layout_wrappers() {
+        let service_uuid = "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let url_template_uuid = "33333333-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let method_uuid = "33333333-cccc-4ccc-8ccc-cccccccccccc";
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{2,\"edi\",\r\n{{3,\r\n{{1,0,{service_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20}},1,\r\n{{ec6896c2-9b28-42d8-9140-48491146b8ea,1,\r\n{{\r\n{{0,\"/events/newdocs\",\r\n{{3,\r\n{{1,0,{url_template_uuid}}},\"Any\",{{1,\"en\",\"Any\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},1,\r\n{{21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73,1,\r\n{{\r\n{{0,\"HandlePost\",11,\r\n{{3,\r\n{{1,0,{method_uuid}}},\"POST\",{{1,\"en\",\"POST\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            service_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(xml.contains("<RootURL>edi</RootURL>"));
+        assert!(xml.contains(&format!(r#"<URLTemplate uuid="{url_template_uuid}">"#)));
+        assert!(xml.contains("<Template>/events/newdocs</Template>"));
+        assert!(xml.contains(&format!(r#"<Method uuid="{method_uuid}">"#)));
+        assert!(xml.contains("<HTTPMethod>POST</HTTPMethod>"));
+        assert!(xml.contains("<Handler>HandlePost</Handler>"));
+    }
+
+    #[test]
+    fn parses_http_service_url_templates_from_real_layout_text() {
+        let service_uuid = "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let url_template_uuid = "33333333-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let method_uuid = "33333333-cccc-4ccc-8ccc-cccccccccccc";
+        let text = format!(
+            "{{1,\r\n{{2,\"edi\",\r\n{{3,\r\n{{1,0,{service_uuid}}},\"Api\",{{1,\"en\",\"API\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,20}},1,\r\n{{ec6896c2-9b28-42d8-9140-48491146b8ea,1,\r\n{{\r\n{{0,\"/events/newdocs\",\r\n{{3,\r\n{{1,0,{url_template_uuid}}},\"Any\",{{1,\"en\",\"Any\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},1,\r\n{{21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73,1,\r\n{{\r\n{{0,\"HandlePost\",11,\r\n{{3,\r\n{{1,0,{method_uuid}}},\"POST\",{{1,\"en\",\"POST\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+        );
+
+        let nested = nested_headers_with_offsets_from_text(&text, service_uuid, |_| true);
+        assert_eq!(nested.len(), 2);
+
+        let candidates = http_service_child_candidates_from_text(&text, service_uuid);
+        assert_eq!(candidates.len(), 2);
+
+        let templates = parse_http_service_url_templates_from_text(&text, service_uuid);
+
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].header.uuid, url_template_uuid);
+        assert_eq!(templates[0].template, "/events/newdocs");
+        assert_eq!(templates[0].methods.len(), 1);
+        assert_eq!(templates[0].methods[0].header.uuid, method_uuid);
+        assert_eq!(templates[0].methods[0].http_method, "POST");
+        assert_eq!(templates[0].methods[0].handler, "HandlePost");
     }
 
     #[test]
