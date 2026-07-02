@@ -5,7 +5,7 @@ Generated from:
 ```powershell
 target\release\ibcmd-rs.exe mssql-dump-config `
   --database ut_ibcmd `
-  -o E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_dump `
+  -o E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_dump `
   --overwrite `
   --inflate `
   --extract-module-text `
@@ -14,38 +14,46 @@ target\release\ibcmd-rs.exe mssql-dump-config `
   --no-binary-rows
 
 robocopy `
-  E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_dump `
-  E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_source_only `
+  E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_dump `
+  E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_source_only `
   /E /XD Config_inflated Config_raw ConfigSave_inflated ConfigSave_raw `
   /XF manifest.json *.json
 
 target\release\ibcmd-rs.exe source-diff `
-  -o E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\diff_full_source_only.json `
+  -o E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\diff_full_source_only.json `
   D:\ibcmd-rs\lab\ut_ibcmd_20260629_164647\ibcmd `
-  E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\ibcmd_rs_source_only
+  E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\ibcmd_rs_source_only
 ```
 
 The full JSON report is retained at
-`E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\diff_full_source_only.json`.
+`E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\diff_full_source_only.json`.
 A matching signature-mining report for this snapshot is retained at
-`E:\ibcmd_lab\full_diff_20260701_140349_full_snapshot\source-diff-signatures.json`
+`E:\ibcmd_lab\full_diff_20260702_0001_readme_refresh\source-diff-signatures.json`
 to rank repeated XML path differences for the next agent batches.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated from the current direct
-MSSQL export path on July 1, 2026.
+MSSQL export path on July 2, 2026.
 
 Raw source-only summary:
 
 | left_only | right_only | different | unchanged |
 |---:|---:|---:|---:|
-| 1 | 0 | 16809 | 32813 |
+| 1 | 0 | 10276 | 39346 |
 
 The only `left_only` file is `ConfigDumpInfo.xml`; it remains a deliberate
 scope exclusion and is not counted as parity debt.
 
-Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **66.1%**
-(`32813 / 49622` byte-identical files; 66.13% exact), with **16809** files still different.
+Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **79.3%**
+(`39346 / 49622` byte-identical files; 79.29% exact), with **10276** files still different.
+
+Latest full-run timing for this same snapshot: `40,576` rows /
+`927,826,268` bytes (`~884.9 MiB`) exported in `130.3 s` end-to-end, or about
+`311.4 rows/s` and `6.8 MiB/s` overall. Raw BCP fetch took `11.594 s`
+(`76.3 MiB/s`, `10` batches, max batch `150,528,526` bytes). The largest CPU
+buckets remained `metadata_xml_cpu_ms=388275`, `source_asset_cpu_ms=338262`,
+`source_asset_form_xml_cpu_ms=137033`, and
+`source_asset_form_child_items_cpu_ms=62445`.
 
 Verification history:
 
@@ -334,29 +342,29 @@ Diff by file kind:
 | StyleItems | done | 400 | 400 | 0 | 100.0 |
 | WSReferences | done | 2 | 2 | 0 | 100.0 |
 | XDTOPackages | done | 814 | 814 | 0 | 100.0 |
-| Enums | partial | 1195 | 1136 | 59 | 95.1 |
-| CommonTemplates | partial | 495 | 409 | 86 | 82.6 |
-| Reports | partial | 2362 | 1599 | 763 | 67.7 |
-| AccumulationRegisters | partial | 449 | 267 | 182 | 59.5 |
-| Roles | partial | 2220 | 1207 | 1013 | 54.4 |
-| ExchangePlans | partial | 366 | 191 | 175 | 52.2 |
-| HTTPServices | partial | 10 | 5 | 5 | 50.0 |
+| Enums | partial | 1195 | 1179 | 16 | 98.7 |
+| CommonTemplates | partial | 495 | 414 | 81 | 83.6 |
+| Reports | partial | 2362 | 1857 | 505 | 78.6 |
+| AccumulationRegisters | partial | 449 | 307 | 142 | 68.4 |
+| Roles | done | 2220 | 2220 | 0 | 100.0 |
+| ExchangePlans | partial | 366 | 271 | 95 | 74.0 |
+| HTTPServices | partial | 10 | 8 | 2 | 80.0 |
 | WebServices | partial | 36 | 18 | 18 | 50.0 |
-| DocumentJournals | partial | 121 | 60 | 61 | 49.6 |
-| DataProcessors | partial | 7058 | 3489 | 3569 | 49.4 |
-| Tasks | partial | 49 | 23 | 26 | 46.9 |
-| Catalogs | partial | 6705 | 3071 | 3634 | 45.8 |
-| Documents | partial | 6219 | 2799 | 3420 | 45.0 |
-| InformationRegisters | partial | 3978 | 1751 | 2227 | 44.0 |
+| DocumentJournals | partial | 121 | 88 | 33 | 72.7 |
+| DataProcessors | partial | 7058 | 4016 | 3042 | 56.9 |
+| Tasks | partial | 49 | 34 | 15 | 69.4 |
+| Catalogs | partial | 6705 | 4726 | 1979 | 70.5 |
+| Documents | partial | 6219 | 4478 | 1741 | 72.0 |
+| ChartsOfCharacteristicTypes | partial | 167 | 116 | 51 | 69.5 |
+| InformationRegisters | partial | 3978 | 2501 | 1477 | 62.9 |
 | CommonAttributes | partial | 7 | 3 | 4 | 42.9 |
-| ChartsOfCharacteristicTypes | partial | 167 | 70 | 97 | 41.9 |
-| BusinessProcesses | partial | 152 | 63 | 89 | 41.4 |
-| SettingsStorages | partial | 82 | 32 | 50 | 39.0 |
-| CommonForms | partial | 1116 | 411 | 705 | 36.8 |
-| Subsystems | partial | 766 | 147 | 619 | 19.2 |
+| BusinessProcesses | partial | 152 | 100 | 52 | 65.8 |
+| SettingsStorages | partial | 82 | 53 | 29 | 64.6 |
+| CommonForms | partial | 1116 | 676 | 440 | 60.6 |
+| Subsystems | partial | 766 | 219 | 547 | 28.6 |
 | FilterCriteria | partial | 7 | 1 | 6 | 14.3 |
 | Configuration.xml | partial | 1 | 0 | 1 | 0.0 |
-| **Overall full snapshot** | **partial** | **49622** | **32813** | **16809** | **66.1** |
+| **Overall full snapshot** | **partial** | **49622** | **39346** | **10276** | **79.3** |
 
 ## Scope Exclusions
 

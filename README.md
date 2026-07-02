@@ -35,29 +35,29 @@ import hierarchy, not as a production runtime dependency.
 | Object / group | Status | Ready | Remaining |
 |---|---|---:|---:|
 | CommandGroups, CommonCommands, CommonModules, CommonPictures, Constants, DefinedTypes, DocumentNumerators, EventSubscriptions, Ext, FunctionalOptions, FunctionalOptionsParameters, IntegrationServices, Languages, ScheduledJobs, SessionParameters, StyleItems, WSReferences, XDTOPackages | done / byte-identical | 100.0% | 0 |
-| Enums | partial | 95.1% | 59 |
-| CommonTemplates | partial | 82.6% | 86 |
-| Reports | partial | 67.7% | 763 |
-| AccumulationRegisters | partial | 59.5% | 182 |
-| Roles | partial | 54.4% | 1013 |
-| ExchangePlans | partial | 52.2% | 175 |
-| HTTPServices | partial | 50.0% | 5 |
+| Enums | partial | 98.7% | 16 |
+| CommonTemplates | partial | 83.6% | 81 |
+| Reports | partial | 78.6% | 505 |
+| AccumulationRegisters | partial | 68.4% | 142 |
+| Roles | done / byte-identical | 100.0% | 0 |
+| ExchangePlans | partial | 74.0% | 95 |
+| HTTPServices | partial | 80.0% | 2 |
 | WebServices | partial | 50.0% | 18 |
-| DocumentJournals | partial | 49.6% | 61 |
-| DataProcessors | partial | 49.4% | 3569 |
-| Tasks | partial | 46.9% | 26 |
-| Catalogs | partial | 45.8% | 3634 |
-| Documents | partial | 45.0% | 3420 |
-| InformationRegisters | partial | 44.0% | 2227 |
+| DocumentJournals | partial | 72.7% | 33 |
+| DataProcessors | partial | 56.9% | 3042 |
+| Tasks | partial | 69.4% | 15 |
+| Documents | partial | 72.0% | 1741 |
+| Catalogs | partial | 70.5% | 1979 |
+| ChartsOfCharacteristicTypes | partial | 69.5% | 51 |
+| InformationRegisters | partial | 62.9% | 1477 |
 | CommonAttributes | partial | 42.9% | 4 |
-| ChartsOfCharacteristicTypes | partial | 41.9% | 97 |
-| BusinessProcesses | partial | 41.4% | 89 |
-| SettingsStorages | partial | 39.0% | 50 |
-| CommonForms | partial | 36.8% | 705 |
-| Subsystems | partial | 19.2% | 619 |
+| BusinessProcesses | partial | 65.8% | 52 |
+| SettingsStorages | partial | 64.6% | 29 |
+| CommonForms | partial | 60.6% | 440 |
+| Subsystems | partial | 28.6% | 547 |
 | FilterCriteria | partial | 14.3% | 6 |
 | Configuration.xml | partial | 0.0% | 1 |
-| **Overall full snapshot** | **partial** | **66.1%** | **16809** |
+| **Overall full snapshot** | **partial** | **79.3%** | **10276** |
 
 Current live `ut_ibcmd` scoped roundtrip queue status, verified alongside the
 latest full snapshot and tracked separately from the full-export parity table above:
@@ -72,6 +72,13 @@ Note: these percentages describe the current direct MSSQL scoped roundtrip
 queue on the reference database `Srvr="localhost";Ref="ut_ibcmd"`. They are
 not a replacement for the full-snapshot export parity percentages above, which
 must only change after a fresh full diff is regenerated.
+
+Latest full-run timing on July 2, 2026: `40,576` rows / `927,826,268` bytes
+(`~884.9 MiB`) exported in `130.3 s` end-to-end, or about `311.4 rows/s` and
+`6.8 MiB/s` overall. Raw BCP fetch took `11.594 s` (`76.3 MiB/s`), while the
+largest CPU buckets remained `metadata_xml_cpu_ms=388275`,
+`source_asset_form_xml_cpu_ms=137033`, and
+`source_asset_form_child_items_cpu_ms=62445`.
 
 Latest verified slices:
 
