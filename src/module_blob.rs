@@ -1780,6 +1780,9 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
         &spreadsheet,
     ));
     fields.extend(format_spreadsheet_column_sets_for_moxel(&spreadsheet));
+    fields.extend(format_spreadsheet_vertical_groups_for_moxel(
+        &spreadsheet.vertical_groups,
+    ));
     if !spreadsheet.merges.is_empty() || !spreadsheet.vertical_unmerges.is_empty() {
         fields.push(format_spreadsheet_merge_regions_for_moxel(
             &spreadsheet.merges,
@@ -1836,6 +1839,7 @@ struct SpreadsheetDocumentXml {
     column_count: usize,
     column_sets: Vec<SpreadsheetDocumentXmlColumnSet>,
     rows: Vec<SpreadsheetDocumentXmlRow>,
+    vertical_groups: Vec<SpreadsheetDocumentXmlVerticalGroup>,
     merges: Vec<SpreadsheetDocumentXmlMerge>,
     vertical_unmerges: Vec<SpreadsheetDocumentXmlMerge>,
     areas: Vec<SpreadsheetDocumentXmlArea>,
@@ -1859,7 +1863,7 @@ struct SpreadsheetDocumentXmlColumnSet {
 
 #[derive(Debug, Default)]
 struct SpreadsheetDocumentXmlColumn {
-    index: usize,
+    index: i32,
     format_index: usize,
 }
 
@@ -1888,6 +1892,12 @@ struct SpreadsheetDocumentXmlCell {
     parameter: Option<String>,
     detail_parameter: Option<String>,
     empty_text: bool,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetDocumentXmlVerticalGroup {
+    begin_row: usize,
+    end_row: usize,
 }
 
 #[derive(Debug, Default)]
@@ -1950,6 +1960,7 @@ struct SpreadsheetDocumentXmlFormat {
     text_orientation: Option<usize>,
     fill_type: Option<String>,
     number_format: Vec<LocalizedString>,
+    edit_format: Vec<LocalizedString>,
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
     details_use: Option<String>,
@@ -2034,11 +2045,13 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     let mut current_column = None::<SpreadsheetDocumentXmlColumn>;
     let mut current_row = None::<SpreadsheetDocumentXmlRow>;
     let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
+    let mut current_vertical_group = None::<SpreadsheetDocumentXmlVerticalGroup>;
     let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
     let mut current_area = None::<SpreadsheetDocumentXmlArea>;
     let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
     let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
     let mut current_number_format_item = None::<LocalizedString>;
+    let mut current_edit_format_item = None::<LocalizedString>;
     let mut current_line = None::<SpreadsheetDocumentXmlLine>;
     let mut current_header_footer = None::<SpreadsheetDocumentXmlHeaderFooter>;
     let mut current_picture = None::<SpreadsheetDocumentXmlPicture>;
@@ -2058,6 +2071,8 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                 } else if local == "rowsItem" {
                     current_row = Some(SpreadsheetDocumentXmlRow::default());
                     next_column_index = 0;
+                } else if local == "vg" {
+                    current_vertical_group = Some(SpreadsheetDocumentXmlVerticalGroup::default());
                 } else if local == "merge" || local == "verticalUnmerge" {
                     current_merge = Some(SpreadsheetDocumentXmlMerge::default());
                 } else if local == "namedItem" && spreadsheet_named_item_is_cells(&event)? {
@@ -2072,6 +2087,13 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && path_ends_with(&path, &["document", "format", "format"])
                 {
                     current_number_format_item = Some(LocalizedString {
+                        lang: String::new(),
+                        content: String::new(),
+                    });
+                } else if local == "item"
+                    && path_ends_with(&path, &["document", "format", "editFormat"])
+                {
+                    current_edit_format_item = Some(LocalizedString {
                         lang: String::new(),
                         content: String::new(),
                     });
@@ -2184,6 +2206,7 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     current_column.as_mut(),
                     current_row.as_mut(),
                     current_cell.as_mut(),
+                    current_vertical_group.as_mut(),
                     current_merge.as_mut(),
                     current_area.as_mut(),
                     current_print_settings.as_mut(),
@@ -2198,9 +2221,22 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(item) = current_number_format_item.as_mut()
                 {
                     item.lang = text.trim().to_string();
+                } else if local == "lang"
+                    && path_ends_with(&path, &["document", "format", "editFormat", "item", "lang"])
+                    && let Some(item) = current_edit_format_item.as_mut()
+                {
+                    item.lang = text.trim().to_string();
                 } else if local == "content"
                     && path_ends_with(&path, &["document", "format", "format", "item", "content"])
                     && let Some(item) = current_number_format_item.as_mut()
+                {
+                    item.content = text.to_string();
+                } else if local == "content"
+                    && path_ends_with(
+                        &path,
+                        &["document", "format", "editFormat", "item", "content"],
+                    )
+                    && let Some(item) = current_edit_format_item.as_mut()
                 {
                     item.content = text.to_string();
                 }
@@ -2224,6 +2260,10 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                         row.cells.sort_by_key(|cell| cell.column_index);
                     }
                     document.rows.push(row);
+                } else if local == "vg"
+                    && let Some(vertical_group) = current_vertical_group.take()
+                {
+                    document.vertical_groups.push(vertical_group);
                 } else if local == "columnsItem"
                     && let Some(column) = current_column.take()
                     && let Some(column_set) = current_column_set.as_mut()
@@ -2260,6 +2300,12 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
                     && let Some(format) = current_format.as_mut()
                 {
                     format.number_format.push(item);
+                } else if local == "item"
+                    && path_ends_with(&path, &["document", "format", "editFormat", "item"])
+                    && let Some(item) = current_edit_format_item.take()
+                    && let Some(format) = current_format.as_mut()
+                {
+                    format.edit_format.push(item);
                 } else if local == "format"
                     && path_ends_with(&path, &["document", "format"])
                     && let Some(format) = current_format.take()
@@ -2447,6 +2493,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "pageWidth"
             | "pageHeight"
             | "defaultFormatIndex"
+            | "vgLevels"
             | "font"
             | "border"
             | "leftBorder"
@@ -2485,6 +2532,8 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "pictureSize"
             | "zOrder"
             | "pictureIndex"
+            | "b"
+            | "e"
     )
 }
 
@@ -2497,6 +2546,7 @@ fn apply_spreadsheet_text_value(
     column: Option<&mut SpreadsheetDocumentXmlColumn>,
     row: Option<&mut SpreadsheetDocumentXmlRow>,
     cell: Option<&mut SpreadsheetDocumentXmlCell>,
+    vertical_group: Option<&mut SpreadsheetDocumentXmlVerticalGroup>,
     merge: Option<&mut SpreadsheetDocumentXmlMerge>,
     area: Option<&mut SpreadsheetDocumentXmlArea>,
     print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
@@ -2525,7 +2575,7 @@ fn apply_spreadsheet_text_value(
         }
         "index" if path_ends_with(path, &["columns", "columnsItem", "index"]) => {
             if let Some(column) = column
-                && let Ok(index) = value.parse::<usize>()
+                && let Ok(index) = value.parse::<i32>()
             {
                 column.index = index;
             }
@@ -2619,6 +2669,21 @@ fn apply_spreadsheet_text_value(
         "detailParameter" => {
             if let Some(cell) = cell {
                 cell.detail_parameter = Some(text.to_string());
+            }
+        }
+        "b" if path_ends_with(path, &["vg", "b"]) => {
+            if let Some(vertical_group) = vertical_group
+                && let Ok(begin_row) = value.parse::<usize>()
+            {
+                vertical_group.begin_row = begin_row;
+                vertical_group.end_row = begin_row;
+            }
+        }
+        "e" if path_ends_with(path, &["vg", "e"]) => {
+            if let Some(vertical_group) = vertical_group
+                && let Ok(end_row) = value.parse::<usize>()
+            {
+                vertical_group.end_row = end_row;
             }
         }
         "r" if spreadsheet_merge_property_path(path, "r") => {
@@ -3224,6 +3289,27 @@ fn format_spreadsheet_empty_headers_footers_for_moxel(
     vec!["{16,0,{1,0},1,{1,{1,0},1}}".to_string(); tags.len()]
 }
 
+fn spreadsheet_column_set_max_index_plus_one(
+    column_sets: &[SpreadsheetDocumentXmlColumnSet],
+) -> Option<usize> {
+    column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .filter_map(|column| usize::try_from(column.index).ok())
+        .map(|index| index + 1)
+        .max()
+}
+
+fn spreadsheet_columns_max_index_plus_one(
+    columns: &[SpreadsheetDocumentXmlColumn],
+) -> Option<usize> {
+    columns
+        .iter()
+        .filter_map(|column| usize::try_from(column.index).ok())
+        .map(|index| index + 1)
+        .max()
+}
+
 fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml) -> Vec<String> {
     let has_column_metadata = spreadsheet
         .column_sets
@@ -3236,14 +3322,7 @@ fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml
 
     let column_count = spreadsheet
         .column_count
-        .max(
-            spreadsheet
-                .column_sets
-                .iter()
-                .flat_map(|column_set| column_set.columns.iter().map(|column| column.index + 1))
-                .max()
-                .unwrap_or(1),
-        )
+        .max(spreadsheet_column_set_max_index_plus_one(&spreadsheet.column_sets).unwrap_or(1))
         .max(1);
     let default_set = spreadsheet
         .column_sets
@@ -3306,19 +3385,18 @@ fn format_spreadsheet_column_set_for_moxel(
     fallback_size: usize,
     id: Option<&str>,
 ) -> String {
-    let declared_size = column_set
-        .map(|column_set| column_set.size)
-        .filter(|size| *size > 0)
-        .unwrap_or(fallback_size);
-    let size = declared_size
-        .max(
+    let size = if let Some(column_set) = column_set {
+        if column_set.size == 0 {
+            0
+        } else {
             column_set
-                .into_iter()
-                .flat_map(|column_set| column_set.columns.iter().map(|column| column.index + 1))
-                .max()
-                .unwrap_or(1),
-        )
-        .max(1);
+                .size
+                .max(spreadsheet_columns_max_index_plus_one(&column_set.columns).unwrap_or(1))
+                .max(1)
+        }
+    } else {
+        fallback_size.max(1)
+    };
     let synthesized;
     let columns = if let Some(column_set) = column_set {
         if column_set.columns.is_empty() {
@@ -3347,10 +3425,48 @@ fn format_spreadsheet_column_set_for_moxel(
 fn synthesize_spreadsheet_columns(size: usize) -> Vec<SpreadsheetDocumentXmlColumn> {
     (0..size)
         .map(|index| SpreadsheetDocumentXmlColumn {
-            index,
+            index: index as i32,
             format_index: index + 1,
         })
         .collect()
+}
+
+fn format_spreadsheet_vertical_groups_for_moxel(
+    vertical_groups: &[SpreadsheetDocumentXmlVerticalGroup],
+) -> Vec<String> {
+    if vertical_groups.is_empty() {
+        return Vec::new();
+    }
+    let levels = spreadsheet_vertical_group_levels(vertical_groups);
+    let mut fields = Vec::with_capacity(vertical_groups.len() * 2 + 4);
+    fields.push(vertical_groups.len().to_string());
+    for (group, level) in vertical_groups.iter().zip(levels) {
+        fields.push(format!(
+            "{{{},{},{},{{1,0}},0,0}}",
+            group.begin_row, group.end_row, level
+        ));
+        fields.push("-1".to_string());
+    }
+    fields.extend(["0", "0", "0"].into_iter().map(String::from));
+    fields
+}
+
+fn spreadsheet_vertical_group_levels(
+    vertical_groups: &[SpreadsheetDocumentXmlVerticalGroup],
+) -> Vec<usize> {
+    let mut active_ends = Vec::<usize>::new();
+    let mut levels = Vec::with_capacity(vertical_groups.len());
+    for group in vertical_groups {
+        while active_ends
+            .last()
+            .is_some_and(|end| group.begin_row > *end || group.end_row > *end)
+        {
+            active_ends.pop();
+        }
+        levels.push(active_ends.len());
+        active_ends.push(group.end_row.max(group.begin_row));
+    }
+    levels
 }
 
 fn format_spreadsheet_merge_regions_for_moxel(
@@ -3754,6 +3870,16 @@ fn format_spreadsheet_format_for_moxel(
         24,
         spreadsheet_number_format_index(
             &format.number_format,
+            raw_format_position,
+            number_format_hint,
+            number_format_refs,
+        ),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
+        32,
+        spreadsheet_number_format_index(
+            &format.edit_format,
             raw_format_position,
             number_format_hint,
             number_format_refs,
@@ -8975,7 +9101,7 @@ fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandC
 fn parse_form_window_opening_mode_xml(value: &str) -> Result<FormXmlWindowOpeningMode> {
     match value {
         "DontBlock" => Ok(FormXmlWindowOpeningMode::DontBlock),
-        "LockOwner" => Ok(FormXmlWindowOpeningMode::LockOwner),
+        "LockOwner" | "LockOwnerWindow" => Ok(FormXmlWindowOpeningMode::LockOwner),
         "LockWholeInterface" => Ok(FormXmlWindowOpeningMode::LockWholeInterface),
         other => Err(anyhow!("unsupported Form WindowOpeningMode: {other}")),
     }
@@ -20648,23 +20774,48 @@ fn parse_common_command_picture(
 
 fn common_command_standard_picture_code(reference: &str) -> Option<i32> {
     match reference.trim() {
+        "StdPicture.InputFieldClear" => Some(-2),
+        "StdPicture.MoveUp" => Some(-3),
+        "StdPicture.MoveDown" => Some(-4),
         "StdPicture.InputFieldOpen" => Some(-7),
+        "StdPicture.MoveRight" => Some(-9),
+        "StdPicture.CheckAll" => Some(-10),
+        "StdPicture.UncheckAll" => Some(-11),
         _ => None,
     }
 }
 
 fn common_command_standard_picture_uuid(reference: &str) -> Option<&'static str> {
     match reference.trim() {
+        "StdPicture.Information" => Some(STD_PICTURE_INFORMATION_UUID),
+        "StdPicture.SaveFile" => Some(STD_PICTURE_SAVE_FILE_UUID),
         "StdPicture.User" => Some(STD_PICTURE_USER_UUID),
         "StdPicture.LoadReportSettings" => Some(STD_PICTURE_LOAD_REPORT_SETTINGS_UUID),
+        "StdPicture.Change" => Some("97b2cc97-d5c6-45fb-9824-9d6d73db21fe"),
         "StdPicture.Task" => Some("37cf7cc0-abad-4385-b597-6fd2d8dc085a"),
         "StdPicture.ChooseValue" => Some("2f130057-bb2a-4e22-bba5-e108fac26940"),
         "StdPicture.DataHistory" => Some("e8a49985-fef7-45a9-b6bb-ddd2b9028172"),
         "StdPicture.BusinessProcessObject" => Some("a24cff7f-a1a5-4403-af82-a7b31852cde9"),
+        "StdPicture.CloneObject" => Some("f6532868-30b9-44ab-803c-78f0f0b06b02"),
         "StdPicture.CloneListItem" => Some("448d6f55-d885-496c-870d-d1bd78374745"),
         "StdPicture.EventLog" => Some("723765ab-0b92-4745-a621-1ba0f77c92c9"),
+        "StdPicture.EventLogByUser" => Some("4fddea39-5129-4b4c-83fe-4e443cd61940"),
+        "StdPicture.Find" => Some("ffab30f1-da11-44b5-b34c-24da22badcf4"),
         "StdPicture.CreateInitialImage" => Some("4d2570b5-205f-413c-b4cc-b2097f61684f"),
+        "StdPicture.GenerateReport" => Some("0ce78048-0196-4f80-a781-9829cdb7f43e"),
+        "StdPicture.MarkToDelete" => Some("18492a87-2fe4-44af-b218-304897fed020"),
+        "StdPicture.Post" => Some("20ebc47b-f4d9-439c-acd3-fdc624fbac2a"),
+        "StdPicture.Reread" => Some("8f29e0e2-d5e6-41e8-a34d-9a0288156322"),
+        "StdPicture.Report" => Some("db817ee1-fd28-4e7f-bb4a-53686b2b153c"),
+        "StdPicture.ScheduledJob" => Some("1970a480-9b38-405e-9d9e-8209f3fad5f1"),
+        "StdPicture.SetDateInterval" => Some("58174855-39be-462e-8723-cb2d95182146"),
+        "StdPicture.SetTime" => Some("55ef0776-5ee4-4daf-9a9b-70d63643ab8d"),
+        "StdPicture.Refresh" => Some("fc4f29e0-d168-4fe0-8e64-e982fabf2595"),
+        "StdPicture.SortListAsc" => Some("91022b99-b610-48ad-954e-a297848081ce"),
+        "StdPicture.SortListDesc" => Some("1fa32fdb-a180-418f-a6eb-db7516b7a30b"),
+        "StdPicture.UndoPosting" => Some("8ca4ea33-603d-4992-8a41-c7924b5bd40b"),
         "StdPicture.Write" => Some("894cf65b-4109-4533-a1d7-c87b1fcc80a3"),
+        "StdPicture.WriteAndClose" => Some("e6fc55a0-3d58-4b15-bdd3-717453929598"),
         "StdPicture.Delete" => Some("08a45a70-c221-4339-b3b1-9f11cb22147d"),
         _ => None,
     }
@@ -24063,6 +24214,117 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_spreadsheet_column_sets_with_negative_index() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</id>
+		<size>1</size>
+		<columnsItem>
+			<index>-1</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>2</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+
+        assert!(text.contains("{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,2,-1,1,0,2}"));
+        assert!(extracted.contains("<id>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</id>"));
+        assert!(extracted.contains("<index>-1</index>"));
+        assert!(extracted.contains("<index>0</index>"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_zero_sized_default_column_set() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>0</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+		<columnsItem>
+			<index>2</index>
+			<column>
+				<formatIndex>2</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>3</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+
+        assert!(text.contains(
+            "{0,0,00000000-0000-0000-0000-000000000000,2,0,1,2,2},1,1,{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,3}"
+        ));
+        assert!(extracted.contains("<size>0</size>"));
+        assert!(extracted.contains("<index>2</index>"));
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_spreadsheet_empty_row_ranges() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
@@ -24599,6 +24861,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_spreadsheet_edit_format_string_table() -> anyhow::Result<()> {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+					<parameter>Name</parameter>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format/>
+	<format>
+		<format>
+			<v8:item>
+				<v8:lang>ru</v8:lang>
+				<v8:content>ЧДЦ=2</v8:content>
+			</v8:item>
+		</format>
+		<editFormat>
+			<v8:item>
+				<v8:lang>ru</v8:lang>
+				<v8:content>ЧДЦ=2</v8:content>
+			</v8:item>
+		</editFormat>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains(r#"{2,{4311744512,1,1},{0}}"#));
+        assert!(text.contains(r#"2,{1,0},{1,1,{"ru","ЧДЦ=2"}}"#));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_spreadsheet_text_orientation_format() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
@@ -24939,6 +25248,46 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
 
         assert!(text.contains("{2,{1,2,4,2,0},{1,3,4,3,2}}"));
+        assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_vertical_groups() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<vgLevels>3</vgLevels>
+	<vgRows>6</vgRows>
+	<vg>
+		<b>1</b>
+		<e>5</e>
+	</vg>
+	<vg>
+		<b>2</b>
+		<e>4</e>
+	</vg>
+	<vg>
+		<b>3</b>
+	</vg>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(
+            text.contains("3,{1,5,0,{1,0},0,0},-1,{2,4,1,{1,0},0,0},-1,{3,3,2,{1,0},0,0},-1,0,0,0")
+        );
         assert_eq!(packed.plain_bytes, text.len());
 
         Ok(())
@@ -25371,6 +25720,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let fields = super::scan_braced_fields(&parsed.layout, 0)?;
 
         assert_eq!(&parsed.layout[fields[2].clone()], "0");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_lock_owner_window_alias() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,0,2,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<WindowOpeningMode>LockOwnerWindow</WindowOpeningMode>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
+
+        assert_eq!(&parsed.layout[fields[2].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
@@ -33247,8 +33617,48 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             Some("723765ab-0b92-4745-a621-1ba0f77c92c9")
         );
         assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.CloneObject"),
+            Some("f6532868-30b9-44ab-803c-78f0f0b06b02")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.Find"),
+            Some("ffab30f1-da11-44b5-b34c-24da22badcf4")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.MarkToDelete"),
+            Some("18492a87-2fe4-44af-b218-304897fed020")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.Post"),
+            Some("20ebc47b-f4d9-439c-acd3-fdc624fbac2a")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.Reread"),
+            Some("8f29e0e2-d5e6-41e8-a34d-9a0288156322")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.Report"),
+            Some("db817ee1-fd28-4e7f-bb4a-53686b2b153c")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.ScheduledJob"),
+            Some("1970a480-9b38-405e-9d9e-8209f3fad5f1")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.SetTime"),
+            Some("55ef0776-5ee4-4daf-9a9b-70d63643ab8d")
+        );
+        assert_eq!(
+            super::common_command_standard_picture_uuid("StdPicture.UndoPosting"),
+            Some("8ca4ea33-603d-4992-8a41-c7924b5bd40b")
+        );
+        assert_eq!(
             super::common_command_standard_picture_code("StdPicture.InputFieldOpen"),
             Some(-7)
+        );
+        assert_eq!(
+            super::common_command_standard_picture_code("StdPicture.MoveRight"),
+            Some(-9)
         );
         assert_eq!(
             super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
@@ -33256,6 +33666,13 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 load_transparent: true
             }),
             r#"{4,1,{-7},"",-1,-1,1,0,""}"#
+        );
+        assert_eq!(
+            super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
+                code: -9,
+                load_transparent: true
+            }),
+            r#"{4,1,{-9},"",-1,-1,1,0,""}"#
         );
     }
 

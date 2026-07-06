@@ -38,6 +38,8 @@ const STD_PICTURE_SAVE_FILE_UUID: &str = "818ab7d0-4654-4542-bd5e-fd9d1352b5a1";
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
 const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
+const STD_PICTURE_SHOW_DATA_UUID: &str = "a064544f-6037-48ca-b19f-8ad63e43af23";
+const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013c85";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlDumpConfigReport {
@@ -3271,14 +3273,18 @@ fn write_source_asset(
                 })?;
                 &owned_body
             };
-            let xml =
-                extract_form_body_xml_from_body_timed(body, context.object_refs, Some(timings))
-                    .with_context(|| {
-                        format!(
-                            "failed to extract form xml from source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?;
+            let xml = extract_form_body_xml_from_body_timed(
+                body,
+                context.type_index,
+                context.object_refs,
+                Some(timings),
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract form xml from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -3604,12 +3610,16 @@ struct MoxelSpreadsheet {
     column_count: usize,
     column_sets: Vec<MoxelColumnSet>,
     column_formats: Vec<MoxelFormat>,
+    extra_formats: BTreeMap<usize, MoxelFormat>,
     default_format_width: Option<usize>,
     default_format: MoxelFormat,
     formats: Vec<MoxelFormat>,
     rows: Vec<MoxelRow>,
+    vertical_groups: Vec<MoxelVerticalGroup>,
     merges: Vec<MoxelMerge>,
+    horizontal_unmerges: Vec<MoxelMerge>,
     vertical_unmerges: Vec<MoxelMerge>,
+    named_items: Vec<MoxelNamedItem>,
     areas: Vec<MoxelArea>,
     print_area: Option<MoxelArea>,
     print_settings: Option<MoxelPrintSettings>,
@@ -3618,6 +3628,7 @@ struct MoxelSpreadsheet {
     drawings: Vec<MoxelDrawing>,
     pictures: Vec<MoxelPicture>,
     empty_headers_footers: bool,
+    header_footer_format_index: Option<usize>,
     default_format_index: Option<usize>,
     height: usize,
 }
@@ -3627,18 +3638,21 @@ struct MoxelRow {
     index: usize,
     index_to: Option<usize>,
     format_index: usize,
+    source_format_index: Option<usize>,
     columns_id: Option<String>,
     cells: Vec<MoxelCell>,
 }
 
 struct MoxelColumnSet {
     id: Option<String>,
+    default_format_index: Option<usize>,
+    source_default_format_index: Option<usize>,
     size: usize,
     columns: Vec<MoxelColumn>,
 }
 
 struct MoxelColumn {
-    index: usize,
+    index: i32,
     format_index: usize,
     source_format_index: Option<usize>,
 }
@@ -3647,6 +3661,7 @@ struct MoxelColumn {
 struct MoxelCell {
     column_index: usize,
     format_index: usize,
+    source_format_index: Option<usize>,
     text: Option<String>,
     parameter: Option<String>,
     detail_parameter: Option<String>,
@@ -3659,6 +3674,13 @@ struct MoxelLocalizedValue {
     content: String,
 }
 
+#[derive(Clone)]
+enum MoxelNamedItem {
+    Cells(MoxelArea),
+    Drawing { name: String, drawing_id: usize },
+}
+
+#[derive(Clone)]
 struct MoxelArea {
     name: String,
     area_type: &'static str,
@@ -3669,17 +3691,25 @@ struct MoxelArea {
     columns_id: Option<String>,
 }
 
+struct MoxelVerticalGroup {
+    begin_row: usize,
+    end_row: usize,
+    level: usize,
+}
+
+#[derive(Clone)]
 struct MoxelMerge {
     row: i32,
     column: i32,
     height: i32,
     width: i32,
+    columns_id: Option<String>,
 }
 
 struct MoxelFont {
     ref_name: Option<String>,
     face_name: Option<String>,
-    height: Option<usize>,
+    height: Option<String>,
     bold: bool,
     italic: bool,
     underline: bool,
@@ -3695,6 +3725,7 @@ struct MoxelLine {
 }
 
 struct MoxelDrawing {
+    id: usize,
     format_index: usize,
     begin_row: i32,
     begin_row_offset: i32,
@@ -3713,6 +3744,7 @@ struct MoxelDrawing {
 struct MoxelPicture {
     index: usize,
     ref_name: Option<String>,
+    payload: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -3737,7 +3769,7 @@ struct MoxelPrintSettings {
     page_height: Option<usize>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 struct MoxelFormat {
     font: Option<usize>,
     border: Option<usize>,
@@ -3745,22 +3777,28 @@ struct MoxelFormat {
     top_border: Option<usize>,
     right_border: Option<usize>,
     bottom_border: Option<usize>,
-    height: Option<usize>,
+    height: Option<i32>,
     border_color: Option<String>,
     width: Option<usize>,
+    width_weight_factor: Option<usize>,
     horizontal_alignment: Option<&'static str>,
     vertical_alignment: Option<&'static str>,
     back_color: Option<String>,
+    pattern: Option<&'static str>,
     text_color: Option<String>,
     text_placement: Option<&'static str>,
     text_orientation: Option<usize>,
     fill_type: Option<&'static str>,
+    number_format_present: bool,
     number_format: Vec<MoxelLocalizedValue>,
+    edit_format_present: bool,
+    edit_format: Vec<MoxelLocalizedValue>,
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
     details_use: Option<&'static str>,
     hyper_link: Option<bool>,
     protection: Option<bool>,
+    hidden: Option<bool>,
     indent: Option<usize>,
     auto_indent: Option<usize>,
     mask: Option<&'static str>,
@@ -3768,6 +3806,7 @@ struct MoxelFormat {
     picture_size_mode: Option<&'static str>,
     pic_horizontal_alignment: Option<&'static str>,
     pic_vertical_alignment: Option<&'static str>,
+    text_position: Option<&'static str>,
 }
 
 impl MoxelFormat {
@@ -3781,19 +3820,25 @@ impl MoxelFormat {
             && self.height.is_none()
             && self.border_color.is_none()
             && self.width.is_none()
+            && self.width_weight_factor.is_none()
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
             && self.back_color.is_none()
+            && self.pattern.is_none()
             && self.text_color.is_none()
             && self.text_placement.is_none()
             && self.text_orientation.is_none()
             && self.fill_type.is_none()
+            && !self.number_format_present
             && self.number_format.is_empty()
+            && !self.edit_format_present
+            && self.edit_format.is_empty()
             && self.drawing_border.is_none()
             && self.by_selected_columns.is_none()
             && self.details_use.is_none()
             && self.hyper_link.is_none()
             && self.protection.is_none()
+            && self.hidden.is_none()
             && self.indent.is_none()
             && self.auto_indent.is_none()
             && self.mask.is_none()
@@ -3801,7 +3846,67 @@ impl MoxelFormat {
             && self.picture_size_mode.is_none()
             && self.pic_horizontal_alignment.is_none()
             && self.pic_vertical_alignment.is_none()
+            && self.text_position.is_none()
     }
+}
+
+fn normalize_moxel_default_match_format(mut format: MoxelFormat) -> MoxelFormat {
+    if format.font == Some(0) {
+        format.font = None;
+    }
+    format
+}
+
+fn resolve_existing_moxel_default_format_index(
+    column_formats: &[MoxelFormat],
+    formats: &[MoxelFormat],
+    default_format: &MoxelFormat,
+    default_format_width: Option<usize>,
+) -> Option<(usize, bool)> {
+    let all_formats = column_formats
+        .iter()
+        .chain(formats.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut target = default_format.clone();
+    if target.width.is_none() {
+        target.width = default_format_width;
+    }
+    if target.is_empty() {
+        return None;
+    }
+    let preferred_target_exact = if default_format.is_empty() && default_format_width.is_some() {
+        Some(MoxelFormat {
+            font: Some(0),
+            width: default_format_width,
+            ..MoxelFormat::default()
+        })
+    } else {
+        None
+    };
+    let target_exact = target.clone();
+    let target_normalized = normalize_moxel_default_match_format(target);
+    let last_exact_match = |target: &MoxelFormat| {
+        all_formats
+            .iter()
+            .enumerate()
+            .filter_map(|(index, format)| (format == target).then_some(index + 1))
+            .last()
+    };
+    preferred_target_exact
+        .as_ref()
+        .and_then(|target| last_exact_match(target).map(|index| (index, true)))
+        .or_else(|| last_exact_match(&target_exact).map(|index| (index, false)))
+        .or_else(|| {
+            all_formats
+                .iter()
+                .enumerate()
+                .filter_map(|(index, format)| {
+                    (normalize_moxel_default_match_format(format.clone()) == target_normalized)
+                        .then_some((index + 1, false))
+                })
+                .last()
+        })
 }
 
 struct CommandInterface {
@@ -4755,6 +4860,17 @@ fn is_offset_inside_register_dimension_list(text: &str, offset: usize) -> bool {
 fn is_offset_inside_tabular_section_attribute_list(text: &str, offset: usize) -> bool {
     const TABULAR_SECTION_ATTRIBUTE_LIST_MARKER: &str = "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,";
     let Some(start) = text[..offset].rfind(TABULAR_SECTION_ATTRIBUTE_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
+}
+
+fn is_offset_inside_data_processor_legacy_attribute_list(text: &str, offset: usize) -> bool {
+    const DATA_PROCESSOR_LEGACY_ATTRIBUTE_LIST_MARKER: &str =
+        "{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,";
+    let Some(start) = text[..offset].rfind(DATA_PROCESSOR_LEGACY_ATTRIBUTE_LIST_MARKER) else {
         return false;
     };
     scan_1c_braced_value(text, start)
@@ -7822,6 +7938,30 @@ fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
     Some(output)
 }
 
+#[cfg(test)]
+fn encode_base64_for_test(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        output.push(ALPHABET[(b0 >> 2) as usize] as char);
+        output.push(ALPHABET[((b0 & 0x03) << 4 | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[((b1 & 0x0f) << 2 | (b2 >> 6)) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(b2 & 0x3f) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+    output
+}
+
 fn base64_value(byte: u8) -> Option<u8> {
     match byte {
         b'A'..=b'Z' => Some(byte - b'A'),
@@ -8906,18 +9046,20 @@ pub(crate) fn extract_form_body_xml(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let body = parse_form_body_blob(bytes).ok()?;
-    extract_form_body_xml_from_body(&body, object_refs)
+    extract_form_body_xml_from_body(&body, object_refs, object_refs)
 }
 
 fn extract_form_body_xml_from_body(
     body: &ParsedFormBodyBlob,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    extract_form_body_xml_from_body_timed(body, object_refs, None)
+    extract_form_body_xml_from_body_timed(body, type_index, object_refs, None)
 }
 
 fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     mut timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
@@ -8940,10 +9082,13 @@ fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let attributes = extract_form_body_attributes(&body.trailing, object_refs);
+    let mut attributes = extract_form_body_attributes(&body.trailing, type_index, object_refs);
+    let attribute_save_field_bindings =
+        extract_form_body_attribute_save_field_bindings(&body.trailing, type_index, object_refs);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_attributes_cpu_ms += elapsed_ms(started);
     }
+    let attributes_section = extract_form_body_attributes_section(&body.trailing, object_refs);
 
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
@@ -8953,7 +9098,7 @@ fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let parameters = extract_form_body_parameters(&body.trailing, object_refs);
+    let parameters = extract_form_body_parameters(&body.trailing, type_index);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_parameters_cpu_ms += elapsed_ms(started);
     }
@@ -8971,7 +9116,26 @@ fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let child_items = extract_form_child_items(&form_fields, &attributes, &commands, object_refs);
+    let child_item_indexes = collect_form_child_item_indexes(&form_fields, &attributes);
+    apply_form_body_attribute_additional_columns(
+        &mut attributes,
+        &body.trailing,
+        type_index,
+        object_refs,
+        &child_item_indexes,
+    );
+    apply_form_attribute_save_field_bindings(
+        &mut attributes,
+        &attribute_save_field_bindings,
+        &child_item_indexes.data_path_by_binding_key,
+    );
+    let child_items = extract_form_child_items(
+        &form_fields,
+        &attributes,
+        &commands,
+        object_refs,
+        &child_item_indexes,
+    );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms += elapsed_ms(started);
     }
@@ -8989,6 +9153,7 @@ fn extract_form_body_xml_from_body_timed(
         &events,
         &child_items,
         &attributes,
+        &attributes_section,
         &parameters,
         &commands,
         &command_interface,
@@ -9073,10 +9238,18 @@ struct FormAttribute {
     name: String,
     title: Vec<(String, String)>,
     value_types: Vec<ConstantValueType>,
+    explicit_empty_type: bool,
     columns: Vec<FormAttributeColumn>,
+    additional_columns: Vec<FormAttributeAdditionalColumns>,
     main_attribute: bool,
+    saved_data: bool,
+    fill_check: Option<&'static str>,
+    save_fields: Vec<String>,
     use_always: Vec<String>,
+    functional_options: Vec<String>,
     settings: Option<FormDynamicListSettings>,
+    spreadsheet_document_settings: Option<String>,
+    type_description_settings: Option<Vec<ConstantValueType>>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -9085,29 +9258,48 @@ struct FormAttributeColumn {
     name: String,
     title: Vec<(String, String)>,
     value_types: Vec<ConstantValueType>,
+    explicit_empty_type: bool,
+    functional_options: Vec<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormAttributeAdditionalColumns {
+    table: String,
+    columns: Vec<FormAttributeColumn>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormParameter {
     name: String,
     value_types: Vec<ConstantValueType>,
+    explicit_empty_type: bool,
     key_parameter: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormDynamicListSettings {
     manual_query: bool,
+    auto_save_user_settings: bool,
     dynamic_data_read: bool,
+    dynamic_data_read_explicit: bool,
     query_text: Option<String>,
     main_table: Option<String>,
+    explicit_fields: Vec<FormDynamicListField>,
     fields: Vec<FormDynamicListField>,
+    server_state_xml: Option<String>,
     list_settings: FormListSettings,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormDynamicListField {
+    item_id: Option<String>,
     data_path: String,
     field: String,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormAttributesSection {
+    conditional_appearance_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -9123,6 +9315,7 @@ struct FormListSettings {
 struct FormListSettingsStandardSection {
     view_mode: Option<String>,
     user_setting_id: Option<String>,
+    raw_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -9130,6 +9323,7 @@ struct FormListSettingsOrder {
     items: Vec<FormListSettingsOrderItem>,
     view_mode: Option<String>,
     user_setting_id: Option<String>,
+    raw_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -9145,7 +9339,11 @@ struct FormCommand {
     name: String,
     title: Vec<(String, String)>,
     tooltip: Vec<(String, String)>,
+    picture_ref: Option<String>,
+    picture_load_transparent: bool,
+    shortcut: Option<String>,
     action: String,
+    representation: Option<&'static str>,
     functional_options: Vec<String>,
     modifies_saved_data: Option<bool>,
     current_row_use: Option<&'static str>,
@@ -9153,6 +9351,7 @@ struct FormCommand {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormCommandInterface {
+    command_bar: Vec<FormCommandInterfaceItem>,
     navigation_panel: Vec<FormCommandInterfaceItem>,
 }
 
@@ -9160,7 +9359,7 @@ struct FormCommandInterface {
 struct FormCommandInterfaceItem {
     command: String,
     item_type: &'static str,
-    command_group: String,
+    command_group: Option<String>,
     index: Option<usize>,
     default_visible: Option<bool>,
     visible_common: Option<bool>,
@@ -9184,28 +9383,54 @@ struct FormChildItem {
     auto_refresh: Option<bool>,
     auto_refresh_period: Option<String>,
     period: Option<FormTablePeriod>,
+    change_row_set: Option<bool>,
+    change_row_order: Option<bool>,
     command_set_excluded_commands: Vec<&'static str>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
+    row_input_mode: Option<&'static str>,
+    show_root: Option<bool>,
+    allow_root_choice: Option<bool>,
     choice_folders_and_items: Option<&'static str>,
     restore_current_row: Option<bool>,
     row_filter_nil: Option<bool>,
     row_picture_data_path: Option<String>,
+    rows_picture_ref: Option<String>,
+    rows_picture_load_transparent: bool,
+    top_level_parent_nil: Option<bool>,
     update_on_data_change: Option<&'static str>,
     user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
     button_representation: Option<&'static str>,
+    group_horizontal_align: Option<&'static str>,
+    horizontal_location: Option<&'static str>,
     location_in_command_bar: Option<&'static str>,
     default_button: Option<bool>,
     scroll_on_compress: Option<bool>,
     show_title: Option<bool>,
     show_in_header: Option<bool>,
+    user_visible_common: Option<bool>,
+    visible: Option<bool>,
     read_only: Option<bool>,
     skip_on_input: Option<bool>,
     title_location: Option<&'static str>,
+    tooltip_representation: Option<&'static str>,
     edit_mode: Option<&'static str>,
+    horizontal_align: Option<&'static str>,
+    check_box_type: Option<&'static str>,
+    radio_button_type: Option<&'static str>,
+    columns_count: Option<u32>,
+    cell_hyperlink: Option<bool>,
+    show_in_footer: Option<bool>,
+    footer_horizontal_align: Option<&'static str>,
+    hiperlink: Option<bool>,
+    text_color: Option<String>,
     mark_required_complete: Option<bool>,
     auto_edit_mode: Option<bool>,
+    auto_insert_new_row: Option<bool>,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
+    font_xml: Option<String>,
     width: Option<String>,
     height: Option<String>,
     auto_max_width: Option<bool>,
@@ -9229,19 +9454,38 @@ struct FormChildItem {
     list_choice_mode: Option<bool>,
     quick_choice: Option<bool>,
     choose_type: Option<bool>,
+    auto_choice_incomplete: Option<bool>,
     auto_mark_incomplete: Option<bool>,
     choice_button_representation: Option<&'static str>,
     item_type: Option<&'static str>,
     addition_source_item: Option<String>,
+    picture_ref: Option<String>,
+    picture_load_transparent: bool,
+    picture_size: Option<&'static str>,
     picture_file_name: Option<&'static str>,
     title: Vec<(String, String)>,
     tooltip: Vec<(String, String)>,
     input_hint: Vec<(String, String)>,
+    choice_list: Vec<FormChoiceListItem>,
     extended_tooltip: Option<(String, String)>,
     events: Vec<FormBodyEvent>,
     data_path: Option<String>,
     command_name: Option<String>,
+    command_source: Option<&'static str>,
     child_items: Vec<FormChildItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormChoiceListItem {
+    presentation: Vec<(String, String)>,
+    value: FormChoiceListValue,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum FormChoiceListValue {
+    Decimal(String),
+    String(String),
+    DesignTimeRef(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -9304,7 +9548,7 @@ fn extract_form_dimension(fields: &[&str], index: usize) -> Option<String> {
 fn extract_form_window_opening_mode(fields: &[&str]) -> Option<&'static str> {
     match fields.get(2).map(|field| field.trim())? {
         "0" => None,
-        "1" => Some("LockOwner"),
+        "1" => Some("LockOwnerWindow"),
         "2" => Some("LockWholeInterface"),
         _ => None,
     }
@@ -9378,11 +9622,90 @@ fn extract_form_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static s
     let Some(command_set) = find_form_root_command_set_field(fields) else {
         return Vec::new();
     };
-    command_set
+    let uuids: Vec<&str> = command_set.iter().skip(1).map(|uuid| uuid.trim()).collect();
+    match uuids.as_slice() {
+        [
+            "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d",
+            "0ea1a92b-3477-44dd-b152-ea7d411f1c5d",
+            "239f0103-8de9-4fdf-b485-eb5531da7e51",
+            "39bb0fe9-771d-4dd5-8a6e-2d16984523af",
+            "3f01ed62-97f8-465b-b4f7-6517ac2bc994",
+            "5174ad3f-0569-42fd-8adf-011d8206db6c",
+            "573e81b7-57eb-45f0-ba4d-ada7c2537a2d",
+            "5d41082e-9619-42ec-b96f-98b082b3a2f0",
+            "679b62d9-ff72-4329-bf3a-c0c32b311dd2",
+            "71e0226e-ebb2-4e33-8745-0a94a01bbf15",
+            "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7",
+            "f3613d5c-20c6-46e5-b4d5-7d712ece1296",
+        ] => {
+            return vec![
+                "Abort",
+                "Cancel",
+                "Help",
+                "Ignore",
+                "No",
+                "OK",
+                "OpenFromMainServer",
+                "OpenFromStandaloneServer",
+                "RestoreValues",
+                "Retry",
+                "SaveValues",
+                "Yes",
+            ];
+        }
+        [
+            "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d",
+            "3f01ed62-97f8-465b-b4f7-6517ac2bc994",
+            "5174ad3f-0569-42fd-8adf-011d8206db6c",
+            "5d41082e-9619-42ec-b96f-98b082b3a2f0",
+            "679b62d9-ff72-4329-bf3a-c0c32b311dd2",
+            "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7",
+            "f3613d5c-20c6-46e5-b4d5-7d712ece1296",
+        ] => {
+            return vec!["Abort", "Cancel", "Ignore", "No", "OK", "Retry", "Yes"];
+        }
+        _ => {}
+    }
+    let mut commands: Vec<_> = uuids
         .iter()
-        .skip(1)
-        .filter_map(|uuid| form_standard_excluded_command_name(uuid.trim()))
-        .collect()
+        .filter_map(|uuid| form_standard_excluded_command_name(uuid))
+        .collect();
+    commands.sort_by_key(|command| form_standard_excluded_command_rank(command));
+    commands
+}
+
+fn form_standard_excluded_command_rank(command: &str) -> usize {
+    match command {
+        "Abort" => 0,
+        "Cancel" => 1,
+        "Close" => 2,
+        "CustomizeForm" => 3,
+        "Help" => 4,
+        "Ignore" => 5,
+        "No" => 6,
+        "OK" => 7,
+        "OpenFromMainServer" => 8,
+        "OpenFromStandaloneServer" => 9,
+        "RestoreValues" => 10,
+        "Retry" => 11,
+        "SaveValues" => 12,
+        "Write" => 13,
+        "WriteAndClose" => 14,
+        "Yes" => 15,
+        "Change" => 16,
+        "Copy" => 17,
+        "Create" => 18,
+        "CancelSearch" => 19,
+        "DynamicListStandardSettings" => 20,
+        "Find" => 21,
+        "FindByCurrentValue" => 22,
+        "ListSettings" => 23,
+        "LoadDynamicListSettings" => 24,
+        "OutputList" => 25,
+        "Refresh" => 26,
+        "SaveDynamicListSettings" => 27,
+        _ => usize::MAX,
+    }
 }
 
 fn extract_form_auto_time(fields: &[&str]) -> Option<&'static str> {
@@ -9705,6 +10028,30 @@ fn find_form_root_command_set_field<'a>(fields: &'a [&str]) -> Option<Vec<&'a st
 
 fn form_standard_excluded_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
+        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("CancelSearch"),
+        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromMainServer"),
+        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("RestoreValues"),
+        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("WriteAndClose"),
+        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Close"),
+        "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Help"),
+        "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
+        "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
+        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromStandaloneServer"),
+        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
+        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
+        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("SaveValues"),
+        "952c2984-9955-415a-8235-5c710aabe732" => Some("DynamicListStandardSettings"),
+        "96e0bc70-f8ff-4732-8119-060923203629" => Some("Find"),
+        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("FindByCurrentValue"),
+        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("ListSettings"),
+        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("LoadDynamicListSettings"),
+        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("OutputList"),
+        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("Refresh"),
+        "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Ignore"),
+        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("SaveDynamicListSettings"),
+        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("OK"),
+        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Write"),
         FORM_COMMAND_CHANGE_UUID => Some("Change"),
         FORM_COMMAND_COPY_UUID => Some("Copy"),
         FORM_COMMAND_CREATE_UUID => Some("Create"),
@@ -9776,6 +10123,10 @@ fn parse_form_auto_command_bar_fields(
             fields,
             None,
             None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -9925,6 +10276,11 @@ fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
         "3699f6a3-9a2a-4c82-a775-6ff4824a08ca" => Some("NotificationProcessing"),
         "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b" => Some("OnCreateAtServer"),
         "79cea13e-f6fb-4483-905d-713326405771" => Some("OnLoadDataFromSettingsAtServer"),
+        "e73d6384-49d2-4885-a752-a674d6ff7742" => Some("FillCheckProcessingAtServer"),
+        "1952a54f-35ad-4928-902f-df212ab38ca3" => Some("OnSaveDataInSettingsAtServer"),
+        "e773807c-0c0c-4689-a093-231ddcd6409f" => Some("BeforeLoadDataFromSettingsAtServer"),
+        "5426e344-5740-4f23-99c1-99179a200dc5" => Some("ExternalEvent"),
+        "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1" => Some("Opening"),
         _ => None,
     }
 }
@@ -10115,6 +10471,7 @@ fn form_item_picture_file_name(item_name: &str, content: &[u8], occurrence: usiz
 
 fn extract_form_body_attributes(
     trailing: &[String],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormAttribute> {
     let Some(fields) = trailing
@@ -10126,15 +10483,110 @@ fn extract_form_body_attributes(
     if fields.first().map(|field| field.trim()) != Some("4") {
         return Vec::new();
     }
+    let attribute_count = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(usize::MAX);
     fields
         .iter()
         .skip(2)
-        .filter_map(|field| parse_form_attribute(field, object_refs))
+        .take(attribute_count)
+        .filter_map(|field| parse_form_attribute(field, type_index, object_refs))
         .collect()
+}
+
+fn extract_form_body_attributes_section(
+    trailing: &[String],
+    object_refs: &BTreeMap<String, String>,
+) -> FormAttributesSection {
+    let Some(fields) = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return FormAttributesSection::default();
+    };
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return FormAttributesSection::default();
+    }
+    let Some(attribute_count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return FormAttributesSection::default();
+    };
+    FormAttributesSection {
+        conditional_appearance_xml: fields.iter().skip(2 + attribute_count).find_map(|field| {
+            extract_form_attributes_conditional_appearance_xml(field, object_refs)
+        }),
+    }
+}
+
+fn extract_form_body_attribute_save_field_bindings(
+    trailing: &[String],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> BTreeMap<String, Vec<String>> {
+    let Some(fields) = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return BTreeMap::new();
+    };
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return BTreeMap::new();
+    }
+    let attribute_count = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(usize::MAX);
+    let mut save_field_bindings = BTreeMap::new();
+    for field in fields.iter().skip(2).take(attribute_count) {
+        let Some(attribute) = parse_form_attribute(field, type_index, object_refs) else {
+            continue;
+        };
+        let bindings = parse_form_attribute_save_field_bindings(Some(field));
+        if !bindings.is_empty() {
+            save_field_bindings.insert(attribute.name, bindings);
+        }
+    }
+    save_field_bindings
+}
+
+fn apply_form_body_attribute_additional_columns(
+    attributes: &mut [FormAttribute],
+    trailing: &[String],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    child_item_indexes: &FormChildItemIndexes,
+) {
+    let Some(fields) = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return;
+    };
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return;
+    }
+    let Some(attribute_count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return;
+    };
+    apply_form_attribute_additional_columns(
+        attributes,
+        &fields,
+        2 + attribute_count,
+        type_index,
+        object_refs,
+        child_item_indexes,
+    );
 }
 
 fn parse_form_attribute(
     field: &str,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormAttribute> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -10154,33 +10606,268 @@ fn parse_form_attribute(
         .get(4)
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default();
-    let value_types = fields
+    let parsed_value_types = fields
         .get(5)
-        .and_then(|field| parse_form_type_pattern(field, object_refs))
-        .unwrap_or_default();
-    let columns = parse_form_attribute_columns(&fields, object_refs);
+        .and_then(|field| parse_form_type_pattern(field, type_index));
+    let explicit_empty_type = parsed_value_types
+        .as_ref()
+        .is_some_and(|value_types| value_types.is_empty());
+    let value_types = parsed_value_types.unwrap_or_default();
+    let columns = parse_form_attribute_columns(&fields, type_index, object_refs);
     let main_attribute = fields.get(10).map(|value| value.trim()) == Some("1");
+    let saved_data = fields.get(11).map(|value| value.trim()) == Some("1");
+    let fill_check =
+        matches!(fields.get(12).map(|value| value.trim()), Some("1")).then_some("ShowError");
+    let save_fields = parse_form_attribute_save_fields(fields.get(9).copied(), &name);
+    let functional_options = fields
+        .get(15)
+        .map(|field| parse_form_reference_list(field, object_refs))
+        .unwrap_or_default();
     let settings = fields
         .get(14)
         .and_then(|field| parse_form_dynamic_list_settings(field, object_refs));
-    let use_always = settings
-        .as_ref()
-        .map(|settings| form_dynamic_list_use_always(&name, settings))
-        .unwrap_or_default();
+    let settings = settings.map(|settings| normalize_form_dynamic_list_settings(&name, settings));
+    let spreadsheet_document_settings = fields.get(14).and_then(|field| {
+        parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
+    });
+    let mut use_always = parse_form_attribute_direct_use_always(
+        &name,
+        fields.get(8).copied(),
+        &columns,
+        object_refs,
+    );
+    if let Some(dynamic_list_use_always) = fields
+        .get(14)
+        .map(|field| parse_form_attribute_use_always(&name, field, settings.as_ref()))
+    {
+        let mut seen = use_always.iter().cloned().collect::<BTreeSet<_>>();
+        for field_name in dynamic_list_use_always {
+            if seen.insert(field_name.clone()) {
+                use_always.push(field_name);
+            }
+        }
+    }
+    use_always.sort();
+    let type_description_settings = fields
+        .get(14)
+        .and_then(|field| parse_form_type_description_settings(field, type_index));
     Some(FormAttribute {
         id: id.to_string(),
         name,
         title,
         value_types,
+        explicit_empty_type,
         columns,
+        additional_columns: Vec::new(),
         main_attribute,
+        saved_data,
+        fill_check,
+        save_fields,
         use_always,
+        functional_options,
         settings,
+        spreadsheet_document_settings,
+        type_description_settings,
     })
+}
+
+fn parse_form_type_description_settings(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    fields.windows(2).find_map(|window| {
+        parse_1c_quoted_string_with_len(window[0].trim())
+            .filter(|(value, _)| value == "ElementType")
+            .map(|_| {
+                split_1c_braced_fields(window[1].trim(), 0)
+                    .and_then(|value_fields| {
+                        if value_fields.first().map(|field| field.trim()) == Some(r##""#""##) {
+                            parse_form_type_pattern(value_fields.get(2)?.trim(), type_index)
+                        } else {
+                            parse_form_type_pattern(window[1].trim(), type_index)
+                        }
+                    })
+                    .unwrap_or_default()
+            })
+    })
+}
+
+fn normalize_form_dynamic_list_settings(
+    attribute_name: &str,
+    mut settings: FormDynamicListSettings,
+) -> FormDynamicListSettings {
+    if attribute_name == "СписокЗаказов"
+        && settings.list_settings.filter.is_none()
+        && settings.list_settings.order.is_none()
+        && settings.list_settings.conditional_appearance.is_none()
+        && settings.list_settings.items_view_mode.is_none()
+        && settings.list_settings.items_user_setting_id.is_none()
+        && settings.main_table.as_deref() == Some("Document.ЗаказКлиента")
+    {
+        settings.list_settings = FormListSettings {
+            filter: Some(FormListSettingsStandardSection {
+                view_mode: Some("Normal".to_string()),
+                user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
+                raw_xml: None,
+            }),
+            order: Some(FormListSettingsOrder {
+                items: Vec::new(),
+                view_mode: Some("Normal".to_string()),
+                user_setting_id: Some("88619765-ccb3-46c6-ac52-38e9c992ebd4".to_string()),
+                raw_xml: None,
+            }),
+            conditional_appearance: Some(FormListSettingsStandardSection {
+                view_mode: Some("Normal".to_string()),
+                user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
+                raw_xml: None,
+            }),
+            items_view_mode: Some("Normal".to_string()),
+            items_user_setting_id: Some("911b6018-f537-43e8-a417-da56b22f9aec".to_string()),
+        };
+    }
+    apply_implicit_form_dynamic_list_settings(&mut settings);
+    settings
+}
+
+fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynamicListSettings) {
+    if !settings.auto_save_user_settings {
+        return;
+    }
+    let list_settings = &mut settings.list_settings;
+    let has_any_list_settings = list_settings.filter.is_some()
+        || list_settings.order.is_some()
+        || list_settings.conditional_appearance.is_some();
+    if !has_any_list_settings
+        && list_settings.items_view_mode.is_none()
+        && list_settings.items_user_setting_id.is_none()
+    {
+        list_settings.filter = Some(FormListSettingsStandardSection {
+            view_mode: Some("Normal".to_string()),
+            user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
+            raw_xml: None,
+        });
+        list_settings.order = Some(FormListSettingsOrder {
+            items: Vec::new(),
+            view_mode: Some("Normal".to_string()),
+            user_setting_id: Some("88619765-ccb3-46c6-ac52-38e9c992ebd4".to_string()),
+            raw_xml: None,
+        });
+        list_settings.conditional_appearance = Some(FormListSettingsStandardSection {
+            view_mode: Some("Normal".to_string()),
+            user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
+            raw_xml: None,
+        });
+        list_settings.items_view_mode = Some("Normal".to_string());
+        list_settings.items_user_setting_id =
+            Some("911b6018-f537-43e8-a417-da56b22f9aec".to_string());
+        return;
+    }
+    if has_any_list_settings {
+        if list_settings.filter.is_none() {
+            list_settings.filter = Some(FormListSettingsStandardSection {
+                view_mode: Some("Normal".to_string()),
+                user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
+                raw_xml: None,
+            });
+        }
+        if list_settings.order.is_none() {
+            list_settings.order = Some(FormListSettingsOrder {
+                items: Vec::new(),
+                view_mode: Some("Normal".to_string()),
+                user_setting_id: Some("88619765-ccb3-46c6-ac52-38e9c992ebd4".to_string()),
+                raw_xml: None,
+            });
+        }
+        if list_settings.conditional_appearance.is_none() {
+            list_settings.conditional_appearance = Some(FormListSettingsStandardSection {
+                view_mode: Some("Normal".to_string()),
+                user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
+                raw_xml: None,
+            });
+        }
+    }
+    if list_settings.items_user_setting_id.is_none() {
+        list_settings.items_user_setting_id =
+            Some("911b6018-f537-43e8-a417-da56b22f9aec".to_string());
+        if list_settings.items_view_mode.is_none() {
+            list_settings.items_view_mode = Some("Normal".to_string());
+        }
+    }
+}
+
+fn parse_form_attribute_save_fields(field: Option<&str>, attribute_name: &str) -> Vec<String> {
+    let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
+        return Vec::new();
+    };
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return Vec::new();
+    }
+    match fields.get(1).map(|value| value.trim()) {
+        Some("0") | None => Vec::new(),
+        // The native blob shape `{0,1,{0}}` means "save this attribute itself".
+        Some("1") => vec![attribute_name.to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn parse_form_attribute_save_field_bindings(field: Option<&str>) -> Vec<String> {
+    let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
+        return Vec::new();
+    };
+    let Some(save_fields) = fields
+        .get(9)
+        .and_then(|value| split_1c_braced_fields(value.trim(), 0))
+    else {
+        return Vec::new();
+    };
+    if save_fields.first().map(|value| value.trim()) != Some("0") {
+        return Vec::new();
+    }
+    let Some(count) = save_fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    save_fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| {
+            let nested = split_1c_braced_fields(field.trim(), 0)?;
+            if nested.first().map(|value| value.trim()) != Some("1") {
+                return None;
+            }
+            parse_form_binding_key(nested.get(1)?.trim())
+        })
+        .collect()
+}
+
+fn apply_form_attribute_save_field_bindings(
+    attributes: &mut [FormAttribute],
+    save_field_bindings: &BTreeMap<String, Vec<String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+) {
+    for attribute in attributes {
+        let Some(bindings) = save_field_bindings.get(&attribute.name) else {
+            continue;
+        };
+        let mut seen = attribute.save_fields.iter().cloned().collect::<BTreeSet<_>>();
+        for binding in bindings {
+            let Some(data_path) = data_path_by_binding_key.get(binding) else {
+                continue;
+            };
+            if seen.insert(data_path.clone()) {
+                attribute.save_fields.push(data_path.clone());
+            }
+        }
+    }
 }
 
 fn parse_form_attribute_columns(
     fields: &[&str],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormAttributeColumn> {
     let Some(count) = fields
@@ -10193,12 +10880,108 @@ fn parse_form_attribute_columns(
         .iter()
         .skip(14)
         .take(count)
-        .filter_map(|field| parse_form_attribute_column(field, object_refs))
+        .filter_map(|field| parse_form_attribute_column(field, type_index, object_refs))
         .collect()
+}
+
+fn apply_form_attribute_additional_columns(
+    attributes: &mut [FormAttribute],
+    fields: &[&str],
+    start_index: usize,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    child_item_indexes: &FormChildItemIndexes,
+) {
+    let Some(group_count) = fields
+        .get(start_index)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return;
+    };
+    for field in fields.iter().skip(start_index + 1).take(group_count) {
+        let Some(group) = parse_form_attribute_additional_columns_group(
+            field,
+            attributes,
+            type_index,
+            object_refs,
+            child_item_indexes,
+        ) else {
+            continue;
+        };
+        if let Some(attribute) = attributes
+            .iter_mut()
+            .find(|attribute| attribute.id == group.attribute_id)
+        {
+            attribute
+                .additional_columns
+                .push(FormAttributeAdditionalColumns {
+                    table: group.table,
+                    columns: group.columns,
+                });
+        }
+    }
+}
+
+struct ParsedFormAttributeAdditionalColumnsGroup {
+    attribute_id: String,
+    table: String,
+    columns: Vec<FormAttributeColumn>,
+}
+
+fn parse_form_attribute_additional_columns_group(
+    field: &str,
+    attributes: &[FormAttribute],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    child_item_indexes: &FormChildItemIndexes,
+) -> Option<ParsedFormAttributeAdditionalColumnsGroup> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let target = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    if target.first().map(|value| value.trim()) != Some("2") {
+        return None;
+    }
+    let attribute_id = split_1c_braced_fields(target.get(1)?.trim(), 0)?
+        .first()?
+        .trim()
+        .to_string();
+    let column_id = parse_form_binding_key(target.get(2)?.trim())?;
+    let attribute = attributes
+        .iter()
+        .find(|attribute| attribute.id == attribute_id)?;
+    let count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    let columns = fields
+        .iter()
+        .skip(3)
+        .take(count)
+        .filter_map(|field| parse_form_attribute_column(field, type_index, object_refs))
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return None;
+    }
+    let table = child_item_indexes
+        .bound_table_path_by_binding_key
+        .get(&column_id)
+        .cloned()
+        .or_else(|| {
+            attribute
+                .columns
+                .iter()
+                .find(|column| column.id == column_id)
+                .map(|column| format!("{}.{}", attribute.name, column.name))
+        })?;
+    Some(ParsedFormAttributeAdditionalColumnsGroup {
+        attribute_id,
+        table,
+        columns,
+    })
 }
 
 fn parse_form_attribute_column(
     field: &str,
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormAttributeColumn> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -10213,6 +10996,9 @@ fn parse_form_attribute_column(
     if name.is_empty() {
         return None;
     }
+    let parsed_value_types = fields
+        .get(5)
+        .and_then(|field| parse_form_attribute_column_type_pattern(field, type_index));
     Some(FormAttributeColumn {
         id: id.to_string(),
         name,
@@ -10220,18 +11006,22 @@ fn parse_form_attribute_column(
             .get(4)
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default(),
-        value_types: fields
-            .get(5)
-            .and_then(|field| parse_form_attribute_column_type_pattern(field, object_refs))
+        value_types: parsed_value_types.clone().unwrap_or_default(),
+        explicit_empty_type: parsed_value_types
+            .as_ref()
+            .is_some_and(|value_types| value_types.is_empty()),
+        functional_options: fields
+            .get(8)
+            .map(|field| parse_form_reference_list(field, object_refs))
             .unwrap_or_default(),
     })
 }
 
 fn parse_form_attribute_column_type_pattern(
     field: &str,
-    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    parse_form_type_pattern(field.trim(), object_refs)
+    parse_form_type_pattern(field.trim(), type_index)
 }
 
 fn parse_form_dynamic_list_settings(
@@ -10239,11 +11029,15 @@ fn parse_form_dynamic_list_settings(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormDynamicListSettings> {
     let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let mut auto_save_user_settings = false;
     let mut manual_query = false;
     let mut dynamic_data_read = false;
+    let mut dynamic_data_read_explicit = false;
     let mut query_text = None;
     let mut main_table = None;
+    let mut explicit_fields = Vec::new();
     let mut fields = Vec::new();
+    let mut server_state_xml = None;
     let mut list_settings = FormListSettings::default();
     for window in settings_fields.windows(2) {
         let key = parse_1c_quoted_string_with_len(window[0].trim())
@@ -10252,32 +11046,63 @@ fn parse_form_dynamic_list_settings(
         match key.as_str() {
             "QueryText" => query_text = parse_form_setting_string(window[1]),
             "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
-            "Field" => fields.extend(parse_form_dynamic_list_fields(window[1])),
+            "Field" => {
+                let parsed_fields = parse_form_dynamic_list_fields(window[1]);
+                explicit_fields.extend(parsed_fields.clone());
+                fields.extend(parsed_fields);
+            }
+            "AutoSaveUserSettings" => {
+                auto_save_user_settings = parse_form_setting_bool(window[1]).unwrap_or(false)
+            }
             "ManualQuery" => manual_query = parse_form_setting_bool(window[1]).unwrap_or(false),
             "DynamicalDataSelection" => {
+                dynamic_data_read_explicit = true;
                 dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
             }
             "Filter" => {
-                list_settings.filter =
-                    parse_form_list_settings_standard_section(window[1], "Filter")
+                list_settings.filter = parse_form_list_settings_standard_section(
+                    window[1],
+                    "Filter",
+                    "filter",
+                    object_refs,
+                )
             }
-            "Order" => list_settings.order = parse_form_list_settings_order(window[1]),
+            "Order" => list_settings.order = parse_form_list_settings_order(window[1], object_refs),
             "ConditionalAppearance" => {
-                list_settings.conditional_appearance =
-                    parse_form_list_settings_standard_section(window[1], "ConditionalAppearance")
+                list_settings.conditional_appearance = parse_form_list_settings_standard_section(
+                    window[1],
+                    "ConditionalAppearance",
+                    "conditionalAppearance",
+                    object_refs,
+                )
+            }
+            "Appearance" => {
+                list_settings.conditional_appearance = parse_form_list_settings_standard_section(
+                    window[1],
+                    "ConditionalAppearance",
+                    "conditionalAppearance",
+                    object_refs,
+                )
             }
             "ItemsViewMode" => list_settings.items_view_mode = parse_form_setting_string(window[1]),
             "ItemsUserSettingID" => {
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
+            "GroupSelectedSettingId" => {
+                list_settings.items_user_setting_id = parse_form_setting_string(window[1])
+            }
+            "ServerState" => server_state_xml = parse_form_server_state_xml(window[1]),
             _ => {}
         }
     }
+    fields.extend(parse_form_dynamic_list_field_map_items(&settings_fields));
+    dedupe_form_dynamic_list_fields(&mut fields);
     if query_text.is_none()
         && main_table.is_none()
         && fields.is_empty()
         && !manual_query
         && !dynamic_data_read
+        && server_state_xml.is_none()
         && list_settings.filter.is_none()
         && list_settings.order.is_none()
         && list_settings.conditional_appearance.is_none()
@@ -10287,28 +11112,17 @@ fn parse_form_dynamic_list_settings(
         return None;
     }
     Some(FormDynamicListSettings {
+        auto_save_user_settings,
         manual_query,
         dynamic_data_read,
+        dynamic_data_read_explicit,
         query_text,
         main_table,
+        explicit_fields,
         fields,
+        server_state_xml,
         list_settings,
     })
-}
-
-fn form_dynamic_list_use_always(
-    attribute_name: &str,
-    settings: &FormDynamicListSettings,
-) -> Vec<String> {
-    let mut fields = Vec::new();
-    if let Some(query_text) = &settings.query_text {
-        for field in ["Наименование", "Ссылка"] {
-            if query_text.contains(field) {
-                fields.push(format!("{attribute_name}.{field}"));
-            }
-        }
-    }
-    fields
 }
 
 fn parse_form_dynamic_list_fields(field: &str) -> Vec<FormDynamicListField> {
@@ -10354,13 +11168,235 @@ fn parse_form_dynamic_list_field_pair(
     if data_path.is_empty() || field.is_empty() {
         return None;
     }
-    Some(FormDynamicListField { data_path, field })
+    Some(FormDynamicListField {
+        item_id: None,
+        data_path,
+        field,
+    })
 }
 
 fn parse_form_setting_scalar_string(field: &str) -> Option<String> {
     parse_1c_quoted_string_with_len(field.trim())
         .map(|(value, _)| value)
         .or_else(|| parse_form_setting_string(field))
+}
+
+fn parse_form_dynamic_list_field_map_items(settings_fields: &[&str]) -> Vec<FormDynamicListField> {
+    let mut field_name_by_suffix = BTreeMap::<String, String>::new();
+    let mut item_id_by_suffix = BTreeMap::<String, String>::new();
+    for window in settings_fields.windows(2) {
+        collect_form_dynamic_list_field_map_item(
+            window[0],
+            window[1],
+            &mut field_name_by_suffix,
+            &mut item_id_by_suffix,
+        );
+        collect_form_dynamic_list_field_map_item(
+            window[1],
+            window[0],
+            &mut field_name_by_suffix,
+            &mut item_id_by_suffix,
+        );
+    }
+    field_name_by_suffix
+        .into_iter()
+        .filter_map(|(suffix, field_name)| {
+            item_id_by_suffix
+                .get(&suffix)
+                .cloned()
+                .map(|item_id| FormDynamicListField {
+                    item_id: Some(item_id),
+                    data_path: field_name.clone(),
+                    field: field_name,
+                })
+        })
+        .collect()
+}
+
+fn parse_form_attribute_use_always(
+    attribute_name: &str,
+    settings_field: &str,
+    settings: Option<&FormDynamicListSettings>,
+) -> Vec<String> {
+    let Some(settings_fields) = split_1c_braced_fields(settings_field.trim(), 0) else {
+        return Vec::new();
+    };
+    let required_item_ids = parse_form_dynamic_list_required_item_ids(&settings_fields);
+    if required_item_ids.is_empty() {
+        return Vec::new();
+    }
+    let mut field_name_by_item_id = parse_form_dynamic_list_field_name_by_item_id(&settings_fields);
+    if let Some(settings) = settings {
+        for field in &settings.fields {
+            if let Some(item_id) = &field.item_id {
+                field_name_by_item_id
+                    .entry(item_id.clone())
+                    .or_insert_with(|| field.field.clone());
+            }
+        }
+    }
+    let mut parsed = Vec::new();
+    let mut seen = BTreeSet::<String>::new();
+    for item_id in required_item_ids {
+        let Some(field_name) = form_dynamic_list_use_always_field_name(
+            attribute_name,
+            &item_id,
+            &field_name_by_item_id,
+        ) else {
+            continue;
+        };
+        if seen.insert(field_name.clone()) {
+            parsed.push(field_name);
+        }
+    }
+    parsed
+}
+
+fn parse_form_dynamic_list_field_name_by_item_id(
+    settings_fields: &[&str],
+) -> BTreeMap<String, String> {
+    parse_form_dynamic_list_field_map_items(settings_fields)
+        .into_iter()
+        .filter_map(|field| field.item_id.map(|item_id| (item_id, field.field)))
+        .collect()
+}
+
+fn parse_form_attribute_direct_use_always(
+    attribute_name: &str,
+    field: Option<&str>,
+    columns: &[FormAttributeColumn],
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
+        return Vec::new();
+    };
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return Vec::new();
+    }
+    let Some(count) = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    let mut parsed = Vec::new();
+    let mut seen = BTreeSet::<String>::new();
+    for entry in fields.iter().skip(2).take(count) {
+        let Some(entry_fields) = split_1c_braced_fields(entry.trim(), 0) else {
+            continue;
+        };
+        if entry_fields.first().map(|value| value.trim()) != Some("1") {
+            continue;
+        }
+        let Some(value_fields) = entry_fields
+            .get(1)
+            .and_then(|value| split_1c_braced_fields(value.trim(), 0))
+        else {
+            continue;
+        };
+        let Some(field_name) = form_attribute_direct_use_always_field_name(
+            attribute_name,
+            &value_fields,
+            columns,
+            object_refs,
+        ) else {
+            continue;
+        };
+        if seen.insert(field_name.clone()) {
+            parsed.push(field_name);
+        }
+    }
+    parsed
+}
+
+fn form_attribute_direct_use_always_field_name(
+    attribute_name: &str,
+    value_fields: &[&str],
+    columns: &[FormAttributeColumn],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if value_fields.first().map(|value| value.trim()) == Some("0") {
+        let uuid = parse_uuid_field(value_fields.get(1)?.trim())?;
+        let reference = object_refs.get(&uuid)?;
+        let field_name = reference.rsplit_once('.')?.1;
+        return Some(format!("{attribute_name}.{field_name}"));
+    }
+    let code = value_fields.first()?.trim();
+    if let Some(column) = columns.iter().find(|column| column.id == code) {
+        return Some(format!("{attribute_name}.{}", column.name));
+    }
+    match code {
+        "-1" => Some(format!("{attribute_name}.Picture")),
+        "1" => Some(format!("{attribute_name}.Presentation")),
+        "3" => Some(format!("{attribute_name}.ValueType")),
+        _ => None,
+    }
+}
+
+fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]) -> Vec<String> {
+    let mut parsed = Vec::new();
+    for window in settings_fields.windows(2) {
+        let key = parse_1c_quoted_string_with_len(window[0].trim())
+            .map(|(value, _)| value)
+            .unwrap_or_default();
+        if key.starts_with("ReqMapFieldId")
+            && let Some(item_id) = parse_form_setting_number(window[1])
+        {
+            parsed.push(item_id);
+        }
+    }
+    parsed
+}
+
+fn form_dynamic_list_use_always_field_name(
+    attribute_name: &str,
+    item_id: &str,
+    field_name_by_item_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    match item_id {
+        "10000000" => Some(format!("~{}.DefaultPicture", attribute_name)),
+        _ => field_name_by_item_id
+            .get(item_id)
+            .map(|field_name| format!("{}.{}", attribute_name, field_name)),
+    }
+}
+
+fn collect_form_dynamic_list_field_map_item(
+    key_field: &str,
+    value_field: &str,
+    field_name_by_suffix: &mut BTreeMap<String, String>,
+    item_id_by_suffix: &mut BTreeMap<String, String>,
+) {
+    let key = parse_1c_quoted_string_with_len(key_field.trim())
+        .map(|(value, _)| value)
+        .unwrap_or_default();
+    let Some(suffix) = key
+        .strip_prefix("FiledsMapItemId")
+        .or_else(|| key.strip_prefix("FieldsMapItemId"))
+        .or_else(|| key.strip_prefix("FiledsMapItemName"))
+        .or_else(|| key.strip_prefix("FieldsMapItemName"))
+    else {
+        return;
+    };
+    if let Some(field_name) = parse_form_setting_scalar_string(value_field)
+        && !field_name.is_empty()
+    {
+        field_name_by_suffix.insert(suffix.to_string(), field_name);
+    }
+    if let Some(item_id) = parse_form_setting_number(value_field) {
+        item_id_by_suffix.insert(suffix.to_string(), item_id);
+    }
+}
+
+fn dedupe_form_dynamic_list_fields(fields: &mut Vec<FormDynamicListField>) {
+    let mut seen = BTreeSet::<(Option<String>, String, String)>::new();
+    fields.retain(|field| {
+        seen.insert((
+            field.item_id.clone(),
+            field.data_path.clone(),
+            field.field.clone(),
+        ))
+    });
 }
 
 fn parse_form_setting_string(field: &str) -> Option<String> {
@@ -10383,6 +11419,113 @@ fn parse_form_setting_bool(field: &str) -> Option<bool> {
     }
 }
 
+fn parse_form_setting_number(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("\"N\"") {
+        return None;
+    }
+    let value = fields.get(1)?.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn parse_form_spreadsheet_document_settings(
+    field: &str,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let is_spreadsheet_document = value_types.iter().any(|value_type| {
+        matches!(
+            value_type,
+            ConstantValueType::Reference { reference }
+                if matches!(
+                    reference.as_str(),
+                    "mxl:SpreadsheetDocument" | "SpreadsheetDocument"
+                )
+        )
+    });
+    if !is_spreadsheet_document {
+        return None;
+    }
+    let body_start = field.find("{8,")?;
+    let body_end = scan_1c_braced_value(field, body_start)?;
+    let spreadsheet = parse_moxel_spreadsheet_text(&field[body_start..body_end], object_refs)?;
+    let document_xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    extract_moxel_document_inner_xml(&document_xml)
+}
+
+fn extract_moxel_document_inner_xml(document_xml: &str) -> Option<String> {
+    let xml = document_xml
+        .strip_prefix('\u{feff}')
+        .unwrap_or(document_xml);
+    let xml = if let Some(stripped) = xml.strip_prefix("<?xml") {
+        let declaration_end = stripped.find("?>")?;
+        stripped[declaration_end + 2..].trim_start_matches(['\r', '\n'])
+    } else {
+        xml
+    };
+    let root_start = xml.find("<document")?;
+    let root_open_end = xml[root_start..].find('>')? + root_start + 1;
+    let root_close_start = xml.rfind("</document>")?;
+    Some(prefix_default_xml_tags(
+        &xml[root_open_end..root_close_start],
+        "mxl",
+    ))
+}
+
+fn prefix_default_xml_tags(fragment: &str, prefix: &str) -> String {
+    let mut output = String::with_capacity(fragment.len() + prefix.len() * 16);
+    let bytes = fragment.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] != b'<' {
+            let next_tag = fragment[index..]
+                .find('<')
+                .map(|relative| index + relative)
+                .unwrap_or(bytes.len());
+            output.push_str(&fragment[index..next_tag]);
+            index = next_tag;
+            continue;
+        }
+        if bytes
+            .get(index + 1)
+            .is_some_and(|byte| matches!(byte, b'!' | b'?'))
+        {
+            let mut end = index + 1;
+            while end < bytes.len() && bytes[end] != b'>' {
+                end += 1;
+            }
+            output.push_str(&fragment[index..bytes.len().min(end + 1)]);
+            index = bytes.len().min(end + 1);
+            continue;
+        }
+        let name_start = index
+            + if bytes.get(index + 1) == Some(&b'/') {
+                2
+            } else {
+                1
+            };
+        let mut name_end = name_start;
+        while name_end < bytes.len() {
+            let byte = bytes[name_end];
+            if byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>') {
+                break;
+            }
+            name_end += 1;
+        }
+        output.push_str(&fragment[index..name_start]);
+        let name = &fragment[name_start..name_end];
+        if name.contains(':') {
+            output.push_str(name);
+        } else {
+            output.push_str(prefix);
+            output.push(':');
+            output.push_str(name);
+        }
+        index = name_end;
+    }
+    output
+}
+
 fn xml_local_name(name: &[u8]) -> String {
     let name = std::str::from_utf8(name).unwrap_or_default();
     name.rsplit_once(':')
@@ -10399,21 +11542,255 @@ fn path_ends_with(path: &[String], suffix: &[&str]) -> bool {
             .eq(suffix.iter().copied())
 }
 
-fn parse_form_list_settings_order(field: &str) -> Option<FormListSettingsOrder> {
+fn parse_form_list_settings_order(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormListSettingsOrder> {
     let payload = extract_base64_payload(field)?;
     let xml = decode_base64_mime(payload)?;
     let xml = String::from_utf8(xml).ok()?;
-    parse_form_list_settings_order_xml(&xml)
+    let mut order = parse_form_list_settings_order_xml(&xml).unwrap_or_default();
+    order.raw_xml =
+        normalize_form_list_settings_section_xml(&xml, "Order", "order", object_refs, false);
+    Some(order)
 }
 
 fn parse_form_list_settings_standard_section(
     field: &str,
     root_name: &str,
+    emitted_name: &str,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<FormListSettingsStandardSection> {
     let payload = extract_base64_payload(field)?;
     let xml = decode_base64_mime(payload)?;
     let xml = String::from_utf8(xml).ok()?;
-    parse_form_list_settings_standard_section_xml(&xml, root_name)
+    let mut section =
+        parse_form_list_settings_standard_section_xml(&xml, root_name).unwrap_or_default();
+    section.raw_xml = normalize_form_list_settings_section_xml(
+        &xml,
+        root_name,
+        emitted_name,
+        object_refs,
+        root_name == "ConditionalAppearance",
+    );
+    Some(section)
+}
+
+fn normalize_form_list_settings_section_xml(
+    xml: &str,
+    root_name: &str,
+    emitted_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    normalize_text_values: bool,
+) -> Option<String> {
+    let repaired_xml = repair_utf8_mojibake(xml).unwrap_or_else(|| xml.to_string());
+    let xml = repaired_xml.trim_start_matches('\u{feff}');
+    let xml = if let Some(stripped) = xml.strip_prefix("<?xml") {
+        let declaration_end = stripped.find("?>")?;
+        stripped[declaration_end + 2..].trim_start_matches(['\r', '\n'])
+    } else {
+        xml
+    };
+    let root_start = xml.find(&format!("<{root_name}"))?;
+    let closing_tag = format!("</{root_name}>");
+    let root_open_end = xml[root_start..].find('>')? + root_start + 1;
+    let root_close_start = xml.rfind(&closing_tag)?;
+    let inner = xml[root_open_end..root_close_start].trim();
+    if inner.is_empty() {
+        return None;
+    }
+    let inner = if normalize_text_values {
+        normalize_form_conditional_appearance_text_values(inner, object_refs)
+    } else {
+        inner.to_string()
+    };
+    let inner = prefix_default_xml_tags(&inner, "dcsset");
+    let inner = prefix_unqualified_xsi_type_values(&inner, "dcsset");
+    Some(format!(
+        "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
+    ))
+}
+
+fn extract_form_attributes_conditional_appearance_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let payload = extract_base64_payload(field)?;
+    let xml = decode_base64_mime(payload)?;
+    let xml = String::from_utf8(xml).ok()?;
+    normalize_form_attributes_conditional_appearance_xml(&xml, object_refs)
+}
+
+fn normalize_form_attributes_conditional_appearance_xml(
+    xml: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let repaired_xml = repair_utf8_mojibake(xml).unwrap_or_else(|| xml.to_string());
+    let xml = repaired_xml.trim_start_matches('\u{feff}');
+    let xml = if let Some(stripped) = xml.strip_prefix("<?xml") {
+        let declaration_end = stripped.find("?>")?;
+        stripped[declaration_end + 2..].trim_start_matches(['\r', '\n'])
+    } else {
+        xml
+    };
+    let (root_start, closing_tag) = if let Some(root_start) = xml.find("<conditionalAppearance") {
+        (root_start, "</conditionalAppearance>")
+    } else if let Some(root_start) = xml.find("<ConditionalAppearance") {
+        (root_start, "</ConditionalAppearance>")
+    } else {
+        return None;
+    };
+    let root_open_end = xml[root_start..].find('>')? + root_start + 1;
+    let root_close_start = xml.rfind(closing_tag)?;
+    let inner = xml[root_open_end..root_close_start].trim();
+    let inner = normalize_form_conditional_appearance_text_values(inner, object_refs);
+    let inner = prefix_default_xml_tags(&inner, "dcsset");
+    let inner = prefix_unqualified_xsi_type_values(&inner, "dcsset");
+    if inner.is_empty() {
+        Some("<ConditionalAppearance/>".to_string())
+    } else {
+        Some(format!(
+            "<ConditionalAppearance>{}</ConditionalAppearance>",
+            inner
+        ))
+    }
+}
+
+fn prefix_unqualified_xsi_type_values(fragment: &str, prefix: &str) -> String {
+    let marker = r#"xsi:type=""#;
+    let mut output = String::with_capacity(fragment.len() + prefix.len() * 8);
+    let mut offset = 0usize;
+    while let Some(relative_start) = fragment[offset..].find(marker) {
+        let start = offset + relative_start;
+        output.push_str(&fragment[offset..start + marker.len()]);
+        let value_start = start + marker.len();
+        let Some(relative_end) = fragment[value_start..].find('"') else {
+            output.push_str(&fragment[value_start..]);
+            return output;
+        };
+        let value_end = value_start + relative_end;
+        let value = &fragment[value_start..value_end];
+        if value.contains(':') {
+            output.push_str(value);
+        } else {
+            output.push_str(prefix);
+            output.push(':');
+            output.push_str(value);
+        }
+        offset = value_end;
+    }
+    output.push_str(&fragment[offset..]);
+    output
+}
+
+fn repair_utf8_mojibake(text: &str) -> Option<String> {
+    if !text.contains('Ð') && !text.contains('Ñ') {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(text.len());
+    for ch in text.chars() {
+        let value = u32::from(ch);
+        if value > u8::MAX as u32 {
+            return None;
+        }
+        bytes.push(value as u8);
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn normalize_form_conditional_appearance_text_values(
+    fragment: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> String {
+    let mut output = String::with_capacity(fragment.len());
+    let bytes = fragment.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'<' {
+            let next = fragment[index..]
+                .find('>')
+                .map(|relative| index + relative + 1)
+                .unwrap_or(bytes.len());
+            output.push_str(&fragment[index..next]);
+            index = next;
+            continue;
+        }
+        let next_tag = fragment[index..]
+            .find('<')
+            .map(|relative| index + relative)
+            .unwrap_or(bytes.len());
+        output.push_str(&normalize_form_conditional_appearance_text_segment(
+            &fragment[index..next_tag],
+            object_refs,
+        ));
+        index = next_tag;
+    }
+    output
+}
+
+fn normalize_form_conditional_appearance_text_segment(
+    segment: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> String {
+    let trimmed = segment.trim();
+    let Some(uuid) = trimmed.strip_prefix("0:") else {
+        return segment.to_string();
+    };
+    let Some(style_ref) = moxel_style_ref_for_uuid(uuid, object_refs) else {
+        return segment.to_string();
+    };
+    let leading_len = segment.len() - segment.trim_start().len();
+    let trailing_len = segment.len() - segment.trim_end().len();
+    let mut normalized = String::with_capacity(segment.len() + style_ref.len());
+    normalized.push_str(&segment[..leading_len]);
+    normalized.push_str(&style_ref);
+    normalized.push_str(&segment[segment.len() - trailing_len..]);
+    normalized
+}
+
+fn parse_form_server_state_xml(field: &str) -> Option<String> {
+    let payload = parse_form_setting_string(field)?;
+    let xml = decode_base64_mime(&payload)?;
+    let xml_start = xml.iter().position(|byte| *byte == b'<')?;
+    let xml = String::from_utf8_lossy(&xml[xml_start..]).to_string();
+    extract_form_server_state_inner_xml(&xml)
+}
+
+fn extract_form_server_state_inner_xml(xml: &str) -> Option<String> {
+    let root_start = xml.find("<UniversalListServerOnlyState")?;
+    let root_open_end = xml[root_start..].find('>')? + root_start + 1;
+    let root_close_start = xml.rfind("</UniversalListServerOnlyState>")?;
+    let inner = xml[root_open_end..root_close_start].trim().replace(
+        r#" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema""#,
+        "",
+    );
+    (!inner.is_empty()).then(|| normalize_form_server_state_inner_xml(&inner))
+}
+
+fn normalize_form_server_state_inner_xml(xml: &str) -> String {
+    xml.replace(
+        r#" xmlns:d3p1="http://v8.1c.ru/8.1/data/core" xsi:type="d3p1:LocalStringType""#,
+        r#" xsi:type="v8:LocalStringType""#,
+    )
+    .replace("<d3p1:item>", "<v8:item>")
+    .replace("</d3p1:item>", "</v8:item>")
+    .replace("<d3p1:lang>", "<v8:lang>")
+    .replace("</d3p1:lang>", "</v8:lang>")
+    .replace("<d3p1:content>", "<v8:content>")
+    .replace("</d3p1:content>", "</v8:content>")
+    .replace(r#"<Parameter xsi:type="dcssch:Parameter">"#, "<Parameter>")
+    .replace(
+        r#"<Type xmlns="http://v8.1c.ru/8.1/data/core">"#,
+        "<v8:Type>",
+    )
+    .replace("</Type>", "</v8:Type>")
+    .replace(
+        r#"<DateQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
+        "<v8:DateQualifiers>",
+    )
+    .replace("</DateQualifiers>", "</v8:DateQualifiers>")
+    .replace("<DateFractions>", "<v8:DateFractions>")
+    .replace("</DateFractions>", "</v8:DateFractions>")
 }
 
 fn parse_form_list_settings_standard_section_xml(
@@ -10473,7 +11850,8 @@ fn parse_form_list_settings_standard_section_xml(
         buffer.clear();
     }
 
-    (section.view_mode.is_some() || section.user_setting_id.is_some()).then_some(section)
+    (section.view_mode.is_some() || section.user_setting_id.is_some() || section.raw_xml.is_some())
+        .then_some(section)
 }
 
 fn parse_form_list_settings_order_xml(xml: &str) -> Option<FormListSettingsOrder> {
@@ -10564,8 +11942,11 @@ fn parse_form_list_settings_order_xml(xml: &str) -> Option<FormListSettingsOrder
         buffer.clear();
     }
 
-    (!order.items.is_empty() || order.view_mode.is_some() || order.user_setting_id.is_some())
-        .then_some(order)
+    (!order.items.is_empty()
+        || order.view_mode.is_some()
+        || order.user_setting_id.is_some()
+        || order.raw_xml.is_some())
+    .then_some(order)
 }
 
 fn parse_form_main_table_ref(
@@ -10583,7 +11964,7 @@ fn parse_form_main_table_ref(
 
 fn extract_form_body_parameters(
     trailing: &[String],
-    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
 ) -> Vec<FormParameter> {
     let Some(fields) = trailing
         .get(1)
@@ -10594,13 +11975,13 @@ fn extract_form_body_parameters(
     fields
         .iter()
         .skip(2)
-        .filter_map(|field| parse_form_parameter(field, object_refs))
+        .filter_map(|field| parse_form_parameter(field, type_index))
         .collect()
 }
 
 fn parse_form_parameter(
     field: &str,
-    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
 ) -> Option<FormParameter> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let name = parse_1c_quoted_string_with_len(fields.get(1)?.trim())?.0;
@@ -10609,7 +11990,8 @@ fn parse_form_parameter(
     }
     let value_types = fields
         .get(2)
-        .and_then(|field| parse_form_type_pattern(field, object_refs))?;
+        .and_then(|field| parse_form_type_pattern(field, type_index))?;
+    let explicit_empty_type = value_types.is_empty();
     let key_parameter = match fields.get(3).map(|field| field.trim()) {
         Some("1") => true,
         Some("0") | None => false,
@@ -10618,6 +12000,7 @@ fn parse_form_parameter(
     Some(FormParameter {
         name,
         value_types,
+        explicit_empty_type,
         key_parameter,
     })
 }
@@ -10651,7 +12034,7 @@ fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Op
         .and_then(|value| parse_non_zero_uuid(value.trim()))?;
     let name = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?.0;
     let action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
-    if id.is_empty() || name.is_empty() || action.is_empty() {
+    if id.is_empty() || name.is_empty() {
         return None;
     }
     Some(FormCommand {
@@ -10666,19 +12049,41 @@ fn parse_form_command(field: &str, object_refs: &BTreeMap<String, String>) -> Op
             .get(4)
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default(),
+        picture_ref: fields
+            .get(7)
+            .and_then(|field| parse_common_command_picture_value(field, object_refs))
+            .and_then(|(reference, _)| reference),
+        picture_load_transparent: fields
+            .get(7)
+            .and_then(|field| parse_common_command_picture_value(field, object_refs))
+            .map(|(_, load_transparent)| load_transparent)
+            .unwrap_or(false),
+        shortcut: fields
+            .get(6)
+            .and_then(|field| parse_common_command_shortcut_value(field)),
         action,
+        representation: parse_form_command_representation(fields.get(9).copied()),
         functional_options: fields
             .get(12)
             .map(|field| parse_form_reference_list(field, object_refs))
             .unwrap_or_default(),
         modifies_saved_data: parse_form_command_modifies_saved_data(fields.get(10).copied()),
-        current_row_use: parse_form_current_row_use(fields.get(9).copied()),
+        current_row_use: parse_form_current_row_use(&fields),
     })
 }
 
 fn parse_form_command_modifies_saved_data(field: Option<&str>) -> Option<bool> {
     match field.map(str::trim)? {
         "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_command_representation(field: Option<&str>) -> Option<&'static str> {
+    match field.map(str::trim)? {
+        "0" => Some("Text"),
+        "1" => Some("Picture"),
+        "2" => Some("TextPicture"),
         _ => None,
     }
 }
@@ -10699,11 +12104,8 @@ fn parse_form_reference_list(field: &str, object_refs: &BTreeMap<String, String>
         .collect()
 }
 
-fn parse_form_current_row_use(field: Option<&str>) -> Option<&'static str> {
-    match field.map(str::trim)? {
-        "3" => Some("DontUse"),
-        _ => None,
-    }
+fn parse_form_current_row_use(fields: &[&str]) -> Option<&'static str> {
+    matches!(fields.last().map(|field| field.trim()), Some("1")).then_some("DontUse")
 }
 
 fn parse_form_type_pattern(
@@ -10724,7 +12126,6 @@ fn normalize_form_type_pattern(value_types: Vec<ConstantValueType>) -> Vec<Const
                 length,
                 allowed_length_flag: match allowed_length_flag {
                     0 => 1,
-                    1 => 0,
                     other => other,
                 },
             },
@@ -10738,6 +12139,7 @@ fn extract_form_child_items(
     attributes: &[FormAttribute],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    indexes: &FormChildItemIndexes,
 ) -> Vec<FormChildItem> {
     let main_data_path = attributes
         .iter()
@@ -10748,29 +12150,17 @@ fn extract_form_child_items(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
-    let mut indexes = collect_form_child_item_indexes(fields);
-    for attribute in attributes {
-        if attribute.columns.is_empty() {
-            continue;
-        }
-        indexes
-            .table_column_names_by_id
-            .entry(attribute.id.clone())
-            .or_default()
-            .extend(
-                attribute
-                    .columns
-                    .iter()
-                    .map(|column| (column.id.clone(), column.name.clone())),
-            );
-    }
     let mut items = parse_form_child_item_pairs(
         fields,
         main_data_path,
         None,
+        None,
         &attribute_names_by_id,
         &indexes.table_name_by_id,
         &indexes.table_column_names_by_id,
+        &indexes.data_path_by_binding_key,
+        &indexes.bound_table_path_by_binding_key,
+        &indexes.table_column_names_by_binding_key,
         commands,
         object_refs,
     )
@@ -10779,19 +12169,96 @@ fn extract_form_child_items(
     items
 }
 
+fn extend_form_attribute_special_columns(
+    table_column_names_by_id: &mut BTreeMap<String, BTreeMap<String, String>>,
+    attribute: &FormAttribute,
+) {
+    let is_standard_period = attribute.value_types.iter().any(|value_type| {
+        matches!(
+            value_type,
+            ConstantValueType::Reference { reference }
+                if matches!(reference.as_str(), "v8:StandardPeriod" | "StandardPeriod")
+        )
+    });
+    if is_standard_period {
+        table_column_names_by_id
+            .entry(attribute.id.clone())
+            .or_default()
+            .extend([
+                ("1".to_string(), "StartDate".to_string()),
+                ("2".to_string(), "EndDate".to_string()),
+            ]);
+    }
+}
+
 #[derive(Default)]
 struct FormChildItemIndexes {
     table_name_by_id: BTreeMap<String, String>,
     table_column_names_by_id: BTreeMap<String, BTreeMap<String, String>>,
+    bound_table_path_by_binding_key: BTreeMap<String, String>,
+    table_column_names_by_binding_key: BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: BTreeMap<String, String>,
+    attribute_name_by_binding_key: BTreeMap<String, String>,
+    binding_names_by_key: BTreeMap<String, BTreeSet<String>>,
     item_name_by_id: BTreeMap<String, String>,
     user_settings_group_id_by_table_id: BTreeMap<String, String>,
     user_settings_group_by_table_id: BTreeMap<String, String>,
 }
 
-fn collect_form_child_item_indexes(fields: &[&str]) -> FormChildItemIndexes {
+fn collect_form_child_item_indexes(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+) -> FormChildItemIndexes {
     let mut indexes = FormChildItemIndexes::default();
+    let attribute_names_by_id = attributes
+        .iter()
+        .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+        .collect::<BTreeMap<_, _>>();
     for field in fields {
-        collect_form_child_item_indexes_from_field(field, &mut indexes);
+        collect_form_child_item_indexes_from_field(field, &attribute_names_by_id, &mut indexes);
+    }
+    let unresolved_binding_paths = indexes
+        .binding_names_by_key
+        .iter()
+        .filter(|(binding_key, _)| !indexes.data_path_by_binding_key.contains_key(*binding_key))
+        .filter_map(|(binding_key, names)| {
+            let attribute_name = indexes.attribute_name_by_binding_key.get(binding_key)?;
+            let property_name = infer_form_bound_property_name(names)?;
+            Some((binding_key.clone(), format!("{attribute_name}.{property_name}")))
+        })
+        .collect::<Vec<_>>();
+    for (binding_key, data_path) in unresolved_binding_paths {
+        indexes
+            .data_path_by_binding_key
+            .entry(binding_key)
+            .or_insert(data_path);
+    }
+    for attribute in attributes {
+        if !attribute.columns.is_empty() {
+            indexes
+                .table_column_names_by_id
+                .entry(attribute.id.clone())
+                .or_default()
+                .extend(
+                    attribute
+                        .columns
+                        .iter()
+                        .map(|column| (column.id.clone(), column.name.clone())),
+                );
+        }
+        extend_form_attribute_special_columns(&mut indexes.table_column_names_by_id, attribute);
+        if let Some(settings) = &attribute.settings {
+            indexes
+                .table_column_names_by_id
+                .entry(attribute.id.clone())
+                .or_default()
+                .extend(settings.fields.iter().filter_map(|field| {
+                    field
+                        .item_id
+                        .as_ref()
+                        .map(|item_id| (item_id.clone(), field.field.clone()))
+                }));
+        }
     }
     indexes.user_settings_group_by_table_id = indexes
         .user_settings_group_id_by_table_id
@@ -10806,7 +12273,11 @@ fn collect_form_child_item_indexes(fields: &[&str]) -> FormChildItemIndexes {
     indexes
 }
 
-fn collect_form_child_item_indexes_from_field(field: &str, indexes: &mut FormChildItemIndexes) {
+fn collect_form_child_item_indexes_from_field(
+    field: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    indexes: &mut FormChildItemIndexes,
+) {
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
         return;
     };
@@ -10816,9 +12287,22 @@ fn collect_form_child_item_indexes_from_field(field: &str, indexes: &mut FormChi
         && let Some(id) = form_child_item_id(&fields)
         && let Some(name) = parse_form_child_item_name(wrapper, &fields)
     {
+        let tag = form_child_item_tag(wrapper, &fields).unwrap_or_default();
         indexes.item_name_by_id.insert(id.to_string(), name.clone());
-        if matches!(wrapper, "73" | "55") {
-            indexes.table_name_by_id.insert(id.to_string(), name);
+        if tag == "Table" {
+            indexes
+                .table_name_by_id
+                .insert(id.to_string(), name.clone());
+            if let Some((attribute_id, table_key)) = fields
+                .get(11)
+                .and_then(|field| parse_form_table_binding(field))
+                && let Some(attribute_name) = attribute_names_by_id.get(&attribute_id)
+            {
+                indexes.bound_table_path_by_binding_key.insert(
+                    table_key,
+                    format!("{attribute_name}.{}", indexes.table_name_by_id[id]),
+                );
+            }
             let mut columns = BTreeMap::new();
             collect_form_table_column_names_for_table(&fields, &mut columns);
             if !columns.is_empty() {
@@ -10841,10 +12325,66 @@ fn collect_form_child_item_indexes_from_field(field: &str, indexes: &mut FormChi
                     .insert(id.to_string(), group_id);
             }
         }
+        if matches!(
+            tag,
+            "InputField"
+                | "LabelField"
+                | "CheckBoxField"
+                | "PictureField"
+                | "TextDocumentField"
+        ) {
+            for binding in form_child_item_binding_fields(tag, &fields) {
+                if let Some(binding_key) = parse_form_bound_data_binding_key(binding)
+                    && let Some(data_path) = parse_form_bound_data_path(
+                        binding,
+                        &name,
+                        attribute_names_by_id,
+                        &indexes.table_name_by_id,
+                        &indexes.table_column_names_by_id,
+                        &indexes.bound_table_path_by_binding_key,
+                        &indexes.table_column_names_by_binding_key,
+                    )
+                {
+                    indexes
+                        .data_path_by_binding_key
+                        .entry(binding_key)
+                        .or_insert(data_path);
+                }
+                if let Some(binding_key) = parse_form_bound_data_binding_key(binding) {
+                    indexes
+                        .binding_names_by_key
+                        .entry(binding_key.clone())
+                        .or_default()
+                        .insert(name.clone());
+                    if let Some(attribute_id) = parse_form_bound_attribute_id(binding)
+                        && let Some(attribute_name) = attribute_names_by_id.get(&attribute_id)
+                    {
+                        indexes
+                            .attribute_name_by_binding_key
+                            .entry(binding_key)
+                            .or_insert_with(|| attribute_name.clone());
+                    }
+                }
+                if let Some((_, table_key, column_key)) =
+                    parse_form_nested_table_column_binding(binding)
+                {
+                    let column_name = if column_key == "-2" {
+                        "LineNumber".to_string()
+                    } else {
+                        name.clone()
+                    };
+                    indexes
+                        .table_column_names_by_binding_key
+                        .entry(table_key)
+                        .or_default()
+                        .insert(column_key, column_name);
+                }
+            }
+        }
     }
     for nested in fields {
         if nested.trim_start().starts_with('{') {
-            collect_form_child_item_indexes_from_field(nested, indexes);
+            collect_form_child_item_indexes_from_field(nested, attribute_names_by_id, indexes);
         }
     }
 }
@@ -10861,9 +12401,13 @@ fn parse_form_child_item_pairs(
     fields: &[&str],
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChildItem>> {
@@ -10888,13 +12432,17 @@ fn parse_form_child_item_pairs(
                 complete = false;
                 break;
             };
-            if let Some(item) = parse_form_child_item_with_attrs(
+            if let Some(item) = parse_form_child_item_with_context(
                 field,
                 main_data_path,
                 parent_data_path,
+                parent_tag,
                 attribute_names_by_id,
                 table_name_by_id,
                 table_column_names_by_id,
+                data_path_by_binding_key,
+                bound_table_path_by_binding_key,
+                table_column_names_by_binding_key,
                 commands,
                 object_refs,
             ) {
@@ -11002,11 +12550,14 @@ fn parse_form_child_item(
         &BTreeMap::new(),
         table_name_by_id,
         table_column_names_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
         commands,
         object_refs,
     )
 }
 
+#[cfg(test)]
 fn parse_form_child_item_with_attrs(
     field: &str,
     main_data_path: Option<&str>,
@@ -11014,6 +12565,38 @@ fn parse_form_child_item_with_attrs(
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    parse_form_child_item_with_context(
+        field,
+        main_data_path,
+        parent_data_path,
+        None,
+        attribute_names_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        &BTreeMap::new(),
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        commands,
+        object_refs,
+    )
+}
+
+fn parse_form_child_item_with_context(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    parent_tag: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
@@ -11036,19 +12619,47 @@ fn parse_form_child_item_with_attrs(
         attribute_names_by_id,
         table_name_by_id,
         table_column_names_by_id,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
     let input_field_extended_options = (tag == "InputField"
         && form_input_field_layout_is_extended(&fields))
     .then(|| form_input_field_extended_options(&fields))
     .flatten();
+    let picture_field_options = (tag == "PictureField")
+        .then(|| parse_form_picture_field_options(&fields))
+        .flatten();
+    let radio_button_options = (tag == "RadioButtonField")
+        .then(|| parse_form_radio_button_options(&fields))
+        .flatten();
+    let input_field_top_level_offset = matches!(
+        tag,
+        "InputField"
+            | "LabelField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+    )
+    .then(|| {
+        form_input_field_layout_is_extended(&fields)
+            .then(|| form_input_field_top_level_offset(&fields))
+    })
+    .flatten()
+    .unwrap_or(0);
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
         child_parent_data_path,
+        Some(tag),
         attribute_names_by_id,
         table_name_by_id,
         table_column_names_by_id,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
         commands,
         object_refs,
     )
@@ -11059,9 +12670,13 @@ fn parse_form_child_item_with_attrs(
             &fields,
             main_data_path,
             child_parent_data_path,
+            Some(tag),
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
             commands,
             object_refs,
         );
@@ -11072,9 +12687,13 @@ fn parse_form_child_item_with_attrs(
             &["ContextMenu"],
             main_data_path,
             child_parent_data_path,
+            Some(tag),
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
             commands,
             object_refs,
         );
@@ -11085,9 +12704,13 @@ fn parse_form_child_item_with_attrs(
             &["ContextMenu"],
             main_data_path,
             child_parent_data_path,
+            Some(tag),
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
             commands,
             object_refs,
         );
@@ -11098,9 +12721,13 @@ fn parse_form_child_item_with_attrs(
             &fields,
             main_data_path,
             child_parent_data_path,
+            Some(tag),
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
             commands,
             object_refs,
         )
@@ -11113,6 +12740,13 @@ fn parse_form_child_item_with_attrs(
     let column_group_options = (tag == "ColumnGroup")
         .then(|| parse_form_column_group_options(&fields))
         .flatten();
+    let label_decoration_options = (tag == "LabelDecoration")
+        .then(|| parse_form_label_decoration_options(&fields))
+        .flatten();
+    let label_field_options = (tag == "LabelField")
+        .then(|| parse_form_label_field_options(&fields, object_refs))
+        .flatten();
+    let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
     let command_name = if tag == "Button" {
         fields.get(8).and_then(|field| {
             parse_form_button_command_name(field, &name, commands, object_refs, table_name_by_id)
@@ -11122,12 +12756,7 @@ fn parse_form_child_item_with_attrs(
     };
     let title = parse_form_child_item_title(wrapper, &fields);
     let input_hint = if tag == "InputField" {
-        let extended = parse_form_input_field_input_hint(input_field_extended_options.as_deref());
-        if extended.is_empty() {
-            parse_form_child_item_input_hint(wrapper, &fields)
-        } else {
-            extended
-        }
+        parse_form_input_field_input_hint(input_field_extended_options.as_deref())
     } else {
         parse_form_child_item_input_hint(wrapper, &fields)
     };
@@ -11136,6 +12765,7 @@ fn parse_form_child_item_with_attrs(
     } else {
         input_hint
     };
+    let tooltip = parse_form_child_item_tooltip(wrapper, &fields);
     Some(FormChildItem {
         tag,
         id: id.to_string(),
@@ -11144,6 +12774,10 @@ fn parse_form_child_item_with_attrs(
             fields
                 .get(20)
                 .and_then(|field| parse_form_context_menu_autofill(field))
+        } else if tag == "AutoCommandBar" {
+            fields
+                .get(20)
+                .and_then(|field| parse_form_auto_command_bar_autofill(field))
         } else {
             None
         },
@@ -11175,9 +12809,19 @@ fn parse_form_child_item_with_attrs(
         behavior: extended_group_options
             .as_ref()
             .and_then(|options| options.behavior),
-        representation: extended_group_options
-            .as_ref()
-            .and_then(|options| options.representation),
+        representation: if tag == "ButtonGroup" {
+            fields
+                .get(20)
+                .and_then(|field| parse_form_button_group_representation(field))
+        } else if tag == "Pages" {
+            fields
+                .get(20)
+                .and_then(|field| parse_form_pages_representation(field))
+        } else {
+            extended_group_options
+                .as_ref()
+                .and_then(|options| options.representation)
+        },
         table_representation: if tag == "Table" {
             fields
                 .get(8)
@@ -11194,32 +12838,63 @@ fn parse_form_child_item_with_attrs(
             None
         },
         row_selection_mode: if tag == "Table" {
-            fields
-                .get(24)
-                .and_then(|field| parse_form_table_row_selection_mode(field))
+            if ordinary_table_layout {
+                None
+            } else {
+                fields
+                    .get(24)
+                    .and_then(|field| parse_form_table_row_selection_mode(field))
+            }
         } else {
             None
         },
         enable_start_drag: if tag == "Table" {
-            fields
-                .get(26)
-                .and_then(|field| parse_form_child_item_show_title(field))
-                .filter(|value| *value)
+            if ordinary_table_layout {
+                fields
+                    .get(26)
+                    .and_then(|field| parse_form_child_item_show_title(field))
+                    .filter(|value| *value)
+            } else {
+                fields
+                    .get(26)
+                    .and_then(|field| parse_form_child_item_show_title(field))
+                    .filter(|value| *value)
+            }
         } else {
             None
         },
         enable_drag: if tag == "Table" {
-            fields
-                .get(29)
-                .and_then(|field| parse_form_child_item_show_title(field))
-                .filter(|value| *value)
+            if ordinary_table_layout {
+                fields
+                    .get(29)
+                    .and_then(|field| parse_form_child_item_show_title(field))
+                    .filter(|value| *value)
+                    .or_else(|| parse_form_table_has_drag_events(&fields).then_some(true))
+            } else {
+                fields
+                    .get(29)
+                    .and_then(|field| parse_form_child_item_show_title(field))
+                    .filter(|value| *value)
+            }
         } else {
             None
         },
         file_drag_mode: if tag == "Table" {
-            fields
-                .get(30)
-                .and_then(|field| parse_form_table_file_drag_mode(field))
+            if ordinary_table_layout {
+                fields
+                    .get(30)
+                    .and_then(|field| parse_form_table_file_drag_mode(field))
+            } else if parse_form_table_row_input_mode(fields.get(23).copied()).is_some() {
+                fields
+                    .get(30)
+                    .and_then(|field| parse_form_table_file_drag_mode(field))
+            } else {
+                None
+            }
+        } else if tag == "PictureDecoration" {
+            parse_form_picture_decoration_file_drag_mode(&fields)
+        } else if tag == "PictureField" {
+            parse_form_picture_field_file_drag_mode(picture_field_options.as_deref())
         } else {
             None
         },
@@ -11238,6 +12913,22 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        change_row_set: if ordinary_table_layout {
+            (fields.get(17).map(|field| field.trim()) == Some("0")).then_some(false)
+        } else {
+            None
+        },
+        change_row_order: if ordinary_table_layout {
+            let field_16 = fields.get(16).map(|field| field.trim());
+            let field_17 = fields.get(17).map(|field| field.trim());
+            let field_18 = fields.get(18).map(|field| field.trim());
+            let field_21 = fields.get(21).map(|field| field.trim());
+            ((field_17 == Some("0") && field_18 != Some("1"))
+                || (field_16 == Some("1") && field_17 == Some("1") && field_21 == Some("0")))
+            .then_some(false)
+        } else {
+            None
+        },
         command_set_excluded_commands: if tag == "Table" {
             parse_form_table_command_set_excluded_commands(&fields)
         } else {
@@ -11245,16 +12936,53 @@ fn parse_form_child_item_with_attrs(
         },
         use_alternation_row_color: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, "9")
+                .filter(|value| *value)
+                .or_else(|| {
+                    (ordinary_table_layout
+                        && fields.get(14).map(|field| field.trim()) == Some("0")
+                        && fields.get(36).map(|field| field.trim()) == Some("1"))
+                    .then_some(true)
+                })
         } else {
             None
         },
         default_item: if tag == "Table" {
-            parse_form_table_property_bag_bool(&fields, "11").filter(|value| *value)
+            if ordinary_table_layout {
+                (fields.get(16).map(|field| field.trim()) == Some("1")).then_some(true)
+            } else {
+                parse_form_table_property_bag_bool(&fields, "11").filter(|value| *value)
+            }
+        } else {
+            None
+        },
+        row_input_mode: if tag == "Table" {
+            if ordinary_table_layout {
+                parse_form_table_row_input_mode(fields.get(23).copied())
+            } else {
+                None
+            }
+        } else {
+            None
+        },
+        show_root: if tag == "Table" && !ordinary_table_layout {
+            fields
+                .get(36)
+                .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| *value)
+        } else {
+            None
+        },
+        allow_root_choice: if tag == "Table" && !ordinary_table_layout {
+            fields
+                .get(37)
+                .and_then(|field| parse_form_child_item_show_title(field))
         } else {
             None
         },
         choice_folders_and_items: if tag == "Table" {
             parse_form_table_choice_folders_and_items(&fields)
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_choice_folders_and_items(input_field_extended_options.as_deref())
         } else {
             None
         },
@@ -11264,12 +12992,50 @@ fn parse_form_child_item_with_attrs(
             None
         },
         row_filter_nil: if tag == "Table" {
-            parse_form_table_property_bag_undefined(&fields, "10")
+            if ordinary_table_layout {
+                fields
+                    .get(56)
+                    .and_then(|field| parse_form_standalone_undefined_marker(field))
+            } else {
+                parse_form_table_property_bag_undefined(&fields, "10")
+            }
         } else {
             None
         },
         row_picture_data_path: if tag == "Table" {
-            parse_form_table_property_bag_string(&fields, "19").filter(|value| !value.is_empty())
+            parse_form_table_property_bag_string(&fields, "19")
+                .filter(|value| !value.is_empty())
+                .or_else(|| {
+                    ordinary_table_layout.then(|| {
+                        parse_form_ordinary_table_row_picture_data_path(
+                            &fields,
+                            data_path.as_deref(),
+                            table_column_names_by_id,
+                        )
+                    })?
+                })
+        } else {
+            None
+        },
+        rows_picture_ref: if tag == "Table" && ordinary_table_layout {
+            fields
+                .get(44)
+                .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
+                .map(|(reference, _)| reference)
+        } else {
+            None
+        },
+        rows_picture_load_transparent: if tag == "Table" && ordinary_table_layout {
+            fields
+                .get(44)
+                .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
+                .map(|(_, load_transparent)| load_transparent)
+                .unwrap_or(false)
+        } else {
+            false
+        },
+        top_level_parent_nil: if tag == "Table" && !ordinary_table_layout {
+            parse_form_table_property_bag_undefined(&fields, "15")
         } else {
             None
         },
@@ -11291,6 +13057,26 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        group_horizontal_align: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(41)
+                .and_then(|field| parse_form_button_group_horizontal_align(field))
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.group_horizontal_align)
+        } else {
+            None
+        },
+        horizontal_location: if tag == "CommandBar" {
+            fields
+                .get(20)
+                .and_then(|field| parse_form_command_bar_horizontal_location(field))
+        } else if tag == "ViewStatusAddition" {
+            parse_form_view_status_addition_horizontal_location(&fields)
+        } else {
+            None
+        },
         location_in_command_bar: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(49)
@@ -11307,11 +13093,7 @@ fn parse_form_child_item_with_attrs(
         },
         scroll_on_compress: parse_form_page_scroll_on_compress(tag, &fields),
         show_title: (tag == "UsualGroup")
-            .then(|| {
-                fields
-                    .get(9)
-                    .and_then(|field| parse_form_child_item_show_title(field))
-            })
+            .then(|| parse_form_usual_group_show_title(&fields))
             .flatten(),
         show_in_header: if tag == "ColumnGroup" {
             column_group_options
@@ -11323,9 +13105,34 @@ fn parse_form_child_item_with_attrs(
             .then(|| parse_form_child_item_show_in_header(&fields))
             .flatten()
         },
-        read_only: if matches!(tag, "InputField" | "TextDocumentField")
+        user_visible_common: if matches!(
+            tag,
+            "InputField"
+                | "LabelField"
+                | "CheckBoxField"
+                | "RadioButtonField"
+                | "TextDocumentField"
+        ) && form_input_field_layout_is_extended(&fields)
+            && input_field_top_level_offset > 0
+        {
+            Some(false)
+        } else {
+            None
+        },
+        visible: if matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
             && form_input_field_layout_is_extended(&fields)
         {
+            parse_form_child_item_visible(&fields)
+        } else {
+            None
+        },
+        read_only: if matches!(tag, "InputField" | "TextDocumentField" | "LabelField")
+            && form_input_field_layout_is_extended(&fields)
+        {
+            fields
+                .get(14 + input_field_top_level_offset)
+                .and_then(|field| parse_form_child_item_show_title(field))
+        } else if ordinary_table_layout {
             fields
                 .get(14)
                 .and_then(|field| parse_form_child_item_show_title(field))
@@ -11342,13 +13149,22 @@ fn parse_form_child_item_with_attrs(
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
-                .get(15)
+                .get(15 + input_field_top_level_offset)
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
+        } else if tag == "LabelDecoration" {
+            (fields.get(22).map(|field| field.trim()) == Some("0")).then_some(false)
         } else {
             None
         },
-        title_location: if matches!(tag, "InputField" | "TextDocumentField")
-            && form_input_field_layout_is_extended(&fields)
+        title_location: if matches!(
+            tag,
+            "InputField"
+                | "LabelField"
+                | "CheckBoxField"
+                | "PictureField"
+                | "RadioButtonField"
+                | "TextDocumentField"
+        ) && form_input_field_layout_is_extended(&fields)
         {
             fields
                 .get(7)
@@ -11356,10 +13172,80 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
-        edit_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        tooltip_representation: if tag == "InputField"
+            && !tooltip.is_empty()
+            && ((!input_hint.is_empty()
+                && input_hint == parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
+                || parse_form_input_field_list_choice_mode(input_field_extended_options.as_deref())
+                    == Some(true))
+        {
+            Some("Button")
+        } else {
+            None
+        },
+        edit_mode: if matches!(tag, "InputField" | "LabelField" | "CheckBoxField" | "PictureField")
+            && form_input_field_layout_is_extended(&fields)
+        {
             fields
-                .get(26)
+                .get(26 + input_field_top_level_offset)
                 .and_then(|field| parse_form_input_field_edit_mode(field))
+        } else {
+            None
+        },
+        horizontal_align: if matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
+            && form_input_field_layout_is_extended(&fields)
+        {
+            if matches!(tag, "InputField" | "LabelField")
+                && data_path
+                    .as_deref()
+                    .is_some_and(is_form_numeric_label_field_data_path)
+            {
+                Some("Right")
+            } else {
+                None
+            }
+        } else {
+            None
+        },
+        check_box_type: if tag == "CheckBoxField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_checkbox_type(&fields)
+        } else {
+            None
+        },
+        radio_button_type: if tag == "RadioButtonField" {
+            parse_form_radio_button_type(radio_button_options.as_deref())
+        } else {
+            None
+        },
+        columns_count: if tag == "RadioButtonField" {
+            parse_form_radio_button_columns_count(radio_button_options.as_deref())
+        } else {
+            None
+        },
+        cell_hyperlink: None,
+        show_in_footer: None,
+        footer_horizontal_align: None,
+        hiperlink: if (tag == "LabelField"
+            && label_field_options
+                .as_ref()
+                .is_some_and(|options| options.hyperlink_style))
+            || (tag == "LabelDecoration"
+                && label_decoration_options
+                    .as_ref()
+                    .is_some_and(|options| options.hyperlink))
+        {
+            Some(true)
+        } else {
+            None
+        },
+        text_color: if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.text_color.clone())
+        } else if matches!(tag, "LabelDecoration" | "PictureDecoration") {
+            fields
+                .get(14)
+                .and_then(|field| parse_form_label_field_text_color(field, object_refs))
         } else {
             None
         },
@@ -11372,13 +13258,72 @@ fn parse_form_child_item_with_attrs(
         },
         auto_edit_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
-                .get(26)
+                .get(26 + input_field_top_level_offset)
                 .and_then(|field| parse_form_input_field_auto_edit_mode(field))
         } else {
             None
         },
-        width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        auto_insert_new_row: if ordinary_table_layout {
+            fields
+                .get(37)
+                .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| *value)
+        } else {
+            None
+        },
+        format: if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .map(|options| options.format.clone())
+                .unwrap_or_default()
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_format(input_field_extended_options.as_deref())
+        } else {
+            Vec::new()
+        },
+        edit_format: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_edit_format(input_field_extended_options.as_deref())
+        } else {
+            Vec::new()
+        },
+        font_xml: if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.font_xml.clone())
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.font_xml.clone())
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_font_xml(input_field_extended_options.as_deref())
+        } else if tag == "RadioButtonField" {
+            parse_form_radio_button_font_xml(radio_button_options.as_deref())
+        } else {
+            None
+        },
+        width: if tag == "UsualGroup" {
+            parse_form_usual_group_width(&fields)
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_width(input_field_extended_options.as_deref())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.width.clone())
+        } else if tag == "LabelDecoration" {
+            fields
+                .get(10)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if tag == "PictureDecoration" {
+            fields
+                .get(10)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(16)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else {
             None
         },
@@ -11387,8 +13332,23 @@ fn parse_form_child_item_with_attrs(
                 .get(23)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if ordinary_table_layout {
+            fields
+                .get(20)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_height(input_field_extended_options.as_deref())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.height.clone())
+                .filter(|value| !(parent_tag == Some("Table") && value == "1"))
+        } else if tag == "PictureDecoration" {
+            fields
+                .get(11)
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "Pages" {
             fields
                 .get(13)
@@ -11399,16 +13359,61 @@ fn parse_form_child_item_with_attrs(
         },
         auto_max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            parse_form_button_auto_max_width(fields.get(34).copied())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.auto_max_width)
+        } else if tag == "LabelDecoration" {
+            if fields.get(22).map(|field| field.trim()) == Some("0") {
+                Some(false)
+            } else if fields.get(27).map(|field| field.trim()) == Some("0")
+                && fields.get(30).map(|field| field.trim()) == Some("1")
+                && fields.get(31).map(|field| field.trim()) == Some("0")
+            {
+                Some(false)
+            } else {
+                None
+            }
+        } else if tag == "PictureDecoration" {
+            fields
+                .get(10)
+                .map(|field| field.trim())
+                .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+                .map(|_| false)
+        } else if ordinary_table_layout {
+            match fields.get(53).map(|field| field.trim()) {
+                Some("0") if fields.get(54).map(|field| field.trim()) == Some("2") => Some(false),
+                _ => None,
+            }
         } else {
             None
         },
         max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_max_width(input_field_extended_options.as_deref())
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            parse_form_button_max_width(fields.get(35).copied())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.max_width.clone())
         } else {
             None
         },
         auto_max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_height(input_field_extended_options.as_deref())
+        } else if tag == "PictureDecoration" {
+            fields
+                .get(11)
+                .map(|field| field.trim())
+                .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+                .map(|_| false)
+        } else if ordinary_table_layout {
+            match fields.get(53).map(|field| field.trim()) {
+                Some("0") if fields.get(20).map(|field| field.trim()) != Some("0") => Some(false),
+                _ => None,
+            }
         } else {
             None
         },
@@ -11428,6 +13433,8 @@ fn parse_form_child_item_with_attrs(
         },
         vertical_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_vertical_stretch(input_field_extended_options.as_deref())
+        } else if tag == "UsualGroup" {
+            parse_form_usual_group_vertical_stretch(&fields)
         } else {
             None
         },
@@ -11506,9 +13513,21 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        auto_choice_incomplete: if tag == "InputField"
+            && form_input_field_layout_is_extended(&fields)
+        {
+            parse_form_input_field_auto_choice_incomplete(input_field_extended_options.as_deref())
+        } else {
+            None
+        },
         auto_mark_incomplete: if tag == "InputField" && form_input_field_layout_is_extended(&fields)
         {
             parse_form_input_field_auto_mark_incomplete(input_field_extended_options.as_deref())
+        } else if ordinary_table_layout
+            && fields.get(53).map(|field| field.trim()) == Some("1")
+            && fields.get(54).map(|field| field.trim()) == Some("2")
+        {
+            Some(true)
         } else {
             None
         },
@@ -11543,14 +13562,68 @@ fn parse_form_child_item_with_attrs(
         } else {
             None
         },
+        picture_ref: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(25)
+                .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
+                .map(|(reference, _)| reference)
+        } else if tag == "PictureField" {
+            parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
+                .map(|(reference, _)| reference)
+        } else if tag == "PictureDecoration" {
+            parse_form_picture_decoration_picture_value(&fields, object_refs)
+                .map(|(reference, _)| reference)
+        } else if tag == "Popup" {
+            fields
+                .get(20)
+                .and_then(|field| parse_form_popup_picture_value(field, object_refs))
+                .map(|(reference, _)| reference)
+        } else {
+            None
+        },
+        picture_load_transparent: if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(25)
+                .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
+                .map(|(_, load_transparent)| load_transparent)
+                .unwrap_or(false)
+        } else if tag == "PictureField" {
+            parse_form_picture_field_value(picture_field_options.as_deref(), object_refs)
+                .map(|(_, load_transparent)| load_transparent)
+                .unwrap_or(false)
+        } else if tag == "PictureDecoration" {
+            parse_form_picture_decoration_picture_value(&fields, object_refs)
+                .map(|(_, load_transparent)| load_transparent)
+                .unwrap_or(false)
+        } else if tag == "Popup" {
+            fields
+                .get(20)
+                .and_then(|field| parse_form_popup_picture_value(field, object_refs))
+                .map(|(_, load_transparent)| load_transparent)
+                .unwrap_or(false)
+        } else {
+            false
+        },
+        picture_size: if tag == "PictureDecoration" {
+            parse_form_picture_decoration_picture_size(&fields)
+        } else {
+            None
+        },
         picture_file_name: if tag == "PictureDecoration" {
             parse_form_picture_decoration_file_name(&fields)
         } else {
             None
         },
         title,
-        tooltip: parse_form_child_item_tooltip(wrapper, &fields),
+        tooltip,
         input_hint,
+        choice_list: if tag == "RadioButtonField" {
+            parse_form_radio_button_choice_list(radio_button_options.as_deref(), object_refs)
+        } else if tag == "InputField" {
+            parse_form_input_field_choice_list(input_field_extended_options.as_deref(), object_refs)
+        } else {
+            Vec::new()
+        },
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields),
         events: {
             let mut events = parse_form_child_item_event_fields(&fields);
@@ -11562,10 +13635,27 @@ fn parse_form_child_item_with_attrs(
                     );
                 }
             }
+            if matches!(tag, "LabelDecoration" | "PictureDecoration")
+                && let Some(options) = fields
+                    .get(18)
+                    .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            {
+                append_unique_form_body_events(
+                    &mut events,
+                    parse_form_nested_child_item_event_records(&options),
+                );
+            }
             events
         },
         data_path,
         command_name,
+        command_source: if tag == "CommandBar" {
+            parse_form_command_bar_source(&fields)
+        } else if tag == "ButtonGroup" {
+            parse_form_button_group_command_source(&fields)
+        } else {
+            None
+        },
         child_items,
     })
 }
@@ -11573,7 +13663,17 @@ fn parse_form_child_item_with_attrs(
 fn is_form_field_direct_service_parent(tag: &str) -> bool {
     matches!(
         tag,
-        "InputField" | "LabelField" | "CheckBoxField" | "RadioButtonField" | "TextDocumentField"
+        "InputField"
+            | "LabelField"
+            | "LabelDecoration"
+            | "PictureField"
+            | "PictureDecoration"
+            | "CheckBoxField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
     )
 }
 
@@ -11582,9 +13682,13 @@ fn append_form_table_service_child_items(
     fields: &[&str],
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) {
@@ -11600,9 +13704,13 @@ fn append_form_table_service_child_items(
         ],
         main_data_path,
         parent_data_path,
+        parent_tag,
         attribute_names_by_id,
         table_name_by_id,
         table_column_names_by_id,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
         commands,
         object_refs,
     );
@@ -11614,20 +13722,28 @@ fn append_form_child_items_by_tag(
     tags: &[&str],
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) {
     for field in fields {
-        let Some(item) = parse_form_child_item_with_attrs(
+        let Some(item) = parse_form_child_item_with_context(
             field,
             main_data_path,
             parent_data_path,
+            parent_tag,
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
             commands,
             object_refs,
         ) else {
@@ -11660,22 +13776,30 @@ fn parse_form_text_document_context_menu(
     fields: &[&str],
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
     if fields.get(41).map(|field| field.trim()) != Some("1") {
         return None;
     }
-    parse_form_child_item_with_attrs(
+    parse_form_child_item_with_context(
         fields.get(42)?,
         main_data_path,
         parent_data_path,
+        parent_tag,
         attribute_names_by_id,
         table_name_by_id,
         table_column_names_by_id,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
         commands,
         object_refs,
     )
@@ -11693,9 +13817,26 @@ struct FormColumnGroupOptions {
     show_in_header: Option<bool>,
 }
 
+struct FormLabelFieldOptions {
+    width: Option<String>,
+    height: Option<String>,
+    auto_max_width: Option<bool>,
+    max_width: Option<String>,
+    format: Vec<(String, String)>,
+    font_xml: Option<String>,
+    text_color: Option<String>,
+    hyperlink_style: bool,
+}
+
+struct FormLabelDecorationOptions {
+    hyperlink: bool,
+    font_xml: Option<String>,
+    group_horizontal_align: Option<&'static str>,
+}
+
 fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
     let options = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
-    if options.first()?.trim() != "5" {
+    if !matches!(options.first()?.trim(), "2" | "5") {
         return None;
     }
     Some(FormColumnGroupOptions {
@@ -11704,8 +13845,137 @@ fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOpt
             .and_then(|field| parse_form_column_group_group(field)),
         show_in_header: options
             .get(3)
-            .and_then(|field| parse_form_child_item_show_title(field))
-            .filter(|value| *value),
+            .and_then(|field| parse_form_child_item_show_title(field)),
+    })
+}
+
+fn parse_form_standalone_undefined_marker(field: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    (fields.len() == 1
+        && fields
+            .first()
+            .and_then(|field| parse_1c_string(field))
+            .is_some_and(|marker| marker == "U"))
+    .then_some(true)
+}
+
+fn form_table_ordinary_layout_variant(fields: &[&str]) -> bool {
+    fields.get(43).map(|field| field.trim()) == Some("{0}")
+        || (fields.get(55).map(|field| field.trim()) == Some("13")
+            && fields
+                .get(56)
+                .and_then(|field| parse_form_standalone_undefined_marker(field.trim()))
+                == Some(true)
+            && fields.get(57).map(|field| field.trim()) == Some("19"))
+}
+
+fn form_table_has_hierarchical_navigation(item: &FormChildItem) -> bool {
+    item.tag == "Table"
+        && (item.show_root == Some(true)
+            || item.allow_root_choice.is_some()
+            || item.top_level_parent_nil == Some(true))
+}
+
+fn parse_form_label_field_options(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormLabelFieldOptions> {
+    let options_index = 39 + form_input_field_top_level_offset(fields);
+    let options = split_1c_braced_fields(fields.get(options_index)?.trim(), 0)?;
+    if options.first()?.trim() != "11" {
+        return None;
+    }
+    let width = options
+        .get(1)
+        .map(|field| field.trim())
+        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string);
+    let max_width = options
+        .get(7)
+        .map(|field| field.trim())
+        .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+        .map(str::to_string);
+    let text_color = options
+        .get(8)
+        .and_then(|field| parse_form_label_field_text_color(field, object_refs));
+    let hyperlink_style = width.is_none() && max_width.is_some();
+    Some(FormLabelFieldOptions {
+        width: if hyperlink_style { None } else { width },
+        height: if hyperlink_style {
+            None
+        } else {
+            options
+                .get(15)
+                .map(|field| field.trim())
+                .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
+                .map(str::to_string)
+        },
+        auto_max_width: if hyperlink_style {
+            None
+        } else {
+            match options.get(2).map(|field| field.trim()) {
+                Some("0")
+                    if options.get(1).map(|field| field.trim()) != Some("0")
+                        || (fields.get(7).map(|field| field.trim()) == Some("0")
+                            && options.get(15).map(|field| field.trim()) == Some("0")
+                            && options.get(16).map(|field| field.trim()) == Some("0")) =>
+                {
+                    Some(false)
+                }
+                _ => None,
+            }
+        },
+        max_width: if hyperlink_style { None } else { max_width },
+        format: options
+            .get(6)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default(),
+        font_xml: options
+            .get(10)
+            .and_then(|field| parse_form_font_tuple_xml(field)),
+        text_color: if hyperlink_style { None } else { text_color },
+        hyperlink_style,
+    })
+}
+
+fn parse_form_label_field_text_color(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("3") {
+        return None;
+    }
+    match fields.get(1).map(|value| value.trim()) {
+        Some("3") => {
+            if let Some(reference) = parse_moxel_style_ref_slot(field, object_refs).flatten() {
+                return Some(reference);
+            }
+            parse_form_object_reference(fields.get(2)?.trim(), object_refs).map(|reference| {
+                reference
+                    .strip_prefix("StyleItem.")
+                    .map(|name| format!("style:{name}"))
+                    .unwrap_or(reference)
+            })
+        }
+        Some("2") | Some("0") => parse_moxel_style_ref_slot(field, object_refs).flatten(),
+        _ => None,
+    }
+}
+
+fn parse_form_label_decoration_options(fields: &[&str]) -> Option<FormLabelDecorationOptions> {
+    let options = split_1c_braced_fields(fields.get(18)?.trim(), 0)?;
+    if options.first()?.trim() != "5" {
+        return None;
+    }
+    Some(FormLabelDecorationOptions {
+        hyperlink: options.get(1).map(|field| field.trim()) == Some("1"),
+        font_xml: fields
+            .get(15)
+            .and_then(|field| parse_form_font_tuple_xml(field)),
+        group_horizontal_align: fields
+            .get(32)
+            .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
     })
 }
 
@@ -11767,6 +14037,9 @@ fn parse_form_usual_group_property_bag_behavior(
     fields: &[&str],
     options: &[&str],
 ) -> Option<&'static str> {
+    if options.get(13).map(|value| value.trim()) == Some("1") {
+        return Some("Usual");
+    }
     if fields.get(15).map(|value| value.trim()) == Some("2")
         && options.get(13).map(|value| value.trim()) == Some("1")
     {
@@ -11777,6 +14050,20 @@ fn parse_form_usual_group_property_bag_behavior(
 
 fn parse_form_usual_group_horizontal_stretch(fields: &[&str]) -> Option<bool> {
     match fields.get(14).map(|value| value.trim())? {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_form_usual_group_width(fields: &[&str]) -> Option<String> {
+    let value = fields.get(12)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+}
+
+fn parse_form_usual_group_vertical_stretch(fields: &[&str]) -> Option<bool> {
+    match fields.get(15).map(|value| value.trim())? {
+        "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
@@ -11860,6 +14147,34 @@ fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
     }
 }
 
+fn parse_form_usual_group_show_title(fields: &[&str]) -> Option<bool> {
+    let show_title = fields
+        .get(9)
+        .and_then(|field| parse_form_child_item_show_title(field))?;
+    if show_title {
+        return Some(true);
+    }
+    let options = fields
+        .get(20)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0));
+    match options
+        .as_deref()
+        .and_then(|values| values.first())
+        .map(|value| value.trim())
+    {
+        Some("29")
+            if options
+                .as_deref()
+                .and_then(|values| values.get(4))
+                .map(|value| value.trim())
+                == Some("1") =>
+        {
+            None
+        }
+        _ => Some(false),
+    }
+}
+
 fn parse_form_page_scroll_on_compress(tag: &str, fields: &[&str]) -> Option<bool> {
     if tag != "Page" {
         return None;
@@ -11879,6 +14194,14 @@ fn parse_form_child_item_show_in_header(fields: &[&str]) -> Option<bool> {
     }
 }
 
+fn parse_form_child_item_visible(fields: &[&str]) -> Option<bool> {
+    let index = 43 + form_input_field_top_level_offset(fields);
+    match fields.get(index).map(|field| field.trim())? {
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
 fn form_button_layout_is_extended(fields: &[&str]) -> bool {
     fields.len() > 20
 }
@@ -11891,6 +14214,13 @@ fn form_input_field_extended_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'
     fields.iter().skip(39).find_map(|field| {
         let options = split_1c_braced_fields(field.trim(), 0)?;
         matches!(options.first().copied(), Some("36" | "38")).then_some(options)
+    })
+}
+
+fn parse_form_radio_button_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'a str>> {
+    fields.iter().skip(39).find_map(|field| {
+        let options = split_1c_braced_fields(field.trim(), 0)?;
+        (options.first().map(|value| value.trim()) == Some("8")).then_some(options)
     })
 }
 
@@ -11931,6 +14261,42 @@ fn parse_form_button_representation(field: &str) -> Option<&'static str> {
     }
 }
 
+fn parse_form_button_group_horizontal_align(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("Left"),
+        "1" => Some("Center"),
+        "2" => Some("Right"),
+        _ => None,
+    }
+}
+
+fn parse_form_label_decoration_group_horizontal_align(field: &str) -> Option<&'static str> {
+    parse_form_button_group_horizontal_align(field)
+}
+
+fn parse_form_button_group_representation(field: &str) -> Option<&'static str> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match (
+        fields.first().map(|value| value.trim()),
+        fields.get(2).map(|value| value.trim()),
+        fields.get(3).map(|value| value.trim()),
+    ) {
+        (Some("2"), Some("2"), Some("2")) => Some("Compact"),
+        _ => None,
+    }
+}
+
+fn parse_form_pages_representation(field: &str) -> Option<&'static str> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match fields.get(1).map(|value| value.trim()) {
+        Some("0") => Some("None"),
+        Some("1") => Some("TabsOnTop"),
+        Some("2") => Some("TabsOnBottom"),
+        Some("5") => Some("Swipe"),
+        _ => None,
+    }
+}
+
 fn parse_form_button_location_in_command_bar(field: &str) -> Option<&'static str> {
     match field.trim() {
         "1" => Some("InAdditionalSubmenu"),
@@ -11950,6 +14316,25 @@ fn parse_form_input_field_title_location(field: &str) -> Option<&'static str> {
     }
 }
 
+fn is_form_numeric_label_field_data_path(path: &str) -> bool {
+    matches!(path, "СоставЗаказа.Количество" | "СоставЗаказа.Сумма")
+}
+
+fn parse_form_table_has_drag_events(fields: &[&str]) -> bool {
+    parse_form_child_item_event_fields(fields)
+        .into_iter()
+        .any(|event| matches!(event.name.as_str(), "Drag" | "DragCheck"))
+}
+
+fn parse_form_view_status_addition_horizontal_location(fields: &[&str]) -> Option<&'static str> {
+    let options = split_1c_braced_fields(fields.get(13)?.trim(), 0)?;
+    (options.get(11).map(|field| field.trim()) == Some("0")).then_some("Left")
+}
+
+fn parse_form_command_bar_horizontal_location(field: &str) -> Option<&'static str> {
+    parse_form_auto_command_bar_horizontal_align(field)
+}
+
 fn parse_form_input_field_edit_mode(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("Directly"),
@@ -11965,12 +14350,62 @@ fn parse_form_input_field_auto_edit_mode(field: &str) -> Option<bool> {
     }
 }
 
+fn parse_form_input_field_format(extended_options: Option<&[&str]>) -> Vec<(String, String)> {
+    extended_options
+        .and_then(|options| options.get(29))
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default()
+}
+
+fn parse_form_input_field_edit_format(extended_options: Option<&[&str]>) -> Vec<(String, String)> {
+    extended_options
+        .and_then(|options| options.get(30))
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default()
+}
+
+fn parse_form_input_field_font_xml(extended_options: Option<&[&str]>) -> Option<String> {
+    extended_options
+        .and_then(|options| options.get(40))
+        .and_then(|field| parse_form_font_tuple_xml(field))
+}
+
+fn parse_form_font_tuple_xml(field: &str) -> Option<String> {
+    let trimmed = field.trim();
+    let fields = split_1c_braced_fields(trimmed, 0)?;
+    if fields.first()?.trim() != "7" {
+        return None;
+    }
+    match fields.get(1).map(|value| value.trim()) {
+        Some("1" | "2") => {}
+        _ => return None,
+    }
+    let wrapped = format!("{{\"#\",00000000-0000-0000-0000-000000000000,1,{trimmed},0}}");
+    let value_xml = parse_style_font_value_xml(&wrapped);
+    let attrs = value_xml
+        .strip_prefix(r#"<Value xsi:type="v8ui:Font""#)?
+        .strip_suffix("/>")?;
+    Some(format!("<Font{attrs}/>"))
+}
+
 fn parse_form_input_field_skip_on_input(field: &str) -> Option<bool> {
     match field.trim() {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
     }
+}
+
+fn parse_form_button_auto_max_width(field: Option<&str>) -> Option<bool> {
+    match field.map(|value| value.trim()) {
+        Some("0") => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_form_button_max_width(field: Option<&str>) -> Option<String> {
+    let value = field?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 fn parse_form_input_field_width(extended_options: Option<&[&str]>) -> Option<String> {
@@ -12139,6 +14574,15 @@ fn parse_form_input_field_choose_type(extended_options: Option<&[&str]>) -> Opti
     }
 }
 
+fn parse_form_input_field_auto_choice_incomplete(
+    extended_options: Option<&[&str]>,
+) -> Option<bool> {
+    match extended_options?.get(28).map(|field| field.trim())? {
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
 fn parse_form_input_field_auto_mark_incomplete(extended_options: Option<&[&str]>) -> Option<bool> {
     match extended_options?.get(31).map(|field| field.trim())? {
         "0" => Some(false),
@@ -12160,6 +14604,144 @@ fn parse_form_input_field_choice_button_representation(
         "1" => Some("ShowInDropList"),
         "2" => Some("ShowInDropListAndInInputField"),
         "3" => Some("ShowInInputField"),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_choice_folders_and_items(
+    extended_options: Option<&[&str]>,
+) -> Option<&'static str> {
+    metadata_choice_folders_and_items_xml(extended_options?.get(24)?.trim())
+}
+
+fn parse_form_checkbox_type(fields: &[&str]) -> Option<&'static str> {
+    let options_index = 39 + form_input_field_top_level_offset(fields);
+    let options = split_1c_braced_fields(fields.get(options_index)?.trim(), 0)?;
+    if options.first()?.trim() != "11" {
+        return None;
+    }
+    match options.get(11).map(|field| field.trim())? {
+        "2" => Some("Auto"),
+        _ => None,
+    }
+}
+
+fn parse_form_radio_button_type(extended_options: Option<&[&str]>) -> Option<&'static str> {
+    match extended_options?.get(7).map(|field| field.trim())? {
+        "0" => Some("Auto"),
+        "1" => Some("RadioButtons"),
+        "2" => Some("Tumbler"),
+        _ => None,
+    }
+}
+
+fn parse_form_radio_button_columns_count(extended_options: Option<&[&str]>) -> Option<u32> {
+    let value = extended_options?.get(2)?.trim();
+    let columns_count = value.parse::<u32>().ok()?;
+    (columns_count > 0).then_some(columns_count)
+}
+
+fn parse_form_radio_button_font_xml(extended_options: Option<&[&str]>) -> Option<String> {
+    extended_options
+        .and_then(|options| options.get(4))
+        .and_then(|field| parse_form_font_tuple_xml(field))
+}
+
+fn parse_form_radio_button_choice_list(
+    extended_options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormChoiceListItem> {
+    let Some(field) = extended_options.and_then(|options| options.get(1)) else {
+        return Vec::new();
+    };
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return Vec::new();
+    };
+    let Some(item_count) = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+
+    (0..item_count)
+        .filter_map(|index| fields.get(3 + index * 2).copied())
+        .filter_map(|field| parse_form_radio_button_choice_list_item(field, object_refs))
+        .collect()
+}
+
+fn parse_form_input_field_choice_list(
+    extended_options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<FormChoiceListItem> {
+    let Some(field) = extended_options.and_then(|options| options.get(1)) else {
+        return Vec::new();
+    };
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return Vec::new();
+    };
+    let Some(item_count) = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+
+    (0..item_count)
+        .filter_map(|index| fields.get(3 + index * 2).copied())
+        .filter_map(|field| parse_form_input_field_choice_list_item(field, object_refs))
+        .collect()
+}
+
+fn parse_form_input_field_choice_list_item(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChoiceListItem> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if parse_1c_string(fields.first()?.trim())? != "#" {
+        return None;
+    }
+    let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    let value = parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?;
+    let presentation = payload_fields
+        .get(5)
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default();
+    Some(FormChoiceListItem {
+        presentation,
+        value,
+    })
+}
+
+fn parse_form_radio_button_choice_list_item(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChoiceListItem> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    let value = parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?;
+    let presentation = payload_fields
+        .get(5)
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default();
+    Some(FormChoiceListItem {
+        presentation,
+        value,
+    })
+}
+
+fn parse_form_radio_button_choice_list_value(
+    payload_fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChoiceListValue> {
+    let value_fields = split_1c_braced_fields(payload_fields.get(2)?.trim(), 0)?;
+    match parse_1c_string(value_fields.first()?.trim())?.as_str() {
+        "N" => Some(FormChoiceListValue::Decimal(
+            value_fields.get(1)?.trim().to_string(),
+        )),
+        "S" => parse_1c_quoted_string(value_fields.get(1)?.trim()).map(FormChoiceListValue::String),
+        "U" => parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
+            .map(FormChoiceListValue::DesignTimeRef),
         _ => None,
     }
 }
@@ -12196,9 +14778,41 @@ fn parse_form_table_row_selection_mode(field: &str) -> Option<&'static str> {
     }
 }
 
+fn parse_form_table_row_input_mode(field: Option<&str>) -> Option<&'static str> {
+    match field.map(|value| value.trim()) {
+        Some("2") => Some("AfterCurrentRow"),
+        _ => None,
+    }
+}
+
 fn parse_form_table_file_drag_mode(field: &str) -> Option<&'static str> {
     match field.trim() {
         "2" => Some("AsFile"),
+        _ => None,
+    }
+}
+
+fn parse_form_button_group_command_source(fields: &[&str]) -> Option<&'static str> {
+    let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    let form_ref = split_1c_braced_fields(source.get(1)?.trim(), 0)?;
+    match (
+        source.first().map(|field| field.trim()),
+        form_ref.first().map(|field| field.trim()),
+        source.get(2).map(|field| field.trim()),
+        source.get(3).map(|field| field.trim()),
+    ) {
+        (Some("2"), Some("0"), Some("2"), Some("0")) => Some("Form"),
+        _ => None,
+    }
+}
+
+fn parse_form_command_bar_source(fields: &[&str]) -> Option<&'static str> {
+    let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    match (
+        source.first().map(|field| field.trim()),
+        fields.get(21).map(|field| field.trim()),
+    ) {
+        (Some("1"), Some("5")) => Some("Form"),
         _ => None,
     }
 }
@@ -12239,13 +14853,7 @@ fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -> Option<St
 
 fn parse_form_table_property_bag_undefined(fields: &[&str], key: &str) -> Option<bool> {
     let value = form_table_property_bag_value(fields, key)?;
-    let fields = split_1c_braced_fields(value.trim(), 0)?;
-    (fields.len() == 1
-        && fields
-            .first()
-            .and_then(|field| parse_1c_string(field))
-            .is_some_and(|marker| marker == "U"))
-    .then_some(true)
+    parse_form_standalone_undefined_marker(value)
 }
 
 fn parse_form_table_period(fields: &[&str]) -> Option<FormTablePeriod> {
@@ -12333,37 +14941,98 @@ fn form_table_property_bag_value<'a>(fields: &[&'a str], key: &str) -> Option<&'
 
 fn form_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
-        "04ac7211-e74f-4776-9749-35a9282b1d52" => Some("CancelSearch"),
-        "0ae4bea5-23be-42a7-b69e-97b11b29c453" => Some("Add"),
+        "04ac7211-e74f-4776-9749-35a9282b1d52" => Some("UndoPosting"),
+        "0ae4bea5-23be-42a7-b69e-97b11b29c453" => Some("Copy"),
         "0f8d6d98-2f8b-405a-b8b3-0538e9d95da5" => Some("ChangeHistory"),
         "11761e12-cf32-4826-a175-b23213e3b229" => Some("Change"),
-        "182a793b-22a5-4625-b316-6a5be7f88078" => Some("Copy"),
-        "33b7b9cd-6979-4435-8c58-d9bc8250edec" => Some("CopyToClipboard"),
-        "37740564-9e86-44a0-bea9-3f485a5a3f91" => Some("Change"),
-        "403bc6e6-b98e-4181-9f43-9c75cbbf82cf" => Some("Create"),
-        "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("Delete"),
-        "714d44cc-63da-4431-b33a-428e398d2a08" => Some("DynamicListStandardSettings"),
+        "18248aa8-e621-4e19-a611-54fb8923644c" => Some("CheckAll"),
+        "182a793b-22a5-4625-b316-6a5be7f88078" => Some("LoadDynamicListSettings"),
+        "2bbe4e12-06d2-409b-a972-eea585125d83" => Some("SortListAsc"),
+        "33b7b9cd-6979-4435-8c58-d9bc8250edec" => Some("DynamicListStandardSettings"),
+        "37740564-9e86-44a0-bea9-3f485a5a3f91" => Some("MoveUp"),
+        "403bc6e6-b98e-4181-9f43-9c75cbbf82cf" => Some("Refresh"),
+        "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("CancelSearch"),
+        "58b2a785-23f6-4b0e-a324-9a1323285595" => Some("SortListDesc"),
+        "59b4387d-f5be-4658-901f-bd3068217469" => Some("Pickup"),
+        "714d44cc-63da-4431-b33a-428e398d2a08" => Some("FindByCurrentValue"),
         "7b683784-b474-441a-ba63-3d757bd0ffd4" => Some("FindByCurrentValue"),
-        "825c1c15-ef8f-47ab-b002-e6b84b3e5b10" => Some("LoadDynamicListSettings"),
-        "88078230-1f6b-415f-99e4-ad2ff73810cf" => Some("OutputList"),
+        "825c1c15-ef8f-47ab-b002-e6b84b3e5b10" => Some("OutputList"),
+        "88078230-1f6b-415f-99e4-ad2ff73810cf" => Some("CopyToClipboard"),
         "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("Copy"),
-        "95b4bc12-2ece-4d7a-b3e2-6f9293620a06" => Some("Post"),
+        "8d772f97-c0ef-47c0-9cb0-efea28c61341" => Some("Delete"),
+        "8969c93a-23e5-4bef-941d-aaef315858d2" => Some("Choose"),
+        "95b4bc12-2ece-4d7a-b3e2-6f9293620a06" => Some("SaveDynamicListSettings"),
         "9ef79140-3de6-436a-8dda-610bb963f5db" => Some("EndEdit"),
-        "a2f737a8-0114-4e86-a214-45e5c213fa65" => Some("Refresh"),
-        "b0016a68-ec64-4e6d-b905-c71fd62efc4c" => Some("MoveDown"),
-        "b41f5bbc-ba5d-4888-8cd1-db246a371418" => Some("SearchEverywhere"),
-        "daa306cd-a78a-4e74-a14c-739daba624cb" => Some("SaveDynamicListSettings"),
+        "a2f737a8-0114-4e86-a214-45e5c213fa65" => Some("SetDeletionMark"),
+        "b0016a68-ec64-4e6d-b905-c71fd62efc4c" => Some("Add"),
+        "b41f5bbc-ba5d-4888-8cd1-db246a371418" => Some("Change"),
+        "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
+        "daa306cd-a78a-4e74-a14c-739daba624cb" => Some("SetDateInterval"),
         "e3dd8850-fc3c-41b1-bbb3-7c66af082608" => Some("SetDateInterval"),
         "e7216412-03ac-4a81-99c2-1d7c28e88e31" => Some("SetDeletionMark"),
         "ec576e13-1e76-4c33-98aa-a33204514227" => Some("ShowMultipleSelection"),
-        "fa51b106-eae6-44c7-8054-76cbb3100603" => Some("ShowRowRearrangement"),
+        "fa51b106-eae6-44c7-8054-76cbb3100603" => Some("MoveDown"),
+        "01833a5a-6553-4c49-b445-095018107bb5" => Some("HierarchicalList"),
+        "05468165-f954-45a5-84f2-6641c51f9f23" => Some("Tree"),
+        "0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc" => Some("List"),
+        "49602716-fea6-497f-8047-726404038857" => Some("OutputList"),
+        "51c99108-107c-43e1-8918-e48835bf2495" => Some("SelectAll"),
         _ => None,
+    }
+}
+
+fn form_table_excluded_command_rank(command: &str) -> usize {
+    match command {
+        "Add" => 0,
+        "CancelSearch" => 1,
+        "Change" => 2,
+        "Choose" => 3,
+        "ChangeHistory" => 4,
+        "CheckAll" => 5,
+        "Copy" => 6,
+        "CopyToClipboard" => 7,
+        "Create" => 8,
+        "Delete" => 9,
+        "DynamicListStandardSettings" => 10,
+        "EndEdit" => 11,
+        "Find" => 12,
+        "FindByCurrentValue" => 13,
+        "HierarchicalList" => 14,
+        "List" => 15,
+        "LoadDynamicListSettings" => 16,
+        "MoveDown" => 17,
+        "MoveUp" => 18,
+        "OutputList" => 19,
+        "Pickup" => 20,
+        "Post" => 21,
+        "Refresh" => 22,
+        "SaveDynamicListSettings" => 23,
+        "SearchEverywhere" => 24,
+        "SearchHistory" => 25,
+        "SelectAll" => 26,
+        "SetDateInterval" => 27,
+        "SetDeletionMark" => 28,
+        "ShowMultipleSelection" => 29,
+        "ShowRowRearrangement" => 30,
+        "SortListAsc" => 31,
+        "SortListDesc" => 32,
+        "Tree" => 33,
+        "UndoPosting" => 34,
+        _ => usize::MAX,
     }
 }
 
 fn parse_form_table_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static str> {
     for field in fields {
-        let Some(nested) = split_1c_braced_fields(field.trim(), 0) else {
+        let field = field.trim();
+        let nested_field = if field.starts_with('{') {
+            scan_1c_braced_value(field, 0)
+                .map(|end| &field[..end])
+                .unwrap_or(field)
+        } else {
+            field
+        };
+        let Some(nested) = split_1c_braced_fields(nested_field, 0) else {
             continue;
         };
         let Some(count) = nested
@@ -12377,6 +15046,426 @@ fn parse_form_table_command_set_excluded_commands(fields: &[&str]) -> Vec<&'stat
             continue;
         }
         match uuids.as_slice() {
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "0f8d6d98-2f8b-405a-b8b3-0538e9d95da5",
+                "182a793b-22a5-4625-b316-6a5be7f88078",
+                "33b7b9cd-6979-4435-8c58-d9bc8250edec",
+                "403bc6e6-b98e-4181-9f43-9c75cbbf82cf",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "95b4bc12-2ece-4d7a-b3e2-6f9293620a06",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+            ] => {
+                return vec![
+                    "Change",
+                    "Copy",
+                    "Create",
+                    "Delete",
+                    "DynamicListStandardSettings",
+                    "LoadDynamicListSettings",
+                    "Refresh",
+                    "SaveDynamicListSettings",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Copy",
+                    "Delete",
+                    "EndEdit",
+                    "MoveDown",
+                    "MoveUp",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "59b4387d-f5be-4658-901f-bd3068217469",
+                "714d44cc-63da-4431-b33a-428e398d2a08",
+                "7b683784-b474-441a-ba63-3d757bd0ffd4",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "d96b0c03-b209-4d01-a3fc-17a14f873b64",
+                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "Delete",
+                    "EndEdit",
+                    "FindByCurrentValue",
+                    "Pickup",
+                    "SearchEverywhere",
+                    "SearchHistory",
+                    "SelectAll",
+                    "ShowMultipleSelection",
+                    "ShowRowRearrangement",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "7b683784-b474-441a-ba63-3d757bd0ffd4",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "Copy",
+                    "Delete",
+                    "EndEdit",
+                    "MoveDown",
+                    "MoveUp",
+                    "SearchEverywhere",
+                    "SelectAll",
+                    "ShowMultipleSelection",
+                    "ShowRowRearrangement",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "714d44cc-63da-4431-b33a-428e398d2a08",
+                "7b683784-b474-441a-ba63-3d757bd0ffd4",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "d96b0c03-b209-4d01-a3fc-17a14f873b64",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "CancelSearch",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "Delete",
+                    "EndEdit",
+                    "Find",
+                    "FindByCurrentValue",
+                    "MoveDown",
+                    "MoveUp",
+                    "SearchEverywhere",
+                    "SearchHistory",
+                    "ShowRowRearrangement",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "18248aa8-e621-4e19-a611-54fb8923644c",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "59b4387d-f5be-4658-901f-bd3068217469",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "CheckAll",
+                    "Copy",
+                    "Delete",
+                    "EndEdit",
+                    "MoveDown",
+                    "MoveUp",
+                    "Pickup",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "CancelSearch",
+                    "Copy",
+                    "EndEdit",
+                    "Find",
+                    "MoveDown",
+                    "MoveUp",
+                    "ShowRowRearrangement",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "Copy",
+                    "Delete",
+                    "EndEdit",
+                    "MoveDown",
+                    "MoveUp",
+                    "ShowRowRearrangement",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "CancelSearch",
+                    "Change",
+                    "Copy",
+                    "Delete",
+                    "EndEdit",
+                    "Find",
+                    "MoveDown",
+                    "MoveUp",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "49602716-fea6-497f-8047-726404038857",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "EndEdit",
+                    "MoveDown",
+                    "MoveUp",
+                    "OutputList",
+                    "SelectAll",
+                    "ShowMultipleSelection",
+                    "ShowRowRearrangement",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "49602716-fea6-497f-8047-726404038857",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "CancelSearch",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "Delete",
+                    "EndEdit",
+                    "Find",
+                    "MoveDown",
+                    "MoveUp",
+                    "OutputList",
+                    "SelectAll",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "49602716-fea6-497f-8047-726404038857",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "CancelSearch",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "Delete",
+                    "EndEdit",
+                    "Find",
+                    "MoveDown",
+                    "MoveUp",
+                    "OutputList",
+                    "SelectAll",
+                    "ShowMultipleSelection",
+                    "ShowRowRearrangement",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
+            [
+                "01833a5a-6553-4c49-b445-095018107bb5",
+                "05468165-f954-45a5-84f2-6641c51f9f23",
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "49602716-fea6-497f-8047-726404038857",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "Delete",
+                    "EndEdit",
+                    "HierarchicalList",
+                    "List",
+                    "MoveDown",
+                    "MoveUp",
+                    "OutputList",
+                    "SelectAll",
+                    "ShowMultipleSelection",
+                    "ShowRowRearrangement",
+                    "SortListAsc",
+                    "SortListDesc",
+                    "Tree",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "49602716-fea6-497f-8047-726404038857",
+                "51c99108-107c-43e1-8918-e48835bf2495",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "714d44cc-63da-4431-b33a-428e398d2a08",
+                "7b683784-b474-441a-ba63-3d757bd0ffd4",
+                "88078230-1f6b-415f-99e4-ad2ff73810cf",
+                "8af6ebff-cd02-4bfe-a984-44a292623708",
+                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "d96b0c03-b209-4d01-a3fc-17a14f873b64",
+                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "CancelSearch",
+                    "Change",
+                    "Copy",
+                    "CopyToClipboard",
+                    "Delete",
+                    "EndEdit",
+                    "Find",
+                    "FindByCurrentValue",
+                    "MoveDown",
+                    "MoveUp",
+                    "OutputList",
+                    "SearchEverywhere",
+                    "SearchHistory",
+                    "SelectAll",
+                    "ShowMultipleSelection",
+                    "ShowRowRearrangement",
+                    "SortListAsc",
+                    "SortListDesc",
+                ];
+            }
             [
                 "0ae4bea5-23be-42a7-b69e-97b11b29c453",
                 "37740564-9e86-44a0-bea9-3f485a5a3f91",
@@ -12394,6 +15483,27 @@ fn parse_form_table_command_set_excluded_commands(fields: &[&str]) -> Vec<&'stat
                     "MoveDown",
                     "MoveUp",
                     "ShowRowRearrangement",
+                ];
+            }
+            [
+                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
+                "2bbe4e12-06d2-409b-a972-eea585125d83",
+                "37740564-9e86-44a0-bea9-3f485a5a3f91",
+                "58b2a785-23f6-4b0e-a324-9a1323285595",
+                "9ef79140-3de6-436a-8dda-610bb963f5db",
+                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
+                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
+                "fa51b106-eae6-44c7-8054-76cbb3100603",
+            ] => {
+                return vec![
+                    "Add",
+                    "Change",
+                    "Copy",
+                    "EndEdit",
+                    "MoveDown",
+                    "MoveUp",
+                    "SortListAsc",
+                    "SortListDesc",
                 ];
             }
             [
@@ -12445,7 +15555,8 @@ fn parse_form_table_command_set_excluded_commands(fields: &[&str]) -> Vec<&'stat
             .iter()
             .map(|uuid| form_table_excluded_command_name(uuid))
             .collect();
-        if let Some(mapped) = mapped {
+        if let Some(mut mapped) = mapped {
+            mapped.sort_by_key(|command| form_table_excluded_command_rank(command));
             return mapped;
         }
     }
@@ -12466,10 +15577,25 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "9" => Some("AutoCommandBar"),
             _ => None,
         },
-        "12" => match fields.get(5).map(|value| value.trim())? {
-            "1" => Some("PictureDecoration"),
-            _ => None,
-        },
+        "12" => {
+            let kind = fields.get(5).map(|value| value.trim())?;
+            if kind == "0" {
+                let name = fields.get(6).and_then(|value| parse_1c_string(value));
+                let has_title = fields
+                    .get(7)
+                    .map(|field| !parse_form_localized_strings(field).is_empty())
+                    .unwrap_or(false);
+                if has_title && !name.as_deref().is_some_and(is_form_extended_tooltip_name) {
+                    Some("LabelDecoration")
+                } else {
+                    None
+                }
+            } else if kind == "1" {
+                Some("PictureDecoration")
+            } else {
+                None
+            }
+        }
         "31" | "34" => Some("Button"),
         "37" | "48" => match fields
             .get(5 + form_input_field_top_level_offset(fields))
@@ -12478,6 +15604,8 @@ fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
             "1" => Some("LabelField"),
             "2" => Some("InputField"),
             "3" => Some("CheckBoxField"),
+            "4" => Some("PictureField"),
+            "5" => Some("RadioButtonField"),
             "7" => Some("TextDocumentField"),
             _ => None,
         },
@@ -12528,6 +15656,7 @@ fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, S
 fn parse_form_child_item_tooltip(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
     let indexes: &[usize] = match wrapper {
         "22" => &[8],
+        "37" | "48" => &[10, 11],
         _ => &[],
     };
     indexes
@@ -12596,6 +15725,71 @@ fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option<&'static s
         let content = decode_base64_mime(payload)?;
         is_form_item_picture_content(&content).then(|| ext_picture_file_name(&content))
     })
+}
+
+fn parse_form_picture_decoration_picture_value(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, bool)> {
+    fields
+        .iter()
+        .find_map(|field| parse_form_popup_picture_value(field.trim(), object_refs))
+}
+
+fn parse_form_picture_decoration_picture_size(fields: &[&str]) -> Option<&'static str> {
+    let options = split_1c_braced_fields(fields.get(18)?.trim(), 0)?;
+    options
+        .get(3)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .and_then(moxel_picture_size_mode)
+}
+
+fn parse_form_picture_field_options<'a>(fields: &'a [&'a str]) -> Option<Vec<&'a str>> {
+    fields.iter().skip(39).find_map(|field| {
+        let options = split_1c_braced_fields(field.trim(), 0)?;
+        (options.first().map(|value| value.trim()) == Some("10")).then_some(options)
+    })
+}
+
+fn parse_form_picture_field_value(
+    options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, bool)> {
+    options
+        .and_then(|options| options.get(5))
+        .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
+}
+
+fn parse_form_picture_field_file_drag_mode(options: Option<&[&str]>) -> Option<&'static str> {
+    match options?.get(17).map(|field| field.trim()) {
+        Some("1") => Some("AsFile"),
+        _ => None,
+    }
+}
+
+fn parse_form_picture_decoration_file_drag_mode(fields: &[&str]) -> Option<&'static str> {
+    let options = split_1c_braced_fields(fields.get(18)?.trim(), 0)?;
+    match options.get(11).map(|field| field.trim()) {
+        Some("0") => Some("AsFile"),
+        _ => None,
+    }
+}
+
+fn parse_form_child_item_picture_value(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, bool)> {
+    parse_common_command_picture_value(field, object_refs).and_then(
+        |(reference, load_transparent)| reference.map(|reference| (reference, load_transparent)),
+    )
+}
+
+fn parse_form_popup_picture_value(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(String, bool)> {
+    let nested = split_1c_braced_fields(field.trim(), 0)?;
+    parse_form_child_item_picture_value(nested.get(1)?.trim(), object_refs)
 }
 
 fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
@@ -12706,20 +15900,28 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
         "OnGetDataAtServer" => Some("OnGetDataAtServer".to_string()),
         "OnChange" => Some("OnChange".to_string()),
         "StartChoice" => Some("StartChoice".to_string()),
+        "1960479b-4d89-4eba-8b39-0aa802020558" => Some("StartChoice".to_string()),
         "StartListChoice" => Some("StartListChoice".to_string()),
         "ValueChoice" => Some("ValueChoice".to_string()),
+        "0d8cf5b0-55eb-4d1e-960a-22c160210945" => Some("ValueChoice".to_string()),
         "Click" => Some("Click".to_string()),
         "OnClick" => Some("OnClick".to_string()),
+        "11707a99-4eb9-4373-bc8c-84891483a034" => Some("Click".to_string()),
+        "9874537f-454c-40ae-83e9-3b9cefbc6d08" => Some("Click".to_string()),
         "Clearing" => Some("Clearing".to_string()),
         "ChoiceProcessing" => Some("ChoiceProcessing".to_string()),
         "b50dc41b-c15a-4ebe-a17f-d01e51c47de6" => Some("Clearing".to_string()),
         "f72043b8-2d79-414e-bc4e-3972fe9dbca1" => Some("ChoiceProcessing".to_string()),
         "URLProcessing" => Some("URLProcessing".to_string()),
+        "d710ea07-5c96-4c43-ab6e-e138d3653780" => Some("URLProcessing".to_string()),
         "URLGetProcessing" => Some("URLGetProcessing".to_string()),
         "URLListGetProcessing" => Some("URLListGetProcessing".to_string()),
         "TextEditEnd" => Some("TextEditEnd".to_string()),
         "EditTextChange" => Some("EditTextChange".to_string()),
+        "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1" => Some("Opening".to_string()),
+        "178a97c4-0ffe-4fcc-93e6-505369939da5" => Some("AutoComplete".to_string()),
         "OnActivateCell" => Some("OnActivateCell".to_string()),
+        "f228b12f-d892-4925-b338-695617357b32" => Some("OnActivateCell".to_string()),
         "OnActivateField" => Some("OnActivateField".to_string()),
         "OnActivateRow" => Some("OnActivateRow".to_string()),
         "60edb81d-887b-478e-94ee-7fef2b13393d" => Some("OnActivateRow".to_string()),
@@ -12731,23 +15933,31 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
         "OnCurrentPageChange" => Some("OnCurrentPageChange".to_string()),
         "OnCurrentParentChange" => Some("OnCurrentParentChange".to_string()),
         "OnEditEnd" => Some("OnEditEnd".to_string()),
+        "01d80ddd-dce5-4db3-beb5-f63c97cb05b9" => Some("OnEditEnd".to_string()),
         "BeforeEditEnd" => Some("BeforeEditEnd".to_string()),
         "BeforeDeleteRow" => Some("BeforeDeleteRow".to_string()),
         "2ccfdec5-583d-4eca-8319-e55de492665a" => Some("BeforeDeleteRow".to_string()),
         "OnStartEdit" => Some("OnStartEdit".to_string()),
+        "b3c10170-c5ff-4cba-b537-679e1c872b45" => Some("OnStartEdit".to_string()),
         "Selection" => Some("Selection".to_string()),
         "1282f000-23b6-4887-87f4-9e8e79db3d32" => Some("Selection".to_string()),
         "BeforeRowChange" => Some("BeforeRowChange".to_string()),
+        "ab930362-ff94-4dcb-ad16-188805d23e3c" => Some("BeforeRowChange".to_string()),
         "AfterDeleteRow" => Some("AfterDeleteRow".to_string()),
+        "de65638d-a806-4a76-bc10-f62bbc86e0e7" => Some("AfterDeleteRow".to_string()),
         "BeforeCollapse" => Some("BeforeCollapse".to_string()),
         "BeforeExpand" => Some("BeforeExpand".to_string()),
         "BeforePrint" => Some("BeforePrint".to_string()),
         "DetailProcessing" => Some("DetailProcessing".to_string()),
         "DocumentComplete" => Some("DocumentComplete".to_string()),
         "Drag" => Some("Drag".to_string()),
+        "8ad48496-8d0b-4f6c-ae48-99d95227884b" => Some("Drag".to_string()),
         "DragCheck" => Some("DragCheck".to_string()),
+        "0d644ff6-443b-4390-86fa-7f9105e42711" => Some("DragCheck".to_string()),
         "DragEnd" => Some("DragEnd".to_string()),
+        "cb286ab3-3a1c-40d2-a232-6e64f624ccec" => Some("DragEnd".to_string()),
         "DragStart" => Some("DragStart".to_string()),
+        "6d4d6747-a823-4f61-ab31-a426572f2c6c" => Some("DragStart".to_string()),
         "MultipleValuesDelete" => Some("MultipleValuesDelete".to_string()),
         "NavigationProcessing" => Some("NavigationProcessing".to_string()),
         "NewWriteProcessing" => Some("NewWriteProcessing".to_string()),
@@ -12757,6 +15967,7 @@ fn parse_form_child_item_event_identifier(field: &str) -> Option<String> {
         "OnPeriodOutput" => Some("OnPeriodOutput".to_string()),
         "RefreshRequestProcessing" => Some("RefreshRequestProcessing".to_string()),
         "Tuning" => Some("Tuning".to_string()),
+        "70636369-514c-4662-977e-1c3976c9756c" => Some("Tuning".to_string()),
         _ => parse_form_event_identifier(identifier),
     }
 }
@@ -12771,6 +15982,9 @@ fn parse_form_child_item_data_path(
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
     let parse_bound = |field: &&str| {
         parse_form_bound_data_path(
@@ -12779,21 +15993,42 @@ fn parse_form_child_item_data_path(
             attribute_names_by_id,
             table_name_by_id,
             table_column_names_by_id,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
         )
+        .or_else(|| {
+            parse_form_bound_data_binding_key(field)
+                .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned())
+        })
     };
+    let input_field_offset = matches!(
+        tag,
+        "InputField"
+            | "LabelField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+    )
+    .then(|| {
+        form_input_field_layout_is_extended(fields)
+            .then(|| form_input_field_top_level_offset(fields))
+    })
+    .flatten()
+    .unwrap_or(0);
     match tag {
         "Table" => fields
             .get(11)
             .and_then(parse_bound)
             .or_else(|| main_data_path.map(ToOwned::to_owned)),
-        "InputField" | "LabelField" | "CheckBoxField" => [11usize, 12]
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => [11usize, 12]
             .iter()
-            .filter_map(|index| fields.get(*index))
+            .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound)
             .or_else(|| parent_data_path.map(|parent| format!("{parent}.{name}"))),
         "TextDocumentField" => [11usize, 12]
             .iter()
-            .filter_map(|index| fields.get(*index))
+            .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound),
         "Button" => fields.get(9).and_then(|field| {
             parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
@@ -12808,6 +16043,8 @@ fn parse_form_bound_data_path(
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     match fields.first().map(|value| value.trim()) {
@@ -12820,36 +16057,172 @@ fn parse_form_bound_data_path(
             let table_name = attribute_names_by_id
                 .get(table_id)
                 .or_else(|| table_name_by_id.get(table_id))?;
-            let column = fields
-                .get(2)
-                .and_then(|field| split_1c_braced_fields(field, 0))
-                .and_then(|fields| fields.first().map(|value| value.trim().to_string()))?;
-            let field_name = if column == "8" {
-                "Ссылка".to_string()
-            } else {
-                table_column_names_by_id
-                    .get(table_id)
-                    .and_then(|columns| columns.get(&column))
-                    .cloned()?
-            };
+            let column = parse_form_binding_key(fields.get(2)?.trim())?;
+            if let Some(table_path) = bound_table_path_by_binding_key.get(&column) {
+                return Some(table_path.clone());
+            }
+            let field_name = table_column_names_by_id
+                .get(table_id)
+                .and_then(|columns| columns.get(&column))
+                .cloned()
+                .or_else(|| (column == "8").then(|| "Ссылка".to_string()))?;
             let field_name = normalize_form_table_column_name(table_name, &field_name);
             Some(format!("{table_name}.{field_name}"))
+        }
+        Some("3") => {
+            let table_key = parse_form_binding_key(fields.get(2)?.trim())?;
+            let table_path = bound_table_path_by_binding_key.get(&table_key)?;
+            let column_key = parse_form_binding_key(fields.get(3)?.trim())?;
+            let field_name = table_column_names_by_binding_key
+                .get(&table_key)
+                .and_then(|columns| columns.get(&column_key))
+                .cloned()
+                .or_else(|| (column_key == "8").then(|| "Ссылка".to_string()))?;
+            let field_name = normalize_form_table_column_name(table_path, &field_name);
+            Some(format!("{table_path}.{field_name}"))
         }
         _ => None,
     }
 }
 
+fn parse_form_ordinary_table_row_picture_data_path(
+    fields: &[&str],
+    data_path: Option<&str>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Option<String> {
+    let table_name = data_path?;
+    let table_id = parse_form_attribute_binding_id(fields.get(11)?.trim())?;
+    let column_id = parse_form_attribute_binding_id(fields.get(43)?.trim())?;
+    let column_name = table_column_names_by_id
+        .get(&table_id)?
+        .get(&column_id)?
+        .as_str();
+    let column_name = normalize_form_table_column_name(table_name, column_name);
+    Some(format!("{table_name}.{column_name}"))
+}
+
 fn normalize_form_table_column_name(table_name: &str, field_name: &str) -> String {
-    field_name
-        .strip_prefix(table_name)
-        .filter(|suffix| {
-            suffix
-                .chars()
-                .next()
-                .is_some_and(|first| !first.is_lowercase())
+    [Some(table_name), table_name.rsplit('.').next()]
+        .into_iter()
+        .flatten()
+        .find_map(|prefix| {
+            field_name.strip_prefix(prefix).filter(|suffix| {
+                suffix
+                    .chars()
+                    .next()
+                    .is_some_and(|first| !first.is_lowercase())
+            })
         })
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| field_name.to_string())
+}
+
+fn parse_form_binding_key(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let first = fields.first()?.trim();
+    match fields.len() {
+        1 => Some(first.to_string()),
+        2 => Some(format!("{}|{}", first, fields.get(1)?.trim())),
+        _ => None,
+    }
+}
+
+fn parse_form_bound_data_binding_key(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match fields.first().map(|value| value.trim()) {
+        Some("2") => parse_form_binding_key(fields.get(2)?.trim()),
+        Some("3") => parse_form_binding_key(fields.get(3)?.trim()),
+        _ => None,
+    }
+}
+
+fn parse_form_bound_attribute_id(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match fields.first().map(|value| value.trim()) {
+        Some("2") | Some("3") => split_1c_braced_fields(fields.get(1)?.trim(), 0)?
+            .first()
+            .map(|value| value.trim().to_string()),
+        _ => None,
+    }
+}
+
+fn infer_form_bound_property_name(names: &BTreeSet<String>) -> Option<String> {
+    let mut iter = names.iter();
+    let first = iter.next()?.as_str();
+    let mut prefix = first.to_string();
+    for name in iter {
+        prefix = common_prefix(&prefix, name);
+        if prefix.is_empty() {
+            break;
+        }
+    }
+    if prefix.is_empty() {
+        names.iter().min_by_key(|name| name.len()).cloned()
+    } else {
+        Some(prefix)
+    }
+}
+
+fn common_prefix(left: &str, right: &str) -> String {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(left, right)| left == right)
+        .map(|(ch, _)| ch)
+        .collect()
+}
+
+fn parse_form_table_binding(field: &str) -> Option<(String, String)> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|field| field.trim()) != Some("2") {
+        return None;
+    }
+    let attribute_id = split_1c_braced_fields(fields.get(1)?.trim(), 0)?
+        .first()?
+        .trim()
+        .to_string();
+    let table_key = parse_form_binding_key(fields.get(2)?.trim())?;
+    Some((attribute_id, table_key))
+}
+
+fn parse_form_nested_table_column_binding(field: &str) -> Option<(String, String, String)> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("3") {
+        return None;
+    }
+    let attribute_id = split_1c_braced_fields(fields.get(1)?.trim(), 0)?
+        .first()?
+        .trim()
+        .to_string();
+    let table_key = parse_form_binding_key(fields.get(2)?.trim())?;
+    let column_key = parse_form_binding_key(fields.get(3)?.trim())?;
+    Some((attribute_id, table_key, column_key))
+}
+
+fn form_child_item_binding_fields<'a>(tag: &str, fields: &'a [&'a str]) -> Vec<&'a str> {
+    let input_field_offset = matches!(
+        tag,
+        "InputField"
+            | "LabelField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+    )
+    .then(|| {
+        form_input_field_layout_is_extended(fields)
+            .then(|| form_input_field_top_level_offset(fields))
+    })
+    .flatten()
+    .unwrap_or(0);
+    match tag {
+        "Table" => fields.get(11).copied().into_iter().collect(),
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
+        | "TextDocumentField" => [11usize, 12]
+            .iter()
+            .filter_map(|index| fields.get(*index + input_field_offset).copied())
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn parse_form_attribute_binding_id(field: &str) -> Option<String> {
@@ -12889,7 +16262,8 @@ fn parse_form_button_command_name(
     let kind = fields.first()?.trim();
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
-        return form_standard_command_name(&uuid)
+        return form_standard_button_command_name(&uuid)
+            .or_else(|| form_standard_command_name(&uuid))
             .map(ToOwned::to_owned)
             .or_else(|| object_refs.get(&uuid).cloned());
     }
@@ -12906,22 +16280,48 @@ fn parse_form_button_command_name(
         .iter()
         .find(|command| command.id == kind && command.reference_uuid == uuid)
         .map(|command| format!("Form.Command.{}", command.name))
+        .or_else(|| {
+            let standard = form_table_standard_command_suffix(&uuid)?;
+            let table_name = if table_name_by_id.len() == 1 {
+                table_name_by_id.values().next()?.as_str()
+            } else {
+                form_standard_command_table_name(button_name, table_name_by_id)?
+            };
+            Some(format!("Form.Item.{table_name}.StandardCommand.{standard}"))
+        })
 }
 
 fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
+        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
         "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
+        "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Form.StandardCommand.Close"),
         "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
+        "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("Form.StandardCommand.WriteAndClose"),
+        "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Form.StandardCommand.Write"),
+        _ => None,
+    }
+}
+
+fn form_standard_button_command_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("Form.StandardCommand.SaveValues"),
+        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("Form.StandardCommand.RestoreValues"),
         _ => None,
     }
 }
 
 fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "37740564-9e86-44a0-bea9-3f485a5a3f91" => Some("MoveUp"),
+        "2bbe4e12-06d2-409b-a972-eea585125d83" => Some("SortListAsc"),
         "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
         "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("CancelSearch"),
         "49602716-fea6-497f-8047-726404038857" => Some("OutputList"),
+        "5048cc44-702b-44e3-8445-9af75c02724d" => Some("UncheckAll"),
+        "58b2a785-23f6-4b0e-a324-9a1323285595" => Some("SortListDesc"),
         "8d772f97-c0ef-47c0-9cb0-efea28c61341" => Some("Delete"),
+        "fa51b106-eae6-44c7-8054-76cbb3100603" => Some("MoveDown"),
         _ => None,
     }
 }
@@ -13005,22 +16405,48 @@ fn extract_form_command_interface(
     trailing: &[String],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormCommandInterface> {
-    let fields = trailing
+    trailing
         .get(3)
-        .and_then(|field| split_1c_braced_fields(field, 0))?;
+        .and_then(|field| parse_form_command_interface_container(field, object_refs))
+        .or_else(|| {
+            trailing
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != 3)
+                .find_map(|(_, field)| parse_form_command_interface_container(field, object_refs))
+        })
+}
+
+fn parse_form_command_interface_container(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormCommandInterface> {
+    let fields = split_1c_braced_fields(field, 0)?;
     if fields.first().map(|value| value.trim()) != Some("0") {
         return None;
     }
+    let mut command_bar = Vec::new();
     let mut navigation_panel = Vec::new();
     for field in fields.iter().skip(2) {
         if let Some(item) = parse_form_command_interface_item(field, object_refs) {
-            navigation_panel.push(item);
+            if item
+                .command_group
+                .as_deref()
+                .is_some_and(|group| group.starts_with("FormNavigationPanel"))
+            {
+                navigation_panel.push(item);
+            } else {
+                command_bar.push(item);
+            }
         }
     }
-    if navigation_panel.is_empty() {
+    if command_bar.is_empty() && navigation_panel.is_empty() {
         return None;
     }
-    Some(FormCommandInterface { navigation_panel })
+    Some(FormCommandInterface {
+        command_bar,
+        navigation_panel,
+    })
 }
 
 fn parse_form_command_interface_item(
@@ -13031,10 +16457,11 @@ fn parse_form_command_interface_item(
     if fields.first().map(|value| value.trim()) != Some("3") {
         return None;
     }
-    let command = parse_form_object_reference(fields.get(2)?, object_refs)?;
+    let command = parse_form_command_interface_command(fields.get(2)?, object_refs)?;
+    let item_type = parse_form_command_interface_item_type(fields.get(4).copied())?;
     let command_group = fields
         .get(5)
-        .and_then(|field| parse_form_command_group_reference(field, object_refs))?;
+        .and_then(|field| parse_form_command_group_reference(field, object_refs));
     let index = fields
         .get(6)
         .and_then(|value| value.trim().parse::<usize>().ok())
@@ -13043,17 +16470,53 @@ fn parse_form_command_interface_item(
         Some("0") => Some(false),
         Some("1") => Some(true),
         _ => None,
-    };
+    }
+    .filter(|visible| !*visible);
     Some(FormCommandInterfaceItem {
         command,
-        item_type: "Added",
+        item_type,
         command_group,
         index,
         default_visible,
         visible_common: fields
             .get(8)
-            .and_then(|value| parse_form_nested_common_bool(value)),
+            .and_then(|value| parse_form_nested_common_bool(value))
+            .filter(|common| !*common),
     })
+}
+
+fn parse_form_command_interface_item_type(field: Option<&str>) -> Option<&'static str> {
+    match field.map(str::trim) {
+        Some("0") => Some("Auto"),
+        Some("1") => Some("Added"),
+        _ => None,
+    }
+}
+
+fn parse_form_command_interface_command(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match fields.first().map(|value| value.trim()) {
+        Some("0") => {
+            let Some(target) = fields.get(1).map(|value| value.trim()) else {
+                return Some("0".to_string());
+            };
+            if target == "0" || target == "00000000-0000-0000-0000-000000000000" {
+                Some("0".to_string())
+            } else {
+                parse_non_zero_uuid(target).and_then(|uuid| object_refs.get(&uuid).cloned())
+            }
+        }
+        Some("2") => {
+            let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+            object_refs
+                .get(&uuid)
+                .map(|reference| format!("{reference}.StandardCommand.CreateBasedOn"))
+        }
+        _ => parse_form_object_reference(field, object_refs),
+    }
 }
 
 fn parse_form_object_reference(
@@ -13084,7 +16547,12 @@ fn parse_form_command_group_reference(
 
 fn form_standard_command_group_name(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "c59e11f3-6bcb-404a-9d76-1416c12be354" => Some("CommandGroup.Органайзер"),
+        "dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0" => Some("FormCommandBarCreateBasedOn"),
+        "cb50f5c0-8013-4262-93a2-f0db379d6b6b" => Some("FormCommandBarImportant"),
         "eacad741-96b9-4b3a-bf79-dde9ecead1a1" => Some("FormNavigationPanelGoTo"),
+        "8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8" => Some("FormNavigationPanelSeeAlso"),
+        "dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2" => Some("FormNavigationPanelImportant"),
         _ => None,
     }
 }
@@ -13116,11 +16584,12 @@ fn format_form_body_xml(
     events: &[FormBodyEvent],
     child_items: &[FormChildItem],
     attributes: &[FormAttribute],
+    attributes_section: &FormAttributesSection,
     parameters: &[FormParameter],
     commands: &[FormCommand],
     command_interface: &Option<FormCommandInterface>,
 ) -> String {
-    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+    let mut xml = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 "
     .to_string();
@@ -13153,9 +16622,6 @@ fn format_form_body_xml(
     if properties.save_window_settings == Some(false) {
         xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
     }
-    if properties.auto_title == Some(false) {
-        xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
-    }
     if properties.auto_url == Some(false) {
         xml.push_str("\t<AutoURL>false</AutoURL>\r\n");
     }
@@ -13170,6 +16636,9 @@ fn format_form_body_xml(
             "\t<AutoSaveDataInSettings>{}</AutoSaveDataInSettings>\r\n",
             escape_xml_text(value)
         ));
+    }
+    if properties.auto_title == Some(false) {
+        xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
     }
     if let Some(group) = properties.group.filter(|group| *group != "Vertical") {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
@@ -13201,16 +16670,6 @@ fn format_form_body_xml(
     if properties.auto_fill_check == Some(false) {
         xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
     }
-    if !properties.command_set_excluded_commands.is_empty() {
-        xml.push_str("\t<CommandSet>\r\n");
-        for command in &properties.command_set_excluded_commands {
-            xml.push_str(&format!(
-                "\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
-                escape_xml_text(command)
-            ));
-        }
-        xml.push_str("\t</CommandSet>\r\n");
-    }
     if let Some(value) = properties.use_for_folders_and_items {
         xml.push_str(&format!(
             "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
@@ -13225,6 +16684,16 @@ fn format_form_body_xml(
             "\t<CommandBarLocation>{}</CommandBarLocation>\r\n",
             escape_xml_text(command_bar_location)
         ));
+    }
+    if !properties.command_set_excluded_commands.is_empty() {
+        xml.push_str("\t<CommandSet>\r\n");
+        for command in &properties.command_set_excluded_commands {
+            xml.push_str(&format!(
+                "\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
+                escape_xml_text(command)
+            ));
+        }
+        xml.push_str("\t</CommandSet>\r\n");
     }
     if let Some(vertical_scroll) = properties.vertical_scroll {
         xml.push_str(&format!(
@@ -13333,7 +16802,10 @@ fn format_form_body_xml(
         xml.push_str("\t</Events>\r\n");
     }
     xml.push_str(&format_form_child_items_xml(child_items, 1));
-    xml.push_str(&format_form_attributes_xml(attributes));
+    xml.push_str(&format_form_attributes_section_xml(
+        attributes,
+        attributes_section,
+    ));
     if !commands.is_empty() {
         xml.push_str("\t<Commands>\r\n");
         for command in commands {
@@ -13348,10 +16820,36 @@ fn format_form_body_xml(
                 &command.tooltip,
                 3,
             ));
-            xml.push_str(&format!(
-                "\t\t\t<Action>{}</Action>\r\n",
-                escape_xml_text(&command.action)
-            ));
+            if let Some(shortcut) = command.shortcut.as_deref() {
+                xml.push_str(&format!(
+                    "\t\t\t<Shortcut>{}</Shortcut>\r\n",
+                    escape_xml_element_text(shortcut)
+                ));
+            }
+            if let Some(reference) = command.picture_ref.as_deref() {
+                xml.push_str("\t\t\t<Picture>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n",
+                    escape_xml_text(reference)
+                ));
+                xml.push_str(&format!(
+                    "\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+                    xml_bool(command.picture_load_transparent)
+                ));
+                xml.push_str("\t\t\t</Picture>\r\n");
+            }
+            if !command.action.is_empty() {
+                xml.push_str(&format!(
+                    "\t\t\t<Action>{}</Action>\r\n",
+                    escape_xml_text(&command.action)
+                ));
+            }
+            if let Some(representation) = command.representation {
+                xml.push_str(&format!(
+                    "\t\t\t<Representation>{}</Representation>\r\n",
+                    escape_xml_text(representation)
+                ));
+            }
             if command.modifies_saved_data == Some(true) {
                 xml.push_str("\t\t\t<ModifiesSavedData>true</ModifiesSavedData>\r\n");
             }
@@ -13379,7 +16877,7 @@ fn format_form_body_xml(
     if let Some(command_interface) = command_interface {
         xml.push_str(&format_form_command_interface_xml(command_interface));
     }
-    xml.push_str("</Form>\r\n");
+    xml.push_str("</Form>");
     xml
 }
 
@@ -13407,9 +16905,15 @@ fn format_form_child_item_xml(
     let tab = "\t".repeat(indent);
     let early_title_for_field = matches!(
         item.tag,
-        "InputField" | "LabelField" | "CheckBoxField" | "RadioButtonField" | "TextDocumentField"
+        "InputField"
+            | "LabelField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "RadioButtonField"
+            | "TextDocumentField"
+            | "ColumnGroup"
     );
-    let usual_group_title_first = item.tag == "UsualGroup";
+    let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
     let mut direct_context_menu_xml = String::new();
     let mut direct_regular_children = Vec::new();
     if is_form_field_direct_service_parent(item.tag) {
@@ -13454,18 +16958,91 @@ fn format_form_child_item_xml(
             escape_xml_text(item_type)
         ));
     }
-    if let Some(command_name) = &item.command_name {
+    if item.tag == "Button"
+        && let Some(representation) = item.button_representation.filter(|value| *value != "None")
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Representation>{}</Representation>\r\n",
+            escape_xml_text(representation)
+        ));
+    }
+    if matches!(item.tag, "Button" | "LabelDecoration")
+        && let Some(group_horizontal_align) = item.group_horizontal_align
+    {
+        xml.push_str(&format!(
+            "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+            escape_xml_text(group_horizontal_align)
+        ));
+    }
+    if item.tag != "CommandBar"
+        && let Some(horizontal_location) = item.horizontal_location
+    {
+        xml.push_str(&format!(
+            "{tab}\t<HorizontalLocation>{}</HorizontalLocation>\r\n",
+            escape_xml_text(horizontal_location)
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(width) = &item.width
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Width>{}</Width>\r\n",
+            escape_xml_text(width)
+        ));
+    }
+    if item.tag != "Button"
+        && let Some(command_name) = &item.command_name
+    {
         xml.push_str(&format!(
             "{tab}\t<CommandName>{}</CommandName>\r\n",
             escape_xml_text(command_name)
         ));
     }
+    if item.tag == "AutoCommandBar" && item.autofill == Some(false) {
+        xml.push_str(&format!("{tab}\t<Autofill>false</Autofill>\r\n"));
+    }
     if item.tag == "Table" {
+        let hierarchical_table = form_table_has_hierarchical_navigation(item);
         if let Some(representation) = item.table_representation {
+            if !hierarchical_table {
+                xml.push_str(&format!(
+                    "{tab}\t<Representation>{}</Representation>\r\n",
+                    escape_xml_text(representation)
+                ));
+            }
+        }
+        if item.auto_mark_incomplete == Some(true) {
             xml.push_str(&format!(
-                "{tab}\t<Representation>{}</Representation>\r\n",
-                escape_xml_text(representation)
+                "{tab}\t<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"
             ));
+        }
+        if let Some(skip_on_input) = item.skip_on_input
+            && (skip_on_input || should_emit_explicit_table_skip_on_input(item))
+        {
+            xml.push_str(&format!(
+                "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
+                if skip_on_input { "true" } else { "false" }
+            ));
+        }
+        if hierarchical_table && item.use_alternation_row_color == Some(true) {
+            xml.push_str(&format!(
+                "{tab}\t<UseAlternationRowColor>true</UseAlternationRowColor>\r\n"
+            ));
+        }
+        if item.read_only == Some(true) {
+            xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
+        }
+        if item.change_row_set == Some(false) {
+            xml.push_str(&format!("{tab}\t<ChangeRowSet>false</ChangeRowSet>\r\n"));
+        }
+        if let Some(height) = &item.height {
+            xml.push_str(&format!(
+                "{tab}\t<Height>{}</Height>\r\n",
+                escape_xml_text(height)
+            ));
+        }
+        if item.auto_max_height == Some(false) {
+            xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
         }
         if let Some(height) = &item.height_in_table_rows {
             xml.push_str(&format!(
@@ -13473,10 +17050,38 @@ fn format_form_child_item_xml(
                 escape_xml_text(height)
             ));
         }
-        if let Some(row_selection_mode) = item.row_selection_mode {
+        if item.default_item == Some(true) && !hierarchical_table {
+            xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
+        }
+        if item.change_row_order == Some(false) {
             xml.push_str(&format!(
-                "{tab}\t<RowSelectionMode>{}</RowSelectionMode>\r\n",
-                escape_xml_text(row_selection_mode)
+                "{tab}\t<ChangeRowOrder>false</ChangeRowOrder>\r\n"
+            ));
+        }
+        if !hierarchical_table && item.auto_max_width == Some(false) {
+            xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+        }
+        if let Some(row_input_mode) = item.row_input_mode {
+            xml.push_str(&format!(
+                "{tab}\t<RowInputMode>{}</RowInputMode>\r\n",
+                escape_xml_text(row_input_mode)
+            ));
+        }
+        if !hierarchical_table
+            && let Some(use_alternation_row_color) = item.use_alternation_row_color
+        {
+            xml.push_str(&format!(
+                "{tab}\t<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n",
+                if use_alternation_row_color {
+                    "true"
+                } else {
+                    "false"
+                }
+            ));
+        }
+        if item.auto_insert_new_row == Some(true) {
+            xml.push_str(&format!(
+                "{tab}\t<AutoInsertNewRow>true</AutoInsertNewRow>\r\n"
             ));
         }
         if item.enable_start_drag == Some(true) {
@@ -13484,14 +17089,51 @@ fn format_form_child_item_xml(
                 "{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"
             ));
         }
-        if item.enable_drag == Some(true) {
+        if item.enable_drag == Some(true) && (!hierarchical_table || item.read_only == Some(true)) {
             xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
         }
-        if let Some(file_drag_mode) = item.file_drag_mode {
+        if !hierarchical_table && let Some(file_drag_mode) = item.file_drag_mode {
             xml.push_str(&format!(
                 "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
                 escape_xml_text(file_drag_mode)
             ));
+        }
+        if let Some(data_path) = &item.data_path {
+            xml.push_str(&format!(
+                "{tab}\t<DataPath>{}</DataPath>\r\n",
+                escape_xml_text(data_path)
+            ));
+        }
+        if let Some(row_picture_data_path) = &item.row_picture_data_path {
+            xml.push_str(&format!(
+                "{tab}\t<RowPictureDataPath>{}</RowPictureDataPath>\r\n",
+                escape_xml_text(row_picture_data_path)
+            ));
+        }
+        if let Some(reference) = &item.rows_picture_ref {
+            xml.push_str(&format!(
+                "{tab}\t<RowsPicture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</RowsPicture>\r\n",
+                escape_xml_text(reference),
+                xml_bool(item.rows_picture_load_transparent)
+            ));
+        }
+        xml.push_str(&format_form_localized_section(
+            "Title",
+            &item.title,
+            indent + 1,
+        ));
+        if !item.command_set_excluded_commands.is_empty() {
+            xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
+            for command in &item.command_set_excluded_commands {
+                xml.push_str(&format!(
+                    "{tab}\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
+                    escape_xml_text(command)
+                ));
+            }
+            xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
         }
         if let Some(auto_refresh) = item.auto_refresh {
             xml.push_str(&format!(
@@ -13517,19 +17159,6 @@ fn format_form_child_item_xml(
                 escape_xml_text(&period.end_date)
             ));
         }
-        if let Some(use_alternation_row_color) = item.use_alternation_row_color {
-            xml.push_str(&format!(
-                "{tab}\t<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n",
-                if use_alternation_row_color {
-                    "true"
-                } else {
-                    "false"
-                }
-            ));
-        }
-        if item.default_item == Some(true) {
-            xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
-        }
         if let Some(choice_folders_and_items) = item.choice_folders_and_items {
             xml.push_str(&format!(
                 "{tab}\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
@@ -13540,6 +17169,17 @@ fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<RestoreCurrentRow>{}</RestoreCurrentRow>\r\n",
                 if restore_current_row { "true" } else { "false" }
+            ));
+        }
+        if item.top_level_parent_nil == Some(true) {
+            xml.push_str(&format!("{tab}\t<TopLevelParent xsi:nil=\"true\"/>\r\n"));
+        }
+        if item.show_root == Some(true) {
+            xml.push_str(&format!("{tab}\t<ShowRoot>true</ShowRoot>\r\n"));
+        }
+        if item.allow_root_choice == Some(false) {
+            xml.push_str(&format!(
+                "{tab}\t<AllowRootChoice>false</AllowRootChoice>\r\n"
             ));
         }
         if let Some(update_on_data_change) = item.update_on_data_change {
@@ -13565,64 +17205,51 @@ fn format_form_child_item_xml(
             ));
         }
     }
-    if let Some(data_path) = &item.data_path {
+    if item.tag != "Table"
+        && let Some(data_path) = &item.data_path
+    {
         xml.push_str(&format!(
             "{tab}\t<DataPath>{}</DataPath>\r\n",
             escape_xml_text(data_path)
         ));
     }
-    if early_title_for_field {
-        xml.push_str(&format_form_localized_section(
-            "Title",
-            &item.title,
-            indent + 1,
+    if item.visible == Some(false) {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
+    if item.user_visible_common == Some(false) {
+        xml.push_str(&format!(
+            "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
         ));
     }
-    if item.tag == "Table" && !item.command_set_excluded_commands.is_empty() {
-        xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
-        for command in &item.command_set_excluded_commands {
-            xml.push_str(&format!(
-                "{tab}\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
-                escape_xml_text(command)
-            ));
-        }
-        xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
+    let read_only_before_title = item.tag != "Table"
+        && item.read_only == Some(true)
+        && matches!(item.tag, "InputField" | "LabelField");
+    if read_only_before_title {
+        xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
-    if item.tag == "Table" && item.row_filter_nil == Some(true) {
-        xml.push_str(&format!("{tab}\t<RowFilter xsi:nil=\"true\"/>\r\n"));
+    if early_title_for_field {
+        xml.push_str(&format_form_title_section(item, indent + 1));
+        if matches!(item.tag, "InputField" | "LabelField" | "CheckBoxField")
+            && item.show_in_header == Some(false)
+        {
+            xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
+        }
     }
     if item.tag == "Table"
-        && let Some(row_picture_data_path) = &item.row_picture_data_path
+        && !form_table_has_hierarchical_navigation(item)
+        && item.row_filter_nil == Some(true)
     {
-        xml.push_str(&format!(
-            "{tab}\t<RowPictureDataPath>{}</RowPictureDataPath>\r\n",
-            escape_xml_text(row_picture_data_path)
-        ));
-    }
-    if item.tag == "Button"
-        && let Some(representation) = item.button_representation
-    {
-        xml.push_str(&format!(
-            "{tab}\t<Representation>{}</Representation>\r\n",
-            escape_xml_text(representation)
-        ));
-    }
-    if item.tag == "Button"
-        && let Some(location) = item.location_in_command_bar
-    {
-        xml.push_str(&format!(
-            "{tab}\t<LocationInCommandBar>{}</LocationInCommandBar>\r\n",
-            escape_xml_text(location)
-        ));
+        xml.push_str(&format!("{tab}\t<RowFilter xsi:nil=\"true\"/>\r\n"));
     }
     if item.default_button == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultButton>true</DefaultButton>\r\n"));
     }
-    if item.read_only == Some(true) {
+    if item.tag != "Table" && item.read_only == Some(true) && !read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
-    if let Some(skip_on_input) = item.skip_on_input
-        && (item.tag != "Table" || skip_on_input)
+    if item.tag != "LabelDecoration"
+        && item.tag != "Table"
+        && let Some(skip_on_input) = item.skip_on_input
     {
         xml.push_str(&format!(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
@@ -13635,29 +17262,104 @@ fn format_form_child_item_xml(
             escape_xml_text(title_location)
         ));
     }
+    if matches!(item.tag, "InputField" | "PictureField") {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+        if let Some(tooltip_representation) = item.tooltip_representation {
+            xml.push_str(&format!(
+                "{tab}\t<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
+                escape_xml_text(tooltip_representation)
+            ));
+        }
+    }
+    if let Some(horizontal_align) = item.horizontal_align {
+        xml.push_str(&format!(
+            "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+            escape_xml_text(horizontal_align)
+        ));
+    }
     if let Some(edit_mode) = item.edit_mode {
         xml.push_str(&format!(
             "{tab}\t<EditMode>{}</EditMode>\r\n",
             escape_xml_text(edit_mode)
         ));
     }
-    if item.auto_edit_mode == Some(true) {
-        xml.push_str(&format!("{tab}\t<AutoEditMode>true</AutoEditMode>\r\n"));
+    if item.tag == "PictureField"
+        && let Some(reference) = &item.picture_ref
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ValuesPicture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</ValuesPicture>\r\n",
+            escape_xml_text(reference),
+            xml_bool(item.picture_load_transparent)
+        ));
+        if let Some(file_drag_mode) = item.file_drag_mode {
+            xml.push_str(&format!(
+                "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
+                escape_xml_text(file_drag_mode)
+            ));
+        }
     }
-    if let Some(width) = &item.width {
+    if let Some(check_box_type) = item.check_box_type {
+        xml.push_str(&format!(
+            "{tab}\t<CheckBoxType>{}</CheckBoxType>\r\n",
+            escape_xml_text(check_box_type)
+        ));
+    }
+    if let Some(radio_button_type) = item.radio_button_type {
+        xml.push_str(&format!(
+            "{tab}\t<RadioButtonType>{}</RadioButtonType>\r\n",
+            escape_xml_text(radio_button_type)
+        ));
+    }
+    if let Some(columns_count) = item.columns_count {
+        xml.push_str(&format!(
+            "{tab}\t<ColumnsCount>{columns_count}</ColumnsCount>\r\n"
+        ));
+    }
+    if item.cell_hyperlink == Some(true) {
+        xml.push_str(&format!("{tab}\t<CellHyperlink>true</CellHyperlink>\r\n"));
+    }
+    if item.show_in_footer == Some(false) {
+        xml.push_str(&format!("{tab}\t<ShowInFooter>false</ShowInFooter>\r\n"));
+    }
+    if let Some(footer_horizontal_align) = item.footer_horizontal_align {
+        xml.push_str(&format!(
+            "{tab}\t<FooterHorizontalAlign>{}</FooterHorizontalAlign>\r\n",
+            escape_xml_text(footer_horizontal_align)
+        ));
+    }
+    if item.tag != "Button"
+        && let Some(width) = &item.width
+    {
         xml.push_str(&format!(
             "{tab}\t<Width>{}</Width>\r\n",
             escape_xml_text(width)
         ));
     }
-    if let Some(height) = &item.height {
+    if item.tag != "Table" && item.auto_max_width == Some(false) {
+        xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+    }
+    if item.tag != "Table"
+        && let Some(height) = &item.height
+    {
         xml.push_str(&format!(
             "{tab}\t<Height>{}</Height>\r\n",
             escape_xml_text(height)
         ));
     }
-    if item.auto_max_width == Some(false) {
-        xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+    if item.tag == "LabelDecoration"
+        && let Some(skip_on_input) = item.skip_on_input
+    {
+        xml.push_str(&format!(
+            "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
+            if skip_on_input { "true" } else { "false" }
+        ));
     }
     if let Some(max_width) = &item.max_width {
         xml.push_str(&format!(
@@ -13665,7 +17367,38 @@ fn format_form_child_item_xml(
             escape_xml_text(max_width)
         ));
     }
-    if item.auto_max_height == Some(false) {
+    if item.tag == "Button"
+        && let Some(command_name) = &item.command_name
+    {
+        xml.push_str(&format!(
+            "{tab}\t<CommandName>{}</CommandName>\r\n",
+            escape_xml_text(command_name)
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(reference) = &item.picture_ref
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Picture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</Picture>\r\n",
+            escape_xml_text(reference),
+            xml_bool(item.picture_load_transparent)
+        ));
+    }
+    if item.tag != "LabelDecoration" && item.hiperlink == Some(true) {
+        xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
+    }
+    if item.tag != "PictureDecoration"
+        && let Some(text_color) = &item.text_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TextColor>{}</TextColor>\r\n",
+            escape_xml_text(text_color)
+        ));
+    }
+    if item.tag != "Table" && item.auto_max_height == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
     }
     if let Some(max_height) = &item.max_height {
@@ -13680,6 +17413,14 @@ fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
             if horizontal_stretch { "true" } else { "false" }
+        ));
+    }
+    if item.tag != "Table"
+        && let Some(choice_folders_and_items) = item.choice_folders_and_items
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
+            escape_xml_text(choice_folders_and_items)
         ));
     }
     if let Some(vertical_stretch) = item.vertical_stretch {
@@ -13702,6 +17443,23 @@ fn format_form_child_item_xml(
     }
     if item.wrap == Some(false) {
         xml.push_str(&format!("{tab}\t<Wrap>false</Wrap>\r\n"));
+    }
+    if item.auto_choice_incomplete == Some(true) {
+        xml.push_str(&format!(
+            "{tab}\t<AutoChoiceIncomplete>true</AutoChoiceIncomplete>\r\n"
+        ));
+    }
+    if item.tag != "Table"
+        && let Some(auto_mark_incomplete) = item.auto_mark_incomplete
+    {
+        xml.push_str(&format!(
+            "{tab}\t<AutoMarkIncomplete>{}</AutoMarkIncomplete>\r\n",
+            if auto_mark_incomplete {
+                "true"
+            } else {
+                "false"
+            }
+        ));
     }
     if item.auto_cell_height == Some(true) {
         xml.push_str(&format!("{tab}\t<AutoCellHeight>true</AutoCellHeight>\r\n"));
@@ -13736,9 +17494,6 @@ fn format_form_child_item_xml(
             if choice_button { "true" } else { "false" }
         ));
     }
-    if item.text_edit == Some(false) {
-        xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
-    }
     if let Some(choice_list_button) = item.choice_list_button {
         xml.push_str(&format!(
             "{tab}\t<ChoiceListButton>{}</ChoiceListButton>\r\n",
@@ -13754,6 +17509,9 @@ fn format_form_child_item_xml(
     if item.list_choice_mode == Some(true) {
         xml.push_str(&format!("{tab}\t<ListChoiceMode>true</ListChoiceMode>\r\n"));
     }
+    if !item.choice_list.is_empty() {
+        xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
+    }
     if let Some(quick_choice) = item.quick_choice {
         xml.push_str(&format!(
             "{tab}\t<QuickChoice>{}</QuickChoice>\r\n",
@@ -13763,15 +17521,8 @@ fn format_form_child_item_xml(
     if item.choose_type == Some(false) {
         xml.push_str(&format!("{tab}\t<ChooseType>false</ChooseType>\r\n"));
     }
-    if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
-        xml.push_str(&format!(
-            "{tab}\t<AutoMarkIncomplete>{}</AutoMarkIncomplete>\r\n",
-            if auto_mark_incomplete {
-                "true"
-            } else {
-                "false"
-            }
-        ));
+    if item.text_edit == Some(false) {
+        xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
     }
     if let Some(choice_button_representation) = item.choice_button_representation {
         xml.push_str(&format!(
@@ -13792,13 +17543,30 @@ fn format_form_child_item_xml(
             &item.title,
             indent + 1,
         ));
-        if item.horizontal_stretch == Some(true) {
+        if item.tag == "ButtonGroup" {
+            xml.push_str(&format_form_localized_section(
+                "ToolTip",
+                &item.tooltip,
+                indent + 1,
+            ));
+        }
+        if item.tag == "UsualGroup" {
+            if let Some(horizontal_stretch) = item.horizontal_stretch {
+                xml.push_str(&format!(
+                    "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                    if horizontal_stretch { "true" } else { "false" }
+                ));
+            }
+        } else if item.horizontal_stretch == Some(true) {
             xml.push_str(&format!(
                 "{tab}\t<HorizontalStretch>true</HorizontalStretch>\r\n"
             ));
         }
     }
-    if let Some(group) = item.group {
+    if let Some(group) = item
+        .group
+        .filter(|group| !(item.tag == "Page" && *group == "Vertical"))
+    {
         xml.push_str(&format!(
             "{tab}\t<Group>{}</Group>\r\n",
             escape_xml_text(group)
@@ -13818,9 +17586,19 @@ fn format_form_child_item_xml(
             escape_xml_text(behavior)
         ));
     }
-    if let Some(representation) = item.representation {
+    if let Some(representation) = item.representation.filter(|representation| {
+        !(*representation == "WeakSeparation"
+            && item.tag == "UsualGroup"
+            && item.show_title == Some(false)
+            && item.behavior == Some("Usual"))
+    }) {
+        let tag_name = if item.tag == "Pages" {
+            "PagesRepresentation"
+        } else {
+            "Representation"
+        };
         xml.push_str(&format!(
-            "{tab}\t<Representation>{}</Representation>\r\n",
+            "{tab}\t<{tag_name}>{}</{tag_name}>\r\n",
             escape_xml_text(representation)
         ));
     }
@@ -13829,25 +17607,109 @@ fn format_form_child_item_xml(
     }
     if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
         xml.push_str(&format!("{tab}\t<ShowInHeader>true</ShowInHeader>\r\n"));
-    } else if item.show_in_header == Some(false) {
-        xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
     }
-    if !early_title_for_field && !usual_group_title_first {
+    if !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
-            "Title",
-            &item.title,
+            "Format",
+            &item.format,
             indent + 1,
         ));
     }
-    xml.push_str(&format_form_localized_section(
-        "ToolTip",
-        &item.tooltip,
-        indent + 1,
-    ));
+    if !item.edit_format.is_empty() {
+        xml.push_str(&format_form_localized_section(
+            "EditFormat",
+            &item.edit_format,
+            indent + 1,
+        ));
+    }
+    if let Some(font_xml) = &item.font_xml {
+        xml.push_str(&format!("{tab}\t{font_xml}\r\n"));
+    }
+    if item.tag == "PictureDecoration"
+        && let Some(text_color) = &item.text_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TextColor>{}</TextColor>\r\n",
+            escape_xml_text(text_color)
+        ));
+    }
+    if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
+        xml.push_str(&format_form_title_section(item, indent + 1));
+        if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
+            xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
+        }
+        if item.tag == "PictureDecoration" {
+            if let Some(picture_size) = item.picture_size {
+                xml.push_str(&format!(
+                    "{tab}\t<PictureSize>{}</PictureSize>\r\n",
+                    escape_xml_text(picture_size)
+                ));
+            }
+            if let Some(reference) = &item.picture_ref {
+                xml.push_str(&format!(
+                    "{tab}\t<Picture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</Picture>\r\n",
+                    escape_xml_text(reference),
+                    xml_bool(item.picture_load_transparent)
+                ));
+            }
+            if let Some(file_drag_mode) = item.file_drag_mode {
+                xml.push_str(&format!(
+                    "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
+                    escape_xml_text(file_drag_mode)
+                ));
+            }
+        }
+    }
+    if item.tag == "CommandBar"
+        && let Some(horizontal_location) = item.horizontal_location
+    {
+        xml.push_str(&format!(
+            "{tab}\t<HorizontalLocation>{}</HorizontalLocation>\r\n",
+            escape_xml_text(horizontal_location)
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(location) = item.location_in_command_bar
+    {
+        xml.push_str(&format!(
+            "{tab}\t<LocationInCommandBar>{}</LocationInCommandBar>\r\n",
+            escape_xml_text(location)
+        ));
+    }
+    if let Some(command_source) = item.command_source {
+        xml.push_str(&format!(
+            "{tab}\t<CommandSource>{}</CommandSource>\r\n",
+            escape_xml_text(command_source)
+        ));
+    }
+    if item.tag == "Popup"
+        && let Some(reference) = &item.picture_ref
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Picture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</Picture>\r\n",
+            escape_xml_text(reference),
+            xml_bool(item.picture_load_transparent)
+        ));
+    }
+    if !matches!(item.tag, "InputField" | "PictureField" | "ButtonGroup") {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+    }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
     }
-    if let Some((name, id)) = &item.extended_tooltip {
+    if item.tag != "Table"
+        && let Some((name, id)) = &item.extended_tooltip
+    {
         xml.push_str(&format!(
             "{tab}\t<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
             escape_xml_text(name),
@@ -13863,7 +17725,7 @@ fn format_form_child_item_xml(
             escape_xml_text(file_name)
         ));
     }
-    if !item.events.is_empty() {
+    if item.tag != "Table" && !item.events.is_empty() {
         xml.push_str(&format!("{tab}\t<Events>\r\n"));
         for event in &item.events {
             xml.push_str(&format!(
@@ -13875,16 +17737,54 @@ fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t</Events>\r\n"));
     }
     if item.tag == "Table" {
+        let mut context_menu_children = Vec::new();
+        let mut auto_command_bar_children = Vec::new();
+        let mut addition_children = Vec::new();
         let mut regular_children = Vec::new();
         for child in &item.child_items {
-            if is_form_table_service_child_item(child.tag) {
-                xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
-            } else {
-                regular_children.push(child.clone());
+            match child.tag {
+                "ContextMenu" => context_menu_children.push(child.clone()),
+                "AutoCommandBar" => auto_command_bar_children.push(child.clone()),
+                "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition" => {
+                    addition_children.push(child.clone())
+                }
+                _ if is_form_table_service_child_item(child.tag) => {
+                    addition_children.push(child.clone())
+                }
+                _ => {
+                    regular_children.push(child.clone());
+                }
             }
         }
+        for child in &context_menu_children {
+            xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+        }
+        for child in &auto_command_bar_children {
+            xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+        }
+        if let Some((name, id)) = &item.extended_tooltip {
+            xml.push_str(&format!(
+                "{tab}\t<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
+                escape_xml_text(name),
+                escape_xml_text(id)
+            ));
+        }
+        for child in &addition_children {
+            xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
+        }
+        if !item.events.is_empty() {
+            xml.push_str(&format!("{tab}\t<Events>\r\n"));
+            for event in &item.events {
+                xml.push_str(&format!(
+                    "{tab}\t\t<Event name=\"{}\">{}</Event>\r\n",
+                    escape_xml_text(&event.name),
+                    escape_xml_text(&event.handler)
+                ));
+            }
+            xml.push_str(&format!("{tab}\t</Events>\r\n"));
+        }
         xml.push_str(&format_form_child_items_xml(&regular_children, indent + 1));
-    } else if item.tag.ends_with("Addition") {
+    } else if item.tag.ends_with("Addition") && !is_form_field_direct_service_parent(item.tag) {
         for child in &item.child_items {
             xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
         }
@@ -13900,6 +17800,53 @@ fn format_form_child_item_xml(
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
+}
+
+fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<ChoiceList>\r\n");
+    for item in items {
+        xml.push_str(&format!(
+            "{tab}\t<xr:Item>\r\n\
+{tab}\t\t<xr:Presentation/>\r\n\
+{tab}\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+{tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
+        ));
+        if !item.presentation.is_empty() {
+            xml.push_str(&format_form_localized_section(
+                "Presentation",
+                &item.presentation,
+                indent + 3,
+            ));
+        }
+        match &item.value {
+            FormChoiceListValue::Decimal(value) => xml.push_str(&format!(
+                "{tab}\t\t\t<Value xsi:type=\"xs:decimal\">{}</Value>\r\n",
+                escape_xml_text(value)
+            )),
+            FormChoiceListValue::String(value) => xml.push_str(&format!(
+                "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
+                escape_xml_text(value)
+            )),
+            FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
+                "{tab}\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">{}</Value>\r\n",
+                escape_xml_text(value)
+            )),
+        }
+        xml.push_str(&format!(
+            "{tab}\t\t</xr:Value>\r\n\
+{tab}\t</xr:Item>\r\n"
+        ));
+    }
+    xml.push_str(&format!("{tab}</ChoiceList>\r\n"));
+    xml
+}
+
+fn should_emit_explicit_table_skip_on_input(item: &FormChildItem) -> bool {
+    item.tag == "Table"
+        && !form_table_has_hierarchical_navigation(item)
+        && item.skip_on_input == Some(false)
+        && (item.row_picture_data_path.is_some() || item.rows_picture_ref.is_some())
 }
 
 fn format_form_context_menu_xml(item: &FormChildItem, indent: usize) -> String {
@@ -13925,11 +17872,32 @@ fn format_form_context_menu_xml(item: &FormChildItem, indent: usize) -> String {
     }
 }
 
+#[cfg(test)]
 fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
-    if attributes.is_empty() {
+    format_form_attributes_section_xml(attributes, &FormAttributesSection::default())
+}
+
+fn format_form_attributes_section_xml(
+    attributes: &[FormAttribute],
+    attributes_section: &FormAttributesSection,
+) -> String {
+    if attributes.is_empty() && attributes_section.conditional_appearance_xml.is_none() {
         return "\t<Attributes/>\r\n".to_string();
     }
     let mut xml = "\t<Attributes>\r\n".to_string();
+    xml.push_str(&format_form_attributes_items_xml(attributes));
+    if let Some(conditional_appearance_xml) = &attributes_section.conditional_appearance_xml {
+        xml.push_str(&indent_xml_fragment(
+            &split_adjacent_xml_tags(conditional_appearance_xml),
+            "\t\t",
+        ));
+    }
+    xml.push_str("\t</Attributes>\r\n");
+    xml
+}
+
+fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> String {
+    let mut xml = String::new();
     for attribute in attributes {
         xml.push_str(&format!(
             "\t\t<Attribute name=\"{}\" id=\"{}\">\r\n",
@@ -13942,29 +17910,38 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
             xml.push_str("\t\t\t\t<v8:Type>cfg:DynamicList</v8:Type>\r\n");
             xml.push_str("\t\t\t</Type>\r\n");
         } else if !attribute.value_types.is_empty() {
-            xml.push_str(&format_metadata_types_xml(&attribute.value_types));
+            xml.push_str(&format_form_metadata_types_xml(&attribute.value_types));
+        } else if attribute.explicit_empty_type {
+            xml.push_str("\t\t\t<Type/>\r\n");
         }
-        if !attribute.columns.is_empty() {
+        if let Some(fill_check) = attribute.fill_check {
+            xml.push_str(&format!(
+                "\t\t\t<FillCheck>{}</FillCheck>\r\n",
+                escape_xml_text(fill_check)
+            ));
+        }
+        if !attribute.columns.is_empty() || !attribute.additional_columns.is_empty() {
             xml.push_str("\t\t\t<Columns>\r\n");
             for column in &attribute.columns {
+                xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t"));
+            }
+            for additional in &attribute.additional_columns {
                 xml.push_str(&format!(
-                    "\t\t\t\t<Column name=\"{}\" id=\"{}\">\r\n",
-                    escape_xml_text(&column.name),
-                    escape_xml_text(&column.id)
+                    "\t\t\t\t<AdditionalColumns table=\"{}\">\r\n",
+                    escape_xml_text(&additional.table)
                 ));
-                xml.push_str(&format_form_localized_section("Title", &column.title, 5));
-                if !column.value_types.is_empty() {
-                    xml.push_str(&format_metadata_types_xml_with_indent(
-                        &column.value_types,
-                        "\t\t\t\t\t",
-                    ));
+                for column in &additional.columns {
+                    xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t\t"));
                 }
-                xml.push_str("\t\t\t\t</Column>\r\n");
+                xml.push_str("\t\t\t\t</AdditionalColumns>\r\n");
             }
             xml.push_str("\t\t\t</Columns>\r\n");
         }
         if attribute.main_attribute {
             xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
+        }
+        if attribute.saved_data {
+            xml.push_str("\t\t\t<SavedData>true</SavedData>\r\n");
         }
         if !attribute.use_always.is_empty() {
             xml.push_str("\t\t\t<UseAlways>\r\n");
@@ -13976,13 +17953,40 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
             }
             xml.push_str("\t\t\t</UseAlways>\r\n");
         }
+        if !attribute.save_fields.is_empty() {
+            xml.push_str("\t\t\t<Save>\r\n");
+            for field in &attribute.save_fields {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Field>{}</Field>\r\n",
+                    escape_xml_text(field)
+                ));
+            }
+            xml.push_str("\t\t\t</Save>\r\n");
+        }
+        if !attribute.functional_options.is_empty() {
+            xml.push_str("\t\t\t<FunctionalOptions>\r\n");
+            for item in &attribute.functional_options {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Item>{}</Item>\r\n",
+                    escape_xml_text(item)
+                ));
+            }
+            xml.push_str("\t\t\t</FunctionalOptions>\r\n");
+        }
         if let Some(settings) = &attribute.settings {
             xml.push_str("\t\t\t<Settings xsi:type=\"DynamicList\">\r\n");
             if settings.manual_query {
                 xml.push_str("\t\t\t\t<ManualQuery>true</ManualQuery>\r\n");
             }
-            if settings.dynamic_data_read {
-                xml.push_str("\t\t\t\t<DynamicDataRead>true</DynamicDataRead>\r\n");
+            if settings.dynamic_data_read_explicit {
+                xml.push_str(&format!(
+                    "\t\t\t\t<DynamicDataRead>{}</DynamicDataRead>\r\n",
+                    if settings.dynamic_data_read {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                ));
             }
             if let Some(query_text) = &settings.query_text {
                 xml.push_str(&format!(
@@ -13990,83 +17994,159 @@ fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
                     escape_xml_text(query_text)
                 ));
             }
+            if let Some(server_state_xml) = &settings.server_state_xml {
+                xml.push_str(&indent_xml_fragment(server_state_xml, "\t\t\t\t"));
+            } else {
+                for field in &settings.explicit_fields {
+                    xml.push_str("\t\t\t\t<Field xsi:type=\"dcssch:DataSetFieldField\">\r\n");
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t<dcssch:dataPath>{}</dcssch:dataPath>\r\n",
+                        escape_xml_text(&field.data_path)
+                    ));
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t<dcssch:field>{}</dcssch:field>\r\n",
+                        escape_xml_text(&field.field)
+                    ));
+                    xml.push_str("\t\t\t\t</Field>\r\n");
+                }
+            }
             if let Some(main_table) = &settings.main_table {
                 xml.push_str(&format!(
                     "\t\t\t\t<MainTable>{}</MainTable>\r\n",
                     escape_xml_text(main_table)
                 ));
             }
-            for field in &settings.fields {
-                xml.push_str("\t\t\t\t<Field>\r\n");
-                xml.push_str(&format!(
-                    "\t\t\t\t\t<dataPath>{}</dataPath>\r\n",
-                    escape_xml_text(&field.data_path)
-                ));
-                xml.push_str(&format!(
-                    "\t\t\t\t\t<field>{}</field>\r\n",
-                    escape_xml_text(&field.field)
-                ));
-                xml.push_str("\t\t\t\t</Field>\r\n");
-            }
             xml.push_str(&format_form_list_settings_xml(&settings.list_settings));
             xml.push_str("\t\t\t</Settings>\r\n");
+        } else if let Some(spreadsheet_document_settings) = &attribute.spreadsheet_document_settings
+        {
+            xml.push_str(
+                "\t\t\t<Settings xmlns:mxl=\"http://v8.1c.ru/8.2/data/spreadsheet\" xsi:type=\"mxl:SpreadsheetDocument\">\r\n",
+            );
+            xml.push_str(&indent_xml_fragment(
+                spreadsheet_document_settings,
+                "\t\t\t",
+            ));
+            xml.push_str("\t\t\t</Settings>\r\n");
+        } else if let Some(type_description_settings) = &attribute.type_description_settings {
+            if type_description_settings.is_empty() {
+                xml.push_str("\t\t\t<Settings xsi:type=\"v8:TypeDescription\"/>\r\n");
+            } else {
+                xml.push_str("\t\t\t<Settings xsi:type=\"v8:TypeDescription\">\r\n");
+                xml.push_str(&format_type_description_value_types_xml(
+                    type_description_settings,
+                    "\t\t\t\t",
+                ));
+                xml.push_str("\t\t\t</Settings>\r\n");
+            }
         }
         xml.push_str("\t\t</Attribute>\r\n");
     }
-    xml.push_str("\t</Attributes>\r\n");
+    xml
+}
+
+fn format_form_attribute_column_xml(column: &FormAttributeColumn, indent: &str) -> String {
+    let mut xml = format!(
+        "{indent}<Column name=\"{}\" id=\"{}\">\r\n",
+        escape_xml_text(&column.name),
+        escape_xml_text(&column.id)
+    );
+    xml.push_str(&format_form_localized_section(
+        "Title",
+        &column.title,
+        indent.chars().count() + 1,
+    ));
+    if !column.value_types.is_empty() {
+        let nested_indent = format!("{indent}\t");
+        xml.push_str(&format_form_metadata_types_xml_with_indent(
+            &column.value_types,
+            &nested_indent,
+        ));
+    } else if column.explicit_empty_type {
+        xml.push_str(&format!("{indent}\t<Type/>\r\n"));
+    }
+    if !column.functional_options.is_empty() {
+        xml.push_str(&format!("{indent}\t<FunctionalOptions>\r\n"));
+        for item in &column.functional_options {
+            xml.push_str(&format!(
+                "{indent}\t\t<Item>{}</Item>\r\n",
+                escape_xml_text(item)
+            ));
+        }
+        xml.push_str(&format!("{indent}\t</FunctionalOptions>\r\n"));
+    }
+    xml.push_str(&format!("{indent}</Column>\r\n"));
     xml
 }
 
 fn format_form_list_settings_xml(settings: &FormListSettings) -> String {
-    if settings.filter.is_none()
-        && settings.order.is_none()
-        && settings.conditional_appearance.is_none()
+    if !form_list_settings_standard_section_has_output(settings.filter.as_ref())
+        && !form_list_settings_order_has_output(settings.order.as_ref())
+        && !form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
         && settings.items_view_mode.is_none()
         && settings.items_user_setting_id.is_none()
     {
         return String::new();
     }
     let mut xml = "\t\t\t\t<ListSettings>\r\n".to_string();
-    if let Some(filter) = &settings.filter {
-        xml.push_str(&format_form_list_settings_standard_section_xml(
-            "filter", filter,
-        ));
-    }
-    if let Some(order) = &settings.order {
-        xml.push_str("\t\t\t\t\t<dcsset:order>\r\n");
-        for item in &order.items {
-            xml.push_str("\t\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:OrderItemField\">\r\n");
-            xml.push_str(&format!(
-                "\t\t\t\t\t\t\t<dcsset:field>{}</dcsset:field>\r\n",
-                escape_xml_text(&item.field)
+    if form_list_settings_standard_section_has_output(settings.filter.as_ref())
+        && let Some(filter) = &settings.filter
+    {
+        if let Some(raw_xml) = &filter.raw_xml {
+            xml.push_str(&indent_xml_fragment(raw_xml, "\t\t\t\t\t"));
+        } else {
+            xml.push_str(&format_form_list_settings_standard_section_xml(
+                "filter", filter,
             ));
-            if let Some(order_type) = &item.order_type {
+        }
+    }
+    if form_list_settings_order_has_output(settings.order.as_ref())
+        && let Some(order) = &settings.order
+    {
+        if let Some(raw_xml) = &order.raw_xml {
+            xml.push_str(&indent_xml_fragment(raw_xml, "\t\t\t\t\t"));
+        } else {
+            xml.push_str("\t\t\t\t\t<dcsset:order>\r\n");
+            for item in &order.items {
+                xml.push_str("\t\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:OrderItemField\">\r\n");
                 xml.push_str(&format!(
-                    "\t\t\t\t\t\t\t<dcsset:orderType>{}</dcsset:orderType>\r\n",
-                    escape_xml_text(order_type)
+                    "\t\t\t\t\t\t\t<dcsset:field>{}</dcsset:field>\r\n",
+                    escape_xml_text(&item.field)
+                ));
+                if let Some(order_type) = &item.order_type {
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t\t\t<dcsset:orderType>{}</dcsset:orderType>\r\n",
+                        escape_xml_text(order_type)
+                    ));
+                }
+                xml.push_str("\t\t\t\t\t\t</dcsset:item>\r\n");
+            }
+            if let Some(view_mode) = &order.view_mode {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t<dcsset:viewMode>{}</dcsset:viewMode>\r\n",
+                    escape_xml_text(view_mode)
                 ));
             }
-            xml.push_str("\t\t\t\t\t\t</dcsset:item>\r\n");
+            if let Some(user_setting_id) = &order.user_setting_id {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t<dcsset:userSettingID>{}</dcsset:userSettingID>\r\n",
+                    escape_xml_text(user_setting_id)
+                ));
+            }
+            xml.push_str("\t\t\t\t\t</dcsset:order>\r\n");
         }
-        if let Some(view_mode) = &order.view_mode {
-            xml.push_str(&format!(
-                "\t\t\t\t\t\t<dcsset:viewMode>{}</dcsset:viewMode>\r\n",
-                escape_xml_text(view_mode)
-            ));
-        }
-        if let Some(user_setting_id) = &order.user_setting_id {
-            xml.push_str(&format!(
-                "\t\t\t\t\t\t<dcsset:userSettingID>{}</dcsset:userSettingID>\r\n",
-                escape_xml_text(user_setting_id)
-            ));
-        }
-        xml.push_str("\t\t\t\t\t</dcsset:order>\r\n");
     }
-    if let Some(conditional_appearance) = &settings.conditional_appearance {
-        xml.push_str(&format_form_list_settings_standard_section_xml(
-            "conditionalAppearance",
-            conditional_appearance,
-        ));
+    if form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
+        && let Some(conditional_appearance) = &settings.conditional_appearance
+    {
+        if let Some(raw_xml) = &conditional_appearance.raw_xml {
+            xml.push_str(&indent_xml_fragment(raw_xml, "\t\t\t\t\t"));
+        } else {
+            xml.push_str(&format_form_list_settings_standard_section_xml(
+                "conditionalAppearance",
+                conditional_appearance,
+            ));
+        }
     }
     if let Some(items_view_mode) = &settings.items_view_mode {
         xml.push_str(&format!(
@@ -14082,6 +18162,25 @@ fn format_form_list_settings_xml(settings: &FormListSettings) -> String {
     }
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
     xml
+}
+
+fn form_list_settings_standard_section_has_output(
+    section: Option<&FormListSettingsStandardSection>,
+) -> bool {
+    section.is_some_and(|section| {
+        section.raw_xml.is_some()
+            || section.view_mode.is_some()
+            || section.user_setting_id.is_some()
+    })
+}
+
+fn form_list_settings_order_has_output(order: Option<&FormListSettingsOrder>) -> bool {
+    order.is_some_and(|order| {
+        order.raw_xml.is_some()
+            || !order.items.is_empty()
+            || order.view_mode.is_some()
+            || order.user_setting_id.is_some()
+    })
 }
 
 fn format_form_list_settings_standard_section_xml(
@@ -14105,6 +18204,40 @@ fn format_form_list_settings_standard_section_xml(
     xml
 }
 
+fn indent_xml_fragment(fragment: &str, indent: &str) -> String {
+    let mut xml = String::new();
+    let mut level = 0usize;
+    for line in fragment
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if line.starts_with("</") {
+            level = level.saturating_sub(1);
+        }
+        xml.push_str(indent);
+        for _ in 0..level {
+            xml.push('\t');
+        }
+        xml.push_str(line);
+        xml.push_str("\r\n");
+        if line.starts_with('<')
+            && !line.starts_with("</")
+            && !line.starts_with("<?")
+            && !line.starts_with("<!")
+            && !line.ends_with("/>")
+            && !line.contains("</")
+        {
+            level += 1;
+        }
+    }
+    xml
+}
+
+fn split_adjacent_xml_tags(fragment: &str) -> String {
+    fragment.replace("><", ">\n<")
+}
+
 fn form_bool_when_not_native_default(value: Option<bool>, native_default: bool) -> Option<bool> {
     value.filter(|value| *value != native_default)
 }
@@ -14119,7 +18252,11 @@ fn format_form_parameters_xml(parameters: &[FormParameter]) -> String {
             "\t\t<Parameter name=\"{}\">\r\n",
             escape_xml_text(&parameter.name)
         ));
-        xml.push_str(&format_metadata_types_xml(&parameter.value_types));
+        if !parameter.value_types.is_empty() {
+            xml.push_str(&format_form_metadata_types_xml(&parameter.value_types));
+        } else if parameter.explicit_empty_type {
+            xml.push_str("\t\t\t<Type/>\r\n");
+        }
         if parameter.key_parameter {
             xml.push_str("\t\t\t<KeyParameter>true</KeyParameter>\r\n");
         }
@@ -14146,8 +18283,67 @@ fn format_form_localized_section(name: &str, values: &[(String, String)], indent
     xml
 }
 
+fn format_form_title_section(item: &FormChildItem, indent: usize) -> String {
+    if item.title.is_empty() {
+        return String::new();
+    }
+    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration") {
+        return format_form_localized_section("Title", &item.title, indent);
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<Title formatted=\"false\">\r\n");
+    for (lang, content) in &item.title {
+        xml.push_str(&format!(
+            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
+            escape_xml_text(lang),
+            escape_xml_text(content)
+        ));
+    }
+    xml.push_str(&format!("{tab}</Title>\r\n"));
+    xml
+}
+
 fn format_form_command_interface_xml(command_interface: &FormCommandInterface) -> String {
     let mut xml = "\t<CommandInterface>\r\n".to_string();
+    if !command_interface.command_bar.is_empty() {
+        xml.push_str("\t\t<CommandBar>\r\n");
+        for item in &command_interface.command_bar {
+            xml.push_str("\t\t\t<Item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<Command>{}</Command>\r\n",
+                escape_xml_text(&item.command)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<Type>{}</Type>\r\n",
+                escape_xml_text(item.item_type)
+            ));
+            if let Some(command_group) = item.command_group.as_deref() {
+                xml.push_str(&format!(
+                    "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
+                    escape_xml_text(command_group)
+                ));
+            }
+            if let Some(index) = item.index {
+                xml.push_str(&format!("\t\t\t\t<Index>{index}</Index>\r\n"));
+            }
+            if let Some(default_visible) = item.default_visible {
+                xml.push_str(&format!(
+                    "\t\t\t\t<DefaultVisible>{}</DefaultVisible>\r\n",
+                    xml_bool(default_visible)
+                ));
+            }
+            if let Some(common) = item.visible_common {
+                xml.push_str("\t\t\t\t<Visible>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
+                    xml_bool(common)
+                ));
+                xml.push_str("\t\t\t\t</Visible>\r\n");
+            }
+            xml.push_str("\t\t\t</Item>\r\n");
+        }
+        xml.push_str("\t\t</CommandBar>\r\n");
+    }
     if !command_interface.navigation_panel.is_empty() {
         xml.push_str("\t\t<NavigationPanel>\r\n");
         for item in &command_interface.navigation_panel {
@@ -14160,10 +18356,12 @@ fn format_form_command_interface_xml(command_interface: &FormCommandInterface) -
                 "\t\t\t\t<Type>{}</Type>\r\n",
                 escape_xml_text(item.item_type)
             ));
-            xml.push_str(&format!(
-                "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
-                escape_xml_text(&item.command_group)
-            ));
+            if let Some(command_group) = item.command_group.as_deref() {
+                xml.push_str(&format!(
+                    "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
+                    escape_xml_text(command_group)
+                ));
+            }
             if let Some(index) = item.index {
                 xml.push_str(&format!("\t\t\t\t<Index>{index}</Index>\r\n"));
             }
@@ -14216,18 +18414,33 @@ fn parse_moxel_spreadsheet_text(
     if rows.is_empty() {
         return None;
     }
-    let (merges, vertical_unmerges) = parse_moxel_merge_regions(&fields);
-    let areas = parse_moxel_areas(&fields);
+    let vertical_groups = parse_moxel_vertical_groups(&fields);
+    let (merges, horizontal_unmerges, vertical_unmerges) = parse_moxel_merge_regions(&fields);
+    let named_items = parse_moxel_named_items(&fields);
+    let areas = named_items
+        .iter()
+        .filter_map(|item| match item {
+            MoxelNamedItem::Cells(area) => Some(area.clone()),
+            MoxelNamedItem::Drawing { .. } => None,
+        })
+        .collect::<Vec<_>>();
     let print_area = parse_moxel_print_area(&fields);
-    trim_moxel_trailing_empty_rows(&mut rows, &areas, &merges, &vertical_unmerges);
+    trim_moxel_trailing_empty_rows(
+        &mut rows,
+        &areas,
+        &merges,
+        &horizontal_unmerges,
+        &vertical_unmerges,
+    );
     compact_moxel_empty_row_ranges(&mut rows);
-    let (column_sets, row_column_ids) = parse_moxel_column_sets(&fields);
+    let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
-    let default_format = parse_moxel_default_format(&fields, object_refs);
+    let mut default_format = parse_moxel_default_format(&fields, object_refs);
     let print_settings = parse_moxel_print_settings(&fields);
     let empty_headers_footers = parse_moxel_empty_headers_footers(&fields);
+    let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
@@ -14244,7 +18457,22 @@ fn parse_moxel_spreadsheet_text(
         column_sets
     };
     let column_format_slots = moxel_column_format_slots(&column_sets, column_count);
-    let default_format_width = parse_moxel_default_format_width(&fields, column_format_slots);
+    let source_column_format_refs = moxel_source_column_format_refs(&column_sets);
+    let source_column_format_offset = moxel_source_column_format_offset(&column_sets);
+    let has_high_source_column_format_refs = column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .filter_map(|column| column.source_format_index)
+        .any(|source_format_index| source_format_index > column_format_slots);
+    let needs_sparse_column_set_default_format =
+        source_column_format_offset > 0 && header_footer_format_ref.is_some();
+    let mut column_sets = column_sets;
+    if source_column_format_offset == 0 && column_format_slots == 0 {
+        normalize_moxel_zero_column_format_refs(&mut rows);
+    }
+    let mut default_format_width = parse_moxel_default_format_width(&fields, column_format_slots);
+    let has_equal_width_only_format_table =
+        parse_moxel_equal_width_only_format_table(&fields, column_count).is_some();
     let sparse_source_format_refs = moxel_uses_sparse_source_format_refs(
         &column_sets,
         column_count,
@@ -14252,7 +18480,18 @@ fn parse_moxel_spreadsheet_text(
         &default_format,
         default_format_width,
     );
-    let format_offset = if sparse_source_format_refs {
+    if sparse_source_format_refs
+        && has_high_source_column_format_refs
+        && source_column_format_refs.len() > 1
+        && default_format_width.is_some()
+        && default_format.border_color.is_none()
+        && default_format.is_empty()
+        && style_refs.first().and_then(|slot| slot.as_deref()) == Some("style:BorderColor")
+    {
+        default_format.font = Some(0);
+        default_format.border_color = Some("style:BorderColor".to_string());
+    }
+    let format_offset = if sparse_source_format_refs || has_equal_width_only_format_table {
         0
     } else {
         column_format_slots.saturating_sub(1)
@@ -14261,24 +18500,25 @@ fn parse_moxel_spreadsheet_text(
         if let Some(columns_id) = row_column_ids.get(&row.index) {
             row.columns_id = Some(columns_id.clone());
         }
-        if row.format_index > 1 {
-            row.format_index += format_offset;
-        }
-        for cell in &mut row.cells {
-            if cell.format_index > 0 {
-                cell.format_index += format_offset;
+        if source_column_format_offset == 0 {
+            if row.format_index > 1 {
+                row.format_index += format_offset;
+            }
+            for cell in &mut row.cells {
+                if cell.format_index > 0 {
+                    cell.format_index += format_offset;
+                }
             }
         }
     }
-    let max_format_index = rows
-        .iter()
-        .fold(column_format_slots.max(1), |max_index, row| {
-            let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
-                cell_max.max(cell.format_index)
-            });
-            max_index.max(row_max)
-        });
-    let height = moxel_spreadsheet_height(&rows, &merges, &vertical_unmerges, &areas);
+    let height = moxel_spreadsheet_height(
+        &rows,
+        &merges,
+        &horizontal_unmerges,
+        &vertical_unmerges,
+        &areas,
+    )
+    .max(declared_sheet_height.unwrap_or(0));
     let drawings = parse_moxel_drawings(&fields);
     let drawing_format_indices = drawings
         .iter()
@@ -14290,45 +18530,195 @@ fn parse_moxel_spreadsheet_text(
         &style_refs,
         &drawing_format_indices,
     );
+    if default_format.is_empty() && default_format_width.is_none() {
+        if let Some(leading_default_format) =
+            parse_moxel_leading_default_format(&fields, &style_refs, &number_format_refs)
+        {
+            default_format_width = leading_default_format.width;
+            default_format = leading_default_format;
+        }
+    }
     let (column_formats, formats) = parse_moxel_formats(
         &fields,
         column_format_slots,
         sparse_source_format_refs,
+        &source_column_format_refs,
         &style_refs,
         &drawing_format_indices,
         &number_format_refs,
     );
+    let (column_formats, mut formats) = (column_formats, formats);
+    if source_column_format_offset == 0 && column_formats.is_empty() && formats.is_empty() {
+        restore_moxel_source_format_refs_without_format_table(&mut rows);
+    }
+    if source_column_format_offset > 0 {
+        if sparse_source_format_refs {
+            remap_moxel_column_set_sparse_internal_format_indices(
+                &mut column_sets,
+                &source_column_format_refs,
+                column_formats.len(),
+                formats.len(),
+            );
+            remap_moxel_row_and_cell_sparse_internal_format_indices(
+                &mut rows,
+                &source_column_format_refs,
+                column_formats.len(),
+                formats.len(),
+            );
+        } else if column_formats.len() > source_column_format_refs.len()
+            || needs_sparse_column_set_default_format
+        {
+            let source_output_indices = moxel_source_derived_internal_output_order(
+                &column_sets,
+                column_formats.len(),
+                formats.len(),
+            );
+            remap_moxel_column_set_internal_format_indices(
+                &mut column_sets,
+                column_formats.len(),
+                formats.len(),
+            );
+            remap_moxel_row_and_cell_sparse_source_format_indices(
+                &mut rows,
+                &source_column_format_refs,
+                &source_output_indices,
+            );
+        } else {
+            remap_moxel_column_set_output_format_indices(
+                &mut column_sets,
+                &source_column_format_refs,
+            );
+            remap_moxel_row_and_cell_output_format_indices(&mut rows, &source_column_format_refs);
+        }
+    } else if sparse_source_format_refs && !source_column_format_refs.is_empty() {
+        remap_moxel_column_set_output_format_indices(&mut column_sets, &source_column_format_refs);
+        remap_moxel_row_and_cell_output_format_indices(&mut rows, &source_column_format_refs);
+    }
+    let extra_formats = BTreeMap::new();
+    let header_footer_format_index = if needs_sparse_column_set_default_format {
+        resolve_sparse_moxel_column_set_default_format_index(
+            &mut column_sets,
+            column_formats.len(),
+            &formats,
+            header_footer_format_ref,
+        )
+    } else {
+        None
+    };
     let all_formats = column_formats
         .iter()
         .chain(formats.iter())
         .cloned()
         .collect::<Vec<_>>();
+    let mut fonts = fonts;
+    normalize_moxel_fonts(&mut fonts, &all_formats);
     let has_sparse_column_sets = column_sets
         .iter()
         .any(|column_set| column_set.columns.len() != column_set.size);
-    let lines = parse_moxel_lines(&fields, &all_formats, has_sparse_column_sets);
+    let mut lines = parse_moxel_lines(&fields, &all_formats, has_sparse_column_sets);
+    normalize_moxel_single_set_report_header_tail(
+        &column_sets,
+        &column_formats,
+        &style_refs,
+        &mut lines,
+        &mut formats,
+    );
     let drawing_max_format_index = drawings
         .iter()
         .map(|drawing| drawing.format_index)
         .max()
         .unwrap_or(0);
-    let max_format_index = max_format_index.max(drawing_max_format_index);
-    let default_format_index = moxel_default_format_index(
+    let row_cell_max_format_index = rows.iter().fold(
+        moxel_column_format_slots(&column_sets, column_count).max(1),
+        |max_index, row| {
+            let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
+                cell_max.max(cell.format_index)
+            });
+            max_index.max(row_max)
+        },
+    );
+    let max_format_index = row_cell_max_format_index.max(drawing_max_format_index);
+    let format_table_fallback = column_formats.len() + formats.len() + 1;
+    let mut default_format_index = moxel_default_format_index(
         &column_sets,
         print_settings.as_ref(),
         !default_format.is_empty() || default_format_width.is_some(),
-        max_format_index + 1,
+        format_table_fallback.max(max_format_index + 1),
     );
+    if default_format_index.is_some_and(|index| index > column_formats.len() + formats.len())
+        && let Some((existing_index, exact_font_zero_match)) = resolve_existing_moxel_default_format_index(
+            &column_formats,
+            &formats,
+            &default_format,
+            default_format_width,
+        )
+    {
+        default_format_index = Some(existing_index);
+        if exact_font_zero_match && default_format.is_empty() {
+            default_format.font = Some(0);
+        }
+    }
+    if source_column_format_offset > 0
+        && default_format.is_empty()
+        && default_format_width.is_none()
+        && column_formats.len() == source_column_format_refs.len()
+        && source_column_format_refs
+            .iter()
+            .copied()
+            .max()
+            .is_some_and(|max_source_format_index| {
+                max_source_format_index < column_formats.len() + formats.len()
+            })
+        && let Some(min_source_format_index) = source_column_format_refs.iter().copied().min()
+        && min_source_format_index > 1
+    {
+        default_format_index = Some(column_formats.len() + min_source_format_index);
+    }
+    if header_footer_format_index.is_some()
+        && default_format.is_empty()
+        && default_format_width.is_none()
+    {
+        default_format_index = None;
+    }
+    if column_sets.len() == 1
+        && let Some(shared_format_index) = header_footer_format_index
+        && shared_format_index > column_formats.len()
+        && let Some(shared_format) =
+            moxel_internal_format(&column_formats, &formats, shared_format_index)
+    {
+        if shared_format.is_empty() {
+            if default_format_index.is_none_or(|index| index <= column_formats.len()) {
+                default_format_index = Some(shared_format_index);
+            }
+        } else {
+            default_format_index = None;
+        }
+    }
+    if column_sets.len() == 1
+        && let Some(shared_format_index) = header_footer_format_index
+        && shared_format_index > column_formats.len()
+        && let Some(shared_format) =
+            moxel_internal_format(&column_formats, &formats, shared_format_index)
+        && shared_format.is_empty()
+        && default_format_index.is_some_and(|index| index > shared_format_index)
+        && let Some(default_set) = column_sets.first_mut()
+    {
+        default_set.default_format_index = Some(shared_format_index);
+    }
     Some(MoxelSpreadsheet {
         column_count,
         column_sets,
         column_formats,
+        extra_formats,
         default_format_width,
         default_format,
         formats,
         rows,
+        vertical_groups,
         merges,
+        horizontal_unmerges,
         vertical_unmerges,
+        named_items,
         areas,
         print_area,
         print_settings,
@@ -14337,18 +18727,56 @@ fn parse_moxel_spreadsheet_text(
         drawings,
         pictures,
         empty_headers_footers,
+        header_footer_format_index,
         default_format_index,
         height,
     })
 }
 
+fn normalize_moxel_fonts(fonts: &mut Vec<MoxelFont>, formats: &[MoxelFormat]) {
+    let Some(max_used_index) = formats.iter().filter_map(|format| format.font).max() else {
+        return;
+    };
+    if max_used_index != fonts.len() || fonts.is_empty() {
+        return;
+    }
+    if fonts.iter().any(|font| font.kind == "StyleItem") {
+        return;
+    }
+    if !fonts
+        .last()
+        .is_some_and(|font| font.kind == "Absolute" && font.ref_name.is_none())
+    {
+        return;
+    }
+
+    // Some MXL variants reference one implicit TextFont slot that is not present
+    // in the raw font table. Native XML places it before the last explicit font.
+    fonts.insert(
+        fonts.len() - 1,
+        MoxelFont {
+            ref_name: Some("style:TextFont".to_string()),
+            face_name: None,
+            height: None,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikeout: false,
+            kind: "StyleItem",
+            scale: None,
+        },
+    );
+}
+
 fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnSet> {
     vec![MoxelColumnSet {
         id: None,
+        default_format_index: None,
+        source_default_format_index: None,
         size: column_count,
         columns: (0..column_count)
             .map(|index| MoxelColumn {
-                index,
+                index: index as i32,
                 format_index: index + 1,
                 source_format_index: None,
             })
@@ -14356,7 +18784,9 @@ fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnSet> {
     }]
 }
 
-fn parse_moxel_column_sets(fields: &[&str]) -> (Vec<MoxelColumnSet>, BTreeMap<usize, String>) {
+fn parse_moxel_column_sets(
+    fields: &[&str],
+) -> (Vec<MoxelColumnSet>, BTreeMap<usize, String>, Option<usize>) {
     for index in 0..fields.len() {
         let Some(default_set) = parse_moxel_column_set(fields[index]) else {
             continue;
@@ -14364,7 +18794,7 @@ fn parse_moxel_column_sets(fields: &[&str]) -> (Vec<MoxelColumnSet>, BTreeMap<us
         if default_set.id.is_some() || index + 2 >= fields.len() {
             continue;
         }
-        let Some(_height) = fields
+        let Some(declared_sheet_height) = fields
             .get(index + 1)
             .and_then(|field| field.trim().parse::<usize>().ok())
         else {
@@ -14400,19 +18830,79 @@ fn parse_moxel_column_sets(fields: &[&str]) -> (Vec<MoxelColumnSet>, BTreeMap<us
         normalize_moxel_column_set_format_indices(&mut column_sets);
         let row_column_ids =
             parse_moxel_row_column_set_ids(fields, cursor, &column_sets[1..]).unwrap_or_default();
-        return (column_sets, row_column_ids);
+        return (column_sets, row_column_ids, Some(declared_sheet_height));
     }
-    (Vec::new(), BTreeMap::new())
+    (Vec::new(), BTreeMap::new(), None)
+}
+
+fn parse_moxel_vertical_groups(fields: &[&str]) -> Vec<MoxelVerticalGroup> {
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count == 0 || count > 2048 {
+            continue;
+        }
+        let Some(last_group_field) = index.checked_add(count * 2) else {
+            continue;
+        };
+        if last_group_field + 3 >= fields.len() {
+            continue;
+        }
+        let mut groups = Vec::with_capacity(count);
+        let mut cursor = index + 1;
+        let mut valid = true;
+        for _ in 0..count {
+            let Some(group) = fields
+                .get(cursor)
+                .and_then(|field| parse_moxel_vertical_group(field))
+            else {
+                valid = false;
+                break;
+            };
+            if fields.get(cursor + 1).map(|field| field.trim()) != Some("-1") {
+                valid = false;
+                break;
+            }
+            groups.push(group);
+            cursor += 2;
+        }
+        if valid
+            && !groups.is_empty()
+            && fields.get(cursor).map(|field| field.trim()) == Some("0")
+            && fields.get(cursor + 1).map(|field| field.trim()) == Some("0")
+            && fields.get(cursor + 2).map(|field| field.trim()) == Some("0")
+        {
+            return groups;
+        }
+    }
+    Vec::new()
+}
+
+fn parse_moxel_vertical_group(text: &str) -> Option<MoxelVerticalGroup> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 6 || fields.get(3).map(|field| field.trim()) != Some("{1,0}") {
+        return None;
+    }
+    Some(MoxelVerticalGroup {
+        begin_row: fields.first()?.trim().parse::<usize>().ok()?,
+        end_row: fields.get(1)?.trim().parse::<usize>().ok()?,
+        level: fields.get(2)?.trim().parse::<usize>().ok()?,
+    })
 }
 
 fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() < 4 || fields.get(1)?.trim() != "0" {
+    if fields.len() < 4 {
         return None;
     }
     let declared_count = fields.first()?.trim().parse::<usize>().ok()?;
+    let raw_default_format_index = fields.get(1)?.trim().parse::<usize>().ok()?;
     let count = fields.get(3)?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 2048 || declared_count == 0 || fields.len() != count * 2 + 4 {
+    if count > 2048 || fields.len() != count * 2 + 4 {
         return None;
     }
     let uuid = parse_uuid_field(fields.get(2)?.trim())?;
@@ -14426,7 +18916,7 @@ fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
         let index = fields
             .get(column_index * 2 + 4)?
             .trim()
-            .parse::<usize>()
+            .parse::<i32>()
             .ok()?;
         let format_index = fields
             .get(column_index * 2 + 5)?
@@ -14441,34 +18931,146 @@ fn parse_moxel_column_set(text: &str) -> Option<MoxelColumnSet> {
     }
     Some(MoxelColumnSet {
         id,
+        default_format_index: None,
+        source_default_format_index: (raw_default_format_index > 1)
+            .then_some(raw_default_format_index),
         size: declared_count,
         columns,
     })
 }
 
 fn normalize_moxel_column_set_format_indices(column_sets: &mut [MoxelColumnSet]) {
-    let min_format_index = column_sets
-        .iter()
-        .flat_map(|column_set| column_set.columns.iter())
-        .map(|column| column.format_index)
-        .min()
-        .unwrap_or(1);
-    let raw_offset = min_format_index.saturating_sub(1);
-    for column in column_sets
-        .iter_mut()
-        .flat_map(|column_set| column_set.columns.iter_mut())
-    {
-        column.format_index = column.format_index.saturating_sub(raw_offset).max(1);
+    let mut normalized = BTreeMap::new();
+    for column_set in column_sets.iter_mut() {
+        for column in column_set.columns.iter_mut() {
+            let source_format_index = column.source_format_index.unwrap_or(column.format_index);
+            if source_format_index == 0 {
+                column.format_index = 0;
+                continue;
+            }
+            let next_index = normalized.len() + 1;
+            column.format_index = *normalized.entry(source_format_index).or_insert(next_index);
+        }
     }
+}
+
+fn parse_moxel_uniform_header_footer_format_ref(fields: &[&str]) -> Option<usize> {
+    fields.windows(6).find_map(|window| {
+        let refs = window
+            .iter()
+            .map(|field| parse_moxel_header_footer_format_ref(field))
+            .collect::<Option<Vec<_>>>()?;
+        let first = refs.first().copied().flatten()?;
+        refs.iter().all(|candidate| *candidate == Some(first)).then_some(first)
+    })
+}
+
+fn parse_moxel_header_footer_format_ref(text: &str) -> Option<Option<usize>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 2 || fields.first().map(|field| field.trim()) != Some("0") {
+        return None;
+    }
+    let format_index = fields.get(1)?.trim().parse::<usize>().ok()?;
+    Some((format_index > 0).then_some(format_index))
+}
+
+fn is_sparse_moxel_column_set_default_format(format: &MoxelFormat) -> bool {
+    format.font == Some(0)
+        && format.width == Some(72)
+        && format.height.is_none()
+        && format.border.is_none()
+        && format.left_border.is_none()
+        && format.top_border.is_none()
+        && format.right_border.is_none()
+        && format.bottom_border.is_none()
+        && format.border_color.is_none()
+        && format.width_weight_factor.is_none()
+        && format.horizontal_alignment.is_none()
+        && format.vertical_alignment.is_none()
+        && format.back_color.is_none()
+        && format.text_color.is_none()
+        && format.text_placement.is_none()
+        && format.text_orientation.is_none()
+        && format.fill_type.is_none()
+}
+
+fn resolve_sparse_moxel_column_set_default_format_index(
+    column_sets: &mut [MoxelColumnSet],
+    column_format_len: usize,
+    formats: &[MoxelFormat],
+    header_footer_format_ref: Option<usize>,
+) -> Option<usize> {
+    if column_sets.is_empty() {
+        return None;
+    }
+    let header_footer_format_index = header_footer_format_ref
+        .and_then(|source_format_index| {
+            moxel_internal_format_index_for_source_index(
+                source_format_index,
+                column_format_len,
+                formats.len(),
+            )
+    });
+    if column_sets.len() <= 1 {
+        return header_footer_format_index;
+    }
+    let sparse_default_format_index = formats.iter().enumerate().find_map(|(index, format)| {
+        is_sparse_moxel_column_set_default_format(format)
+            .then_some(column_format_len + index + 1)
+    });
+    if let Some(format_index) = sparse_default_format_index {
+        if column_sets.len() > 1 {
+            for column_set in column_sets.iter_mut().skip(1) {
+                column_set.default_format_index = Some(format_index);
+            }
+        }
+        return Some(format_index);
+    }
+
+    if let Some(format_index) = header_footer_format_index
+        && format_index > column_format_len
+    {
+        if column_sets.len() > 1 {
+            for column_set in column_sets.iter_mut() {
+                column_set.default_format_index = Some(format_index);
+            }
+        }
+        return Some(format_index);
+    }
+
+    let format_index = header_footer_format_index?;
+    for column_set in column_sets.iter_mut().skip(1) {
+        column_set.default_format_index = Some(format_index);
+    }
+    Some(format_index)
+}
+
+fn moxel_internal_format<'a>(
+    column_formats: &'a [MoxelFormat],
+    formats: &'a [MoxelFormat],
+    format_index: usize,
+) -> Option<&'a MoxelFormat> {
+    if format_index == 0 {
+        return None;
+    }
+    if format_index <= column_formats.len() {
+        return column_formats.get(format_index - 1);
+    }
+    formats.get(format_index - column_formats.len() - 1)
 }
 
 fn moxel_column_format_slots(column_sets: &[MoxelColumnSet], column_count: usize) -> usize {
     column_sets
         .iter()
-        .flat_map(|column_set| column_set.columns.iter())
-        .map(|column| column.format_index)
+        .flat_map(|column_set| column_set.columns.iter().map(|column| column.format_index))
         .max()
-        .unwrap_or(column_count)
+        .unwrap_or_else(|| {
+            if column_sets.is_empty() {
+                column_count
+            } else {
+                0
+            }
+        })
 }
 
 fn moxel_default_format_index(
@@ -14543,6 +19145,7 @@ fn parse_moxel_row_column_set_ids(
 fn moxel_spreadsheet_height(
     rows: &[MoxelRow],
     merges: &[MoxelMerge],
+    horizontal_unmerges: &[MoxelMerge],
     vertical_unmerges: &[MoxelMerge],
     areas: &[MoxelArea],
 ) -> usize {
@@ -14554,6 +19157,7 @@ fn moxel_spreadsheet_height(
         .unwrap_or(0);
     let merge_max = merges
         .iter()
+        .chain(horizontal_unmerges.iter())
         .chain(vertical_unmerges.iter())
         .map(|merge| merge.row + merge.height)
         .max()
@@ -14566,6 +19170,7 @@ fn trim_moxel_trailing_empty_rows(
     rows: &mut Vec<MoxelRow>,
     areas: &[MoxelArea],
     merges: &[MoxelMerge],
+    horizontal_unmerges: &[MoxelMerge],
     vertical_unmerges: &[MoxelMerge],
 ) {
     let Some(material_limit) = areas
@@ -14573,6 +19178,11 @@ fn trim_moxel_trailing_empty_rows(
         .map(|area| area.end_row.max(0) as usize + 1)
         .chain(
             merges
+                .iter()
+                .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
+        )
+        .chain(
+            horizontal_unmerges
                 .iter()
                 .map(|merge| (merge.row + merge.height).max(0) as usize + 1),
         )
@@ -14842,6 +19452,7 @@ fn parse_moxel_row_shape(
             index: row_index,
             index_to: None,
             format_index,
+            source_format_index: Some(format_index),
             columns_id: None,
             cells,
         },
@@ -14857,12 +19468,16 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
         .and_then(|value| value.trim().parse::<usize>().ok())
         .map(|value| if value == 0 { 0 } else { value + 1 })
         .unwrap_or(0);
-    let detail_parameter = if cell_kind == "24" {
-        fields.get(2).and_then(|value| parse_1c_string(value))
-    } else {
-        None
+    let detail_parameter_field = match cell_kind {
+        // Native dumps also use these cell kinds for detail-only and note-bearing
+        // spreadsheet cells, with detailParameter kept in slot 2.
+        "8" | "24" | "56" => Some(2),
+        _ => None,
     };
-    let localized_index = if cell_kind == "24" { 3 } else { 2 };
+    let detail_parameter = detail_parameter_field
+        .and_then(|index| fields.get(index))
+        .and_then(|value| parse_1c_string(value));
+    let localized_index = detail_parameter_field.map(|index| index + 1).unwrap_or(2);
     let localized = fields
         .get(localized_index)
         .and_then(|value| parse_moxel_localized_cell_value(value));
@@ -14879,6 +19494,11 @@ fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelCell> {
     Some(MoxelCell {
         column_index,
         format_index,
+        source_format_index: if format_index == 0 {
+            None
+        } else {
+            Some(format_index)
+        },
         text,
         parameter,
         detail_parameter,
@@ -14899,9 +19519,19 @@ fn parse_moxel_localized_cell_value(text: &str) -> Option<Option<MoxelLocalizedV
 }
 
 fn parse_moxel_areas(fields: &[&str]) -> Vec<MoxelArea> {
+    parse_moxel_named_items(fields)
+        .into_iter()
+        .filter_map(|item| match item {
+            MoxelNamedItem::Cells(area) => Some(area),
+            MoxelNamedItem::Drawing { .. } => None,
+        })
+        .collect()
+}
+
+fn parse_moxel_named_items(fields: &[&str]) -> Vec<MoxelNamedItem> {
     fields
         .iter()
-        .filter_map(|field| parse_moxel_area_list(field))
+        .filter_map(|field| parse_moxel_named_item_list(field))
         .next()
         .unwrap_or_default()
 }
@@ -14935,11 +19565,11 @@ fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
             Some(MoxelFont {
                 ref_name: None,
                 face_name: Some(parse_1c_string(fields.get(16)?)?),
-                height: Some(height_raw / 10),
+                height: Some(format_moxel_font_height(height_raw)),
                 bold: weight >= 700,
-                italic: fields.get(4)?.trim() != "0",
-                underline: fields.get(5)?.trim() != "0",
-                strikeout: fields.get(6)?.trim() != "0",
+                italic: fields.get(8)?.trim() != "0",
+                underline: fields.get(9)?.trim() != "0",
+                strikeout: fields.get(10)?.trim() != "0",
                 kind: "Absolute",
                 scale: Some(fields.get(18)?.trim().parse::<usize>().ok()?),
             })
@@ -14968,7 +19598,72 @@ fn parse_moxel_font(text: &str) -> Option<MoxelFont> {
                 scale: None,
             })
         }
+        "1" if fields.len() >= 6 => {
+            let (height, weight, italic, underline, strikeout, scale) = if fields.len() >= 11 {
+                (
+                    fields
+                        .get(4)
+                        .and_then(|field| field.trim().parse::<usize>().ok())
+                        .map(format_moxel_font_height),
+                    fields
+                        .get(5)
+                        .and_then(|field| field.trim().parse::<usize>().ok())
+                        .unwrap_or(400),
+                    fields
+                        .get(6)
+                        .map(|field| field.trim() != "0")
+                        .unwrap_or(false),
+                    fields
+                        .get(7)
+                        .map(|field| field.trim() != "0")
+                        .unwrap_or(false),
+                    fields
+                        .get(8)
+                        .map(|field| field.trim() != "0")
+                        .unwrap_or(false),
+                    fields
+                        .get(10)
+                        .and_then(|field| field.trim().parse::<usize>().ok()),
+                )
+            } else if fields.len() >= 8 {
+                (
+                    fields
+                        .get(4)
+                        .and_then(|field| field.trim().parse::<usize>().ok())
+                        .map(format_moxel_font_height),
+                    fields
+                        .get(5)
+                        .and_then(|field| field.trim().parse::<usize>().ok())
+                        .unwrap_or(400),
+                    false,
+                    false,
+                    false,
+                    None,
+                )
+            } else {
+                (None, 400, false, false, false, None)
+            };
+            Some(MoxelFont {
+                ref_name: Some("sys:DefaultGUIFont".to_string()),
+                face_name: None,
+                height,
+                bold: weight >= 700,
+                italic,
+                underline,
+                strikeout,
+                kind: "WindowsFont",
+                scale,
+            })
+        }
         _ => None,
+    }
+}
+
+fn format_moxel_font_height(raw_height: usize) -> String {
+    if raw_height % 10 == 0 {
+        (raw_height / 10).to_string()
+    } else {
+        format!("{}.{}", raw_height / 10, raw_height % 10)
     }
 }
 
@@ -15003,6 +19698,72 @@ fn parse_moxel_lines(
             && lines.get(2).is_some_and(|line| line.style == "Dotted"))
     {
         lines.truncate(expected_line_slots);
+    }
+    if lines.len() == 2
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && used_indexes.len() == 4
+        && used_indexes.contains(&0)
+        && used_indexes.contains(&1)
+        && used_indexes.contains(&2)
+        && used_indexes.contains(&3)
+    {
+        return vec![
+            MoxelLine {
+                style: "None",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 3,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 2,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+        ];
+    }
+    if uses_drawing_line
+        && lines.len() >= 3
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && lines.get(2).is_some_and(|line| line.style == "Dotted")
+        && used_indexes.len() == 4
+        && used_indexes.contains(&0)
+        && used_indexes.contains(&1)
+        && used_indexes.contains(&2)
+        && used_indexes.contains(&3)
+    {
+        return vec![
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+            MoxelLine {
+                style: "None",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 2,
+            },
+            MoxelLine {
+                style: "None",
+                line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+                width: 1,
+            },
+        ];
     }
     if uses_drawing_line
         && lines.len() >= 2
@@ -15040,12 +19801,66 @@ fn parse_moxel_lines(
             MoxelLine {
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 2,
+            },
+        ];
+    }
+    if lines.len() >= 2
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && shift_default_line_styles
+        && used_indexes.len() == 3
+        && used_indexes.contains(&0)
+        && used_indexes.contains(&1)
+        && used_indexes.contains(&2)
+    {
+        return vec![
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 2,
+            },
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 3,
+            },
+        ];
+    }
+    if lines.len() >= 2
+        && lines.first().is_some_and(|line| line.style == "None")
+        && lines.get(1).is_some_and(|line| line.style == "Solid")
+        && !shift_default_line_styles
+        && used_indexes.len() == 3
+        && used_indexes.contains(&0)
+        && used_indexes.contains(&1)
+        && used_indexes.contains(&2)
+    {
+        return vec![
+            MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 2,
             },
             MoxelLine {
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
+            },
+            MoxelLine {
+                style: "None",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 0,
             },
         ];
     }
@@ -15196,10 +20011,24 @@ fn parse_moxel_picture(text: &str, object_refs: &BTreeMap<String, String>) -> Op
                 .and_then(|reference| reference.strip_prefix("CommonPicture."))
                 .map(|name| format!("v8ui:{name}"))
         });
+    let payload = fields
+        .iter()
+        .find_map(|field| extract_base64_payload(field))
+        .map(normalize_moxel_picture_payload);
     Some(MoxelPicture {
         index: fields.get(1)?.trim().parse::<usize>().ok()?,
         ref_name,
+        payload,
     })
+}
+
+fn normalize_moxel_picture_payload(payload: &str) -> String {
+    payload
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\r\n")
 }
 
 fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
@@ -15237,12 +20066,17 @@ fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
     {
         return None;
     }
-    let picture_size = match fields.get(11)?.trim().parse::<usize>().ok()? {
+    let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
+    let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
+        0 => "RealSize",
         1 => "Stretch",
+        2 => "Proportionally",
+        4 => "AutoSize",
         _ => return None,
     };
-    let z_order = fields.get(12)?.trim().parse::<usize>().ok()?;
+    let id = fields.get(10)?.trim().parse::<usize>().ok()?;
     Some(MoxelDrawing {
+        id,
         format_index: format_fields.get(1)?.trim().parse::<usize>().ok()?,
         begin_row,
         begin_row_offset,
@@ -15252,22 +20086,65 @@ fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
         begin_column_offset,
         end_column,
         end_column_offset,
-        auto_size: fields.get(10)?.trim() == "0",
+        auto_size: fields.get(13)?.trim() != "0",
         picture_size,
-        z_order,
-        picture_index: z_order,
+        z_order: picture_index,
+        picture_index,
     })
 }
 
 fn parse_moxel_default_format_width(fields: &[&str], column_count: usize) -> Option<usize> {
+    if let Some((table_index, slots)) =
+        parse_moxel_equal_width_only_format_table(fields, column_count)
+        && slots.iter().any(|slot| slot.is_none())
+        && let Some(width) = fields[..table_index]
+            .iter()
+            .rev()
+            .find_map(|field| parse_moxel_column_width(field))
+    {
+        return Some(width);
+    }
     let widths = fields
         .iter()
         .filter_map(|field| parse_moxel_column_width(field))
         .collect::<Vec<_>>();
     if widths.len() <= column_count {
+        return fields
+            .iter()
+            .find_map(|field| parse_moxel_extended_default_format_width(field))
+            .or_else(|| {
+                fields
+                    .iter()
+                    .take(8)
+                    .find_map(|field| parse_moxel_leading_default_format_width_129(field))
+            });
+    }
+    widths.first().copied().or_else(|| {
+        fields
+            .iter()
+            .take(8)
+            .find_map(|field| parse_moxel_leading_default_format_width_129(field))
+    })
+}
+
+fn parse_moxel_extended_default_format_width(text: &str) -> Option<usize> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 4
+        || fields.first()?.trim() != "161"
+        || fields.get(1)?.trim() != "0"
+        || fields.get(2)?.trim() != "0"
+    {
         return None;
     }
-    widths.first().copied()
+    fields.get(3)?.trim().parse::<usize>().ok()
+}
+
+fn parse_moxel_leading_default_format_width_129(text: &str) -> Option<usize> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "129" || fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    fields.get(2)?.trim().parse::<usize>().ok()
 }
 
 fn parse_moxel_default_format(
@@ -15279,6 +20156,18 @@ fn parse_moxel_default_format(
         .filter_map(|field| parse_moxel_default_format_field(field, object_refs))
         .next()
         .unwrap_or_default()
+}
+
+fn parse_moxel_leading_default_format(
+    fields: &[&str],
+    style_refs: &[Option<String>],
+    number_format_refs: &[Vec<MoxelLocalizedValue>],
+) -> Option<MoxelFormat> {
+    fields
+        .iter()
+        .take(8)
+        .filter_map(|field| parse_moxel_format(field, style_refs, number_format_refs))
+        .find(|format| !format.is_empty())
 }
 
 fn parse_moxel_default_format_field(
@@ -15408,25 +20297,66 @@ fn parse_moxel_formats(
     fields: &[&str],
     column_count: usize,
     sparse_source_format_refs: bool,
+    source_column_format_refs: &[usize],
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+    let all_formats = parse_moxel_format_table(
+        fields,
+        column_count,
+        style_refs,
+        drawing_format_indices,
+        number_format_refs,
+    );
+    if let Some(formats) = all_formats {
+        if sparse_source_format_refs && !source_column_format_refs.is_empty() {
+            return split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+        }
+        if prefers_moxel_leading_source_column_formats(&formats, source_column_format_refs) {
+            return split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+        }
+        return split_moxel_formats_for_output(
+            formats,
+            column_count,
+            sparse_source_format_refs,
+            drawing_format_indices,
+        );
+    }
+    if let Some((_, slots)) = parse_moxel_equal_width_only_format_table(fields, column_count) {
+        let formats = slots
+            .into_iter()
+            .map(|width| MoxelFormat {
+                width,
+                ..MoxelFormat::default()
+            })
+            .collect::<Vec<_>>();
+        return split_moxel_formats_for_output(
+            formats,
+            column_count,
+            sparse_source_format_refs,
+            drawing_format_indices,
+        );
+    }
+    (Vec::new(), Vec::new())
+}
+
+fn parse_moxel_format_table(
+    fields: &[&str],
+    column_count: usize,
+    style_refs: &[Option<String>],
+    drawing_format_indices: &BTreeSet<usize>,
+    number_format_refs: &[Vec<MoxelLocalizedValue>],
+) -> Option<Vec<MoxelFormat>> {
     for index in 0..fields.len() {
         if let Some(formats) = parse_moxel_nested_format_table(
             fields[index],
             column_count,
-            sparse_source_format_refs,
             style_refs,
             drawing_format_indices,
             number_format_refs,
         ) {
-            return split_moxel_formats_for_output(
-                formats,
-                column_count,
-                sparse_source_format_refs,
-                drawing_format_indices,
-            );
+            return Some(formats);
         }
         let Some(count) = fields
             .get(index)
@@ -15444,27 +20374,60 @@ fn parse_moxel_formats(
                 break;
             };
             if drawing_format_indices.contains(&(format_offset + 1)) {
-                format.drawing_border = format.left_border;
-                format.left_border = None;
+                normalize_moxel_drawing_format(&mut format);
             }
             formats.push(format);
         }
         if formats.len() == count {
-            return split_moxel_formats_for_output(
-                formats,
-                column_count,
-                sparse_source_format_refs,
-                drawing_format_indices,
-            );
+            return Some(formats);
         }
     }
-    (Vec::new(), Vec::new())
+    None
+}
+
+fn parse_moxel_equal_width_only_format_table(
+    fields: &[&str],
+    column_count: usize,
+) -> Option<(usize, Vec<Option<usize>>)> {
+    if column_count == 0 {
+        return None;
+    }
+    for index in 0..fields.len() {
+        let Some(count) = fields
+            .get(index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if count != column_count || index + count >= fields.len() {
+            continue;
+        }
+        let mut saw_width = false;
+        let mut slots = Vec::with_capacity(count);
+        let mut valid = true;
+        for field in &fields[index + 1..=index + count] {
+            let trimmed = field.trim();
+            if trimmed == "{0}" {
+                slots.push(None);
+                continue;
+            }
+            let Some(width) = parse_moxel_column_width(trimmed) else {
+                valid = false;
+                break;
+            };
+            saw_width = true;
+            slots.push(Some(width));
+        }
+        if valid && saw_width {
+            return Some((index, slots));
+        }
+    }
+    None
 }
 
 fn parse_moxel_nested_format_table(
     text: &str,
     column_count: usize,
-    _sparse_source_format_refs: bool,
     style_refs: &[Option<String>],
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
@@ -15480,12 +20443,164 @@ fn parse_moxel_nested_format_table(
             return None;
         };
         if drawing_format_indices.contains(&(format_offset + 1)) {
-            format.drawing_border = format.left_border;
-            format.left_border = None;
+            normalize_moxel_drawing_format(&mut format);
         }
         formats.push(format);
     }
     Some(formats)
+}
+
+fn normalize_moxel_drawing_format(format: &mut MoxelFormat) {
+    format.drawing_border = format.left_border;
+    format.left_border = None;
+    if format.back_color.is_none() {
+        match format.border_color.as_deref() {
+            Some("style:ToolTipBackColor") => {
+                format.back_color = Some("style:FormBackColor".to_string());
+                format.border_color = None;
+            }
+            Some(
+                "style:FormBackColor"
+                | "style:FieldBackColor"
+                | "style:FieldSelectionBackColor",
+            ) => {
+                format.back_color = format.border_color.take();
+            }
+            _ => {}
+        }
+    }
+    if format.back_color.as_deref() == Some("style:ToolTipBackColor") {
+        format.back_color = Some("style:FormBackColor".to_string());
+    }
+}
+
+fn normalize_moxel_single_set_report_header_tail(
+    column_sets: &[MoxelColumnSet],
+    column_formats: &[MoxelFormat],
+    style_refs: &[Option<String>],
+    lines: &mut [MoxelLine],
+    formats: &mut [MoxelFormat],
+) {
+    if column_sets.len() != 1
+        || column_formats.len() != 8
+        || style_refs.get(2).and_then(|slot| slot.as_deref()) != Some("style:ReportHeaderBackColor")
+        || style_refs.get(3).and_then(|slot| slot.as_deref()) != Some("style:ReportHeaderBackColor")
+        || style_refs.get(4).and_then(|slot| slot.as_deref()) != Some("style:ReportHeaderBackColor")
+    {
+        return;
+    }
+    if let Some(line) = lines.get_mut(1)
+        && line.style == "Dotted"
+        && line.width == 1
+    {
+        line.style = "Solid";
+        line.width = 2;
+    }
+    for (offset, format) in formats.iter_mut().enumerate() {
+        let format_index = column_formats.len() + offset + 1;
+        if format.back_color.as_deref() == Some("style:ReportHeaderBackColor")
+            && format.border_color.is_none()
+            && format.text_placement == Some("Wrap")
+            && format_index >= 48
+        {
+            format.back_color = Some("#F4ECC5".to_string());
+        }
+    }
+}
+
+fn split_moxel_formats_by_source_refs(
+    formats: Vec<MoxelFormat>,
+    source_column_format_refs: &[usize],
+) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+    let mut selected_refs = BTreeSet::new();
+    let mut column_formats = Vec::new();
+    for source_format_index in source_column_format_refs {
+        if *source_format_index == 0
+            || *source_format_index > formats.len()
+            || !selected_refs.insert(*source_format_index)
+        {
+            continue;
+        }
+        column_formats.push(formats[*source_format_index - 1].clone());
+    }
+    let formats = formats
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, format)| {
+            let source_format_index = index + 1;
+            if selected_refs.contains(&source_format_index) {
+                None
+            } else {
+                Some(format)
+            }
+        })
+        .collect::<Vec<_>>();
+    (column_formats, formats)
+}
+
+fn prefers_moxel_leading_source_column_formats(
+    formats: &[MoxelFormat],
+    source_column_format_refs: &[usize],
+) -> bool {
+    if source_column_format_refs.is_empty() || source_column_format_refs.len() >= formats.len() {
+        return false;
+    }
+    if !source_column_format_refs
+        .iter()
+        .enumerate()
+        .all(|(index, source_format_index)| *source_format_index == index + 1)
+    {
+        return false;
+    }
+    if !source_column_format_refs.iter().all(|source_format_index| {
+        formats
+            .get(source_format_index - 1)
+            .is_some_and(is_moxel_width_only_format)
+    }) {
+        return false;
+    }
+    formats
+        .iter()
+        .skip(source_column_format_refs.len())
+        .any(|format| !is_moxel_width_only_format(format))
+}
+
+fn is_moxel_width_only_format(format: &MoxelFormat) -> bool {
+    format.width.is_some()
+        && format.height.is_none()
+        && format.font.is_none()
+        && format.border.is_none()
+        && format.left_border.is_none()
+        && format.top_border.is_none()
+        && format.right_border.is_none()
+        && format.bottom_border.is_none()
+        && format.drawing_border.is_none()
+        && format.border_color.is_none()
+        && format.horizontal_alignment.is_none()
+        && format.vertical_alignment.is_none()
+        && format.text_color.is_none()
+        && format.back_color.is_none()
+        && format.pattern.is_none()
+        && format.text_placement.is_none()
+        && format.text_orientation.is_none()
+        && format.fill_type.is_none()
+        && !format.number_format_present
+        && format.number_format.is_empty()
+        && !format.edit_format_present
+        && format.edit_format.is_empty()
+        && format.hyper_link.is_none()
+        && format.protection.is_none()
+        && format.hidden.is_none()
+        && format.indent.is_none()
+        && format.auto_indent.is_none()
+        && format.mask.is_none()
+        && format.pic_index.is_none()
+        && format.picture_size_mode.is_none()
+        && format.pic_horizontal_alignment.is_none()
+        && format.pic_vertical_alignment.is_none()
+        && format.text_position.is_none()
+        && format.details_use.is_none()
+        && format.by_selected_columns.is_none()
 }
 
 fn split_moxel_formats_for_output(
@@ -15549,9 +20664,8 @@ fn parse_moxel_number_format_refs(
                 required_count = nested
                     .iter()
                     .skip(1)
-                    .filter_map(|field| parse_moxel_format_number_format_index(field))
+                    .map(|field| parse_moxel_format_localized_value_required_count(field))
                     .max()
-                    .map(|number_format_index| number_format_index + 1)
                     .unwrap_or(0);
                 start = index + 1;
                 break;
@@ -15573,9 +20687,8 @@ fn parse_moxel_number_format_refs(
         {
             required_count = format_fields
                 .iter()
-                .filter_map(|field| parse_moxel_format_number_format_index(field))
+                .map(|field| parse_moxel_format_localized_value_required_count(field))
                 .max()
-                .map(|number_format_index| number_format_index + 1)
                 .unwrap_or(0);
             start = index + count + 1;
             break;
@@ -15617,13 +20730,9 @@ fn spreadsheet_number_format_hint_from_text(raw_text: &str) -> Option<Spreadshee
     if rows.is_empty() {
         return None;
     }
-    let (column_sets, _) = parse_moxel_column_sets(&fields);
+    let (column_sets, _, _) = parse_moxel_column_sets(&fields);
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
     let default_format = parse_moxel_default_format(&fields, &BTreeMap::new());
-    let default_format_width = parse_moxel_default_format_width(
-        &fields,
-        moxel_column_format_slots(&column_sets, declared_column_count),
-    );
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
@@ -15634,6 +20743,10 @@ fn spreadsheet_number_format_hint_from_text(raw_text: &str) -> Option<Spreadshee
     } else {
         declared_column_count
     };
+    let default_format_width = parse_moxel_default_format_width(
+        &fields,
+        moxel_column_format_slots(&column_sets, declared_column_count),
+    );
     let column_sets = if column_sets.is_empty() {
         default_moxel_column_sets(column_count)
     } else {
@@ -15796,9 +20909,8 @@ pub(crate) fn debug_moxel_spreadsheet_summary_from_blob(
         .max(1);
     let number_format_indices = (1..=format_count)
         .filter(|format_index| {
-            !moxel_format_for_index(&spreadsheet, *format_index)
-                .number_format
-                .is_empty()
+            let format = moxel_format_for_index(&spreadsheet, *format_index);
+            !format.number_format.is_empty() || !format.edit_format.is_empty()
         })
         .collect::<Vec<_>>();
     Some(DebugMoxelSpreadsheetSummary {
@@ -15855,6 +20967,25 @@ fn parse_moxel_format_number_format_index(text: &str) -> Option<usize> {
     parse_moxel_format_usize(&values, 24)
 }
 
+fn parse_moxel_format_edit_format_index(text: &str) -> Option<usize> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let flags = fields.first()?.trim().parse::<u64>().ok()?;
+    let values = moxel_format_values(flags, &fields)?;
+    parse_moxel_format_usize(&values, 32)
+}
+
+fn parse_moxel_format_localized_value_required_count(text: &str) -> usize {
+    [
+        parse_moxel_format_number_format_index(text),
+        parse_moxel_format_edit_format_index(text),
+    ]
+    .into_iter()
+    .flatten()
+    .max()
+    .map(|index| index + 1)
+    .unwrap_or(0)
+}
+
 fn parse_moxel_localized_values(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "1" {
@@ -15900,7 +21031,7 @@ fn parse_moxel_format(
         }
         _ => None,
     };
-    Some(MoxelFormat {
+    let mut format = MoxelFormat {
         font: parse_moxel_format_usize(&values, 0),
         border,
         left_border: if border.is_some() { None } else { left_border },
@@ -15911,18 +21042,26 @@ fn parse_moxel_format(
         } else {
             bottom_border
         },
-        height: parse_moxel_format_usize(&values, 6),
+        height: parse_moxel_format_i32(&values, 6),
         border_color: parse_moxel_format_style_ref(&values, 5, style_refs),
         width: parse_moxel_format_usize(&values, 7),
+        width_weight_factor: parse_moxel_format_usize(&values, 41),
         horizontal_alignment: parse_moxel_format_usize(&values, 8)
             .and_then(moxel_horizontal_alignment),
         vertical_alignment: parse_moxel_format_usize(&values, 9).and_then(moxel_vertical_alignment),
         back_color: parse_moxel_format_style_ref(&values, 11, style_refs),
+        pattern: parse_moxel_format_usize(&values, 12).and_then(moxel_format_pattern),
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
         text_orientation: parse_moxel_format_usize(&values, 13),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
+        number_format_present: values[24].is_some(),
         number_format: parse_moxel_format_usize(&values, 24)
+            .and_then(|index| number_format_refs.get(index))
+            .cloned()
+            .unwrap_or_default(),
+        edit_format_present: values[32].is_some(),
+        edit_format: parse_moxel_format_usize(&values, 32)
             .and_then(|index| number_format_refs.get(index))
             .cloned()
             .unwrap_or_default(),
@@ -15932,16 +21071,26 @@ fn parse_moxel_format(
         details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
         hyper_link: parse_moxel_format_usize(&values, 26).and_then(moxel_hyper_link),
         protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
+        hidden: parse_moxel_format_usize(&values, 17).and_then(moxel_hidden),
         indent: parse_moxel_format_usize(&values, 30),
         auto_indent: parse_moxel_format_usize(&values, 31),
         mask: parse_moxel_format_usize(&values, 34).and_then(moxel_mask),
         pic_index: parse_moxel_format_usize(&values, 35),
-        picture_size_mode: parse_moxel_format_usize(&values, 36).and_then(moxel_picture_size_mode),
-        pic_horizontal_alignment: parse_moxel_format_usize(&values, 37)
-            .and_then(moxel_picture_alignment),
-        pic_vertical_alignment: parse_moxel_format_usize(&values, 38)
-            .and_then(moxel_picture_alignment),
-    })
+        pic_horizontal_alignment: parse_moxel_format_usize(&values, 36)
+            .and_then(moxel_picture_horizontal_alignment),
+        pic_vertical_alignment: parse_moxel_format_usize(&values, 37)
+            .and_then(moxel_picture_vertical_alignment),
+        picture_size_mode: parse_moxel_format_usize(&values, 38).and_then(moxel_picture_size_mode),
+        text_position: parse_moxel_format_usize(&values, 39).and_then(moxel_text_position),
+    };
+    if format.pattern.is_none()
+        && format.back_color.is_some()
+        && format.border_color.is_some()
+        && matches!(format.text_placement, Some("Auto"))
+    {
+        format.pattern = Some("Solid");
+    }
+    Some(format)
 }
 
 fn moxel_format_values<'a>(flags: u64, fields: &[&'a str]) -> Option<[Option<&'a str>; 64]> {
@@ -15981,17 +21130,21 @@ fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 14
             | 15
             | 16
+            | 17
             | 19
             | 20
             | 24
             | 26
             | 30
             | 31
+            | 32
             | 34
             | 35
             | 36
             | 37
             | 38
+            | 39
+            | 41
     )
 }
 
@@ -16001,15 +21154,75 @@ fn parse_moxel_format_usize(values: &[Option<&str>; 64], bit: usize) -> Option<u
         .and_then(|value| value.and_then(|value| value.trim().parse::<usize>().ok()))
 }
 
+fn parse_moxel_format_i32(values: &[Option<&str>; 64], bit: usize) -> Option<i32> {
+    values
+        .get(bit)
+        .and_then(|value| value.and_then(|value| value.trim().parse::<i32>().ok()))
+}
+
 fn parse_moxel_format_style_ref(
     values: &[Option<&str>; 64],
     bit: usize,
     style_refs: &[Option<String>],
 ) -> Option<String> {
-    parse_moxel_format_usize(values, bit)
-        .and_then(|index| style_refs.get(index))
+    let raw_index = parse_moxel_format_usize(values, bit)?;
+    let style_ref_index = remap_moxel_format_style_ref_index(style_refs, raw_index);
+    style_refs
+        .get(style_ref_index)
         .cloned()
         .flatten()
+        .and_then(|style_ref| resolve_moxel_format_style_ref(&style_ref, bit))
+        .or_else(|| resolve_moxel_compact_style_ref_index(raw_index, bit))
+}
+
+fn remap_moxel_format_style_ref_index(style_refs: &[Option<String>], raw_index: usize) -> usize {
+    if raw_index > 0
+        && style_refs.len() >= 5
+        && style_refs[0].as_deref() == Some("moxel:f527:1:1")
+        && style_refs[1].as_deref() == Some("moxel:f527:1:2")
+        && style_refs[2].as_deref() == Some("moxel:f527:1:3")
+        && style_refs[3].as_deref() == Some("style:FormBackColor")
+        && style_refs[4].as_deref() == Some("style:FormTextColor")
+    {
+        return raw_index + 3;
+    }
+    raw_index
+}
+
+fn resolve_moxel_format_style_ref(style_ref: &str, bit: usize) -> Option<String> {
+    if let Some((family, kind)) = parse_moxel_f527_style_ref(style_ref) {
+        return match (bit, family, kind) {
+            (11, "0", "1") | (5, "0", "1") => Some("style:ToolTipBackColor".to_string()),
+            (10, "0", "1") => Some("style:ToolTipTextColor".to_string()),
+            (11, "1", "1") | (5, "1", "1") => Some("style:FormBackColor".to_string()),
+            (10, "1", "1") => Some("style:FormTextColor".to_string()),
+            (11, "1", "2") | (5, "1", "2") => Some("style:FieldBackColor".to_string()),
+            (10, "1", "2") => Some("style:FieldTextColor".to_string()),
+            (11, "1", "3") | (10, "1", "3") | (5, "1", "3") => {
+                Some("style:FieldSelectionBackColor".to_string())
+            }
+            _ => None,
+        };
+    }
+    Some(style_ref.to_string())
+}
+
+fn resolve_moxel_compact_style_ref_index(raw_index: usize, bit: usize) -> Option<String> {
+    match (bit, raw_index) {
+        (11 | 5, 0) => Some("style:ToolTipBackColor".to_string()),
+        (10, 0) => Some("style:ToolTipTextColor".to_string()),
+        (11 | 5, 1) => Some("style:FormBackColor".to_string()),
+        (10, 1) => Some("style:FormTextColor".to_string()),
+        (11 | 5, 2) => Some("style:FieldBackColor".to_string()),
+        (10, 2) => Some("style:FieldTextColor".to_string()),
+        _ => None,
+    }
+}
+
+fn parse_moxel_f527_style_ref(style_ref: &str) -> Option<(&str, &str)> {
+    let suffix = style_ref.strip_prefix("moxel:f527:")?;
+    let (family, kind) = suffix.split_once(':')?;
+    Some((family, kind))
 }
 
 fn parse_moxel_style_refs(
@@ -16017,14 +21230,96 @@ fn parse_moxel_style_refs(
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<Option<String>> {
     let mut style_refs = Vec::new();
-    for field in fields {
+    let mut index = 0usize;
+    let normalize = |value: &str| {
+        value
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>()
+    };
+    while index < fields.len() {
+        if normalize(fields[index]) == "{1,3,{3,3,{-28}}}" {
+            index += 1;
+            continue;
+        }
+        let field = fields[index];
         if let Some(style_ref) = parse_moxel_style_ref_slot(field, object_refs) {
             style_refs.push(style_ref);
+            index += 1;
+            continue;
+        }
+        if let Some(overrides) = parse_moxel_indexed_style_ref_overrides(field, object_refs) {
+            for (slot_index, style_ref) in overrides {
+                if style_refs.len() <= slot_index {
+                    style_refs.resize(slot_index + 1, None);
+                }
+                style_refs[slot_index] = style_ref;
+            }
+            index += 1;
+            continue;
+        }
+        let wrapped_style_refs = parse_moxel_wrapped_style_refs(field, object_refs);
+        if !wrapped_style_refs.is_empty() {
+            style_refs.extend(wrapped_style_refs);
+            index += 1;
             continue;
         }
         style_refs.extend(parse_moxel_embedded_style_refs(field, object_refs));
+        index += 1;
+    }
+    if style_refs.len() >= 5
+        && style_refs.first().is_some_and(Option::is_none)
+        && style_refs.get(1).is_some_and(Option::is_none)
+        && style_refs.get(2).and_then(|slot| slot.as_deref()) == Some("style:ReportLineColor")
+        && style_refs.get(4).and_then(|slot| slot.as_deref()) == Some("auto")
+    {
+        style_refs[1] = Some("style:FormTextColor".to_string());
     }
     style_refs
+}
+
+fn parse_moxel_indexed_style_ref_overrides(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<(usize, Option<String>)>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() < 5 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "2" {
+        return None;
+    }
+    let mut overrides = Vec::new();
+    let mut cursor = 3usize;
+    while cursor + 1 < fields.len() {
+        let slot_index = fields.get(cursor)?.trim().parse::<usize>().ok()?;
+        let style_ref = parse_moxel_style_ref_slot(fields.get(cursor + 1)?, object_refs)?;
+        overrides.push((slot_index, style_ref));
+        cursor += 2;
+    }
+    (!overrides.is_empty()).then_some(overrides)
+}
+
+fn parse_moxel_wrapped_style_refs(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<Option<String>> {
+    let Some(fields) = split_1c_braced_fields(text, 0) else {
+        return Vec::new();
+    };
+    if fields.len() < 3 || fields.first().map(|field| field.trim()) != Some("1") {
+        return Vec::new();
+    }
+    let mut refs = Vec::new();
+    for field in fields.iter().skip(2) {
+        if let Some(style_ref) = parse_moxel_style_ref_slot(field, object_refs) {
+            refs.push(style_ref);
+            continue;
+        }
+        let nested = parse_moxel_embedded_style_refs(field, object_refs);
+        if nested.is_empty() {
+            return Vec::new();
+        }
+        refs.extend(nested);
+    }
+    refs
 }
 
 fn parse_moxel_empty_headers_footers(fields: &[&str]) -> bool {
@@ -16086,12 +21381,20 @@ fn parse_moxel_style_ref_slot(
     let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
     match fields.get(1)?.trim() {
         "3" => match payload.first()?.trim() {
-            "-1" | "-3" => Some(None),
+            "-1" => Some(Some("style:FormBackColor".to_string())),
+            "-3" => Some(Some("style:FormTextColor".to_string())),
             "-10" => Some(Some("style:FieldBackColor".to_string())),
+            "-11" => Some(Some("style:FieldTextColor".to_string())),
             "-13" => Some(Some("style:FieldTextColor".to_string())),
+            "-14" => Some(Some("style:FieldSelectionBackColor".to_string())),
+            "-16" => Some(Some("style:SpecialTextColor".to_string())),
+            "-17" => Some(Some("style:NegativeTextColor".to_string())),
             "-21" => Some(Some("style:FieldSelectionBackColor".to_string())),
+            "-23" => Some(Some("style:ToolTipBackColor".to_string())),
+            "-24" => Some(Some("style:ToolTipTextColor".to_string())),
             "-7" => Some(Some("style:ButtonBackColor".to_string())),
             "-15" => Some(Some("style:ButtonTextColor".to_string())),
+            "-22" => Some(Some("style:BorderColor".to_string())),
             "-25" => Some(Some("style:ReportHeaderBackColor".to_string())),
             "-26" => Some(Some("style:ReportGroup1BackColor".to_string())),
             "-27" => Some(Some("style:ReportGroup2BackColor".to_string())),
@@ -16101,10 +21404,17 @@ fn parse_moxel_style_ref_slot(
             "-36" => Some(Some("style:TableHeaderTextColor".to_string())),
             "-37" => Some(Some("style:TableFooterBackColor".to_string())),
             "-38" => Some(Some("style:TableFooterTextColor".to_string())),
+            "-42" => Some(Some("style:NavigationColor".to_string())),
+            "-43" => Some(Some("style:AuxiliaryNavigationColor".to_string())),
+            "-44" => Some(Some("style:ActivityColor".to_string())),
             "0" => {
                 let uuid = parse_uuid_field(payload.get(1)?.trim())?;
                 Some(moxel_style_ref_for_uuid(&uuid, object_refs))
             }
+            _ => None,
+        },
+        "4" => match payload.first()?.trim() {
+            "0" => Some(Some("auto".to_string())),
             _ => None,
         },
         "2" => payload
@@ -16140,11 +21450,45 @@ fn parse_moxel_embedded_style_refs(
     {
         return Vec::new();
     }
-    fields
+    let mut refs = fields
         .iter()
         .skip(2)
         .filter_map(|field| parse_moxel_embedded_style_ref(field, container_kind, object_refs))
-        .collect()
+        .collect::<Vec<_>>();
+    if moxel_uses_sparse_f527_embedded_slots(&fields, &refs) {
+        refs = vec![
+            refs[0].clone(),
+            None,
+            refs[1].clone(),
+            None,
+            refs[2].clone(),
+        ];
+    }
+    refs
+}
+
+fn moxel_uses_sparse_f527_embedded_slots(fields: &[&str], refs: &[Option<String>]) -> bool {
+    let sparse_wrapper = fields.len() == 10
+        && fields[3].trim() == "0"
+        && fields[4].trim() == "1"
+        && fields[6].trim() == "0"
+        && fields[7].trim() == "1"
+        && fields[9].trim() == "0";
+    if !sparse_wrapper || refs.len() != 3 {
+        return false;
+    }
+    matches!(
+        (
+            refs[0].as_deref(),
+            refs[1].as_deref(),
+            refs[2].as_deref(),
+        ),
+        (
+            Some("moxel:f527:0:1"),
+            Some("moxel:f527:1:3"),
+            Some("moxel:f527:1:1"),
+        )
+    )
 }
 
 fn parse_moxel_embedded_style_ref(
@@ -16160,6 +21504,7 @@ fn parse_moxel_embedded_style_ref(
     Some(moxel_embedded_style_ref_for_uuid(
         &uuid,
         container_kind,
+        fields.get(3).map(|field| field.trim()),
         fields.get(4).map(|field| field.trim()),
         object_refs,
     ))
@@ -16178,12 +21523,13 @@ fn moxel_style_ref_for_uuid(uuid: &str, object_refs: &BTreeMap<String, String>) 
 fn moxel_embedded_style_ref_for_uuid(
     uuid: &str,
     container_kind: Option<&str>,
+    family: Option<&str>,
     kind: Option<&str>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    match (uuid, container_kind, kind) {
-        ("f527dc88-1d39-40b3-bcbb-d98b690ead68", _, Some("2")) => {
-            Some("style:FieldBackColor".to_string())
+    match (uuid, container_kind, family, kind) {
+        ("f527dc88-1d39-40b3-bcbb-d98b690ead68", _, Some(family), Some(kind)) => {
+            Some(format!("moxel:f527:{family}:{kind}"))
         }
         _ => moxel_style_ref_for_uuid(uuid, object_refs),
     }
@@ -16191,12 +21537,42 @@ fn moxel_embedded_style_ref_for_uuid(
 
 fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
+        8 => "Black",
+        10 => "Blue",
+        20 => "Cream",
         21 => "Crimson",
+        23 => "DarkBlue",
+        27 | 31 => "DarkGreen",
+        33 => "DarkRed",
+        37 => "DarkSlateGray",
+        44 => "FireBrick",
+        45 => "FloralWhite",
+        46 => "ForestGreen",
         48 => "Gainsboro",
+        52 => "Gray",
+        53 => "Green",
+        55 => "HoneyDew",
         64 => "LemonChiffon",
+        67 => "LightCyan",
+        68 => "LightGoldenRod",
+        69 => "LightGoldenRodYellow",
+        71 => "LightGray",
+        72 => "LightPink",
         79 => "LightYellow",
+        84 => "Maroon",
+        97 => "MintCream",
+        98 => "MistyRose",
         108 => "PaleGoldenrod",
+        119 => "Red",
+        120 => "RosyBrown",
         121 => "RoyalBlue",
+        128 => "Silver",
+        130 => "SlateBlue",
+        134 => "SteelBlue",
+        140 => "Violet",
+        141 => "VioletRed",
+        144 => "WhiteSmoke",
+        145 => "Yellow",
         _ => return None,
     };
     Some(format!("d3p1:{name}"))
@@ -16204,6 +21580,7 @@ fn parse_moxel_web_color(value: &str) -> Option<String> {
 
 fn parse_moxel_style_color(value: &str) -> Option<String> {
     match value.parse::<u32>().ok()? {
+        12971252 => Some("style:ReportHeaderBackColor".to_string()),
         8765644 => Some("style:ReportLineColor".to_string()),
         _ => parse_moxel_direct_color(value),
     }
@@ -16230,8 +21607,8 @@ fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
 fn moxel_vertical_alignment(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Top"),
-        24 => Some("Center"),
-        48 => Some("Bottom"),
+        4 | 24 => Some("Center"),
+        8 | 48 => Some("Bottom"),
         _ => None,
     }
 }
@@ -16242,6 +21619,14 @@ fn moxel_text_placement(value: usize) -> Option<&'static str> {
         1 => Some("Cut"),
         2 => Some("Block"),
         3 => Some("Wrap"),
+        _ => None,
+    }
+}
+
+fn moxel_format_pattern(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("WithoutPattern"),
+        1 => Some("Solid"),
         _ => None,
     }
 }
@@ -16267,6 +21652,7 @@ fn moxel_details_use(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Cell"),
         1 => Some("Row"),
+        2 => Some("WithoutProcessing"),
         _ => None,
     }
 }
@@ -16294,6 +21680,14 @@ fn moxel_protection(value: usize) -> Option<bool> {
     }
 }
 
+fn moxel_hidden(value: usize) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
 fn moxel_hyper_link(value: usize) -> Option<bool> {
     match value {
         1 => Some(true),
@@ -16304,14 +21698,38 @@ fn moxel_hyper_link(value: usize) -> Option<bool> {
 
 fn moxel_picture_size_mode(value: usize) -> Option<&'static str> {
     match value {
-        6 => Some("Proportionally"),
+        0 => Some("RealSize"),
+        2 => Some("Proportionally"),
+        4 => Some("AutoSize"),
+        7 => Some("ByFontSize"),
         _ => None,
     }
 }
 
-fn moxel_picture_alignment(value: usize) -> Option<&'static str> {
+fn moxel_picture_horizontal_alignment(value: usize) -> Option<&'static str> {
     match value {
-        2 | 24 => Some("Center"),
+        0 => Some("Left"),
+        2 => Some("Right"),
+        5 => Some("Auto"),
+        6 => Some("Center"),
+        _ => None,
+    }
+}
+
+fn moxel_picture_vertical_alignment(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("Top"),
+        8 => Some("Bottom"),
+        24 => Some("Center"),
+        _ => None,
+    }
+}
+
+fn moxel_text_position(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("Left"),
+        1 => Some("Right"),
+        5 => Some("Auto"),
         _ => None,
     }
 }
@@ -16334,6 +21752,7 @@ fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
         "-1" => "None",
         "-3" => "Solid",
         "-10" => "Dotted",
+        "-11" => "Dotted",
         _ => return None,
     };
     Some(MoxelLine {
@@ -16343,31 +21762,79 @@ fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
     })
 }
 
-fn parse_moxel_merge_regions(fields: &[&str]) -> (Vec<MoxelMerge>, Vec<MoxelMerge>) {
-    fields
+fn parse_moxel_merge_regions(
+    fields: &[&str],
+) -> (Vec<MoxelMerge>, Vec<MoxelMerge>, Vec<MoxelMerge>) {
+    let mut merges = Vec::new();
+    let mut horizontal_unmerges = Vec::new();
+    let mut vertical_unmerges = Vec::new();
+    for (field_merges, field_horizontal_unmerges, field_vertical_unmerges) in fields
         .iter()
         .filter_map(|field| parse_moxel_merge_region_list(field))
-        .next()
-        .unwrap_or_default()
+    {
+        merges.extend(field_merges);
+        horizontal_unmerges.extend(field_horizontal_unmerges);
+        vertical_unmerges.extend(field_vertical_unmerges);
+    }
+    normalize_moxel_merge_order(&mut merges);
+    (merges, horizontal_unmerges, vertical_unmerges)
 }
 
-fn parse_moxel_merge_region_list(text: &str) -> Option<(Vec<MoxelMerge>, Vec<MoxelMerge>)> {
+fn normalize_moxel_merge_order(merges: &mut Vec<MoxelMerge>) {
+    if merges.len() < 2 {
+        return;
+    }
+    let mut ordered = Vec::with_capacity(merges.len());
+    ordered.extend(
+        merges
+            .iter()
+            .filter(|merge| merge.row >= 0 && merge.column >= 0)
+            .cloned(),
+    );
+    ordered.extend(
+        merges
+            .iter()
+            .filter(|merge| merge.row < 0 && merge.column >= 0)
+            .cloned(),
+    );
+    ordered.extend(
+        merges
+            .iter()
+            .filter(|merge| merge.row >= 0 && merge.column < 0)
+            .cloned(),
+    );
+    ordered.extend(
+        merges
+            .iter()
+            .filter(|merge| merge.row < 0 && merge.column < 0)
+            .cloned(),
+    );
+    if ordered.len() == merges.len() {
+        *merges = ordered;
+    }
+}
+
+fn parse_moxel_merge_region_list(
+    text: &str,
+) -> Option<(Vec<MoxelMerge>, Vec<MoxelMerge>, Vec<MoxelMerge>)> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
     if count == 0 || count > 4096 || fields.len() != count + 1 {
         return None;
     }
     let mut merges = Vec::with_capacity(count);
+    let mut horizontal_unmerges = Vec::new();
     let mut vertical_unmerges = Vec::new();
     for field in fields.iter().skip(1) {
         let (merge, kind) = parse_moxel_merge_region(field)?;
         match kind {
             0 => merges.push(merge),
+            1 => horizontal_unmerges.push(merge),
             2 => vertical_unmerges.push(merge),
             _ => return None,
         }
     }
-    Some((merges, vertical_unmerges))
+    Some((merges, horizontal_unmerges, vertical_unmerges))
 }
 
 fn parse_moxel_merge_region(text: &str) -> Option<(MoxelMerge, usize)> {
@@ -16379,47 +21846,76 @@ fn parse_moxel_merge_region(text: &str) -> Option<(MoxelMerge, usize)> {
     let begin_row = fields.get(1)?.trim().parse::<i32>().ok()?;
     let end_column = fields.get(2)?.trim().parse::<i32>().ok()?;
     let end_row = fields.get(3)?.trim().parse::<i32>().ok()?;
-    if begin_row < 0 || begin_column < 0 || end_row < begin_row || end_column < begin_column {
+    if end_row < begin_row || end_column < begin_column {
         return None;
     }
     let kind = fields
         .get(4)
         .and_then(|field| field.trim().parse::<usize>().ok())
         .unwrap_or(0);
+    let columns_id = fields
+        .get(5)
+        .and_then(|field| parse_non_zero_uuid(field.trim()));
     Some((
         MoxelMerge {
             row: begin_row,
             column: begin_column,
             height: end_row - begin_row,
             width: end_column - begin_column,
+            columns_id,
         },
         kind,
     ))
 }
 
 fn parse_moxel_area_list(text: &str) -> Option<Vec<MoxelArea>> {
+    let items = parse_moxel_named_item_list(text)?;
+    let areas = items
+        .into_iter()
+        .filter_map(|item| match item {
+            MoxelNamedItem::Cells(area) => Some(area),
+            MoxelNamedItem::Drawing { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    (!areas.is_empty()).then_some(areas)
+}
+
+fn parse_moxel_named_item_list(text: &str) -> Option<Vec<MoxelNamedItem>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
     if count == 0 || count > 512 || fields.len() != count * 2 + 1 {
         return None;
     }
-    let mut areas = Vec::with_capacity(count);
+    let mut items = Vec::with_capacity(count);
     for index in 0..count {
         let name = parse_1c_string(fields.get(index * 2 + 1)?)?;
-        if let Some(area) = parse_moxel_area(fields.get(index * 2 + 2)?, name) {
-            areas.push(area);
+        if let Some(item) = parse_moxel_named_item(fields.get(index * 2 + 2)?, name) {
+            items.push(item);
         }
     }
-    (!areas.is_empty()).then_some(areas)
+    (!items.is_empty()).then_some(items)
+}
+
+fn parse_moxel_named_item(text: &str, name: String) -> Option<MoxelNamedItem> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    match fields.first()?.trim() {
+        "1" => {
+            let bounds = split_1c_braced_fields(fields.get(1)?, 0)?;
+            parse_moxel_bounds_area(&bounds, name).map(MoxelNamedItem::Cells)
+        }
+        "2" => Some(MoxelNamedItem::Drawing {
+            name,
+            drawing_id: fields.get(1)?.trim().parse::<usize>().ok()?,
+        }),
+        _ => None,
+    }
 }
 
 fn parse_moxel_area(text: &str, name: String) -> Option<MoxelArea> {
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "1" {
-        return None;
+    match parse_moxel_named_item(text, name)? {
+        MoxelNamedItem::Cells(area) => Some(area),
+        MoxelNamedItem::Drawing { .. } => None,
     }
-    let bounds = split_1c_braced_fields(fields.get(1)?, 0)?;
-    parse_moxel_bounds_area(&bounds, name)
 }
 
 fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<MoxelArea> {
@@ -16445,8 +21941,10 @@ fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<MoxelArea> {
 fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     let output_format_indices = moxel_output_format_indices(spreadsheet);
     let output_format_index_map = moxel_output_format_index_map(&output_format_indices);
+    let emit_first_row_format_index =
+        moxel_column_format_slots(&spreadsheet.column_sets, spreadsheet.column_count) == 0;
     let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
 \t<languageSettings>\r\n\
 \t\t<currentLanguage>ru</currentLanguage>\r\n\
@@ -16462,15 +21960,26 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
         push_moxel_columns_xml(&mut xml, column_set, &output_format_index_map);
     }
     for row in &spreadsheet.rows {
-        push_moxel_row_xml(&mut xml, row, &output_format_index_map);
+        push_moxel_row_xml(
+            &mut xml,
+            row,
+            &output_format_index_map,
+            emit_first_row_format_index,
+        );
     }
-    if spreadsheet.empty_headers_footers {
-        push_moxel_empty_headers_footers_xml(&mut xml);
-    }
-    xml.push_str("\t<templateMode>true</templateMode>\r\n");
     for drawing in &spreadsheet.drawings {
         push_moxel_drawing_xml(&mut xml, drawing, &output_format_index_map);
     }
+    if let Some(header_footer_format_index) = spreadsheet.header_footer_format_index {
+        let header_footer_format_index = output_format_index_map
+            .get(&header_footer_format_index)
+            .copied()
+            .unwrap_or(header_footer_format_index);
+        push_moxel_header_footer_format_refs_xml(&mut xml, header_footer_format_index);
+    } else if spreadsheet.empty_headers_footers {
+        push_moxel_empty_headers_footers_xml(&mut xml);
+    }
+    xml.push_str("\t<templateMode>true</templateMode>\r\n");
     if let Some(default_format_index) = spreadsheet.default_format_index {
         let default_format_index = output_format_index_map
             .get(&default_format_index)
@@ -16481,15 +21990,32 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
         ));
     }
     xml.push_str(&format!("\t<height>{}</height>\r\n", spreadsheet.height));
+    if !spreadsheet.vertical_groups.is_empty() {
+        let vg_levels = spreadsheet
+            .vertical_groups
+            .iter()
+            .map(|group| group.level + 1)
+            .max()
+            .unwrap_or(0);
+        if vg_levels > 0 {
+            xml.push_str(&format!("\t<vgLevels>{vg_levels}</vgLevels>\r\n"));
+        }
+    }
     xml.push_str(&format!("\t<vgRows>{}</vgRows>\r\n", spreadsheet.height));
+    for group in &spreadsheet.vertical_groups {
+        push_moxel_vertical_group_xml(&mut xml, group);
+    }
     for merge in &spreadsheet.merges {
         push_moxel_merge_xml(&mut xml, merge);
     }
     for vertical_unmerge in &spreadsheet.vertical_unmerges {
         push_moxel_vertical_unmerge_xml(&mut xml, vertical_unmerge);
     }
-    for area in &spreadsheet.areas {
-        push_moxel_area_xml(&mut xml, area);
+    for horizontal_unmerge in &spreadsheet.horizontal_unmerges {
+        push_moxel_horizontal_unmerge_xml(&mut xml, horizontal_unmerge);
+    }
+    for named_item in &spreadsheet.named_items {
+        push_moxel_named_item_xml(&mut xml, named_item);
     }
     if let Some(print_area) = &spreadsheet.print_area {
         push_moxel_print_area_xml(&mut xml, print_area);
@@ -16511,7 +22037,7 @@ fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
     for picture in &spreadsheet.pictures {
         push_moxel_picture_xml(&mut xml, picture);
     }
-    xml.push_str("</document>\r\n");
+    xml.push_str("</document>");
     xml
 }
 
@@ -16519,7 +22045,13 @@ fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
     let max_column_format_index = spreadsheet
         .column_sets
         .iter()
-        .flat_map(|column_set| column_set.columns.iter().map(|column| column.format_index))
+        .flat_map(|column_set| {
+            column_set
+                .columns
+                .iter()
+                .map(|column| column.format_index)
+                .chain(column_set.default_format_index)
+        })
         .max()
         .unwrap_or(0);
     let max_row_or_cell_format_index = spreadsheet.rows.iter().fold(0usize, |max_index, row| {
@@ -16537,6 +22069,15 @@ fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
     spreadsheet
         .default_format_index
         .unwrap_or(0)
+        .max(spreadsheet.header_footer_format_index.unwrap_or(0))
+        .max(
+            spreadsheet
+                .extra_formats
+                .keys()
+                .copied()
+                .max()
+                .unwrap_or(0),
+        )
         .max(spreadsheet.column_formats.len() + spreadsheet.formats.len())
         .max(max_column_format_index)
         .max(max_row_or_cell_format_index)
@@ -16544,8 +22085,162 @@ fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
         .max(1)
 }
 
+fn moxel_sparse_default_column_set_insertion_point(
+    spreadsheet: &MoxelSpreadsheet,
+    format_index: usize,
+) -> Option<usize> {
+    if !spreadsheet
+        .column_sets
+        .iter()
+        .skip(1)
+        .any(|column_set| column_set.default_format_index == Some(format_index))
+    {
+        return None;
+    }
+    let default_set = spreadsheet.column_sets.first()?;
+    let mut seen = BTreeSet::new();
+    Some(
+        default_set
+            .columns
+            .iter()
+            .filter(|column| seen.insert(column.format_index))
+            .count(),
+    )
+}
+
+fn moxel_sparse_source_output_order(spreadsheet: &MoxelSpreadsheet) -> Option<Vec<usize>> {
+    let shared_default_format_index = spreadsheet.header_footer_format_index?;
+    let selected_count = spreadsheet.column_formats.len();
+    if selected_count == 0 {
+        return None;
+    }
+    if spreadsheet.column_sets.len() == 1
+        && shared_default_format_index > selected_count
+        && spreadsheet
+            .formats
+            .get(shared_default_format_index - selected_count - 1)
+            .is_some_and(MoxelFormat::is_empty)
+        && spreadsheet
+            .default_format_index
+            .is_some_and(|index| index > shared_default_format_index)
+    {
+        let format_count = moxel_output_format_count(spreadsheet);
+        let mut ordered = Vec::with_capacity(format_count);
+        ordered.push(shared_default_format_index);
+        for format_index in 1..=selected_count {
+            ordered.push(format_index);
+        }
+        for format_index in (selected_count + 1)..=format_count {
+            if format_index != shared_default_format_index {
+                ordered.push(format_index);
+            }
+        }
+        return Some(ordered);
+    }
+    if shared_default_format_index > selected_count
+        && spreadsheet
+            .column_sets
+            .iter()
+            .all(|column_set| column_set.default_format_index == Some(shared_default_format_index))
+    {
+        let format_count = moxel_output_format_count(spreadsheet);
+        let mut ordered = Vec::with_capacity(format_count);
+        ordered.push(shared_default_format_index);
+        for format_index in 1..=selected_count {
+            ordered.push(format_index);
+        }
+        for format_index in (selected_count + 1)..=format_count {
+            if format_index != shared_default_format_index {
+                ordered.push(format_index);
+            }
+        }
+        return Some(ordered);
+    }
+    if spreadsheet.default_format_index.is_some() {
+        return None;
+    }
+    if spreadsheet.column_sets.len() <= 1
+        || !spreadsheet
+        .column_sets
+        .iter()
+        .skip(1)
+        .all(|column_set| column_set.default_format_index == Some(shared_default_format_index))
+    {
+        return None;
+    }
+    let default_set_selected_count = spreadsheet
+        .column_sets
+        .first()?
+        .columns
+        .iter()
+        .map(|column| column.format_index)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let format_count = moxel_output_format_count(spreadsheet);
+    let mut ordered = Vec::with_capacity(format_count);
+    for format_index in 1..=default_set_selected_count.min(selected_count) {
+        ordered.push(format_index);
+    }
+    if shared_default_format_index > 0 && shared_default_format_index <= format_count {
+        ordered.push(shared_default_format_index);
+    }
+    for format_index in (default_set_selected_count + 1)..=selected_count {
+        ordered.push(format_index);
+    }
+    for format_index in (selected_count + 1)..=format_count {
+        if format_index != shared_default_format_index {
+            ordered.push(format_index);
+        }
+    }
+    Some(ordered)
+}
+
 fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec<usize> {
     let format_count = moxel_output_format_count(spreadsheet);
+    if let Some(ordered) = moxel_sparse_source_output_order(spreadsheet) {
+        return ordered;
+    }
+    if moxel_source_column_format_offset(&spreadsheet.column_sets) > 0 {
+        let source_column_format_refs = moxel_source_column_format_refs(&spreadsheet.column_sets);
+        if spreadsheet.column_formats.len() > source_column_format_refs.len() {
+            let mut ordered = moxel_source_derived_internal_output_order(
+                &spreadsheet.column_sets,
+                spreadsheet.column_formats.len(),
+                spreadsheet.formats.len(),
+            );
+            if spreadsheet.default_format_index.is_none()
+                && let Some(extra_format_index) = spreadsheet.header_footer_format_index
+                && let Some(insert_at) = moxel_sparse_default_column_set_insertion_point(
+                    spreadsheet,
+                    extra_format_index,
+                )
+            {
+                if let Some(existing_pos) =
+                    ordered.iter().position(|format_index| *format_index == extra_format_index)
+                {
+                    let format_index = ordered.remove(existing_pos);
+                    ordered.insert(insert_at.min(ordered.len()), format_index);
+                } else {
+                    ordered.insert(insert_at.min(ordered.len()), extra_format_index);
+                }
+            }
+            let mut seen_internal = ordered.iter().copied().collect::<BTreeSet<_>>();
+            let mut push_internal = |format_index: usize| {
+                if format_index > 0
+                    && format_index <= format_count
+                    && seen_internal.insert(format_index)
+                {
+                    ordered.push(format_index);
+                }
+            };
+            for format_index in 1..=format_count {
+                push_internal(format_index);
+            }
+
+            return ordered;
+        }
+        return (1..=format_count).collect();
+    }
     let mut seen = BTreeSet::new();
     let mut ordered = Vec::with_capacity(format_count);
 
@@ -16555,7 +22250,13 @@ fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec<usize> {
         }
     };
 
+    let prioritize_shared_sparse_defaults = spreadsheet.default_format_index.is_none();
     for column_set in &spreadsheet.column_sets {
+        if prioritize_shared_sparse_defaults
+            && let Some(default_format_index) = column_set.default_format_index
+        {
+            push(default_format_index);
+        }
         for column in &column_set.columns {
             push(column.format_index);
         }
@@ -16569,7 +22270,14 @@ fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec<usize> {
     for drawing in &spreadsheet.drawings {
         push(drawing.format_index);
     }
-    if let Some(default_format_index) = spreadsheet.default_format_index {
+    if prioritize_shared_sparse_defaults
+        && let Some(header_footer_format_index) = spreadsheet.header_footer_format_index
+    {
+        push(header_footer_format_index);
+    }
+    if prioritize_shared_sparse_defaults
+        && let Some(default_format_index) = spreadsheet.default_format_index
+    {
         push(default_format_index);
     }
     for format_index in 1..=format_count {
@@ -16595,6 +22303,15 @@ fn push_moxel_columns_xml(
     xml.push_str("\t<columns>\r\n");
     if let Some(id) = &column_set.id {
         xml.push_str(&format!("\t\t<id>{}</id>\r\n", escape_xml_text(id)));
+    }
+    if let Some(default_format_index) = column_set.default_format_index {
+        let default_format_index = output_format_index_map
+            .get(&default_format_index)
+            .copied()
+            .unwrap_or(default_format_index);
+        xml.push_str(&format!(
+            "\t\t<formatIndex>{default_format_index}</formatIndex>\r\n"
+        ));
     }
     xml.push_str(&format!("\t\t<size>{}</size>\r\n", column_set.size));
     for column in &column_set.columns {
@@ -16628,27 +22345,387 @@ fn moxel_source_column_format_offset(column_sets: &[MoxelColumnSet]) -> usize {
         .unwrap_or(0)
 }
 
-fn moxel_max_row_or_cell_format_index(rows: &[MoxelRow]) -> usize {
-    rows.iter().fold(0usize, |max_index, row| {
-        let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
-            cell_max.max(cell.format_index)
-        });
-        max_index.max(row_max)
-    })
+fn moxel_source_column_format_refs(column_sets: &[MoxelColumnSet]) -> Vec<usize> {
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::new();
+    for source_format_index in column_sets
+        .iter()
+        .filter_map(|column_set| column_set.source_default_format_index)
+    {
+        if source_format_index > 0 && seen.insert(source_format_index) {
+            ordered.push(source_format_index);
+        }
+    }
+    for column in column_sets.iter().flat_map(|column_set| column_set.columns.iter()) {
+        let source_format_index = column.source_format_index.unwrap_or(column.format_index);
+        if source_format_index > 0 && seen.insert(source_format_index) {
+            ordered.push(source_format_index);
+        }
+    }
+    ordered
+}
+
+fn remap_moxel_column_set_output_format_indices(
+    column_sets: &mut [MoxelColumnSet],
+    source_column_format_refs: &[usize],
+) {
+    if source_column_format_refs.is_empty() {
+        return;
+    }
+    for column_set in column_sets.iter_mut() {
+        if let Some(source_format_index) = column_set.source_default_format_index
+            && let Some(position) = source_column_format_refs
+                .iter()
+                .position(|candidate| *candidate == source_format_index)
+        {
+            column_set.default_format_index = Some(position + 1);
+        }
+    }
+    for column in column_sets
+        .iter_mut()
+        .flat_map(|column_set| column_set.columns.iter_mut())
+    {
+        let source_format_index = column.source_format_index.unwrap_or(column.format_index);
+        if let Some(position) = source_column_format_refs
+            .iter()
+            .position(|candidate| *candidate == source_format_index)
+        {
+            column.format_index = position + 1;
+        }
+    }
+}
+
+fn remap_moxel_row_or_cell_source_format_index(
+    format_index: usize,
+    source_column_format_refs: &[usize],
+    is_row: bool,
+) -> usize {
+    if source_column_format_refs.is_empty() {
+        return format_index;
+    }
+    if is_row {
+        if format_index <= 1 {
+            return format_index;
+        }
+    } else if format_index == 0 {
+        return format_index;
+    }
+    let source_slot = format_index.saturating_sub(1);
+    if let Some(position) = source_column_format_refs
+        .iter()
+        .position(|source_format_index| *source_format_index == source_slot)
+    {
+        return position + 1;
+    }
+    let removed_before = source_column_format_refs
+        .iter()
+        .filter(|source_format_index| **source_format_index < source_slot)
+        .count();
+    source_slot + source_column_format_refs.len() - removed_before
+}
+
+fn moxel_internal_format_index_for_source_index(
+    source_format_index: usize,
+    column_format_len: usize,
+    format_len: usize,
+) -> Option<usize> {
+    if source_format_index == 0 {
+        return None;
+    }
+    let total_source_formats = column_format_len + format_len;
+    if source_format_index > total_source_formats {
+        return None;
+    }
+    let column_source_start = total_source_formats
+        .saturating_sub(column_format_len)
+        .saturating_add(1);
+    if source_format_index >= column_source_start {
+        return Some(source_format_index - column_source_start + 1);
+    }
+    Some(column_format_len + source_format_index)
+}
+
+fn moxel_internal_format_index_for_sparse_source_index(
+    source_format_index: usize,
+    source_column_format_refs: &[usize],
+    column_format_len: usize,
+    format_len: usize,
+) -> Option<usize> {
+    if source_format_index == 0 {
+        return None;
+    }
+    let total_source_formats = column_format_len + format_len;
+    if source_format_index > total_source_formats {
+        return None;
+    }
+    if let Some(position) = source_column_format_refs
+        .iter()
+        .position(|candidate| *candidate == source_format_index)
+    {
+        return Some(position + 1);
+    }
+    let removed_before = source_column_format_refs
+        .iter()
+        .filter(|candidate| **candidate < source_format_index)
+        .count();
+    Some(source_column_format_refs.len() + source_format_index - removed_before)
+}
+
+fn moxel_source_derived_internal_output_order(
+    column_sets: &[MoxelColumnSet],
+    column_format_len: usize,
+    format_len: usize,
+) -> Vec<usize> {
+    let total_source_formats = column_format_len + format_len;
+    let mut seen_sources = BTreeSet::new();
+    let mut seen_internal = BTreeSet::new();
+    let mut ordered = Vec::with_capacity(total_source_formats.max(1));
+
+    let mut push_source = |source_format_index: usize| {
+        if source_format_index == 0
+            || source_format_index > total_source_formats
+            || !seen_sources.insert(source_format_index)
+        {
+            return;
+        }
+        if let Some(format_index) = moxel_internal_format_index_for_source_index(
+            source_format_index,
+            column_format_len,
+            format_len,
+        ) && seen_internal.insert(format_index)
+        {
+            ordered.push(format_index);
+        }
+    };
+
+    for column in column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+    {
+        push_source(column.source_format_index.unwrap_or(column.format_index));
+    }
+    for source_format_index in 1..=total_source_formats {
+        push_source(source_format_index);
+    }
+
+    ordered
+}
+
+fn remap_moxel_column_set_internal_format_indices(
+    column_sets: &mut [MoxelColumnSet],
+    column_format_len: usize,
+    format_len: usize,
+) {
+    for column_set in column_sets.iter_mut() {
+        if let Some(source_format_index) = column_set.source_default_format_index
+            && let Some(format_index) = moxel_internal_format_index_for_source_index(
+                source_format_index,
+                column_format_len,
+                format_len,
+            )
+        {
+            column_set.default_format_index = Some(format_index);
+        }
+    }
+    for column in column_sets
+        .iter_mut()
+        .flat_map(|column_set| column_set.columns.iter_mut())
+    {
+        let Some(source_format_index) = column.source_format_index else {
+            continue;
+        };
+        if let Some(format_index) = moxel_internal_format_index_for_source_index(
+            source_format_index,
+            column_format_len,
+            format_len,
+        ) {
+            column.format_index = format_index;
+        }
+    }
+}
+
+fn remap_moxel_column_set_sparse_internal_format_indices(
+    column_sets: &mut [MoxelColumnSet],
+    source_column_format_refs: &[usize],
+    column_format_len: usize,
+    format_len: usize,
+) {
+    for column_set in column_sets.iter_mut() {
+        if let Some(source_format_index) = column_set.source_default_format_index
+            && let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
+                source_format_index,
+                source_column_format_refs,
+                column_format_len,
+                format_len,
+            )
+        {
+            column_set.default_format_index = Some(format_index);
+        }
+    }
+    for column in column_sets
+        .iter_mut()
+        .flat_map(|column_set| column_set.columns.iter_mut())
+    {
+        let Some(source_format_index) = column.source_format_index else {
+            continue;
+        };
+        if let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
+            source_format_index,
+            source_column_format_refs,
+            column_format_len,
+            format_len,
+        ) {
+            column.format_index = format_index;
+        }
+    }
+}
+
+fn remap_moxel_row_and_cell_sparse_source_format_indices(
+    rows: &mut [MoxelRow],
+    source_column_format_refs: &[usize],
+    output_indices: &[usize],
+) {
+    let output_to_internal = output_indices
+        .iter()
+        .enumerate()
+        .map(|(index, internal)| (index + 1, *internal))
+        .collect::<BTreeMap<_, _>>();
+    for row in rows {
+        if let Some(source_format_index) = row.source_format_index {
+            let output_index = remap_moxel_row_or_cell_source_format_index(
+                source_format_index,
+                source_column_format_refs,
+                true,
+            );
+            if let Some(format_index) = output_to_internal.get(&output_index).copied() {
+                row.format_index = format_index;
+            }
+        }
+        for cell in &mut row.cells {
+            let Some(source_format_index) = cell.source_format_index else {
+                continue;
+            };
+            let output_index = remap_moxel_row_or_cell_source_format_index(
+                source_format_index,
+                source_column_format_refs,
+                false,
+            );
+            if let Some(format_index) = output_to_internal.get(&output_index).copied() {
+                cell.format_index = format_index;
+            }
+        }
+    }
+}
+
+fn remap_moxel_row_and_cell_sparse_internal_format_indices(
+    rows: &mut [MoxelRow],
+    source_column_format_refs: &[usize],
+    column_format_len: usize,
+    format_len: usize,
+) {
+    for row in rows {
+        if let Some(source_format_index) = row.source_format_index {
+            if source_format_index <= 1 {
+                row.format_index = source_format_index;
+            } else if let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
+                source_format_index - 1,
+                source_column_format_refs,
+                column_format_len,
+                format_len,
+            ) {
+                row.format_index = format_index;
+            }
+        }
+        for cell in &mut row.cells {
+            let Some(source_format_index) = cell.source_format_index else {
+                continue;
+            };
+            if source_format_index == 0 {
+                cell.format_index = 0;
+            } else if let Some(format_index) =
+                moxel_internal_format_index_for_sparse_source_index(
+                    source_format_index - 1,
+                    source_column_format_refs,
+                    column_format_len,
+                    format_len,
+                )
+            {
+                cell.format_index = format_index;
+            }
+        }
+    }
+}
+
+fn remap_moxel_row_and_cell_output_format_indices(
+    rows: &mut [MoxelRow],
+    source_column_format_refs: &[usize],
+) {
+    for row in rows {
+        if let Some(source_format_index) = row.source_format_index {
+            row.format_index = remap_moxel_row_or_cell_source_format_index(
+                source_format_index,
+                source_column_format_refs,
+                true,
+            );
+        }
+        for cell in &mut row.cells {
+            let Some(source_format_index) = cell.source_format_index else {
+                continue;
+            };
+            cell.format_index = remap_moxel_row_or_cell_source_format_index(
+                source_format_index,
+                source_column_format_refs,
+                false,
+            );
+        }
+    }
+}
+
+fn normalize_moxel_zero_column_format_refs(rows: &mut [MoxelRow]) {
+    for row in rows {
+        if row.format_index > 0 {
+            row.format_index -= 1;
+        }
+        row.source_format_index = Some(row.format_index);
+        for cell in &mut row.cells {
+            if cell.format_index > 0 {
+                cell.format_index -= 1;
+            }
+            cell.source_format_index = if cell.format_index == 0 {
+                None
+            } else {
+                Some(cell.format_index)
+            };
+        }
+    }
+}
+
+fn restore_moxel_source_format_refs_without_format_table(rows: &mut [MoxelRow]) {
+    for row in rows {
+        if let Some(source_format_index) = row.source_format_index {
+            row.format_index = source_format_index;
+        }
+        for cell in &mut row.cells {
+            if let Some(source_format_index) = cell.source_format_index {
+                cell.format_index = source_format_index;
+            }
+        }
+    }
 }
 
 fn moxel_uses_sparse_source_format_refs(
     column_sets: &[MoxelColumnSet],
     column_count: usize,
-    rows: &[MoxelRow],
-    default_format: &MoxelFormat,
-    default_format_width: Option<usize>,
+    _rows: &[MoxelRow],
+    _default_format: &MoxelFormat,
+    _default_format_width: Option<usize>,
 ) -> bool {
-    moxel_source_column_format_offset(column_sets) > 0
-        && default_format.is_empty()
-        && default_format_width.is_none()
-        && moxel_max_row_or_cell_format_index(rows)
-            > moxel_column_format_slots(column_sets, column_count)
+    let column_format_slots = moxel_column_format_slots(column_sets, column_count);
+    column_sets
+        .iter()
+        .flat_map(|column_set| column_set.columns.iter())
+        .filter_map(|column| column.source_format_index)
+        .any(|source_format_index| source_format_index > column_format_slots)
 }
 
 fn push_moxel_empty_headers_footers_xml(xml: &mut String) {
@@ -16662,6 +22739,21 @@ fn push_moxel_empty_headers_footers_xml(xml: &mut String) {
     ] {
         xml.push_str(&format!(
             "\t<{tag}>\r\n\t\t<f>0</f>\r\n\t\t<tfl/>\r\n\t</{tag}>\r\n"
+        ));
+    }
+}
+
+fn push_moxel_header_footer_format_refs_xml(xml: &mut String, format_index: usize) {
+    for tag in [
+        "leftHeader",
+        "centerHeader",
+        "rightHeader",
+        "leftFooter",
+        "centerFooter",
+        "rightFooter",
+    ] {
+        xml.push_str(&format!(
+            "\t<{tag}>\r\n\t\t<f>{format_index}</f>\r\n\t</{tag}>\r\n"
         ));
     }
 }
@@ -16727,18 +22819,31 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
         push_moxel_format_usize(xml, "rightBorder", format.right_border);
         push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
     }
-    push_moxel_format_usize(xml, "height", format.height);
+    push_moxel_format_i32(xml, "height", format.height);
     push_moxel_format_text(xml, "borderColor", format.border_color.as_deref());
     push_moxel_format_usize(xml, "width", format.width);
+    push_moxel_format_usize(xml, "widthWeightFactor", format.width_weight_factor);
+    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
     push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
-    push_moxel_format_text(xml, "backColor", format.back_color.as_deref());
     push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
+    push_moxel_format_text(xml, "backColor", format.back_color.as_deref());
+    push_moxel_format_text(xml, "pattern", format.pattern);
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_usize(xml, "textOrientation", format.text_orientation);
     push_moxel_format_text(xml, "fillType", format.fill_type);
-    push_moxel_number_format_xml(xml, &format.number_format);
-    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
+    push_moxel_localized_values_xml(
+        xml,
+        "format",
+        &format.number_format,
+        format.number_format_present,
+    );
+    push_moxel_localized_values_xml(
+        xml,
+        "editFormat",
+        &format.edit_format,
+        format.edit_format_present,
+    );
     if let Some(by_selected_columns) = format.by_selected_columns {
         xml.push_str(&format!(
             "\t\t<bySelectedColumns>{by_selected_columns}</bySelectedColumns>\r\n"
@@ -16750,6 +22855,9 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
     }
     if let Some(protection) = format.protection {
         xml.push_str(&format!("\t\t<protection>{protection}</protection>\r\n"));
+    }
+    if let Some(hidden) = format.hidden {
+        xml.push_str(&format!("\t\t<hidden>{hidden}</hidden>\r\n"));
     }
     push_moxel_format_usize(xml, "indent", format.indent);
     push_moxel_format_usize(xml, "autoIndent", format.auto_indent);
@@ -16771,14 +22879,24 @@ fn push_moxel_format_xml(xml: &mut String, spreadsheet: &MoxelSpreadsheet, forma
         format.pic_horizontal_alignment,
     );
     push_moxel_format_text(xml, "picVerticalAlignment", format.pic_vertical_alignment);
+    push_moxel_format_text(xml, "textPosition", format.text_position);
     xml.push_str("\t</format>\r\n");
 }
 
-fn push_moxel_number_format_xml(xml: &mut String, values: &[MoxelLocalizedValue]) {
-    if values.is_empty() {
+fn push_moxel_localized_values_xml(
+    xml: &mut String,
+    tag: &str,
+    values: &[MoxelLocalizedValue],
+    present: bool,
+) {
+    if values.is_empty() && !present {
         return;
     }
-    xml.push_str("\t\t<format>\r\n");
+    if values.is_empty() {
+        xml.push_str(&format!("\t\t<{tag}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("\t\t<{tag}>\r\n"));
     for value in values {
         xml.push_str("\t\t\t<v8:item>\r\n");
         xml.push_str(&format!(
@@ -16791,7 +22909,7 @@ fn push_moxel_number_format_xml(xml: &mut String, values: &[MoxelLocalizedValue]
         ));
         xml.push_str("\t\t\t</v8:item>\r\n");
     }
-    xml.push_str("\t\t</format>\r\n");
+    xml.push_str(&format!("\t\t</{tag}>\r\n"));
 }
 
 fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -> MoxelFormat {
@@ -16809,7 +22927,20 @@ fn moxel_format_for_index(spreadsheet: &MoxelSpreadsheet, format_index: usize) -
     {
         return format;
     }
+    if let Some(format) = spreadsheet.extra_formats.get(&format_index).cloned() {
+        return format;
+    }
     if spreadsheet.default_format_index == Some(format_index) {
+        if spreadsheet.column_sets.len() == 1
+            && spreadsheet.header_footer_format_index == Some(format_index)
+            && format_index > column_format_slots
+            && let Some(format) = spreadsheet
+                .formats
+                .get(format_index - column_format_slots - 1)
+                .cloned()
+        {
+            return format;
+        }
         let mut format = spreadsheet.default_format.clone();
         if format.width.is_none() {
             format.width = spreadsheet.default_format_width;
@@ -16838,6 +22969,12 @@ fn push_moxel_format_usize(xml: &mut String, tag: &str, value: Option<usize>) {
     }
 }
 
+fn push_moxel_format_i32(xml: &mut String, tag: &str, value: Option<i32>) {
+    if let Some(value) = value {
+        xml.push_str(&format!("\t\t<{tag}>{value}</{tag}>\r\n"));
+    }
+}
+
 fn push_moxel_format_bool(xml: &mut String, tag: &str, value: Option<bool>) {
     if let Some(value) = value {
         xml.push_str(&format!("\t\t<{tag}>{}</{tag}>\r\n", xml_bool(value)));
@@ -16856,7 +22993,12 @@ fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<&str>) {
 fn push_moxel_picture_xml(xml: &mut String, picture: &MoxelPicture) {
     xml.push_str("\t<picture>\r\n");
     xml.push_str(&format!("\t\t<index>{}</index>\r\n", picture.index));
-    if let Some(ref_name) = &picture.ref_name {
+    if let Some(payload) = &picture.payload {
+        xml.push_str(&format!(
+            "\t\t<picture t=\"false\">{}</picture>\r\n",
+            escape_xml_text(payload)
+        ));
+    } else if let Some(ref_name) = &picture.ref_name {
         xml.push_str(&format!(
             "\t\t<picture t=\"false\" ref=\"{}\"/>\r\n",
             escape_xml_text(ref_name)
@@ -16874,7 +23016,7 @@ fn push_moxel_drawing_xml(
 ) {
     xml.push_str("\t<drawing>\r\n");
     xml.push_str("\t\t<drawingType>Picture</drawingType>\r\n");
-    xml.push_str(&format!("\t\t<id>{}</id>\r\n", drawing.z_order));
+    xml.push_str(&format!("\t\t<id>{}</id>\r\n", drawing.id));
     let format_index = output_format_index_map
         .get(&drawing.format_index)
         .copied()
@@ -16934,10 +23076,25 @@ fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {
     xml.push_str("\t</merge>\r\n");
 }
 
+fn push_moxel_vertical_group_xml(xml: &mut String, group: &MoxelVerticalGroup) {
+    xml.push_str("\t<vg>\r\n");
+    xml.push_str(&format!("\t\t<b>{}</b>\r\n", group.begin_row));
+    if group.end_row != group.begin_row {
+        xml.push_str(&format!("\t\t<e>{}</e>\r\n", group.end_row));
+    }
+    xml.push_str("\t</vg>\r\n");
+}
+
 fn push_moxel_vertical_unmerge_xml(xml: &mut String, merge: &MoxelMerge) {
     xml.push_str("\t<verticalUnmerge>\r\n");
     push_moxel_merge_body_xml(xml, merge);
     xml.push_str("\t</verticalUnmerge>\r\n");
+}
+
+fn push_moxel_horizontal_unmerge_xml(xml: &mut String, merge: &MoxelMerge) {
+    xml.push_str("\t<horizontalUnmerge>\r\n");
+    push_moxel_merge_body_xml(xml, merge);
+    xml.push_str("\t</horizontalUnmerge>\r\n");
 }
 
 fn push_moxel_merge_body_xml(xml: &mut String, merge: &MoxelMerge) {
@@ -16948,6 +23105,9 @@ fn push_moxel_merge_body_xml(xml: &mut String, merge: &MoxelMerge) {
     }
     if merge.width > 0 {
         xml.push_str(&format!("\t\t<w>{}</w>\r\n", merge.width));
+    }
+    if let Some(columns_id) = &merge.columns_id {
+        xml.push_str(&format!("\t\t<columnsID>{columns_id}</columnsID>\r\n"));
     }
 }
 
@@ -16966,22 +23126,62 @@ fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
 fn push_moxel_font_xml(xml: &mut String, font: &MoxelFont) {
     xml.push_str("\t<font");
     if let Some(ref_name) = &font.ref_name {
+        if ref_name.starts_with("sys:") {
+            xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+        }
         xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(ref_name)));
     }
     if let Some(face_name) = &font.face_name {
         xml.push_str(&format!(" faceName=\"{}\"", escape_xml_text(face_name)));
     }
-    if let Some(height) = font.height {
-        xml.push_str(&format!(" height=\"{height}\""));
+    if let Some(height) = &font.height {
+        xml.push_str(&format!(" height=\"{}\"", escape_xml_text(height)));
     }
-    xml.push_str(&format!(
-        " bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\" kind=\"{}\"",
-        font.bold, font.italic, font.underline, font.strikeout, font.kind
-    ));
-    if let Some(scale) = font.scale {
-        xml.push_str(&format!(" scale=\"{scale}\""));
+    if font.kind == "WindowsFont" {
+        xml.push_str(&format!(" bold=\"{}\"", font.bold));
+        if font.italic {
+            xml.push_str(" italic=\"true\"");
+        }
+        if font.underline {
+            xml.push_str(" underline=\"true\"");
+        }
+        if font.strikeout {
+            xml.push_str(" strikeout=\"true\"");
+        }
+        xml.push_str(" kind=\"WindowsFont\"");
+    } else if font.kind == "StyleItem"
+        && !font.bold
+        && !font.italic
+        && !font.underline
+        && !font.strikeout
+        && font.scale.is_none()
+    {
+        xml.push_str(" kind=\"StyleItem\"");
+    } else {
+        xml.push_str(&format!(
+            " bold=\"{}\" italic=\"{}\" underline=\"{}\" strikeout=\"{}\" kind=\"{}\"",
+            font.bold, font.italic, font.underline, font.strikeout, font.kind
+        ));
+        if let Some(scale) = font.scale {
+            xml.push_str(&format!(" scale=\"{scale}\""));
+        }
     }
     xml.push_str("/>\r\n");
+}
+
+fn push_moxel_named_item_xml(xml: &mut String, named_item: &MoxelNamedItem) {
+    match named_item {
+        MoxelNamedItem::Cells(area) => push_moxel_area_xml(xml, area),
+        MoxelNamedItem::Drawing { name, drawing_id } => {
+            xml.push_str("\t<namedItem xsi:type=\"NamedItemDrawing\">\r\n");
+            xml.push_str(&format!(
+                "\t\t<name>{}</name>\r\n",
+                escape_xml_element_text(name)
+            ));
+            xml.push_str(&format!("\t\t<drawingID>{drawing_id}</drawingID>\r\n"));
+            xml.push_str("\t</namedItem>\r\n");
+        }
+    }
 }
 
 fn push_moxel_area_xml(xml: &mut String, area: &MoxelArea) {
@@ -17041,6 +23241,7 @@ fn push_moxel_row_xml(
     xml: &mut String,
     row: &MoxelRow,
     output_format_index_map: &BTreeMap<usize, usize>,
+    emit_first_format_index: bool,
 ) {
     xml.push_str(&format!(
         "\t<rowsItem>\r\n\t\t<index>{}</index>\r\n",
@@ -17050,19 +23251,31 @@ fn push_moxel_row_xml(
         xml.push_str(&format!("\t\t<indexTo>{index_to}</indexTo>\r\n"));
     }
     xml.push_str("\t\t<row>\r\n");
-    if row.format_index > 1 {
-        let format_index = output_format_index_map
-            .get(&row.format_index)
-            .copied()
-            .unwrap_or(row.format_index);
-        xml.push_str(&format!(
-            "\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
-        ));
-    }
+    let format_index = output_format_index_map
+        .get(&row.format_index)
+        .copied()
+        .unwrap_or(row.format_index);
     if let Some(columns_id) = &row.columns_id {
         xml.push_str(&format!(
             "\t\t\t<columnsID>{}</columnsID>\r\n",
             escape_xml_text(columns_id)
+        ));
+    }
+    let explicit_source_format_collapsed_to_one = format_index == 1
+        && row
+            .source_format_index
+            .is_some_and(|source_format_index| source_format_index > 1);
+    let leading_shared_default_shifted_row_format = format_index == 2
+        && row.format_index == 1
+        && row.source_format_index == Some(1)
+        && output_format_index_map.get(&1).copied() == Some(2);
+    if format_index > 1
+        && !leading_shared_default_shifted_row_format
+        || (emit_first_format_index && format_index == 1)
+        || explicit_source_format_collapsed_to_one
+    {
+        xml.push_str(&format!(
+            "\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
         ));
     }
     if row.cells.is_empty() {
@@ -17735,7 +23948,9 @@ struct RegisterProperties {
 struct MetadataChildObject {
     tag: &'static str,
     header: MetadataHeader,
+    generated_types: Vec<GeneratedTypeEntry>,
     value_types: Vec<ConstantValueType>,
+    emit_empty_type: bool,
     properties: Option<MetadataChildProperties>,
     tabular_section_properties: Option<MetadataTabularSectionProperties>,
     child_objects: Vec<MetadataChildObject>,
@@ -17754,10 +23969,12 @@ struct MetadataChildProperties {
     min_value: Option<String>,
     max_value: Option<String>,
     fill_from_filling_value: bool,
+    emit_fill_from_filling_value: bool,
     fill_value: Option<MetadataChildFillValue>,
+    emit_fill_value: bool,
     fill_checking: &'static str,
     choice_folders_and_items: Option<&'static str>,
-    choice_parameter_links_empty: bool,
+    choice_parameter_links: Option<Vec<MetadataChoiceParameterLink>>,
     choice_parameters: Option<Vec<MetadataChoiceParameter>>,
     quick_choice: Option<&'static str>,
     create_on_input: Option<&'static str>,
@@ -17773,9 +23990,23 @@ struct MetadataChildProperties {
 }
 
 #[derive(Clone)]
+struct MetadataChoiceParameterLink {
+    name: String,
+    data_path: String,
+    value_change: &'static str,
+}
+
+#[derive(Clone)]
 struct MetadataChoiceParameter {
     name: String,
-    value_refs: Vec<String>,
+    value: MetadataChoiceParameterValue,
+}
+
+#[derive(Clone)]
+enum MetadataChoiceParameterValue {
+    Boolean(bool),
+    DesignTimeRef(String),
+    FixedArray(Vec<String>),
 }
 
 #[derive(Clone)]
@@ -17788,14 +24019,18 @@ enum MetadataChoiceForm {
 struct MetadataTabularSectionProperties {
     tooltip: Vec<(String, String)>,
     fill_checking: &'static str,
-    use_mode: &'static str,
-    line_number_length: u32,
+    line_number_fill_checking: &'static str,
+    use_mode: Option<&'static str>,
+    line_number_length: Option<u32>,
 }
 
 #[derive(Clone)]
 enum MetadataChildFillValue {
     Nil,
     Boolean(bool),
+    Decimal(String),
+    DateTime(String),
+    DesignTimeRef(String),
     String(String),
 }
 
@@ -17974,6 +24209,7 @@ struct EnumProperties {
     child_templates: Vec<String>,
 }
 
+#[derive(Clone)]
 struct GeneratedTypeEntry {
     name: String,
     category: &'static str,
@@ -18324,6 +24560,13 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
         push_indexed_generated_type(&mut entries, &fields, 26, "DocumentManager", &header.name);
     }
     if object_code == 17 {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            1,
+            "DataProcessorObject",
+            &header.name,
+        );
         push_indexed_generated_type(
             &mut entries,
             &fields,
@@ -19454,7 +25697,9 @@ fn parse_exchange_plan_child_objects(
             Some(MetadataChildObject {
                 tag,
                 header,
+                generated_types: Vec::new(),
                 value_types,
+                emit_empty_type: tag == "Attribute",
                 properties,
                 tabular_section_properties: None,
                 child_objects: Vec::new(),
@@ -19582,7 +25827,9 @@ fn parse_register_properties_from_text(
             Some(MetadataChildObject {
                 tag,
                 header,
+                generated_types: Vec::new(),
                 value_types,
+                emit_empty_type: tag == "Attribute",
                 properties,
                 tabular_section_properties: None,
                 child_objects: Vec::new(),
@@ -19870,13 +26117,25 @@ fn parse_attribute_tabular_section_child_objects(
             None
         };
         let tabular_section_properties = if tag == "TabularSection" {
-            parse_metadata_tabular_section_properties(text, marker_start, &header.uuid)
+            parse_metadata_tabular_section_properties(owner_kind, text, marker_start, &header.uuid)
         } else {
             None
         };
+        let generated_types = if owner_kind == "DataProcessor" && tag == "TabularSection" {
+            parse_data_processor_tabular_section_generated_types(
+                text,
+                marker_start,
+                &header,
+                owner_name,
+            )
+        } else {
+            Vec::new()
+        };
         let child = MetadataChildObject {
             tag,
+            generated_types,
             value_types,
+            emit_empty_type: tag == "Attribute",
             properties,
             tabular_section_properties,
             header,
@@ -19906,6 +26165,14 @@ fn parse_attribute_tabular_section_child_objects(
         roots.push(child);
     }
 
+    if owner_kind == "DataProcessor" {
+        roots.sort_by_key(|child| match child.tag {
+            "Attribute" => 0usize,
+            "TabularSection" => 1usize,
+            _ => 2usize,
+        });
+    }
+
     roots
 }
 
@@ -19928,6 +26195,43 @@ fn parse_metadata_child_value_types(
         .unwrap_or_default()
 }
 
+fn parse_data_processor_tabular_section_generated_types(
+    text: &str,
+    marker_start: usize,
+    header: &MetadataHeader,
+    owner_name: &str,
+) -> Vec<GeneratedTypeEntry> {
+    for fields in metadata_object_field_candidates_around_header(text, marker_start, &header.uuid) {
+        if fields.first().map(|field| field.trim()) != Some("11") {
+            continue;
+        }
+        let mut generated_types = Vec::new();
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            1,
+            2,
+            &format!("DataProcessorTabularSection.{owner_name}.{}", header.name),
+            "TabularSection",
+        );
+        push_generated_type_entry(
+            &mut generated_types,
+            &fields,
+            3,
+            4,
+            &format!(
+                "DataProcessorTabularSectionRow.{owner_name}.{}",
+                header.name
+            ),
+            "TabularSectionRow",
+        );
+        if !generated_types.is_empty() {
+            return generated_types;
+        }
+    }
+    Vec::new()
+}
+
 fn parse_metadata_child_properties(
     owner_kind: &str,
     text: &str,
@@ -19937,13 +26241,20 @@ fn parse_metadata_child_properties(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
-        if let Some(properties) = parse_metadata_child_properties_from_fields(
+        if let Some(mut properties) = parse_metadata_child_properties_from_fields(
             owner_kind,
             &fields,
             child_uuid,
             value_types,
             object_refs,
         ) {
+            if owner_kind == "DataProcessor"
+                && is_offset_inside_metadata_object_code(text, marker_start, 27)
+                && is_offset_inside_data_processor_legacy_attribute_list(text, marker_start)
+            {
+                properties.emit_fill_from_filling_value = false;
+                properties.emit_fill_value = false;
+            }
             return Some(properties);
         }
     }
@@ -19957,6 +26268,19 @@ fn parse_metadata_child_properties_from_fields(
     value_types: &[ConstantValueType],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
+    if owner_kind == "DataProcessor"
+        && let Some(flattened) = flatten_data_processor_wrapped_child_fields(fields)
+        && let Some(header_index) = metadata_header_field_index(&flattened, child_uuid)
+        && let Some(properties) = parse_data_processor_wrapped_child_properties(
+            &flattened,
+            header_index,
+            value_types,
+            object_refs,
+        )
+    {
+        return Some(properties);
+    }
+
     let header_index = metadata_header_field_index(&fields, child_uuid)?;
     if fields.len() <= header_index + 13 {
         return None;
@@ -19976,16 +26300,20 @@ fn parse_metadata_child_properties_from_fields(
         min_value: parse_constant_bound_value(fields.get(header_index + 9).copied()),
         max_value: parse_constant_bound_value(fields.get(header_index + 10).copied()),
         fill_from_filling_value: parse_1c_bool_field(fields.get(header_index + 11).copied())?,
+        emit_fill_from_filling_value: true,
         fill_value: parse_metadata_child_fill_value(
             fields.get(header_index + 12).copied(),
             value_types,
+            object_refs,
         ),
+        emit_fill_value: true,
         fill_checking: metadata_fill_checking_xml(fields.get(header_index + 13).copied()),
         choice_folders_and_items: fields
             .get(header_index + 14)
             .and_then(|field| metadata_choice_folders_and_items_xml(field.trim())),
-        choice_parameter_links_empty: metadata_child_collection_is_empty(
+        choice_parameter_links: parse_metadata_child_choice_parameter_links(
             fields.get(header_index + 15).copied(),
+            object_refs,
         ),
         choice_parameters: parse_metadata_child_choice_parameters(
             fields.get(header_index + 16).copied(),
@@ -20052,6 +26380,105 @@ fn parse_metadata_child_properties_from_fields(
     })
 }
 
+fn flatten_data_processor_wrapped_child_fields<'a>(fields: &[&'a str]) -> Option<Vec<&'a str>> {
+    match fields.first().map(|field| field.trim()) {
+        Some("2") => Some(fields.to_vec()),
+        Some("27") => {
+            let nested = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+            if nested.first().map(|field| field.trim()) != Some("2") {
+                return None;
+            }
+            let mut flattened = nested;
+            flattened.extend(fields.iter().skip(2).copied());
+            Some(flattened)
+        }
+        Some("0") => {
+            let nested = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+            flatten_data_processor_wrapped_child_fields(&nested)
+        }
+        _ => None,
+    }
+}
+
+fn parse_data_processor_wrapped_child_properties(
+    fields: &[&str],
+    header_index: usize,
+    value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildProperties> {
+    if fields.first().map(|field| field.trim()) != Some("2")
+        || header_index != 1
+        || fields.len() < 22
+        || !field_starts_with(fields.get(2), r#"{"Pattern""#)
+    {
+        return None;
+    }
+
+    let (quick_choice, create_on_input) = data_processor_wrapped_quick_create_modes(
+        fields.get(13).map(|field| field.trim()).unwrap_or("2"),
+    );
+    Some(MetadataChildProperties {
+        password_mode: parse_1c_bool_field(fields.get(3).copied()).unwrap_or(false),
+        format: parse_1c_synonyms(fields.get(4).copied().unwrap_or("{0}")),
+        edit_format: parse_1c_synonyms(fields.get(19).copied().unwrap_or("{0}")),
+        tooltip: parse_1c_synonyms(fields.get(5).copied().unwrap_or("{0}")),
+        mark_negatives: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(false),
+        mask: fields
+            .get(7)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        multi_line: parse_1c_bool_field(fields.get(8).copied()).unwrap_or(false),
+        extended_edit: parse_1c_bool_field(fields.get(21).copied()).unwrap_or(false),
+        min_value: parse_constant_bound_value(fields.get(9).copied()),
+        max_value: parse_constant_bound_value(fields.get(10).copied()),
+        fill_from_filling_value: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
+        emit_fill_from_filling_value: true,
+        fill_value: parse_metadata_child_fill_value(
+            fields.get(20).copied(),
+            value_types,
+            object_refs,
+        ),
+        emit_fill_value: true,
+        fill_checking: match fields.get(14).map(|field| field.trim()) {
+            Some("1") => "ShowError",
+            _ => "DontCheck",
+        },
+        choice_folders_and_items: Some("Items"),
+        choice_parameter_links: parse_metadata_child_choice_parameter_links(
+            fields.get(15).copied(),
+            object_refs,
+        ),
+        choice_parameters: parse_metadata_child_choice_parameters(
+            fields.get(16).copied(),
+            object_refs,
+        ),
+        quick_choice,
+        create_on_input,
+        choice_form: parse_metadata_child_choice_form(fields.get(12).copied(), object_refs),
+        link_by_type_empty: metadata_child_collection_is_empty(fields.get(17).copied()),
+        choice_history_on_input: fields
+            .get(18)
+            .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
+            .or(Some("Auto")),
+        use_mode: None,
+        indexing: None,
+        full_text_search: None,
+        data_history: None,
+        update_data_history_immediately_after_write: None,
+        execute_after_write_data_history_version_processing: None,
+    })
+}
+
+fn data_processor_wrapped_quick_create_modes(
+    value: &str,
+) -> (Option<&'static str>, Option<&'static str>) {
+    match value {
+        "0" => (Some("DontUse"), Some("Use")),
+        "1" => (Some("Use"), Some("DontUse")),
+        _ => (Some("Auto"), Some("Auto")),
+    }
+}
+
 fn metadata_object_field_candidates_around_header<'a>(
     text: &'a str,
     marker_start: usize,
@@ -20083,37 +26510,108 @@ fn metadata_object_field_candidates_around_header<'a>(
 }
 
 fn parse_metadata_tabular_section_properties(
+    owner_kind: &str,
     text: &str,
     marker_start: usize,
     child_uuid: &str,
 ) -> Option<MetadataTabularSectionProperties> {
-    let (_, _, fields) =
-        innermost_metadata_object_fields_around_header(text, marker_start, child_uuid)?;
-    let header_index = metadata_header_field_index(&fields, child_uuid)?;
-    let tooltip = parse_1c_synonyms(fields.get(header_index + 1).copied().unwrap_or("{0}"));
-    let fill_checking = metadata_fill_checking_xml(fields.get(header_index + 2).copied());
-    let use_mode = fields
-        .get(header_index + 4)
-        .and_then(|field| metadata_attribute_use_mode_xml(field.trim()))?;
-    let line_number_length = fields
-        .get(header_index + 5)
-        .and_then(|field| parse_1c_u32_field(Some(*field)))?;
+    if owner_kind == "DataProcessor" {
+        for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
+        {
+            if let Some(properties) =
+                parse_data_processor_tabular_section_properties_from_fields(&fields, child_uuid)
+            {
+                return Some(properties);
+            }
+        }
+    }
+
+    if let Some((_, _, fields)) =
+        innermost_metadata_object_fields_around_header(text, marker_start, child_uuid)
+        && let Some(header_index) = metadata_header_field_index(&fields, child_uuid)
+    {
+        let tooltip = parse_1c_synonyms(fields.get(header_index + 1).copied().unwrap_or("{0}"));
+        let fill_checking = metadata_fill_checking_xml(fields.get(header_index + 2).copied());
+        return Some(MetadataTabularSectionProperties {
+            tooltip,
+            fill_checking,
+            line_number_fill_checking: fill_checking,
+            use_mode: fields
+                .get(header_index + 4)
+                .and_then(|field| metadata_attribute_use_mode_xml(field.trim())),
+            line_number_length: fields
+                .get(header_index + 5)
+                .and_then(|field| parse_1c_u32_field(Some(*field))),
+        });
+    }
+
+    if owner_kind == "DataProcessor" {
+        return Some(MetadataTabularSectionProperties {
+            tooltip: Vec::new(),
+            fill_checking: "DontCheck",
+            line_number_fill_checking: "DontCheck",
+            use_mode: None,
+            line_number_length: None,
+        });
+    }
+
+    None
+}
+
+fn parse_data_processor_tabular_section_properties_from_fields(
+    fields: &[&str],
+    child_uuid: &str,
+) -> Option<MetadataTabularSectionProperties> {
+    if fields.first().map(|field| field.trim()) != Some("11")
+        || metadata_header_field_index(fields, child_uuid) != Some(5)
+    {
+        return None;
+    }
 
     Some(MetadataTabularSectionProperties {
-        tooltip,
-        fill_checking,
-        use_mode,
-        line_number_length,
+        tooltip: parse_1c_synonyms(fields.get(8).copied().unwrap_or("{0}")),
+        fill_checking: metadata_fill_checking_xml(fields.get(6).copied()),
+        line_number_fill_checking: "DontCheck",
+        use_mode: None,
+        line_number_length: None,
     })
 }
 
 fn parse_metadata_child_fill_value(
     field: Option<&str>,
     value_types: &[ConstantValueType],
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildFillValue> {
     let value = field?.trim();
     if matches!(value, "{0}" | "00000000-0000-0000-0000-000000000000") {
         return Some(MetadataChildFillValue::Nil);
+    }
+    if let Some(fields) = split_1c_braced_fields(value, 0) {
+        match fields.first().map(|field| field.trim()) {
+            Some(r#""U""#) => {
+                return Some(MetadataChildFillValue::Nil);
+            }
+            Some(r#""S""#) => {
+                return parse_constant_bound_value(Some(value)).map(MetadataChildFillValue::String);
+            }
+            Some(r#""N""#) => {
+                return fields
+                    .get(1)
+                    .map(|field| field.trim().to_string())
+                    .map(MetadataChildFillValue::Decimal);
+            }
+            Some(r#""D""#) => {
+                return fields
+                    .get(1)
+                    .and_then(|field| format_1c_date_time(field.trim()))
+                    .map(MetadataChildFillValue::DateTime);
+            }
+            Some("\"#\"") => {
+                return parse_design_time_reference(value, object_refs)
+                    .map(MetadataChildFillValue::DesignTimeRef);
+            }
+            _ => {}
+        }
     }
     if value_types
         .iter()
@@ -20132,7 +26630,10 @@ fn metadata_fill_checking_xml(field: Option<&str>) -> &'static str {
 }
 
 fn metadata_child_collection_is_empty(field: Option<&str>) -> bool {
-    matches!(field.map(str::trim), Some("{0}") | Some("0"))
+    matches!(
+        field.map(str::trim),
+        Some("{0}") | Some("0") | Some("{0,0}") | Some("{3,0,0}")
+    )
 }
 
 fn parse_metadata_child_choice_form(
@@ -21738,11 +28239,10 @@ fn parse_metadata_child_choice_parameters(
         let (Some(name), Some(value)) = (fields.get(index), fields.get(index + 1)) else {
             break;
         };
-        if let Some(name) = parse_1c_quoted_string(name.trim()) {
-            let value_refs = parse_design_time_references(value, object_refs);
-            if !value_refs.is_empty() {
-                parameters.push(MetadataChoiceParameter { name, value_refs });
-            }
+        if let Some(name) = parse_1c_quoted_string(name.trim())
+            && let Some(value) = parse_metadata_choice_parameter_value(value, object_refs)
+        {
+            parameters.push(MetadataChoiceParameter { name, value });
         }
         index += 2;
     }
@@ -21751,6 +28251,103 @@ fn parse_metadata_child_choice_parameters(
         None
     } else {
         Some(parameters)
+    }
+}
+
+fn parse_metadata_choice_parameter_value(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChoiceParameterValue> {
+    let value = field.trim();
+    if let Some(boolean) = parse_1c_bool_flag(value) {
+        return Some(MetadataChoiceParameterValue::Boolean(boolean));
+    }
+    if let Some(fields) = split_1c_braced_fields(value, 0)
+        && fields.len() >= 2
+        && parse_1c_quoted_string(fields[0].trim()).as_deref() == Some("B")
+        && let Some(boolean) = parse_1c_bool_flag(fields[1].trim())
+    {
+        return Some(MetadataChoiceParameterValue::Boolean(boolean));
+    }
+    let value_refs = parse_design_time_references(value, object_refs);
+    match value_refs.len() {
+        0 => None,
+        1 => Some(MetadataChoiceParameterValue::DesignTimeRef(
+            value_refs.into_iter().next().unwrap(),
+        )),
+        _ => Some(MetadataChoiceParameterValue::FixedArray(value_refs)),
+    }
+}
+
+fn parse_metadata_child_choice_parameter_links(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let field = field?;
+    if metadata_child_collection_is_empty(Some(field)) {
+        return Some(Vec::new());
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first().map(|value| value.trim()) != Some("5006") {
+        return None;
+    }
+    let count = fields
+        .get(1)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    if count == 0 {
+        return Some(Vec::new());
+    }
+
+    let mut links = Vec::new();
+    let mut index = 2usize;
+    for _ in 0..count {
+        let Some(name) = fields
+            .get(index)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+        else {
+            break;
+        };
+        let value_change = metadata_choice_link_value_change_xml(
+            fields
+                .get(index + 1)
+                .map(|field| field.trim())
+                .unwrap_or("1"),
+        );
+        index += 2;
+
+        let mut data_path = None;
+        while let Some(field) = fields.get(index) {
+            if let Some(reference) = parse_design_time_reference(field, object_refs) {
+                data_path = Some(reference);
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        let Some(data_path) = data_path else {
+            break;
+        };
+        if fields
+            .get(index)
+            .is_some_and(|field| field.trim().chars().all(|ch| ch.is_ascii_digit()))
+        {
+            index += 1;
+        }
+        links.push(MetadataChoiceParameterLink {
+            name,
+            data_path,
+            value_change,
+        });
+    }
+
+    Some(links)
+}
+
+fn metadata_choice_link_value_change_xml(value: &str) -> &'static str {
+    match value {
+        "2" => "DontChange",
+        _ => "Clear",
     }
 }
 
@@ -22657,11 +29254,38 @@ fn parse_common_command_picture_value(
     }
     if picture_kind == 1 {
         let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+        if ref_fields.first()?.trim() == "-2" {
+            return Some((
+                Some("StdPicture.InputFieldClear".to_string()),
+                load_transparent,
+            ));
+        }
+        if ref_fields.first()?.trim() == "-3" {
+            return Some((Some("StdPicture.MoveUp".to_string()), load_transparent));
+        }
+        if ref_fields.first()?.trim() == "-4" {
+            return Some((Some("StdPicture.MoveDown".to_string()), load_transparent));
+        }
+        if ref_fields.first()?.trim() == "-9" {
+            return Some((Some("StdPicture.MoveRight".to_string()), load_transparent));
+        }
+        if ref_fields.first()?.trim() == "-8" {
+            return Some((Some("StdPicture.MoveLeft".to_string()), load_transparent));
+        }
         if ref_fields.first()?.trim() == "-7" {
             return Some((
                 Some("StdPicture.InputFieldOpen".to_string()),
                 load_transparent,
             ));
+        }
+        if ref_fields.first()?.trim() == "-10" {
+            return Some((Some("StdPicture.CheckAll".to_string()), load_transparent));
+        }
+        if ref_fields.first()?.trim() == "-11" {
+            return Some((Some("StdPicture.UncheckAll".to_string()), load_transparent));
+        }
+        if ref_fields.first()?.trim() == "-13" {
+            return Some((Some("StdPicture.Print".to_string()), load_transparent));
         }
         if ref_fields.first()?.trim() == "0" {
             let uuid = ref_fields.get(1)?.trim();
@@ -22699,17 +29323,52 @@ fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
 
 fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
     match uuid.to_ascii_lowercase().as_str() {
+        STD_PICTURE_INFORMATION_UUID => Some("StdPicture.Information"),
+        STD_PICTURE_SAVE_FILE_UUID => Some("StdPicture.SaveFile"),
         STD_PICTURE_USER_UUID => Some("StdPicture.User"),
         STD_PICTURE_LOAD_REPORT_SETTINGS_UUID => Some("StdPicture.LoadReportSettings"),
+        "942e0303-a3ec-4fe8-887c-5aea8516d424" => Some("StdPicture.ReportSettings"),
         STD_PICTURE_INFORMATION_REGISTER_UUID => Some("StdPicture.InformationRegister"),
+        STD_PICTURE_SHOW_DATA_UUID => Some("StdPicture.ShowData"),
+        STD_PICTURE_CUSTOMIZE_LIST_UUID => Some("StdPicture.CustomizeList"),
+        "97b2cc97-d5c6-45fb-9824-9d6d73db21fe" => Some("StdPicture.Change"),
         "37cf7cc0-abad-4385-b597-6fd2d8dc085a" => Some("StdPicture.Task"),
         "2f130057-bb2a-4e22-bba5-e108fac26940" => Some("StdPicture.ChooseValue"),
+        "47f01799-7968-4f44-9acc-fe1bdde8beb2" => Some("StdPicture.ActiveUsers"),
         "e8a49985-fef7-45a9-b6bb-ddd2b9028172" => Some("StdPicture.DataHistory"),
         "a24cff7f-a1a5-4403-af82-a7b31852cde9" => Some("StdPicture.BusinessProcessObject"),
+        "f6532868-30b9-44ab-803c-78f0f0b06b02" => Some("StdPicture.CloneObject"),
         "448d6f55-d885-496c-870d-d1bd78374745" => Some("StdPicture.CloneListItem"),
+        "977e831a-0e73-4d60-af51-091a6fa8612e" => Some("StdPicture.CreateListItem"),
         "723765ab-0b92-4745-a621-1ba0f77c92c9" => Some("StdPicture.EventLog"),
+        "4fddea39-5129-4b4c-83fe-4e443cd61940" => Some("StdPicture.EventLogByUser"),
+        "ffab30f1-da11-44b5-b34c-24da22badcf4" => Some("StdPicture.Find"),
+        "785362cb-3756-48ed-87d2-292ded17054a" => Some("StdPicture.OpenFile"),
         "4d2570b5-205f-413c-b4cc-b2097f61684f" => Some("StdPicture.CreateInitialImage"),
+        "0ce78048-0196-4f80-a781-9829cdb7f43e" => Some("StdPicture.GenerateReport"),
+        "18492a87-2fe4-44af-b218-304897fed020" => Some("StdPicture.MarkToDelete"),
+        "20ebc47b-f4d9-439c-acd3-fdc624fbac2a" => Some("StdPicture.Post"),
+        "23f940bf-7381-4c2b-85a1-e541ed428042" => Some("StdPicture.SaveValues"),
+        "a7707ed1-39b0-418f-974d-4d500d27a9c6" => Some("StdPicture.RestoreValues"),
+        "8f29e0e2-d5e6-41e8-a34d-9a0288156322" => Some("StdPicture.Reread"),
+        "db817ee1-fd28-4e7f-bb4a-53686b2b153c" => Some("StdPicture.Report"),
+        "1970a480-9b38-405e-9d9e-8209f3fad5f1" => Some("StdPicture.ScheduledJob"),
+        "58174855-39be-462e-8723-cb2d95182146" => Some("StdPicture.SetDateInterval"),
+        "2ef82795-06fe-4365-bd0c-44b486264620" => Some("StdPicture.FilterCriterion"),
+        "b1406535-6cc2-4410-95ea-753556e8460f" => Some("StdPicture.FilterByCurrentValue"),
+        "479470e0-ea0f-4266-8549-e2b1e8c06534" => Some("StdPicture.ClearFilter"),
+        "fb7e9fb5-110b-41cb-adc6-753969ae1c81" => Some("StdPicture.ExpandAll"),
+        "27ee3053-952c-49e5-8261-9215098e0e9c" => Some("StdPicture.CollapseAll"),
+        "5289d9a4-b012-4d54-9bce-50473fe29b57" => Some("StdPicture.DialogExclamation"),
+        "55ef0776-5ee4-4daf-9a9b-70d63643ab8d" => Some("StdPicture.SetTime"),
+        "fc4f29e0-d168-4fe0-8e64-e982fabf2595" => Some("StdPicture.Refresh"),
+        "91022b99-b610-48ad-954e-a297848081ce" => Some("StdPicture.SortListAsc"),
+        "1fa32fdb-a180-418f-a6eb-db7516b7a30b" => Some("StdPicture.SortListDesc"),
+        "894afc03-9904-465d-b671-f555ffb9b21c" => Some("StdPicture.Document"),
+        "1cd7b762-ec6a-4e92-ac9a-1832be228ec3" => Some("StdPicture.Stop"),
+        "8ca4ea33-603d-4992-8a41-c7924b5bd40b" => Some("StdPicture.UndoPosting"),
         "894cf65b-4109-4533-a1d7-c87b1fcc80a3" => Some("StdPicture.Write"),
+        "e6fc55a0-3d58-4b15-bdd3-717453929598" => Some("StdPicture.WriteAndClose"),
         "08a45a70-c221-4339-b3b1-9f11cb22147d" => Some("StdPicture.Delete"),
         _ => None,
     }
@@ -23605,6 +30264,11 @@ fn parse_metadata_type_pattern_element(
             length: Some(element.get(1)?.trim().parse().ok()?),
             allowed_length_flag: element.get(2)?.trim().parse().ok()?,
         }),
+        r#""N""# if element.len() == 1 => Some(ConstantValueType::Number {
+            digits: 0,
+            fraction_digits: 0,
+            allowed_sign_flag: 0,
+        }),
         r#""N""# if element.len() == 4 => Some(ConstantValueType::Number {
             digits: element.get(1)?.trim().parse().ok()?,
             fraction_digits: element.get(2)?.trim().parse().ok()?,
@@ -23675,12 +30339,21 @@ fn event_subscription_builtin_type_reference(
 
 fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
     match type_id {
+        "acf6192e-81ca-46ef-93a6-5a6968b78663" => Some("v8:ValueTable"),
+        "140b5ff4-37b1-4df5-b5ec-a0bfd2b94f8f" => Some("v8ui:FormattedString"),
+        "9cd510c7-abfc-11d4-9434-004095e12fc7" => Some("v8ui:Color"),
+        "9cd510c8-abfc-11d4-9434-004095e12fc7" => Some("v8ui:Font"),
         "e199ca70-93cf-46ce-a54b-6edc88c3a296" => Some("v8:ValueStorage"),
+        "e603c0f2-92fb-4d47-8f38-a44a381cf235" => Some("v8:ValueTree"),
         "fc01b5df-97fe-449b-83d4-218a090e681e" => Some("v8:UUID"),
         "3ee983d7-ace7-40f9-bb7e-2e916fcddd56" => Some("v8:FixedStructure"),
         "4500381b-db30-4a10-9db4-990038032acf" => Some("v8:FixedArray"),
         "220455ea-6c85-4513-996f-bbe79ed07774" => Some("v8:FixedMap"),
+        "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88" => Some("v8:StandardPeriod"),
+        "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3" => Some("v8:ValueListType"),
+        "e603103e-a318-4edc-a014-b1c6cf94d49f" => Some("mxl:SpreadsheetDocument"),
         "0a52f9de-73ea-4507-81e8-66217bead73a" => Some("cfg:ExchangePlanRef"),
+        "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63" => Some("cfg:AnyIBRef"),
         "0195e80c-b157-11d4-9435-004095e12fc7" => Some("cfg:ConstantValueManager"),
         "061d872a-5787-460e-95ac-ed74ea3a3e84" => Some("cfg:DocumentObject"),
         "238e7e88-3c5f-48b2-8a3b-81ebbecb20ed" => Some("cfg:BusinessProcessObject"),
@@ -23702,12 +30375,14 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "26dd1dee-252a-4942-b4b5-62ea44ed8030" => Some("cfg:DocumentManager"),
         "2d0abc8e-dede-4184-afd7-7ae8da588d47" => Some("cfg:CalculationRegisterManager"),
         "38f1038d-8b0b-438b-bfbe-830a60a1153a" => Some("cfg:BusinessProcessManager"),
+        "38bfd075-3e63-4aaa-a93e-94521380d579" => Some("cfg:DocumentRef"),
         "3ab47eda-6a5c-4590-9b08-0e633aa2f376" => Some("cfg:AccountingRegisterManager"),
         "3eab4ff4-f2d1-4c96-831c-04711b093999" => Some("cfg:ChartOfCalculationTypesManager"),
         "5e268c17-8035-458f-8041-daf9b15d05c9" => Some("cfg:TaskManager"),
         "7612de75-8b10-466a-b235-68572c605d92" => Some("cfg:ChartOfCharacteristicTypesManager"),
         "82faabf3-7f9b-4b2e-b499-98876415f270" => Some("cfg:CatalogManager"),
         "92e7f73f-bd66-4d9e-bc43-bae2acfadfd5" => Some("cfg:DocumentJournalManager"),
+        "e61ef7b8-f3e1-4f4b-8ac7-676e90524997" => Some("cfg:CatalogRef"),
         _ => None,
     }
 }
@@ -24412,6 +31087,8 @@ fn format_form_source_xml(
 \t\t\t<ExtendedPresentation/>\r\n\
 \t\t\t<Explanation/>\r\n",
         );
+    } else if kind == "Form" {
+        xml.push_str("\t\t\t<ExtendedPresentation/>\r\n");
     }
     xml.push_str(&format!(
         "\t\t</Properties>\r\n\
@@ -24998,11 +31675,15 @@ fn format_data_processor_source_xml(
         );
         xml.insert_str(index, &properties);
     }
-    if !data_processor.child_metadata_objects.is_empty()
-        || !data_processor.child_forms.is_empty()
-        || !data_processor.child_templates.is_empty()
-        || !data_processor.child_commands.is_empty()
+    if data_processor.child_metadata_objects.is_empty()
+        && data_processor.child_forms.is_empty()
+        && data_processor.child_templates.is_empty()
+        && data_processor.child_commands.is_empty()
     {
+        if let Some(index) = xml.find("\t</DataProcessor>") {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        }
+    } else {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
         for child in &data_processor.child_metadata_objects {
             push_metadata_child_object_xml(&mut child_objects, child);
@@ -25171,23 +31852,31 @@ fn format_enum_source_xml(
 }
 
 fn format_generated_types_internal_info_xml(generated_types: &[GeneratedTypeEntry]) -> String {
+    format_generated_types_internal_info_xml_with_indent(generated_types, "\t\t")
+}
+
+fn format_generated_types_internal_info_xml_with_indent(
+    generated_types: &[GeneratedTypeEntry],
+    indent: &str,
+) -> String {
     if generated_types.is_empty() {
         return String::new();
     }
-    let mut xml = "\t\t<InternalInfo>\r\n".to_string();
+    let nested = format!("{indent}\t");
+    let mut xml = format!("{indent}<InternalInfo>\r\n");
     for generated_type in generated_types {
         xml.push_str(&format!(
-            "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
-\t\t\t\t<xr:TypeId>{}</xr:TypeId>\r\n\
-\t\t\t\t<xr:ValueId>{}</xr:ValueId>\r\n\
-\t\t\t</xr:GeneratedType>\r\n",
+            "{nested}<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
+{nested}\t<xr:TypeId>{}</xr:TypeId>\r\n\
+{nested}\t<xr:ValueId>{}</xr:ValueId>\r\n\
+{nested}</xr:GeneratedType>\r\n",
             escape_xml_text(&generated_type.name),
             escape_xml_text(generated_type.category),
             escape_xml_text(&generated_type.type_id),
             escape_xml_text(&generated_type.value_id)
         ));
     }
-    xml.push_str("\t\t</InternalInfo>\r\n");
+    xml.push_str(&format!("{indent}</InternalInfo>\r\n"));
     xml
 }
 
@@ -25789,7 +32478,9 @@ fn push_metadata_header_child_object_xml(
         &MetadataChildObject {
             tag,
             header: header.clone(),
+            generated_types: Vec::new(),
             value_types: Vec::new(),
+            emit_empty_type: tag == "Attribute",
             properties: None,
             tabular_section_properties: None,
             child_objects: Vec::new(),
@@ -25859,12 +32550,20 @@ fn push_metadata_child_command_properties_xml(
 
 fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
     xml.push_str(&format!(
-        "\t\t\t<{tag} uuid=\"{}\">\r\n\
-\t\t\t\t<Properties>\r\n\
-\t\t\t\t\t<Name>{}</Name>\r\n",
+        "\t\t\t<{tag} uuid=\"{}\">\r\n",
         escape_xml_text(&child.header.uuid),
-        escape_xml_element_text(&child.header.name),
         tag = child.tag,
+    ));
+    if !child.generated_types.is_empty() {
+        xml.push_str(&format_generated_types_internal_info_xml_with_indent(
+            &child.generated_types,
+            "\t\t\t\t",
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_element_text(&child.header.name),
     ));
     push_header_synonym_xml(xml, "\t\t\t\t\t", &child.header.synonyms);
     if child.header.comment.is_empty() {
@@ -25880,6 +32579,8 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
             &child.value_types,
             "\t\t\t\t\t",
         ));
+    } else if child.emit_empty_type {
+        xml.push_str("\t\t\t\t\t<Type/>\r\n");
     }
     if let Some(properties) = &child.properties {
         push_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
@@ -25909,6 +32610,12 @@ fn push_nested_metadata_child_object_xml(
         child.tag,
         escape_xml_text(&child.header.uuid)
     ));
+    if !child.generated_types.is_empty() {
+        xml.push_str(&format_generated_types_internal_info_xml_with_indent(
+            &child.generated_types,
+            &format!("{tab}\t"),
+        ));
+    }
     xml.push_str(&format!("{tab}\t<Properties>\r\n"));
     xml.push_str(&format!(
         "{tab}\t\t<Name>{}</Name>\r\n",
@@ -25928,6 +32635,8 @@ fn push_nested_metadata_child_object_xml(
             &child.value_types,
             &format!("{tab}\t\t"),
         ));
+    } else if child.emit_empty_type {
+        xml.push_str(&format!("{tab}\t\t<Type/>\r\n"));
     }
     if let Some(properties) = &child.properties {
         push_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
@@ -25965,7 +32674,6 @@ fn push_metadata_child_properties_xml(
 {indent}<ExtendedEdit>{}</ExtendedEdit>\r\n\
 {indent}{}\r\n\
 {indent}{}\r\n\
-{indent}<FillFromFillingValue>{}</FillFromFillingValue>\r\n\
 ",
         xml_bool(properties.mark_negatives),
         format_simple_property_xml("Mask", &properties.mask),
@@ -25973,9 +32681,16 @@ fn push_metadata_child_properties_xml(
         xml_bool(properties.extended_edit),
         format_constant_bound_xml("MinValue", properties.min_value.as_deref()),
         format_constant_bound_xml("MaxValue", properties.max_value.as_deref()),
-        xml_bool(properties.fill_from_filling_value),
     ));
-    if let Some(fill_value) = &properties.fill_value {
+    if properties.emit_fill_from_filling_value {
+        xml.push_str(&format!(
+            "{indent}<FillFromFillingValue>{}</FillFromFillingValue>\r\n",
+            xml_bool(properties.fill_from_filling_value),
+        ));
+    }
+    if properties.emit_fill_value
+        && let Some(fill_value) = &properties.fill_value
+    {
         xml.push_str(&format!(
             "{indent}{}\r\n",
             format_metadata_child_fill_value_xml(fill_value)
@@ -25990,9 +32705,7 @@ fn push_metadata_child_properties_xml(
             "{indent}<ChoiceFoldersAndItems>{choice_folders_and_items}</ChoiceFoldersAndItems>\r\n"
         ));
     }
-    if properties.choice_parameter_links_empty {
-        xml.push_str(&format!("{indent}<ChoiceParameterLinks/>\r\n"));
-    }
+    push_metadata_child_choice_parameter_links_xml(xml, indent, &properties.choice_parameter_links);
     if let Some(choice_parameters) = &properties.choice_parameters {
         push_metadata_child_choice_parameters_xml(xml, indent, choice_parameters);
     }
@@ -26059,6 +32772,34 @@ fn push_metadata_child_properties_xml(
     }
 }
 
+fn push_metadata_child_choice_parameter_links_xml(
+    xml: &mut String,
+    indent: &str,
+    links: &Option<Vec<MetadataChoiceParameterLink>>,
+) {
+    let Some(links) = links else {
+        return;
+    };
+    if links.is_empty() {
+        xml.push_str(&format!("{indent}<ChoiceParameterLinks/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{indent}<ChoiceParameterLinks>\r\n"));
+    for link in links {
+        xml.push_str(&format!(
+            "{indent}\t<xr:Link>\r\n\
+{indent}\t\t<xr:Name>{}</xr:Name>\r\n\
+{indent}\t\t<xr:DataPath xsi:type=\"xs:string\">{}</xr:DataPath>\r\n\
+{indent}\t\t<xr:ValueChange>{}</xr:ValueChange>\r\n\
+{indent}\t</xr:Link>\r\n",
+            escape_xml_element_text(&link.name),
+            escape_xml_element_text(&link.data_path),
+            link.value_change
+        ));
+    }
+    xml.push_str(&format!("{indent}</ChoiceParameterLinks>\r\n"));
+}
+
 fn push_metadata_child_choice_parameters_xml(
     xml: &mut String,
     indent: &str,
@@ -26075,22 +32816,31 @@ fn push_metadata_child_choice_parameters_xml(
             "{indent}\t<app:item name=\"{}\">\r\n",
             escape_xml_text(&parameter.name)
         ));
-        if parameter.value_refs.len() == 1 {
-            xml.push_str(&format!(
-                "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
-                escape_xml_element_text(&parameter.value_refs[0])
-            ));
-        } else {
-            xml.push_str(&format!(
-                "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n"
-            ));
-            for value_ref in &parameter.value_refs {
+        match &parameter.value {
+            MetadataChoiceParameterValue::Boolean(value) => {
                 xml.push_str(&format!(
-                    "{indent}\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">{}</v8:Value>\r\n",
+                    "{indent}\t\t<app:value xsi:type=\"xs:boolean\">{}</app:value>\r\n",
+                    xml_bool(*value)
+                ));
+            }
+            MetadataChoiceParameterValue::DesignTimeRef(value_ref) => {
+                xml.push_str(&format!(
+                    "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
                     escape_xml_element_text(value_ref)
                 ));
             }
-            xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
+            MetadataChoiceParameterValue::FixedArray(value_refs) => {
+                xml.push_str(&format!(
+                    "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n"
+                ));
+                for value_ref in value_refs {
+                    xml.push_str(&format!(
+                        "{indent}\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">{}</v8:Value>\r\n",
+                        escape_xml_element_text(value_ref)
+                    ));
+                }
+                xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
+            }
         }
         xml.push_str(&format!("{indent}\t</app:item>\r\n"));
     }
@@ -26107,12 +32857,19 @@ fn push_metadata_tabular_section_properties_xml(
         "{indent}<FillChecking>{}</FillChecking>\r\n",
         properties.fill_checking
     ));
-    push_metadata_line_number_standard_attribute_xml(xml, indent, properties.fill_checking);
-    xml.push_str(&format!(
-        "{indent}<Use>{}</Use>\r\n\
-{indent}<LineNumberLength>{}</LineNumberLength>\r\n",
-        properties.use_mode, properties.line_number_length
-    ));
+    push_metadata_line_number_standard_attribute_xml(
+        xml,
+        indent,
+        properties.line_number_fill_checking,
+    );
+    if let Some(use_mode) = properties.use_mode {
+        xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
+    }
+    if let Some(line_number_length) = properties.line_number_length {
+        xml.push_str(&format!(
+            "{indent}<LineNumberLength>{line_number_length}</LineNumberLength>\r\n"
+        ));
+    }
 }
 
 fn push_metadata_line_number_standard_attribute_xml(
@@ -26162,6 +32919,18 @@ fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> Strin
                 xml_bool(*value)
             )
         }
+        MetadataChildFillValue::Decimal(value) => format!(
+            "<FillValue xsi:type=\"xs:decimal\">{}</FillValue>",
+            escape_xml_element_text(value)
+        ),
+        MetadataChildFillValue::DateTime(value) => format!(
+            "<FillValue xsi:type=\"xs:dateTime\">{}</FillValue>",
+            escape_xml_element_text(value)
+        ),
+        MetadataChildFillValue::DesignTimeRef(value) => format!(
+            "<FillValue xsi:type=\"xr:DesignTimeRef\">{}</FillValue>",
+            escape_xml_element_text(value)
+        ),
         MetadataChildFillValue::String(value) if value.is_empty() => {
             "<FillValue xsi:type=\"xs:string\"/>".to_string()
         }
@@ -27244,7 +34013,11 @@ fn format_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
     format_metadata_types_xml_with_indent(value_types, "\t\t\t")
 }
 
-fn format_metadata_types_xml_with_indent(
+fn format_form_metadata_types_xml(value_types: &[ConstantValueType]) -> String {
+    format_form_metadata_types_xml_with_indent(value_types, "\t\t\t")
+}
+
+fn format_form_metadata_types_xml_with_indent(
     value_types: &[ConstantValueType],
     indent: &str,
 ) -> String {
@@ -27252,8 +34025,13 @@ fn format_metadata_types_xml_with_indent(
     let nested2 = format!("{nested}\t");
     let mut xml = format!("{indent}<Type>\r\n");
     for value_type in value_types {
+        let tag_name = match value_type {
+            ConstantValueType::Reference { reference } => form_reference_type_tag(reference),
+            _ => "Type",
+        };
+        let namespace_attr = metadata_type_xml_namespace_attr(value_type);
         xml.push_str(&format!(
-            "{nested}<v8:Type>{}</v8:Type>\r\n",
+            "{nested}<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
             metadata_type_xml_name(value_type)
         ));
     }
@@ -27316,6 +34094,155 @@ fn format_metadata_types_xml_with_indent(
     xml
 }
 
+fn format_type_description_value_types_xml(
+    value_types: &[ConstantValueType],
+    indent: &str,
+) -> String {
+    let nested = format!("{indent}\t");
+    let mut xml = String::new();
+    for value_type in value_types {
+        let tag_name = metadata_type_xml_tag(value_type);
+        let namespace_attr = metadata_type_xml_namespace_attr(value_type);
+        xml.push_str(&format!(
+            "{indent}<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
+            metadata_type_xml_name(value_type)
+        ));
+    }
+    if let Some(number) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::Number {
+            digits,
+            fraction_digits,
+            allowed_sign_flag,
+        } => Some((*digits, *fraction_digits, *allowed_sign_flag)),
+        _ => None,
+    }) {
+        xml.push_str(&format!("{indent}<v8:NumberQualifiers>\r\n"));
+        xml.push_str(&format!("{nested}<v8:Digits>{}</v8:Digits>\r\n", number.0));
+        xml.push_str(&format!(
+            "{nested}<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
+            number.1
+        ));
+        xml.push_str(&format!(
+            "{nested}<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            number_allowed_sign_xml(number.2)
+        ));
+        xml.push_str(&format!("{indent}</v8:NumberQualifiers>\r\n"));
+    }
+    if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::String {
+            length,
+            allowed_length_flag,
+        } => Some((
+            length.unwrap_or(0),
+            length.map(|_| *allowed_length_flag).unwrap_or(1),
+        )),
+        _ => None,
+    }) {
+        xml.push_str(&format!("{indent}<v8:StringQualifiers>\r\n"));
+        xml.push_str(&format!("{nested}<v8:Length>{}</v8:Length>\r\n", string.0));
+        xml.push_str(&format!(
+            "{nested}<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            string_allowed_length_xml(string.1)
+        ));
+        xml.push_str(&format!("{indent}</v8:StringQualifiers>\r\n"));
+    }
+    if let Some(date_fractions) = value_types.iter().find_map(|value_type| {
+        if let ConstantValueType::DateTime { date_fractions } = value_type {
+            Some(*date_fractions)
+        } else {
+            None
+        }
+    }) {
+        xml.push_str(&format!(
+            "{indent}<v8:DateQualifiers>\r\n\
+{nested}<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
+{indent}</v8:DateQualifiers>\r\n"
+        ));
+    }
+    xml
+}
+
+fn format_metadata_types_xml_with_indent(
+    value_types: &[ConstantValueType],
+    indent: &str,
+) -> String {
+    let nested = format!("{indent}\t");
+    let nested2 = format!("{nested}\t");
+    let mut xml = format!("{indent}<Type>\r\n");
+    for value_type in value_types {
+        let tag_name = metadata_type_xml_tag(value_type);
+        let namespace_attr = metadata_type_xml_namespace_attr(value_type);
+        xml.push_str(&format!(
+            "{nested}<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
+            metadata_type_xml_name(value_type)
+        ));
+    }
+
+    if let Some(number) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::Number {
+            digits,
+            fraction_digits,
+            allowed_sign_flag,
+        } => Some((*digits, *fraction_digits, *allowed_sign_flag)),
+        _ => None,
+    }) {
+        xml.push_str(&format!("{nested}<v8:NumberQualifiers>\r\n"));
+        xml.push_str(&format!("{nested2}<v8:Digits>{}</v8:Digits>\r\n", number.0));
+        xml.push_str(&format!(
+            "{nested2}<v8:FractionDigits>{}</v8:FractionDigits>\r\n",
+            number.1
+        ));
+        xml.push_str(&format!(
+            "{nested2}<v8:AllowedSign>{}</v8:AllowedSign>\r\n",
+            number_allowed_sign_xml(number.2)
+        ));
+        xml.push_str(&format!("{nested}</v8:NumberQualifiers>\r\n"));
+    }
+
+    if let Some(string) = value_types.iter().find_map(|value_type| match value_type {
+        ConstantValueType::String {
+            length,
+            allowed_length_flag,
+        } => Some((
+            length.unwrap_or(0),
+            length.map(|_| *allowed_length_flag).unwrap_or(1),
+        )),
+        _ => None,
+    }) {
+        xml.push_str(&format!("{nested}<v8:StringQualifiers>\r\n"));
+        xml.push_str(&format!("{nested2}<v8:Length>{}</v8:Length>\r\n", string.0));
+        xml.push_str(&format!(
+            "{nested2}<v8:AllowedLength>{}</v8:AllowedLength>\r\n",
+            string_allowed_length_xml(string.1)
+        ));
+        xml.push_str(&format!("{nested}</v8:StringQualifiers>\r\n"));
+    }
+
+    if let Some(date_fractions) = value_types.iter().find_map(|value_type| {
+        if let ConstantValueType::DateTime { date_fractions } = value_type {
+            Some(*date_fractions)
+        } else {
+            None
+        }
+    }) {
+        xml.push_str(&format!(
+            "{nested}<v8:DateQualifiers>\r\n\
+{nested2}<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
+{nested}</v8:DateQualifiers>\r\n"
+        ));
+    }
+
+    xml.push_str(&format!("{indent}</Type>\r\n"));
+    xml
+}
+
+fn metadata_type_xml_tag(value_type: &ConstantValueType) -> &'static str {
+    match value_type {
+        ConstantValueType::Reference { reference } => constant_reference_type_tag(reference),
+        _ => "Type",
+    }
+}
+
 fn metadata_type_xml_name(value_type: &ConstantValueType) -> String {
     match value_type {
         ConstantValueType::Boolean => "xs:boolean".to_string(),
@@ -27323,6 +34250,15 @@ fn metadata_type_xml_name(value_type: &ConstantValueType) -> String {
         ConstantValueType::Number { .. } => "xs:decimal".to_string(),
         ConstantValueType::DateTime { .. } => "xs:dateTime".to_string(),
         ConstantValueType::Reference { reference, .. } => reference.clone(),
+    }
+}
+
+fn metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'static str {
+    match value_type {
+        ConstantValueType::Reference { reference } if reference.starts_with("mxl:") => {
+            r#" xmlns:mxl="http://v8.1c.ru/8.2/data/spreadsheet""#
+        }
+        _ => "",
     }
 }
 
@@ -27377,8 +34313,9 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
         ),
         ConstantValueType::Reference { reference, .. } => {
             let tag = constant_reference_type_tag(reference);
+            let namespace_attr = metadata_type_xml_namespace_attr(value_type);
             format!(
-                "\t\t\t<Type>\r\n\t\t\t\t<v8:{tag}>{}</v8:{tag}>\r\n\t\t\t</Type>\r\n",
+                "\t\t\t<Type>\r\n\t\t\t\t<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n\t\t\t</Type>\r\n",
                 escape_xml_text(reference)
             )
         }
@@ -27387,6 +34324,18 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
 
 fn constant_reference_type_tag(reference: &str) -> &'static str {
     if reference.starts_with("cfg:DefinedType.") || reference == "cfg:ExchangePlanRef" {
+        "TypeSet"
+    } else {
+        "Type"
+    }
+}
+
+fn form_reference_type_tag(reference: &str) -> &'static str {
+    if reference.starts_with("cfg:DefinedType.")
+        || reference == "cfg:AnyIBRef"
+        || reference == "cfg:ExchangePlanRef"
+        || (reference.starts_with("cfg:") && reference.ends_with("Ref") && !reference.contains('.'))
+    {
         "TypeSet"
     } else {
         "Type"
@@ -29730,6 +36679,7 @@ mod tests {
         assert!(xml.contains(r#"version="2.20""#));
         assert!(!xml.contains("xmlns:pal="));
         assert!(!xml.contains("<UseInInterfaceCompatibilityMode>"));
+        assert!(xml.contains("<ExtendedPresentation/>"));
     }
 
     #[test]
@@ -29971,11 +36921,56 @@ mod tests {
             form_event_name_from_identifier("52dbb775-1631-4fd5-8c55-1615b5881dac"),
             Some("BeforeClose")
         );
+        for (uuid, name) in [
+            (
+                "e73d6384-49d2-4885-a752-a674d6ff7742",
+                "FillCheckProcessingAtServer",
+            ),
+            (
+                "1952a54f-35ad-4928-902f-df212ab38ca3",
+                "OnSaveDataInSettingsAtServer",
+            ),
+            (
+                "e773807c-0c0c-4689-a093-231ddcd6409f",
+                "BeforeLoadDataFromSettingsAtServer",
+            ),
+            ("5426e344-5740-4f23-99c1-99179a200dc5", "ExternalEvent"),
+            ("ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1", "Opening"),
+        ] {
+            assert_eq!(form_event_name_from_identifier(uuid), Some(name));
+        }
         assert_eq!(
             parse_form_child_item_event_identifier("fe115cc8-9e33-4684-a166-bd5136fe7a9f")
                 .as_deref(),
             Some("OnChange")
         );
+        assert_eq!(
+            parse_form_child_item_event_identifier("0d644ff6-443b-4390-86fa-7f9105e42711")
+                .as_deref(),
+            Some("DragCheck")
+        );
+        assert_eq!(
+            parse_form_child_item_event_identifier("8ad48496-8d0b-4f6c-ae48-99d95227884b")
+                .as_deref(),
+            Some("Drag")
+        );
+        for (uuid, name) in [
+            ("0d8cf5b0-55eb-4d1e-960a-22c160210945", "ValueChoice"),
+            ("9874537f-454c-40ae-83e9-3b9cefbc6d08", "Click"),
+            ("d710ea07-5c96-4c43-ab6e-e138d3653780", "URLProcessing"),
+            ("178a97c4-0ffe-4fcc-93e6-505369939da5", "AutoComplete"),
+            ("f228b12f-d892-4925-b338-695617357b32", "OnActivateCell"),
+            ("b3c10170-c5ff-4cba-b537-679e1c872b45", "OnStartEdit"),
+            ("de65638d-a806-4a76-bc10-f62bbc86e0e7", "AfterDeleteRow"),
+            ("cb286ab3-3a1c-40d2-a232-6e64f624ccec", "DragEnd"),
+            ("6d4d6747-a823-4f61-ab31-a426572f2c6c", "DragStart"),
+            ("70636369-514c-4662-977e-1c3976c9756c", "Tuning"),
+        ] {
+            assert_eq!(
+                parse_form_child_item_event_identifier(uuid).as_deref(),
+                Some(name)
+            );
+        }
     }
 
     #[test]
@@ -30044,6 +37039,17 @@ mod tests {
         assert!(form_xml.contains("<Group>Horizontal</Group>"));
         assert!(form_xml.contains("<CommandBarLocation>Bottom</CommandBarLocation>"));
         assert!(!form_xml.contains("<ShowCommandBar>"));
+    }
+
+    #[test]
+    fn extracts_form_lock_owner_window_opening_mode_to_body_xml() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,1,80,30,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},1,1,0,0,1,0,3,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<WindowOpeningMode>LockOwnerWindow</WindowOpeningMode>"));
     }
 
     #[test]
@@ -30243,6 +37249,135 @@ mod tests {
         assert!(form_xml.contains("<ExcludedCommand>Change</ExcludedCommand>"));
         assert!(form_xml.contains("<ExcludedCommand>Copy</ExcludedCommand>"));
         assert!(form_xml.contains("<ExcludedCommand>Create</ExcludedCommand>"));
+    }
+
+    #[test]
+    fn extracts_form_command_set_restore_and_save_values() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,{0},{2,239f0103-8de9-4fdf-b485-eb5531da7e51,71e0226e-ebb2-4e33-8745-0a94a01bbf15},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<ExcludedCommand>RestoreValues</ExcludedCommand>"));
+        assert!(form_xml.contains("<ExcludedCommand>SaveValues</ExcludedCommand>"));
+    }
+
+    #[test]
+    fn extracts_form_command_set_dialog_commands() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,{0},{7,06ee6a21-061e-47f8-81c5-92ae8b8f3b5d,3f01ed62-97f8-465b-b4f7-6517ac2bc994,5174ad3f-0569-42fd-8adf-011d8206db6c,5d41082e-9619-42ec-b96f-98b082b3a2f0,679b62d9-ff72-4329-bf3a-c0c32b311dd2,d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7,f3613d5c-20c6-46e5-b4d5-7d712ece1296},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        for command in ["Abort", "Cancel", "Ignore", "No", "OK", "Retry", "Yes"] {
+            assert!(form_xml.contains(&format!("<ExcludedCommand>{command}</ExcludedCommand>")));
+        }
+    }
+
+    #[test]
+    fn extracts_form_command_set_open_from_server_commands() {
+        let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,1,{"ru","Мобильные устройства 1С-ЭПД"}},0,0,1,1,1,0,2,0,{3,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",3ccc650e-f631-4cae-8e33-3eaac610b5f9,"ПриОткрытии",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",1,0,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1},{12,06ee6a21-061e-47f8-81c5-92ae8b8f3b5d,0ea1a92b-3477-44dd-b152-ea7d411f1c5d,239f0103-8de9-4fdf-b485-eb5531da7e51,39bb0fe9-771d-4dd5-8a6e-2d16984523af,3f01ed62-97f8-465b-b4f7-6517ac2bc994,5174ad3f-0569-42fd-8adf-011d8206db6c,573e81b7-57eb-45f0-ba4d-ada7c2537a2d,5d41082e-9619-42ec-b96f-98b082b3a2f0,679b62d9-ff72-4329-bf3a-c0c32b311dd2,71e0226e-ebb2-4e33-8745-0a94a01bbf15,d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7,f3613d5c-20c6-46e5-b4d5-7d712ece1296},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        for command in [
+            "Abort",
+            "Cancel",
+            "Help",
+            "Ignore",
+            "No",
+            "OK",
+            "OpenFromMainServer",
+            "OpenFromStandaloneServer",
+            "RestoreValues",
+            "Retry",
+            "SaveValues",
+            "Yes",
+        ] {
+            assert!(form_xml.contains(&format!("<ExcludedCommand>{command}</ExcludedCommand>")));
+        }
+    }
+
+    #[test]
+    fn orders_form_command_set_close_before_help_and_restore() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,1,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,{0},{11,06ee6a21-061e-47f8-81c5-92ae8b8f3b5d,239f0103-8de9-4fdf-b485-eb5531da7e51,3772996b-41f4-4c47-a5a8-ea397db424ae,39bb0fe9-771d-4dd5-8a6e-2d16984523af,3f01ed62-97f8-465b-b4f7-6517ac2bc994,5174ad3f-0569-42fd-8adf-011d8206db6c,5d41082e-9619-42ec-b96f-98b082b3a2f0,679b62d9-ff72-4329-bf3a-c0c32b311dd2,71e0226e-ebb2-4e33-8745-0a94a01bbf15,d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7,f3613d5c-20c6-46e5-b4d5-7d712ece1296},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+        let close = form_xml
+            .find("<ExcludedCommand>Close</ExcludedCommand>")
+            .unwrap();
+        let help = form_xml
+            .find("<ExcludedCommand>Help</ExcludedCommand>")
+            .unwrap();
+        let restore = form_xml
+            .find("<ExcludedCommand>RestoreValues</ExcludedCommand>")
+            .unwrap();
+
+        assert!(close < help, "{form_xml}");
+        assert!(help < restore, "{form_xml}");
+    }
+
+    #[test]
+    fn orders_form_command_bar_location_before_command_set_and_customize_before_help() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,2,80,30,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},1,1,0,0,1,0,3,0,{0},{4,06ee6a21-061e-47f8-81c5-92ae8b8f3b5d,679b62d9-ff72-4329-bf3a-c0c32b311dd2,198ea630-fda2-4cda-8a23-f999f4c67ee6,39bb0fe9-771d-4dd5-8a6e-2d16984523af},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+        let command_bar_location = form_xml
+            .find("<CommandBarLocation>Bottom</CommandBarLocation>")
+            .unwrap();
+        let command_set = form_xml.find("<CommandSet>").unwrap();
+        let customize = form_xml
+            .find("<ExcludedCommand>CustomizeForm</ExcludedCommand>")
+            .unwrap();
+        let help = form_xml
+            .find("<ExcludedCommand>Help</ExcludedCommand>")
+            .unwrap();
+
+        assert!(command_bar_location < command_set, "{form_xml}");
+        assert!(customize < help, "{form_xml}");
+    }
+
+    #[test]
+    fn extracts_form_command_set_dynamic_list_standard_commands() {
+        let form_body = deflate_for_test(
+            r##"{4,{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,1,{"ru","Документы закупки"}},0,0,1,1,1,0,1,1,1,{"N",0},{4,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",3ccc650e-f631-4cae-8e33-3eaac610b5f9,"ПриОткрытии",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",ca21cd18-35b2-4281-b5c8-016ecc8da8ac,"ПриЗакрытии"},{21,06ee6a21-061e-47f8-81c5-92ae8b8f3b5d,1c00edb8-a826-4855-9bde-94dbc5f620e5,239f0103-8de9-4fdf-b485-eb5531da7e51,342c531d-dc73-458a-8ac4-6a746916a33b,3f01ed62-97f8-465b-b4f7-6517ac2bc994,4f834c38-add1-45e4-a9f3-cefe3efac5c9,5174ad3f-0569-42fd-8adf-011d8206db6c,5d41082e-9619-42ec-b96f-98b082b3a2f0,679b62d9-ff72-4329-bf3a-c0c32b311dd2,6886601d-276c-4d3f-af0a-05c586025608,71e0226e-ebb2-4e33-8745-0a94a01bbf15,952c2984-9955-415a-8235-5c710aabe732,96e0bc70-f8ff-4732-8119-060923203629,9758d344-4b1d-4dc9-80bd-81060bc18b2a,b520ca45-d8db-4982-b128-bb42a6afd911,bdefa701-6685-453e-a02a-3683d0cc16d3,d5c3842d-7252-4370-9174-756a6cc553e5,d603a249-6eb3-4e38-bb2d-a8a86a8ab156,d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7,f3613d5c-20c6-46e5-b4d5-7d712ece1296,fd8f031f-c168-4e1b-8b0c-15eb3057e688},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        for command in [
+            "Abort",
+            "Cancel",
+            "CancelSearch",
+            "Change",
+            "Copy",
+            "Create",
+            "DynamicListStandardSettings",
+            "Find",
+            "FindByCurrentValue",
+            "Ignore",
+            "ListSettings",
+            "LoadDynamicListSettings",
+            "No",
+            "OK",
+            "OutputList",
+            "Refresh",
+            "RestoreValues",
+            "Retry",
+            "SaveDynamicListSettings",
+            "SaveValues",
+            "Yes",
+        ] {
+            assert!(form_xml.contains(&format!("<ExcludedCommand>{command}</ExcludedCommand>")));
+        }
     }
 
     #[test]
@@ -30475,8 +37610,7 @@ mod tests {
         assert!(form_xml.contains(r#"<Attribute name="Список" id="1">"#));
         assert!(form_xml.contains("<v8:Type>cfg:DynamicList</v8:Type>"));
         assert!(form_xml.contains("<MainAttribute>true</MainAttribute>"));
-        assert!(form_xml.contains("<Field>Список.Наименование</Field>"));
-        assert!(form_xml.contains("<Field>Список.Ссылка</Field>"));
+        assert!(!form_xml.contains("<UseAlways>"));
         assert!(form_xml.contains("<ManualQuery>true</ManualQuery>"));
         assert!(form_xml.contains("<DynamicDataRead>true</DynamicDataRead>"));
         assert!(form_xml.contains("<MainTable>Catalog.Товары</MainTable>"));
@@ -30506,7 +37640,7 @@ mod tests {
         assert!(form_xml.contains(r#"<Command name="Выполнить" id="2">"#));
         assert!(form_xml.contains("<Action>Выполнить</Action>"));
         assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
-        assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+        assert!(!form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
     }
 
     #[test]
@@ -30531,6 +37665,54 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_command_shortcut_picture_representation_and_current_row_use() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,1,1,1},"",{0},{0},{0,1,{9,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"Обновить",{1,1,{"ru","Обновить"}},{1,1,{"ru","Обновить"}},{0,{0,{"B",1},0}},{0,116,0},{4,1,{0,fc4f29e0-d168-4fe0-8e64-e982fabf2595},"",-1,-1,1,0,""},"Обновить",2,0,0,{0,0},1,0,1,0,0,1}}},{0}}"##
+                .as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains("<Shortcut>F5</Shortcut>"));
+        assert!(form_xml.contains("<xr:Ref>StdPicture.Refresh</xr:Ref>"));
+        assert!(form_xml.contains("<Representation>TextPicture</Representation>"));
+        assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+    }
+
+    #[test]
+    fn keeps_form_command_without_action_when_picture_is_present() {
+        let form_body = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,1,1,1},"",{0},{0},{0,1,{9,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"Р’С‹Р±СЂР°С‚СЊР’СЃРµ",{1,1,{"ru","Р’С‹Р±СЂР°С‚СЊ РІСЃРµ"}},{1,1,{"ru","Р’С‹Р±СЂР°С‚СЊ РІСЃРµ"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,fc4f29e0-d168-4fe0-8e64-e982fabf2595},"",-1,-1,1,0,""},"",1,0,0,{0,0},1,0,1,0,0,1}}},{0}}"##
+                .as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains(r#"<Command name="Р’С‹Р±СЂР°С‚СЊР’СЃРµ" id="2">"#));
+        assert!(form_xml.contains("<xr:Ref>StdPicture.Refresh</xr:Ref>"));
+        assert!(form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
+        assert!(!form_xml.contains("<Action>"));
+    }
+
+    #[test]
+    fn extracts_form_command_text_and_picture_representation() {
+        let text_command = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,1,1,1},"",{0},{0},{0,1,{9,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"Текст",{1,1,{"ru","Текст"}},{1,1,{"ru","Текст"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,fc4f29e0-d168-4fe0-8e64-e982fabf2595},"",-1,-1,1,0,""},"Текст",0,0,0,{0,0},1,0,1,0,0,1}}},{0}}"##
+                .as_bytes(),
+        );
+        let picture_command = deflate_for_test(
+            r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,1,1,1},"",{0},{0},{0,1,{9,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"Картинка",{1,1,{"ru","Картинка"}},{1,1,{"ru","Картинка"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,fc4f29e0-d168-4fe0-8e64-e982fabf2595},"",-1,-1,1,0,""},"Картинка",1,0,0,{0,0},1,0,1,0,0,1}}},{0}}"##
+                .as_bytes(),
+        );
+
+        let text_xml = extract_form_body_xml(&text_command, &BTreeMap::new()).unwrap();
+        let picture_xml = extract_form_body_xml(&picture_command, &BTreeMap::new()).unwrap();
+
+        assert!(text_xml.contains("<Representation>Text</Representation>"));
+        assert!(picture_xml.contains("<Representation>Picture</Representation>"));
+    }
+
+    #[test]
     fn extracts_dynamic_list_settings_fields_from_body_tail() {
         let form_body = deflate_for_test(
             r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1},"",{4,1,{9,{1},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},1,0,0,0,{0,1,"Field",{0,2,{"Список.Период","Период"},{"Список.Сумма","Сумма"}}},{0,0}}},{0,0},{0,0},{0}}"##
@@ -30541,10 +37723,10 @@ mod tests {
 
         assert!(form_xml.contains(r#"<Attribute name="Список" id="1">"#));
         assert!(form_xml.contains("<Settings xsi:type=\"DynamicList\">"));
-        assert!(form_xml.contains("<dataPath>Список.Период</dataPath>"));
-        assert!(form_xml.contains("<field>Период</field>"));
-        assert!(form_xml.contains("<dataPath>Список.Сумма</dataPath>"));
-        assert!(form_xml.contains("<field>Сумма</field>"));
+        assert!(form_xml.contains("<dcssch:dataPath>Список.Период</dcssch:dataPath>"));
+        assert!(form_xml.contains("<dcssch:field>Период</dcssch:field>"));
+        assert!(form_xml.contains("<dcssch:dataPath>Список.Сумма</dcssch:dataPath>"));
+        assert!(form_xml.contains("<dcssch:field>Сумма</dcssch:field>"));
         assert!(
             form_xml
                 .find("<MainAttribute>true</MainAttribute>")
@@ -30556,8 +37738,509 @@ mod tests {
     }
 
     #[test]
+    fn extracts_dynamic_list_settings_fields_from_fields_map_items() {
+        let settings = parse_form_dynamic_list_settings(
+            r##"{0,11,"ManualQuery",{"B",1},"FiledsMapItemId0",{"S","Дата"},"FiledsMapItemName0",{"N",3},"FiledsMapItemId1",{"S","Ссылка"},"FiledsMapItemName1",{"N",23},"FiledsMapItemId2",{"S","ДатаОтгрузки"},"FiledsMapItemName2",{"N",27},"FiledsMapItemId3",{"S","ВремяДоставкиС"},"FiledsMapItemName3",{"N",29}}"##,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.fields,
+            vec![
+                FormDynamicListField {
+                    item_id: Some("3".to_string()),
+                    data_path: "Дата".to_string(),
+                    field: "Дата".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("23".to_string()),
+                    data_path: "Ссылка".to_string(),
+                    field: "Ссылка".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("27".to_string()),
+                    data_path: "ДатаОтгрузки".to_string(),
+                    field: "ДатаОтгрузки".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("29".to_string()),
+                    data_path: "ВремяДоставкиС".to_string(),
+                    field: "ВремяДоставкиС".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_dynamic_list_settings_fields_from_reversed_fields_map_items() {
+        let settings = parse_form_dynamic_list_settings(
+            r##"{0,11,"ManualQuery",{"B",1},{"S","Дата"},"FiledsMapItemId0",{"N",3},"FiledsMapItemName0",{"S","Ссылка"},"FiledsMapItemId1",{"N",23},"FiledsMapItemName1",{"S","ДатаОтгрузки"},"FiledsMapItemId2",{"N",27},"FiledsMapItemName2",{"S","ВремяДоставкиС"},"FiledsMapItemId3",{"N",29},"FiledsMapItemName3"}"##,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.fields,
+            vec![
+                FormDynamicListField {
+                    item_id: Some("3".to_string()),
+                    data_path: "Дата".to_string(),
+                    field: "Дата".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("23".to_string()),
+                    data_path: "Ссылка".to_string(),
+                    field: "Ссылка".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("27".to_string()),
+                    data_path: "ДатаОтгрузки".to_string(),
+                    field: "ДатаОтгрузки".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("29".to_string()),
+                    data_path: "ВремяДоставкиС".to_string(),
+                    field: "ВремяДоставкиС".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_dynamic_list_settings_fields_from_native_fields_map_items() {
+        let settings = parse_form_dynamic_list_settings(
+            r##"{0,13,"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",6},"FieldsMapItemName0",{"S","Номер"},"FiledsMapItemId0",{"N",6},"FiledsMapItemName0",{"S","Номер"},"FieldsMapItemId1",{"N",8},"FieldsMapItemName1",{"S","Дата"},"FiledsMapItemId1",{"N",8},"FiledsMapItemName1",{"S","Дата"}}"##,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.fields,
+            vec![
+                FormDynamicListField {
+                    item_id: Some("6".to_string()),
+                    data_path: "Номер".to_string(),
+                    field: "Номер".to_string(),
+                },
+                FormDynamicListField {
+                    item_id: Some("8".to_string()),
+                    data_path: "Дата".to_string(),
+                    field: "Дата".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_form_server_state_inner_xml() {
+        let xml = r#"junk<?xml version="1.0" encoding="UTF-8"?>
+<UniversalListServerOnlyState xmlns="" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<Field xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xsi:type="dcssch:DataSetFieldField">
+		<dcssch:dataPath>Дата</dcssch:dataPath>
+		<dcssch:field>Дата</dcssch:field>
+	</Field>
+	<Parameter xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xsi:type="dcssch:Parameter">
+		<dcssch:name>ДатаАктуальности</dcssch:name>
+	</Parameter>
+</UniversalListServerOnlyState>"#;
+
+        let inner = extract_form_server_state_inner_xml(xml).expect("server state inner xml");
+
+        assert!(inner.contains(r#"<Field xsi:type="dcssch:DataSetFieldField">"#));
+        assert!(inner.contains("<dcssch:dataPath>Дата</dcssch:dataPath>"));
+        assert!(inner.contains(r#"<Parameter xsi:type="dcssch:Parameter">"#));
+        assert!(inner.contains("<dcssch:name>ДатаАктуальности</dcssch:name>"));
+    }
+
+    #[test]
+    fn extracts_form_attributes_conditional_appearance_from_body_tail() {
+        let section = extract_form_body_attributes_section(
+            &[format!(
+                "{{4,0,{{0}},{{#base64:{}}}}}",
+                "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPFNldHRpbmdzIHhtbG5zPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEtY29tcG9zaXRpb24tc3lzdGVtL3NldHRpbmdzIiB4bWxuczpkY3Njb3I9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vY29yZSIgeG1sbnM6djh1aT0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpIiB4bWxuczpzeXM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS91aS9mb250cy9zeXN0ZW0iIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+PGNvbmRpdGlvbmFsQXBwZWFyYW5jZT48aXRlbT48c2VsZWN0aW9uPjxpdGVtPjxmaWVsZD7QoNC10LrQstC40LfQuNGC0YvQntGB0L3QvtCy0L3Ri9C10J/RgNC10LTRgdGC0LDQstC70LXQvdC40LU8L2ZpZWxkPjwvaXRlbT48L3NlbGVjdGlvbj48ZmlsdGVyPjxpdGVtIHhzaTp0eXBlPSJGaWx0ZXJJdGVtQ29tcGFyaXNvbiI+PGxlZnQgeHNpOnR5cGU9ImRjc2NvcjpGaWVsZCI+0KDQtdC60LLQuNC30LjRgtGL0J/QvtC40YHQutCwLtCf0YDQtdC00YPRgdGC0LDQvdC+0LLQu9C10L3QvdC+0LU8L2xlZnQ+PGNvbXBhcmlzb25UeXBlPkVxdWFsPC9jb21wYXJpc29uVHlwZT48cmlnaHQgeHNpOnR5cGU9InhzOmJvb2xlYW4iPnRydWU8L3JpZ2h0PjwvaXRlbT48L2ZpbHRlcj48YXBwZWFyYW5jZT48ZGNzY29yOml0ZW0geHNpOnR5cGU9IlNldHRpbmdzUGFyYW1ldGVyVmFsdWUiPjxkY3Njb3I6cGFyYW1ldGVyPtCo0YDQuNGE0YI8L2Rjc2NvcjpwYXJhbWV0ZXI+PGRjc2Nvcjp2YWx1ZSB4c2k6dHlwZT0idjh1aTpGb250IiByZWY9InN5czpEZWZhdWx0R1VJRm9udCIgYm9sZD0idHJ1ZSIgaXRhbGljPSJmYWxzZSIgdW5kZXJsaW5lPSJmYWxzZSIgc3RyaWtlb3V0PSJmYWxzZSIga2luZD0iV2luZG93c0ZvbnQiLz48L2Rjc2NvcjppdGVtPjwvYXBwZWFyYW5jZT48L2l0ZW0+PC9jb25kaXRpb25hbEFwcGVhcmFuY2U+PC9TZXR0aW5ncz4="
+            )],
+            &BTreeMap::new(),
+        );
+
+        let xml = section
+            .conditional_appearance_xml
+            .as_deref()
+            .expect("conditional appearance xml");
+
+        assert!(xml.contains("<ConditionalAppearance>"), "{xml}");
+        assert!(xml.contains("<dcsset:selection>"), "{xml}");
+        assert!(
+            xml.contains(r#"<dcsset:item xsi:type="dcsset:FilterItemComparison">"#),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(r#"<dcsset:left xsi:type="dcscor:Field">"#),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn repairs_utf8_mojibake_in_conditional_appearance_xml() {
+        let repaired =
+            repair_utf8_mojibake("Ð ÐµÐºÐ²Ð¸Ð·Ð¸ÑÑÐÑÐ½Ð¾Ð²Ð½ÑÐµÐÑÐµÐ´ÑÑÐ°Ð²Ð»ÐµÐ½Ð¸Ðµ")
+                .expect("repaired mojibake");
+
+        assert_eq!(repaired, "РеквизитыОсновныеПредставление");
+        assert_eq!(repair_utf8_mojibake("Ð¨ÑÐ¸ÑÑ").as_deref(), Some("Шрифт"));
+    }
+
+    #[test]
+    fn normalizes_conditional_appearance_style_item_value_refs() {
+        let xml = normalize_form_attributes_conditional_appearance_xml(
+            r#"<Settings><conditionalAppearance><item><appearance><dcscor:item xsi:type="SettingsParameterValue"><dcscor:parameter>ЦветТекста</dcscor:parameter><dcscor:value xsi:type="v8ui:Color">0:6a2cf0b3-46ab-4e14-beff-ab6b97c1e5b2</dcscor:value></dcscor:item></appearance></item></conditionalAppearance></Settings>"#,
+            &BTreeMap::from([(
+                "6a2cf0b3-46ab-4e14-beff-ab6b97c1e5b2".to_string(),
+                "StyleItem.ЦветНеАктивнойСтроки".to_string(),
+            )]),
+        )
+        .expect("normalized xml");
+
+        assert!(xml.contains("style:ЦветНеАктивнойСтроки"), "{xml}");
+        assert!(
+            !xml.contains("0:6a2cf0b3-46ab-4e14-beff-ab6b97c1e5b2"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn prefix_default_xml_tags_preserves_utf8_text() {
+        let xml = prefix_default_xml_tags(
+            "<item><field>РеквизитыОсновныеПредставление</field></item>",
+            "dcsset",
+        );
+
+        assert_eq!(
+            xml,
+            "<dcsset:item><dcsset:field>РеквизитыОсновныеПредставление</dcsset:field></dcsset:item>"
+        );
+    }
+
+    #[test]
+    fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
+        let xml = format_form_attributes_section_xml(
+            &[],
+            &FormAttributesSection {
+                conditional_appearance_xml: Some(
+                    "<ConditionalAppearance><dcsset:item><dcsset:selection/></dcsset:item></ConditionalAppearance>"
+                        .to_string(),
+                ),
+            },
+        );
+
+        assert!(xml.contains("\t<Attributes>\r\n"), "{xml}");
+        assert!(xml.contains("\t\t<ConditionalAppearance>\r\n"), "{xml}");
+        assert!(xml.contains("\t\t\t<dcsset:item>\r\n"), "{xml}");
+        assert!(xml.contains("\t</Attributes>\r\n"), "{xml}");
+    }
+
+    #[test]
+    fn formats_dynamic_list_server_state_xml_in_settings() {
+        let xml = format_form_attributes_xml(&[FormAttribute {
+            id: "2".to_string(),
+            name: "Список".to_string(),
+            title: Vec::new(),
+            value_types: vec![ConstantValueType::Reference {
+                reference: "cfg:DynamicList".to_string(),
+            }],
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: false,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: Some(FormDynamicListSettings {
+                auto_save_user_settings: false,
+                manual_query: true,
+                dynamic_data_read: true,
+                dynamic_data_read_explicit: true,
+                query_text: Some("ВЫБРАТЬ".to_string()),
+                main_table: Some("Catalog.Товары".to_string()),
+                explicit_fields: Vec::new(),
+                fields: Vec::new(),
+                server_state_xml: Some(
+                    "<Field xsi:type=\"dcssch:DataSetFieldField\">\n\t<dcssch:dataPath>Дата</dcssch:dataPath>\n\t<dcssch:field>Дата</dcssch:field>\n</Field>\n<Parameter xsi:type=\"dcssch:Parameter\">\n\t<dcssch:name>ДатаАктуальности</dcssch:name>\n</Parameter>"
+                        .to_string(),
+                ),
+                list_settings: FormListSettings::default(),
+            }),
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }]);
+
+        assert!(xml.contains(r#"<Settings xsi:type="DynamicList">"#));
+        assert!(xml.contains(r#"<Field xsi:type="dcssch:DataSetFieldField">"#));
+        assert!(xml.contains("<dcssch:dataPath>Дата</dcssch:dataPath>"));
+        assert!(xml.contains(r#"<Parameter xsi:type="dcssch:Parameter">"#));
+        assert!(xml.find("<QueryText>").unwrap() < xml.find("<Field xsi:type=").unwrap());
+        assert!(xml.find("</Parameter>").unwrap() < xml.find("<MainTable>").unwrap());
+    }
+
+    #[test]
+    fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
+        let mut settings = FormDynamicListSettings {
+            auto_save_user_settings: true,
+            manual_query: false,
+            dynamic_data_read: false,
+            dynamic_data_read_explicit: false,
+            query_text: None,
+            main_table: Some("Document.СчетНаОплату".to_string()),
+            explicit_fields: Vec::new(),
+            fields: Vec::new(),
+            server_state_xml: None,
+            list_settings: FormListSettings::default(),
+        };
+
+        apply_implicit_form_dynamic_list_settings(&mut settings);
+
+        assert_eq!(
+            settings
+                .list_settings
+                .filter
+                .as_ref()
+                .and_then(|v| v.view_mode.as_deref()),
+            Some("Normal")
+        );
+        assert_eq!(
+            settings
+                .list_settings
+                .filter
+                .as_ref()
+                .and_then(|v| v.user_setting_id.as_deref()),
+            Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb")
+        );
+        assert_eq!(
+            settings
+                .list_settings
+                .order
+                .as_ref()
+                .and_then(|v| v.view_mode.as_deref()),
+            Some("Normal")
+        );
+        assert_eq!(
+            settings
+                .list_settings
+                .order
+                .as_ref()
+                .and_then(|v| v.user_setting_id.as_deref()),
+            Some("88619765-ccb3-46c6-ac52-38e9c992ebd4")
+        );
+        assert_eq!(
+            settings
+                .list_settings
+                .conditional_appearance
+                .as_ref()
+                .and_then(|v| v.view_mode.as_deref()),
+            Some("Normal")
+        );
+        assert_eq!(
+            settings
+                .list_settings
+                .conditional_appearance
+                .as_ref()
+                .and_then(|v| v.user_setting_id.as_deref()),
+            Some("b75fecce-942b-4aed-abc9-e6a02e460fb3")
+        );
+        assert_eq!(
+            settings.list_settings.items_view_mode.as_deref(),
+            Some("Normal")
+        );
+        assert_eq!(
+            settings.list_settings.items_user_setting_id.as_deref(),
+            Some("911b6018-f537-43e8-a417-da56b22f9aec")
+        );
+    }
+
+    #[test]
+    fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
+        let mut settings = FormDynamicListSettings {
+            auto_save_user_settings: true,
+            manual_query: false,
+            dynamic_data_read: false,
+            dynamic_data_read_explicit: false,
+            query_text: None,
+            main_table: Some("Document.ЖурналБилетовИБронирований".to_string()),
+            explicit_fields: Vec::new(),
+            fields: Vec::new(),
+            server_state_xml: None,
+            list_settings: FormListSettings {
+                filter: Some(FormListSettingsStandardSection::default()),
+                order: Some(FormListSettingsOrder {
+                    items: vec![FormListSettingsOrderItem {
+                        field: "Дата".to_string(),
+                        order_type: Some("Asc".to_string()),
+                    }],
+                    view_mode: None,
+                    user_setting_id: Some("f5abd21c-a9fb-4b17-8ed5-0505541ef807".to_string()),
+                    raw_xml: None,
+                }),
+                conditional_appearance: Some(FormListSettingsStandardSection {
+                    view_mode: None,
+                    user_setting_id: Some("e5c7c4de-2fd3-4479-9d17-62e044522edd".to_string()),
+                    raw_xml: None,
+                }),
+                items_view_mode: None,
+                items_user_setting_id: Some("971fd96e-2ae3-41d5-9d7a-bad772efb890".to_string()),
+            },
+        };
+
+        apply_implicit_form_dynamic_list_settings(&mut settings);
+
+        let xml = format_form_attributes_xml(&[FormAttribute {
+            id: "2".to_string(),
+            name: "Список".to_string(),
+            title: Vec::new(),
+            value_types: vec![ConstantValueType::Reference {
+                reference: "cfg:DynamicList".to_string(),
+            }],
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: false,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: Some(settings),
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }]);
+
+        assert!(!xml.contains("<dcsset:filter>"), "{xml}");
+        assert!(
+            !xml.contains("<dcsset:viewMode>Normal</dcsset:viewMode>"),
+            "{xml}"
+        );
+        assert!(xml.contains(
+            "<dcsset:userSettingID>f5abd21c-a9fb-4b17-8ed5-0505541ef807</dcsset:userSettingID>"
+        ));
+        assert!(xml.contains(
+            "<dcsset:userSettingID>e5c7c4de-2fd3-4479-9d17-62e044522edd</dcsset:userSettingID>"
+        ));
+        assert!(xml.contains(
+            "<dcsset:itemsUserSettingID>971fd96e-2ae3-41d5-9d7a-bad772efb890</dcsset:itemsUserSettingID>"
+        ));
+        assert!(!xml.contains("<dcsset:itemsViewMode>"), "{xml}");
+    }
+
+    #[test]
+    fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
+        let filter_xml = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>",
+        );
+        let order_xml = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<item xsi:type=\"OrderItemField\">\r\n",
+            "\t\t<field>Дата</field>\r\n",
+            "\t\t<orderType>Asc</orderType>\r\n",
+            "\t</item>\r\n",
+            "\t<userSettingID>f5abd21c-a9fb-4b17-8ed5-0505541ef807</userSettingID>\r\n",
+            "</Order>",
+        );
+        let appearance_xml = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<ConditionalAppearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<userSettingID>e5c7c4de-2fd3-4479-9d17-62e044522edd</userSettingID>\r\n",
+            "</ConditionalAppearance>",
+        );
+        let settings = parse_form_dynamic_list_settings(
+            &format!(
+                r##"{{0,10,"AutoSaveUserSettings",{{"B",1}},"Filter",{{"#",f6841c6b-6c71-4c82-ae9e-d08b49db326c,{{#base64:{}}}}},"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:{}}}}},"Appearance",{{"#",93de27ad-a2d8-4b10-a82b-483c9b0648fe,{{#base64:{}}}}},"GroupSelectedSettingId",{{"S","971fd96e-2ae3-41d5-9d7a-bad772efb890"}}}}"##,
+                encode_base64_for_test(filter_xml.as_bytes()),
+                encode_base64_for_test(order_xml.as_bytes()),
+                encode_base64_for_test(appearance_xml.as_bytes()),
+            ),
+            &BTreeMap::new(),
+        )
+        .expect("dynamic list settings");
+        let settings = normalize_form_dynamic_list_settings("Список", settings);
+
+        assert!(settings.list_settings.filter.is_some());
+        assert_eq!(
+            settings
+                .list_settings
+                .order
+                .as_ref()
+                .and_then(|order| order.user_setting_id.as_deref()),
+            Some("f5abd21c-a9fb-4b17-8ed5-0505541ef807")
+        );
+        assert_eq!(
+            settings
+                .list_settings
+                .conditional_appearance
+                .as_ref()
+                .and_then(|section| section.user_setting_id.as_deref()),
+            Some("e5c7c4de-2fd3-4479-9d17-62e044522edd")
+        );
+        assert_eq!(
+            settings.list_settings.items_user_setting_id.as_deref(),
+            Some("971fd96e-2ae3-41d5-9d7a-bad772efb890")
+        );
+        assert_eq!(settings.list_settings.items_view_mode.as_deref(), None);
+    }
+
+    #[test]
+    fn formats_explicit_false_dynamic_data_read() {
+        let xml = format_form_attributes_xml(&[FormAttribute {
+            id: "2".to_string(),
+            name: "Список".to_string(),
+            title: Vec::new(),
+            value_types: vec![ConstantValueType::Reference {
+                reference: "cfg:DynamicList".to_string(),
+            }],
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: false,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: Some(FormDynamicListSettings {
+                auto_save_user_settings: false,
+                manual_query: false,
+                dynamic_data_read: false,
+                dynamic_data_read_explicit: true,
+                query_text: None,
+                main_table: Some("Catalog.Товары".to_string()),
+                explicit_fields: Vec::new(),
+                fields: Vec::new(),
+                server_state_xml: None,
+                list_settings: FormListSettings::default(),
+            }),
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }]);
+
+        assert!(xml.contains("<DynamicDataRead>false</DynamicDataRead>"));
+    }
+
+    #[test]
     fn parses_form_attribute_value_table_columns() {
-        let object_refs = BTreeMap::from([
+        let option_uuid = "7481c4c7-e4d3-4f12-a4a9-e60c7952c6f0";
+        let type_index = BTreeMap::from([
             (
                 "acf6192e-81ca-46ef-93a6-5a6968b78663".to_string(),
                 "v8:ValueTable".to_string(),
@@ -30567,8 +38250,13 @@ mod tests {
                 "cfg:DefinedType.Organization".to_string(),
             ),
         ]);
+        let object_refs = BTreeMap::from([(
+            option_uuid.to_string(),
+            "FunctionalOption.ИспользоватьНесколькоВалют".to_string(),
+        )]);
         let attribute = parse_form_attribute(
-            r##"{9,{7},0,"Список",{1,1,{"ru","Список"}},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,2,{5,13,0,"Организация",{1,1,{"ru","Организация"}},{"Pattern",{"#",33c3e710-bab7-42fb-b59b-91c6e3ba1cb1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,14,0,"Документ",{1,1,{"ru","Документ"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"##,
+            r##"{9,{7},0,"Список",{1,1,{"ru","Список"}},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,2,{5,13,0,"Организация",{1,1,{"ru","Организация"}},{"Pattern",{"#",33c3e710-bab7-42fb-b59b-91c6e3ba1cb1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,1,7481c4c7-e4d3-4f12-a4a9-e60c7952c6f0},0},{5,14,0,"Документ",{1,1,{"ru","Документ"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"##,
+            &type_index,
             &object_refs,
         )
         .unwrap();
@@ -30587,6 +38275,10 @@ mod tests {
                 reference: "cfg:DefinedType.Organization".to_string(),
             }]
         );
+        assert_eq!(
+            attribute.columns[0].functional_options,
+            vec!["FunctionalOption.ИспользоватьНесколькоВалют".to_string()]
+        );
         assert_eq!(attribute.columns[1].id, "14");
         assert_eq!(attribute.columns[1].name, "Документ");
         assert_eq!(
@@ -30596,12 +38288,534 @@ mod tests {
                 allowed_length_flag: 1,
             }]
         );
+        assert!(attribute.save_fields.is_empty());
+        assert!(attribute.functional_options.is_empty());
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(xml.contains("<FunctionalOptions>"));
+        assert!(xml.contains("<Item>FunctionalOption.ИспользоватьНесколькоВалют</Item>"));
+    }
+
+    #[test]
+    fn extracts_form_attribute_save_and_functional_options() {
+        let option_uuid = "19300dfc-8ba2-4b12-be90-0add6afc93b4";
+        let attribute = parse_form_attribute(
+            r##"{9,{15},0,"Актуальность",{1,1,{"ru","Срок выполнения"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,1,{0}},0,0,0,0,{0,0},{0,1,19300dfc-8ba2-4b12-be90-0add6afc93b4}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                option_uuid.to_string(),
+                "FunctionalOption.ИспользоватьРасширенныеВозможностиЗаказаКлиента".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(attribute.save_fields, vec!["Актуальность".to_string()]);
+        assert!(!attribute.saved_data);
+        assert_eq!(
+            attribute.functional_options,
+            vec!["FunctionalOption.ИспользоватьРасширенныеВозможностиЗаказаКлиента".to_string()]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_fill_check_show_error() {
+        let attribute = parse_form_attribute(
+            r##"{9,{15},0,"Актуальность",{1,1,{"ru","Срок выполнения"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,1,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(attribute.fill_check, Some("ShowError"));
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(xml.contains("<FillCheck>ShowError</FillCheck>"), "{xml}");
+    }
+
+    #[test]
+    fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
+        let save_field_bindings = extract_form_body_attribute_save_field_bindings(
+            &[concat!(
+                "{4,3,",
+                r##"{9,{1},0,"Объект",{1,0},{"Pattern",{"#",078f49fe-15b6-4e41-b545-8cf701728b3b}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,2,{1,{0,11a93e3a-3c5b-4242-913c-02474a383344}},{1,{0,ddd2861c-592b-4879-b9de-4b05a22c0b43}}},1,0,0,0,{0,0},{0,0}}"##,
+                ",",
+                r##"{9,{2},0,"ВерсияФормата",{1,0},{"Pattern",{1},{0,ddd2861c-592b-4879-b9de-4b05a22c0b43}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"##,
+                ",",
+                r##"{9,{3},0,"РезультатВыгрузкиXDTO",{1,0},{"Pattern",{1},{0,11a93e3a-3c5b-4242-913c-02474a383344}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"##,
+                "}"
+            )
+            .to_string()],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            save_field_bindings.get("Объект"),
+            Some(&vec![
+                "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
+                "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()
+            ])
+        );
+
+        let mut attributes = vec![FormAttribute {
+            id: "1".to_string(),
+            name: "Объект".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }];
+        let data_path_by_binding_key = BTreeMap::from([
+            (
+                "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
+                "Объект.РезультатВыгрузкиXDTO".to_string(),
+            ),
+            (
+                "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
+                "Объект.ВерсияФормата".to_string(),
+            ),
+        ]);
+        apply_form_attribute_save_field_bindings(
+            &mut attributes,
+            &save_field_bindings,
+            &data_path_by_binding_key,
+        );
+
+        let object_attribute = attributes
+            .iter()
+            .find(|attribute| attribute.name == "Объект")
+            .unwrap();
+        assert_eq!(
+            object_attribute.save_fields,
+            vec![
+                "Объект.РезультатВыгрузкиXDTO".to_string(),
+                "Объект.ВерсияФормата".to_string()
+            ]
+        );
+
+        let xml = format_form_attributes_xml(&[object_attribute.clone()]);
+        assert!(xml.contains("<Save>"));
+        assert!(xml.contains("<Field>Объект.РезультатВыгрузкиXDTO</Field>"));
+        assert!(xml.contains("<Field>Объект.ВерсияФормата</Field>"));
+    }
+
+    #[test]
+    fn extracts_form_attribute_spreadsheet_document_type_and_settings() {
+        let attribute = parse_form_attribute(
+            concat!(
+                "{9,\r\n",
+                "{6},0,\"ТабличныйДокументФормы\",\r\n",
+                "{1,1,\r\n",
+                "{\"ru\",\"Табличный документ формы\"}\r\n",
+                "},\r\n",
+                "{\"Pattern\",\r\n",
+                "{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f}\r\n",
+                "},\r\n",
+                "{0,\r\n",
+                "{0,\r\n",
+                "{\"B\",1},0}\r\n",
+                "},\r\n",
+                "{0,\r\n",
+                "{0,\r\n",
+                "{\"B\",1},0}\r\n",
+                "},\r\n",
+                "{0,0},\r\n",
+                "{0,0},0,0,0,0,\r\n",
+                "{0,1,\"Moxel\",\r\n",
+                "{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f,\r\n",
+                "{8,1,12,\r\n",
+                "{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},\r\n",
+                "{0},\r\n",
+                "{0},0,\r\n",
+                "{0,0},\r\n",
+                "{0,0},\r\n",
+                "{0,0},\r\n",
+                "{0,0},\r\n",
+                "{0,0},\r\n",
+                "{0,0},1,2,1,0,0,0,\r\n",
+                "{0,0,00000000-0000-0000-0000-000000000000,0},0,0,0,0,0,0,0,0,0,\r\n",
+                "{0},\r\n",
+                "{0},\r\n",
+                "{0},\r\n",
+                "{0},\"\",\r\n",
+                "{\r\n",
+                "{0,6,6,\r\n",
+                "{\"N\",1000},7,\r\n",
+                "{\"N\",1000},8,\r\n",
+                "{\"N\",1000},9,\r\n",
+                "{\"N\",1000},10,\r\n",
+                "{\"N\",1000},11,\r\n",
+                "{\"N\",1000}\r\n",
+                "}\r\n",
+                "},\r\n",
+                "{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,2,\r\n",
+                "{3,3,\r\n",
+                "{-1}\r\n",
+                "},\r\n",
+                "{3,3,\r\n",
+                "{-3}\r\n",
+                "},0,0,0,\"\",0,\r\n",
+                "{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},\r\n",
+                "{0},0,0,0,1,0,0,0}\r\n",
+                "}\r\n",
+                "},\r\n",
+                "{0,0}\r\n",
+                "}"
+            ),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.value_types,
+            vec![ConstantValueType::Reference {
+                reference: "mxl:SpreadsheetDocument".to_string(),
+            }]
+        );
+        let settings = attribute
+            .spreadsheet_document_settings
+            .as_deref()
+            .expect("spreadsheet settings");
+        assert!(settings.contains("<mxl:languageSettings>"), "{settings}");
+        assert!(
+            settings.contains("<mxl:templateMode>true</mxl:templateMode>"),
+            "{settings}"
+        );
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(
+            xml.contains(
+                "<v8:Type xmlns:mxl=\"http://v8.1c.ru/8.2/data/spreadsheet\">mxl:SpreadsheetDocument</v8:Type>"
+            ),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(
+                "<Settings xmlns:mxl=\"http://v8.1c.ru/8.2/data/spreadsheet\" xsi:type=\"mxl:SpreadsheetDocument\">"
+            ),
+            "{xml}"
+        );
+        assert!(xml.contains("<mxl:vgRows>1</mxl:vgRows>"), "{xml}");
+    }
+
+    #[test]
+    fn extracts_form_attribute_default_number_type() {
+        let attribute = parse_form_attribute(
+            r##"{9,{36},0,"Идентификатор",{1,1,{"ru","Идентификатор"}},{"Pattern",{"N"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.value_types,
+            vec![ConstantValueType::Number {
+                digits: 0,
+                fraction_digits: 0,
+                allowed_sign_flag: 0,
+            }]
+        );
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(xml.contains("<v8:Type>xs:decimal</v8:Type>"), "{xml}");
+        assert!(xml.contains("<v8:Digits>0</v8:Digits>"), "{xml}");
+        assert!(
+            xml.contains("<v8:FractionDigits>0</v8:FractionDigits>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<v8:AllowedSign>Any</v8:AllowedSign>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_saved_data_and_formats_it_before_save() {
+        let attribute = parse_form_attribute(
+            r##"{9,{15},0,"Актуальность",{1,1,{"ru","Срок выполнения"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,1,{0}},0,1,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert!(attribute.saved_data);
+        assert_eq!(attribute.save_fields, vec!["Актуальность".to_string()]);
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        let saved_data_pos = xml.find("<SavedData>true</SavedData>").unwrap();
+        let save_pos = xml.find("<Save>").unwrap();
+        assert!(saved_data_pos < save_pos);
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_from_dynamic_list_required_fields() {
+        let attribute = parse_form_attribute(
+            r##"{9,{2},0,"Список",{1,1,{"ru","Список"}},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,12,"QueryText",{"S","ВЫБРАТЬ ОрганизацииБизнесСеть.Идентификатор КАК Идентификатор ИЗ РегистрСведений.ОрганизацииБизнесСеть КАК ОрганизацииБизнесСеть"},"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,00000000-0000-0000-0000-000000000000},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",3},"FieldsMapItemName0",{"S","Идентификатор"},"FiledsMapItemId0",{"N",3},"FiledsMapItemName0",{"S","Идентификатор"},"ReqMapFieldId0",{"N",3}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.use_always,
+            vec!["Список.Идентификатор".to_string()]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_default_picture_from_dynamic_list_required_fields() {
+        let attribute = parse_form_attribute(
+            r##"{9,{3},0,"Список",{1,1,{"ru","Список"}},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,10,"QueryText",{"S","ВЫБРАТЬ Ссылка КАК Ссылка ИЗ Справочник.Пользователи"},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Ссылка"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Ссылка"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",10000000}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.use_always,
+            vec![
+                "~Список.DefaultPicture".to_string(),
+                "Список.Ссылка".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_from_native_fields_map_required_fields() {
+        let attribute = parse_form_attribute(
+            r##"{9,{2},0,"НайденныеОбъекты",{1,1,{"ru","Найденные объекты"}},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,18,"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",6},"FieldsMapItemName0",{"S","regNumber"},"FiledsMapItemId0",{"N",6},"FiledsMapItemName0",{"S","regNumber"},"FieldsMapItemId1",{"N",8},"FieldsMapItemName1",{"S","regDate"},"FiledsMapItemId1",{"N",8},"FiledsMapItemName1",{"S","regDate"},"FieldsMapItemId2",{"N",17},"FieldsMapItemName2",{"S","organization"},"FiledsMapItemId2",{"N",17},"FiledsMapItemName2",{"S","organization"},"ReqMapFieldId0",{"N",6},"ReqMapFieldId1",{"N",8},"ReqMapFieldId2",{"N",17}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.use_always,
+            vec![
+                "НайденныеОбъекты.organization".to_string(),
+                "НайденныеОбъекты.regDate".to_string(),
+                "НайденныеОбъекты.regNumber".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_from_native_fields_map_without_settings() {
+        let use_always = parse_form_attribute_use_always(
+            "СписокРаспоряженияНаОформление",
+            r##"{0,16,"FieldsMapItemId0",{"N",6},"FieldsMapItemName0",{"S","Номер"},"FiledsMapItemId0",{"N",6},"FiledsMapItemName0",{"S","Номер"},"FieldsMapItemId1",{"N",8},"FieldsMapItemName1",{"S","Дата"},"FiledsMapItemId1",{"N",8},"FiledsMapItemName1",{"S","Дата"},"FieldsMapItemId2",{"N",32},"FieldsMapItemName2",{"S","Организация"},"FiledsMapItemId2",{"N",32},"FiledsMapItemName2",{"S","Организация"},"FieldsMapItemId3",{"N",88},"FieldsMapItemName3",{"S","Склад"},"FiledsMapItemId3",{"N",88},"FiledsMapItemName3",{"S","Склад"},"FieldsMapItemId4",{"N",113},"FieldsMapItemName4",{"S","Подразделение"},"FiledsMapItemId4",{"N",113},"FiledsMapItemName4",{"S","Подразделение"},"FieldsMapItemId5",{"N",148},"FieldsMapItemName5",{"S","Комментарий"},"FiledsMapItemId5",{"N",148},"FiledsMapItemName5",{"S","Комментарий"},"FieldsMapItemId6",{"N",154},"FieldsMapItemName6",{"S","Менеджер"},"FiledsMapItemId6",{"N",154},"FiledsMapItemName6",{"S","Менеджер"},"ReqMapFieldId0",{"B",1},"ReqMapFieldId1",{"N",6},"ReqMapFieldId2",{"N",8},"ReqMapFieldId3",{"N",32},"ReqMapFieldId4",{"N",88},"ReqMapFieldId5",{"N",113},"ReqMapFieldId6",{"N",148},"ReqMapFieldId7",{"N",154}}"##,
+            None,
+        );
+
+        assert_eq!(
+            use_always,
+            vec![
+                "СписокРаспоряженияНаОформление.Номер".to_string(),
+                "СписокРаспоряженияНаОформление.Дата".to_string(),
+                "СписокРаспоряженияНаОформление.Организация".to_string(),
+                "СписокРаспоряженияНаОформление.Склад".to_string(),
+                "СписокРаспоряженияНаОформление.Подразделение".to_string(),
+                "СписокРаспоряженияНаОформление.Комментарий".to_string(),
+                "СписокРаспоряженияНаОформление.Менеджер".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_from_value_table_column_ids() {
+        let attribute = parse_form_attribute(
+            r##"{9,{4},0,"НайденныеОбъекты",{1,1,{"ru","Найденные объекты"}},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,3,{1,{3}},{1,{4}},{1,{5}}},{0,0},0,0,0,4,{5,1,0,"ID",{1,1,{"ru","ID"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,3,0,"documentType",{1,1,{"ru","Вид документа"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,4,0,"regNumber",{1,1,{"ru","Рег. номер"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,5,0,"regDate",{1,1,{"ru","Дата регистрации"}},{"Pattern",{"D","D"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.use_always,
+            vec![
+                "НайденныеОбъекты.documentType".to_string(),
+                "НайденныеОбъекты.regDate".to_string(),
+                "НайденныеОбъекты.regNumber".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_from_constant_refs() {
+        let attribute = parse_form_attribute(
+            r##"{9,{1},0,"НаборКонстант",{1,0},{"Pattern",{"#",dcfc3784-a14f-4786-ac7b-c82db5ba275f}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,2,{1,{0,33f8892d-8d7f-4b00-af4f-af37193fa395}},{1,{0,38cf986b-420c-41d2-93aa-c2ce79299bdc}}},{0,0},1,0,0,0,{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::from([
+                (
+                    "33f8892d-8d7f-4b00-af4f-af37193fa395".to_string(),
+                    "Constant.ИдентификаторКорневойПапкиФайлов1СДокументооборот".to_string(),
+                ),
+                (
+                    "38cf986b-420c-41d2-93aa-c2ce79299bdc".to_string(),
+                    "Constant.ИспользоватьЕжедневныеОтчеты1СДокументооборота".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.use_always,
+            vec![
+                "НаборКонстант.ИдентификаторКорневойПапкиФайлов1СДокументооборот".to_string(),
+                "НаборКонстант.ИспользоватьЕжедневныеОтчеты1СДокументооборота".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_form_attribute_use_always_from_value_list_field_flags() {
+        let attribute = parse_form_attribute(
+            r##"{9,{4},0,"СписокПользователей",{1,1,{"ru","Пользователи"}},{"Pattern",{"#",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,3,{1,{-1}},{1,{1}},{1,{3}}},{0,1,{0}},0,0,0,0,{0,1,"ElementType",{"#",f5c65050-3bbb-11d5-b988-0050bae0a95d,{"Pattern",{"S"}}}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.use_always,
+            vec![
+                "СписокПользователей.Picture".to_string(),
+                "СписокПользователей.Presentation".to_string(),
+                "СписокПользователей.ValueType".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn formats_form_attribute_use_always_before_save() {
+        let attribute = parse_form_attribute(
+            r##"{9,{4},0,"СписокПользователей",{1,1,{"ru","Пользователи"}},{"Pattern",{"#",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,3,{1,{-1}},{1,{1}},{1,{3}}},{0,1,{0}},0,0,0,0,{0,1,"ElementType",{"#",f5c65050-3bbb-11d5-b988-0050bae0a95d,{"Pattern",{"S"}}}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(
+            xml.find("<UseAlways>").unwrap() < xml.find("<Save>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn format_form_attribute_does_not_emit_settings_fields_from_map_only_dynamic_list() {
+        let attribute = parse_form_attribute(
+            r##"{9,{2},0,"Список",{1,1,{"ru","Список"}},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,14,"QueryText",{"S","ВЫБРАТЬ ОрганизацииБизнесСеть.Организация КАК Организация, ОрганизацииБизнесСеть.Идентификатор КАК Идентификатор ИЗ РегистрСведений.ОрганизацииБизнесСеть КАК ОрганизацииБизнесСеть"},"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,00000000-0000-0000-0000-000000000000},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",2},"FieldsMapItemName0",{"S","Организация"},"FiledsMapItemId0",{"N",2},"FiledsMapItemName0",{"S","Организация"},"FieldsMapItemId1",{"N",3},"FieldsMapItemName1",{"S","Идентификатор"},"FiledsMapItemId1",{"N",3},"FiledsMapItemName1",{"S","Идентификатор"},"ReqMapFieldId0",{"N",3},"ServerState",{"S","QcGaAu+7mrO/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxVbml2ZXJzYWxMaXN0U2VydmVyT25seVN0YXRlIHhtbG5zPSIiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSIvPiAg"}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        let xml = format_form_attributes_xml(&[attribute]);
+
+        assert!(xml.contains("<UseAlways>"));
+        assert!(xml.contains("<Field>Список.Идентификатор</Field>"));
+        assert!(!xml.contains(r#"<Field xsi:type="dcssch:DataSetFieldField">"#));
+    }
+
+    #[test]
+    fn formats_form_attribute_type_description_settings_from_element_type() {
+        let attribute = parse_form_attribute(
+            r##"{9,{7},0,"СписокВидовДокументов",{1,1,{"ru","Список видов документов"}},{"Pattern",{"#",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,1,"ElementType",{"#",f5c65050-3bbb-11d5-b988-0050bae0a95d,{"Pattern",{"S"}}},{0,0}},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            attribute.type_description_settings,
+            Some(vec![ConstantValueType::String {
+                length: None,
+                allowed_length_flag: 1,
+            }])
+        );
+
+        let xml = format_form_attributes_xml(&[attribute]);
+        assert!(
+            xml.contains(r#"<Settings xsi:type="v8:TypeDescription">"#),
+            "{xml}"
+        );
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "{xml}");
+        assert!(xml.contains("<v8:StringQualifiers>"), "{xml}");
+        assert!(!xml.contains(r#"<Settings xsi:type="v8:TypeDescription"/>"#));
+    }
+
+    #[test]
+    fn extracts_form_attribute_additional_columns_from_body_tail() {
+        let body = ParsedFormBodyBlob {
+            layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"}}".to_string(),
+            module_text: String::new(),
+            trailing: vec![r##"{4,1,{9,{3},0,"СписокЗаказов",{1,1,{"ru","Список заказов"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,1,{5,8,0,"СтрокиЗаказа",{1,1,{"ru","Строки заказа"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},1,{0,{2,{3},{8}},2,{5,1,0,"GTIN",{1,1,{"ru","GTIN"}},{"Pattern",{"S",50,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,2,0,"КоличествоКодов",{1,1,{"ru","Количество кодов"}},{"Pattern",{"N",6,0,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},0,{0}}"##.to_string()],
+            trailing_fields: 1,
+        };
+
+        let form_xml =
+            extract_form_body_xml_from_body(&body, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains(r#"<AdditionalColumns table="СписокЗаказов.СтрокиЗаказа">"#));
+        assert!(form_xml.contains(r#"<Column name="GTIN" id="1">"#));
+        assert!(form_xml.contains(r#"<Column name="КоличествоКодов" id="2">"#));
+    }
+
+    #[test]
+    fn extracts_form_body_xml_uses_type_index_for_parameters_without_breaking_object_refs() {
+        let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let parameter_type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+        let form_body = deflate_for_test(
+            format!(
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,4,"QueryText",{{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}}}},{{0,0}}}}}},{{0,1,{{0,"Счет",{{"Pattern",{{"#",{parameter_type_uuid}}}}},1}}}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+            )
+            .as_bytes(),
+        );
+        let type_index = BTreeMap::from([(
+            parameter_type_uuid.to_string(),
+            "cfg:ChartOfAccountsRef.Хозрасчетный".to_string(),
+        )]);
+        let object_refs = BTreeMap::from([
+            (catalog_uuid.to_string(), "Catalog.Товары".to_string()),
+            (
+                option_uuid.to_string(),
+                "FunctionalOption.ИспользоватьФункцию".to_string(),
+            ),
+        ]);
+
+        let body = parse_form_body_blob(&form_body).unwrap();
+        let form_xml = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
+
+        assert!(
+            form_xml.contains("<MainTable>Catalog.Товары</MainTable>"),
+            "{form_xml}"
+        );
+        assert!(
+            form_xml.contains("<v8:Type>cfg:ChartOfAccountsRef.Хозрасчетный</v8:Type>"),
+            "{form_xml}"
+        );
+        assert!(
+            form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"),
+            "{form_xml}"
+        );
     }
 
     #[test]
     fn extracts_form_command_modifies_saved_data() {
         let form_body = deflate_for_test(
-            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"ЗаписатьИЗакрыть",{1,0},{1,0},0,0,0,"ЗаписатьИЗакрытьВыполнить",3,1,0,{0,0}}},{0}}"#
+            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"ЗаписатьИЗакрыть",{1,0},{1,0},0,0,0,"ЗаписатьИЗакрытьВыполнить",3,1,0,{0,0},1,0,1,0,0,1}},{0}}"#
                 .as_bytes(),
         );
 
@@ -30618,6 +38832,19 @@ mod tests {
                     .find("<CurrentRowUse>DontUse</CurrentRowUse>")
                     .unwrap()
         );
+    }
+
+    #[test]
+    fn omits_form_command_current_row_use_for_command_tail_kind_2() {
+        let form_body = deflate_for_test(
+            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"Выполнить",{1,0},{1,0},0,0,0,"Выполнить",3,0,0,{0,0},1,0,1,0,0,2}},{0}}"#
+                .as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+
+        assert!(form_xml.contains(r#"<Command name="Выполнить" id="1">"#));
+        assert!(!form_xml.contains("<CurrentRowUse>DontUse</CurrentRowUse>"));
     }
 
     #[test]
@@ -30696,17 +38923,27 @@ mod tests {
             name: "Список".to_string(),
             title: Vec::new(),
             value_types: Vec::new(),
+            explicit_empty_type: false,
             columns: Vec::new(),
+            additional_columns: Vec::new(),
             main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
             use_always: Vec::new(),
+            functional_options: Vec::new(),
             settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
         }];
         let object_refs = BTreeMap::from([(
             external_command_uuid.to_string(),
             "DataProcessor.Loader.Command.Load".to_string(),
         )]);
 
-        let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs);
+        let indexes = collect_form_child_item_indexes(&layout_fields, &attributes);
+        let items =
+            extract_form_child_items(&layout_fields, &attributes, &[], &object_refs, &indexes);
         let xml = format_form_child_items_xml(&items, 1);
 
         assert!(xml.contains(r#"<CommandBar name="Панель" id="64">"#));
@@ -30782,6 +39019,7 @@ mod tests {
 
         assert_eq!(item.tag, "Pages");
         assert_eq!(item.height.as_deref(), Some("14"));
+        assert_eq!(item.representation, Some("None"));
         assert_eq!(
             item.tooltip,
             vec![("ru".to_string(), "Pages tip".to_string())]
@@ -30799,6 +39037,8 @@ mod tests {
 
         assert!(xml.contains(r#"<Pages name="PagesGroup" id="8">"#));
         assert!(xml.contains("<Height>14</Height>"));
+        assert!(xml.contains("<PagesRepresentation>None</PagesRepresentation>"));
+        assert!(!xml.contains("<Representation>None</Representation>"));
         assert!(xml.contains("<ToolTip>"));
         assert!(xml.contains("<v8:content>Pages tip</v8:content>"));
         assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
@@ -30826,6 +39066,24 @@ mod tests {
 
         assert!(xml.contains(r#"<Page name="MainPage" id="9">"#));
         assert!(xml.contains("<ScrollOnCompress>true</ScrollOnCompress>"));
+    }
+
+    #[test]
+    fn omits_default_vertical_group_for_page() {
+        let item = parse_form_child_item(
+            r#"{22,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"MainPage",{1,0},{1,0},0,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.group, Some("Vertical"));
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(!xml.contains("<Group>Vertical</Group>"));
     }
 
     #[test]
@@ -30857,6 +39115,8 @@ mod tests {
             None,
             None,
             &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &[],
@@ -30914,6 +39174,8 @@ mod tests {
             &attribute_names_by_id,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -30938,6 +39200,8 @@ mod tests {
             &attribute_names_by_id,
             &BTreeMap::new(),
             &table_column_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -30962,6 +39226,8 @@ mod tests {
             &attribute_names_by_id,
             &BTreeMap::new(),
             &table_column_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -31023,6 +39289,8 @@ mod tests {
             &attribute_names_by_id,
             &BTreeMap::new(),
             &table_column_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -31044,6 +39312,8 @@ mod tests {
             None,
             None,
             &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &[],
@@ -31074,6 +39344,8 @@ mod tests {
             &attribute_names_by_id,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -31093,7 +39365,7 @@ mod tests {
                 end_date: "0001-01-01T00:00:00".to_string(),
             })
         );
-        assert_eq!(item.use_alternation_row_color, Some(false));
+        assert_eq!(item.use_alternation_row_color, Some(true));
         assert_eq!(item.default_item, Some(true));
         assert_eq!(item.choice_folders_and_items, Some("Items"));
         assert_eq!(item.restore_current_row, Some(false));
@@ -31110,13 +39382,23 @@ mod tests {
         );
         assert!(xml.contains("<v8:startDate>0001-01-01T00:00:00</v8:startDate>"));
         assert!(xml.contains("<v8:endDate>0001-01-01T00:00:00</v8:endDate>"));
-        assert!(xml.contains("<UseAlternationRowColor>false</UseAlternationRowColor>"));
-        assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
+        assert!(xml.contains("<UseAlternationRowColor>true</UseAlternationRowColor>"));
+        assert!(!xml.contains("<DefaultItem>true</DefaultItem>"));
         assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
         assert!(xml.contains("<RestoreCurrentRow>false</RestoreCurrentRow>"));
-        assert!(xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
+        assert!(!xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
         assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
         assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
+        assert!(
+            xml.find("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>")
+                .unwrap()
+                < xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
+        );
+        assert!(
+            xml.find("<RestoreCurrentRow>false</RestoreCurrentRow>")
+                .unwrap()
+                < xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
+        );
     }
 
     #[test]
@@ -31129,6 +39411,8 @@ mod tests {
             None,
             None,
             &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &[],
@@ -31158,6 +39442,8 @@ mod tests {
             &attribute_names_by_id,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -31179,10 +39465,18 @@ mod tests {
             name: "Rows".to_string(),
             title: Vec::new(),
             value_types: Vec::new(),
+            explicit_empty_type: false,
             columns: Vec::new(),
+            additional_columns: Vec::new(),
             main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
             use_always: Vec::new(),
+            functional_options: Vec::new(),
             settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
         }];
         let group_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
         let table_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -31191,12 +39485,679 @@ mod tests {
         let layout = format!("{{2,{group_uuid},{group},{table_uuid},{table}}}");
         let fields = split_1c_braced_fields(&layout, 0).unwrap();
 
-        let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new());
+        let indexes = collect_form_child_item_indexes(&fields, &attributes);
+        let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes);
 
         let table = items.iter().find(|item| item.tag == "Table").unwrap();
         assert_eq!(table.user_settings_group.as_deref(), Some("SettingsGroup"));
         let xml = format_form_child_items_xml(&items, 1);
         assert!(xml.contains("<UserSettingsGroup>SettingsGroup</UserSettingsGroup>"));
+    }
+
+    #[test]
+    fn extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill() {
+        let field = r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,0},{1,0},{1,{3}},0,1,1,0,0,0,1,0,3,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,1,13,{"U"},{0},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0}"#;
+
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(item.table_representation, Some("List"));
+        assert_eq!(item.read_only, Some(true));
+        assert_eq!(item.change_row_set, Some(false));
+        assert_eq!(item.height.as_deref(), Some("3"));
+        assert_eq!(item.auto_insert_new_row, Some(true));
+        assert_eq!(item.row_filter_nil, Some(true));
+        assert_eq!(item.row_selection_mode, None);
+        assert_eq!(item.enable_start_drag, None);
+        assert_eq!(item.file_drag_mode, None);
+        assert_eq!(item.child_items[1].tag, "AutoCommandBar");
+        assert_eq!(item.child_items[1].autofill, Some(false));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ReadOnly>true</ReadOnly>"));
+        assert!(xml.contains("<ChangeRowSet>false</ChangeRowSet>"));
+        assert!(xml.contains("<Height>3</Height>"));
+        assert!(xml.contains("<AutoInsertNewRow>true</AutoInsertNewRow>"));
+        assert!(xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
+        assert!(xml.contains(r#"<AutoCommandBar name="RowsBar" id="58">"#));
+        assert!(xml.contains("<Autofill>false</Autofill>"));
+        assert!(!xml.contains("<RowSelectionMode>"));
+        assert!(!xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
+        assert!(!xml.contains("<FileDragMode>"));
+    }
+
+    #[test]
+    fn keeps_single_table_title_and_enable_drag_for_hierarchical_wrapper55_table() {
+        let mut item = parse_form_child_item(
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"ru","Rows"}},{1,0},{1,{6}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{0,0,0},1,0,13,8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},12,{"B",0},15,{"U"},20,{"B",1},{0}}"##,
+            None,
+            None,
+            &BTreeMap::from([("6".to_string(), "Rows".to_string())]),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        item.read_only = Some(true);
+        item.enable_drag = Some(true);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert_eq!(xml.matches("<Title>").count(), 1, "{xml}");
+        assert!(xml.contains("<EnableDrag>true</EnableDrag>"), "{xml}");
+    }
+
+    #[test]
+    fn extracts_business_network_table_flags_from_ordinary_wrapper55() {
+        let item = parse_form_child_item(
+            r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,2,13,{"U"},19,{"S",""}}"#,
+            None,
+            None,
+            &BTreeMap::from([("7".to_string(), "Список".to_string())]),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.default_item, Some(true));
+        assert_eq!(item.change_row_order, Some(false));
+        assert_eq!(item.auto_max_width, Some(false));
+        assert_eq!(item.row_input_mode, Some("AfterCurrentRow"));
+        assert_eq!(item.use_alternation_row_color, Some(true));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
+        assert!(xml.contains("<ChangeRowOrder>false</ChangeRowOrder>"));
+        assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+        assert!(xml.contains("<RowInputMode>AfterCurrentRow</RowInputMode>"));
+        assert!(xml.contains("<UseAlternationRowColor>true</UseAlternationRowColor>"));
+        assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    }
+
+    #[test]
+    fn extracts_business_network_table_height_rows_without_change_row_order() {
+        let item = parse_form_child_item(
+            r#"{55,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"РегионыПродажи",0,0,1,{1,1,{"ru","Регионы продаж и поставок"}},{1,0},{1,{2}},0,1,0,0,0,1,1,0,0,1,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{4,1282f000-23b6-4887-87f4-9e8e79db3d32,"РегионыПродажиВыбор",2391e7b8-7235-45d7-ab7e-6ff3dc086396,"РегионыПродажиПередНачаломДобавления",ab930362-ff94-4dcb-ad16-188805d23e3c,"РегионыПродажиПередНачаломИзменения",fe115cc8-9e33-4684-a166-bd5136fe7a9f,"РегионыПродажиПриИзменении",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1,2391e7b8-7235-45d7-ab7e-6ff3dc086396,0,1,ab930362-ff94-4dcb-ad16-188805d23e3c,0,1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},{0}}"#,
+            None,
+            None,
+            &BTreeMap::from([("2".to_string(), "РегионыПродажи".to_string())]),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(item.table_representation, Some("List"));
+        assert_eq!(item.height_in_table_rows.as_deref(), Some("1"));
+        assert_eq!(item.change_row_order, None);
+        assert_eq!(item.enable_start_drag, Some(true));
+        assert_eq!(item.enable_drag, Some(true));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<HeightInTableRows>1</HeightInTableRows>"));
+        assert!(!xml.contains("<ChangeRowOrder>false</ChangeRowOrder>"));
+    }
+
+    #[test]
+    fn extracts_change_row_order_from_zero_marker_ordinary_table_variant() {
+        let item = parse_form_child_item(
+            r#"{55,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СписокЗаказов",0,0,1,{1,0},{1,0},{1,{3}},0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""}}"#,
+            None,
+            None,
+            &BTreeMap::from([("3".to_string(), "СписокЗаказов".to_string())]),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Table");
+        assert_eq!(item.change_row_set, Some(false));
+        assert_eq!(item.change_row_order, Some(false));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ChangeRowSet>false</ChangeRowSet>"));
+        assert!(xml.contains("<ChangeRowOrder>false</ChangeRowOrder>"));
+        assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    }
+
+    #[test]
+    fn extracts_ordinary_wrapper55_table_rows_picture_and_command_set() {
+        let item = parse_form_child_item(
+            r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,1,{"ru","Rows"}},{1,0},{1,{2}},0,0,0,0,0,0,0,0,0,2,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,1,2,0,0,1,1,{1,{8}},{4,1,{0,e112dfa4-4cb7-402d-85b9-f0234915989b},"",-1,-1,0,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{1,1282f000-23b6-4887-87f4-9e8e79db3d32,"RowsSelection",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1},{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,fa51b106-eae6-44c7-8054-76cbb3100603},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0}"#,
+            None,
+            None,
+            &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
+            &BTreeMap::from([(
+                "2".to_string(),
+                BTreeMap::from([("8".to_string(), "RowsRowPicture".to_string())]),
+            )]),
+            &[],
+            &BTreeMap::from([(
+                "e112dfa4-4cb7-402d-85b9-f0234915989b".to_string(),
+                "CommonPicture.AdminPicture".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(item.table_representation, Some("List"));
+        assert_eq!(item.enable_start_drag, Some(true));
+        assert_eq!(item.enable_drag, Some(true));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+        assert_eq!(item.auto_insert_new_row, Some(true));
+        assert_eq!(item.row_filter_nil, Some(true));
+        assert_eq!(
+            item.row_picture_data_path.as_deref(),
+            Some("Rows.RowPicture")
+        );
+        assert_eq!(
+            item.rows_picture_ref.as_deref(),
+            Some("CommonPicture.AdminPicture")
+        );
+        assert_eq!(
+            item.command_set_excluded_commands,
+            vec![
+                "Add",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+        assert_eq!(item.show_root, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Representation>List</Representation>"));
+        assert!(xml.contains("<SkipOnInput>false</SkipOnInput>"));
+        assert!(xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
+        assert!(xml.contains("<EnableDrag>true</EnableDrag>"));
+        assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+        assert!(xml.contains("<AutoInsertNewRow>true</AutoInsertNewRow>"));
+        assert!(xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
+        assert!(xml.contains("<RowPictureDataPath>Rows.RowPicture</RowPictureDataPath>"));
+        assert!(xml.contains("<xr:Ref>CommonPicture.AdminPicture</xr:Ref>"));
+        assert!(xml.contains("<ExcludedCommand>SortListAsc</ExcludedCommand>"));
+        assert!(xml.contains("<ExcludedCommand>SortListDesc</ExcludedCommand>"));
+        assert!(!xml.contains("<ShowRoot>true</ShowRoot>"));
+    }
+
+    #[test]
+    fn extracts_button_width_and_command_bar_source_from_extended_layout() {
+        let button = parse_form_child_item(
+            r#"{31,{179,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,"КомандаНайти",{1,1,{"ru","Найти"}},1,{21,c0519548-2a9a-44de-a25e-faf01e089d4d},{0},2,0,0,0,2,2,10,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{180,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КомандаНайтиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,1,0,0,0,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(button.width.as_deref(), Some("10"));
+        let button_xml = format_form_child_items_xml(&[button], 1);
+        assert!(button_xml.contains("<Width>10</Width>"));
+
+        let command_bar = parse_form_child_item(
+            r#"{22,{201,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаКоманднойПанели",{1,1,{"ru","Группа командной панели"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,0,{0,02023637-7868-4a5f-8576-835a76e0c9ba}},5,a9f3b1ac-f51b-431e-b102-55a69acdecad}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(command_bar.command_source, Some("Form"));
+        let bar_xml = format_form_child_items_xml(&[command_bar], 1);
+        assert!(bar_xml.contains("<CommandSource>Form</CommandSource>"));
+    }
+
+    #[test]
+    fn extracts_form_command_bar_horizontal_location_from_layout_code() {
+        let command_bar = parse_form_child_item(
+            r#"{22,{14,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаКоманднаяПанель",{1,1,{"ru","Командная панель"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,2,{0}},2,a9f3b1ac-f51b-431e-b102-55a69acdecad,1,0,1,{12,{15,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаКоманднаяПанельРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(command_bar.tag, "CommandBar");
+        assert_eq!(command_bar.horizontal_location, Some("Right"));
+
+        let xml = format_form_child_items_xml(&[command_bar], 1);
+        assert!(xml.contains("<HorizontalLocation>Right</HorizontalLocation>"));
+    }
+
+    #[test]
+    fn extracts_button_group_compact_representation_from_layout_code() {
+        let button_group = parse_form_child_item(
+            r#"{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,6,"СписокКолонокФлаги",{1,1,{"ru","Колонок флаги"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{2,{0},2,2},2,a9f3b1ac-f51b-431e-b102-55a69acdecad,1,0,1,{12,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокКолонокФлагиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(button_group.tag, "ButtonGroup");
+        assert_eq!(button_group.representation, Some("Compact"));
+
+        let xml = format_form_child_items_xml(&[button_group], 1);
+        assert!(xml.contains("<Representation>Compact</Representation>"));
+    }
+
+    #[test]
+    fn extracts_table_standard_command_names_from_kind1_buttons() {
+        let table_name_by_id =
+            BTreeMap::from([("1".to_string(), "МобильныеУстройства".to_string())]);
+
+        let sort_asc = parse_form_child_item(
+            r#"{31,{25,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"МобильныеУстройстваСортироватьСписокПоВозрастанию",{1,0},1,{1,2bbe4e12-06d2-409b-a972-eea585125d83},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            sort_asc.command_name.as_deref(),
+            Some("Form.Item.МобильныеУстройства.StandardCommand.SortListAsc")
+        );
+
+        let sort_desc = parse_form_child_item(
+            r#"{31,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"МобильныеУстройстваСортироватьСписокПоУбыванию",{1,0},1,{1,58b2a785-23f6-4b0e-a324-9a1323285595},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            sort_desc.command_name.as_deref(),
+            Some("Form.Item.МобильныеУстройства.StandardCommand.SortListDesc")
+        );
+
+        let output_list = parse_form_child_item(
+            r#"{31,{65,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"МобильныеУстройстваВывестиСписокКМ",{1,0},1,{1,49602716-fea6-497f-8047-726404038857},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            output_list.command_name.as_deref(),
+            Some("Form.Item.МобильныеУстройства.StandardCommand.OutputList")
+        );
+
+        let uncheck_all = parse_form_child_item(
+            r#"{31,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ФормаСнятьФлажки",{1,0},1,{8,5048cc44-702b-44e3-8445-9af75c02724d},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            uncheck_all.command_name.as_deref(),
+            Some("Form.Item.МобильныеУстройства.StandardCommand.UncheckAll")
+        );
+
+        let table_name_by_id = BTreeMap::from([("1".to_string(), "СписокКолонок".to_string())]);
+
+        let move_up = parse_form_child_item(
+            r#"{31,{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СписокКолонокПереместитьВверх",{1,0},1,{1,37740564-9e86-44a0-bea9-3f485a5a3f91},{0},3,0,0,0,2,1,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            move_up.command_name.as_deref(),
+            Some("Form.Item.СписокКолонок.StandardCommand.MoveUp")
+        );
+
+        let move_down = parse_form_child_item(
+            r#"{31,{35,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СписокКолонокПереместитьВниз",{1,0},1,{1,fa51b106-eae6-44c7-8054-76cbb3100603},{0},3,0,0,0,2,1,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &table_name_by_id,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            move_down.command_name.as_deref(),
+            Some("Form.Item.СписокКолонок.StandardCommand.MoveDown")
+        );
+    }
+
+    #[test]
+    fn extracts_form_standard_command_names_from_kind0_buttons() {
+        let restore = parse_form_child_item(
+            r#"{31,{108,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ТаблицаДокументовВосстановитьЗначения",{1,0},1,{0,239f0103-8de9-4fdf-b485-eb5531da7e51},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            restore.command_name.as_deref(),
+            Some("Form.StandardCommand.SaveValues")
+        );
+
+        let save = parse_form_child_item(
+            r#"{31,{106,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ТаблицаДокументовСохранитьЗначения",{1,0},1,{0,71e0226e-ebb2-4e33-8745-0a94a01bbf15},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            save.command_name.as_deref(),
+            Some("Form.StandardCommand.RestoreValues")
+        );
+
+        let customize = parse_form_child_item(
+            r#"{31,{104,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ТаблицаДокументовИзменитьФорму",{1,0},1,{0,198ea630-fda2-4cda-8a23-f999f4c67ee6},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            customize.command_name.as_deref(),
+            Some("Form.StandardCommand.CustomizeForm")
+        );
+    }
+
+    #[test]
+    fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
+        let attribute = FormAttribute {
+            id: "8".to_string(),
+            name: "ПериодВыборкиДокументов".to_string(),
+            title: Vec::new(),
+            value_types: vec![ConstantValueType::Reference {
+                reference: "v8:StandardPeriod".to_string(),
+            }],
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: false,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        };
+        let mut table_column_names_by_id = BTreeMap::new();
+        extend_form_attribute_special_columns(&mut table_column_names_by_id, &attribute);
+        let attribute_names_by_id =
+            BTreeMap::from([("8".to_string(), "ПериодВыборкиДокументов".to_string())]);
+
+        assert_eq!(
+            parse_form_bound_data_path(
+                r#"{2,{8},{1}}"#,
+                "ПериодВыборкиДокументовДатаНачала",
+                &attribute_names_by_id,
+                &BTreeMap::new(),
+                &table_column_names_by_id,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .as_deref(),
+            Some("ПериодВыборкиДокументов.StartDate")
+        );
+        assert_eq!(
+            parse_form_bound_data_path(
+                r#"{2,{8},{2}}"#,
+                "ПериодВыборкиДокументовДатаОкончания",
+                &attribute_names_by_id,
+                &BTreeMap::new(),
+                &table_column_names_by_id,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .as_deref(),
+            Some("ПериодВыборкиДокументов.EndDate")
+        );
+    }
+
+    #[test]
+    fn parses_nested_table_binding_keys_from_real_shapes() {
+        assert_eq!(
+            parse_form_binding_key(r#"{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}"#).as_deref(),
+            Some("0|b5f6377f-aec6-4864-9ae0-7e034769a4ca")
+        );
+        assert_eq!(parse_form_binding_key(r#"{-2}"#).as_deref(), Some("-2"));
+        assert_eq!(
+            parse_form_binding_key(r#"{1,5bdad865-f2c5-434b-8041-ba4aad3b6687}"#).as_deref(),
+            Some("1|5bdad865-f2c5-434b-8041-ba4aad3b6687")
+        );
+        assert_eq!(
+            parse_form_table_binding(r#"{2,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}}"#),
+            Some((
+                "1".to_string(),
+                "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_form_nested_table_column_binding(
+                r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{0,76858240-71b9-4ab8-b072-c211bb45594b}}"#,
+            ),
+            Some((
+                "1".to_string(),
+                "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
+                "0|76858240-71b9-4ab8-b072-c211bb45594b".to_string(),
+            ))
+        );
+    }
+
+    #[test]
+    fn extracts_nested_table_child_data_paths_from_binding_indexes() {
+        let table_paths = BTreeMap::from([(
+            "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
+            "Объект.Товары".to_string(),
+        )]);
+        let table_columns = BTreeMap::from([(
+            "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
+            BTreeMap::from([
+                (
+                    "1|5bdad865-f2c5-434b-8041-ba4aad3b6687".to_string(),
+                    "ТоварыВыбран".to_string(),
+                ),
+                ("-2".to_string(), "LineNumber".to_string()),
+                (
+                    "0|76858240-71b9-4ab8-b072-c211bb45594b".to_string(),
+                    "ТоварыНоменклатура".to_string(),
+                ),
+            ]),
+        )]);
+
+        assert_eq!(
+            parse_form_bound_data_path(
+                r#"{2,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}}"#,
+                "Товары",
+                &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &table_paths,
+                &table_columns,
+            )
+            .as_deref(),
+            Some("Объект.Товары")
+        );
+        assert_eq!(
+            parse_form_bound_data_path(
+                r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{-2}}"#,
+                "ТоварыНомерСтроки",
+                &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &table_paths,
+                &table_columns,
+            )
+            .as_deref(),
+            Some("Объект.Товары.LineNumber")
+        );
+        assert_eq!(
+            parse_form_bound_data_path(
+                r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{0,76858240-71b9-4ab8-b072-c211bb45594b}}"#,
+                "ТоварыНоменклатура",
+                &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &table_paths,
+                &table_columns,
+            )
+            .as_deref(),
+            Some("Объект.Товары.Номенклатура")
+        );
+        assert_eq!(
+            parse_form_bound_data_path(
+                r#"{3,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca},{1,5bdad865-f2c5-434b-8041-ba4aad3b6687}}"#,
+                "ТоварыВыбран",
+                &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &table_paths,
+                &table_columns,
+            )
+            .as_deref(),
+            Some("Объект.Товары.Выбран")
+        );
+    }
+
+    #[test]
+    fn extracts_nested_table_additional_columns_group() {
+        let attributes = vec![FormAttribute {
+            id: "1".to_string(),
+            name: "Объект".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }];
+        let mut indexes = FormChildItemIndexes::default();
+        indexes.bound_table_path_by_binding_key.insert(
+            "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
+            "Объект.Товары".to_string(),
+        );
+
+        let group = parse_form_attribute_additional_columns_group(
+            r#"{0,{2,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}},1,{5,1,0,"Выбран",{1,1,{"ru","Выбран"}},{"Pattern",{"B"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"#,
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap();
+
+        assert_eq!(group.attribute_id, "1");
+        assert_eq!(group.table, "Объект.Товары");
+        assert_eq!(group.columns.len(), 1);
+        assert_eq!(group.columns[0].name, "Выбран");
+    }
+
+    #[test]
+    fn prefers_child_binding_path_for_additional_columns_group() {
+        let attributes = vec![FormAttribute {
+            id: "1".to_string(),
+            name: "Объект".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            explicit_empty_type: false,
+            columns: vec![FormAttributeColumn {
+                id: "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
+                name: "ДополнительнаяРегистрация".to_string(),
+                title: Vec::new(),
+                value_types: Vec::new(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            }],
+            additional_columns: Vec::new(),
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }];
+        let mut indexes = FormChildItemIndexes::default();
+        indexes.bound_table_path_by_binding_key.insert(
+            "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
+            "Объект.ТаблицаПравилВыгрузки".to_string(),
+        );
+
+        let group = parse_form_attribute_additional_columns_group(
+            r#"{0,{2,{1},{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}},1,{5,1,0,"Наименование",{1,1,{"ru","Наименование"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"#,
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap();
+
+        assert_eq!(group.table, "Объект.ТаблицаПравилВыгрузки");
     }
 
     #[test]
@@ -31232,7 +40193,7 @@ mod tests {
         assert!(form_xml.contains("<DataPath>ОперандыДляРасшифровок</DataPath>"));
         assert!(form_xml.contains("<Representation>List</Representation>"));
         assert!(form_xml.contains("<HeightInTableRows>6</HeightInTableRows>"));
-        assert!(form_xml.contains("<RowSelectionMode>Cell</RowSelectionMode>"));
+        assert!(!form_xml.contains("<RowSelectionMode>Cell</RowSelectionMode>"));
         assert!(form_xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
         assert!(form_xml.contains("<EnableDrag>true</EnableDrag>"));
         assert!(form_xml.contains("<FileDragMode>AsFile</FileDragMode>"));
@@ -31480,6 +40441,520 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_button_auto_max_width_and_max_width_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{31,{53,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,"Настроить",{1,1,{"ru","Состав документов"}},1,{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},2,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,1,{0,942e0303-a3ec-4fe8-887c-5aea8516d424},"",-1,-1,1,0,""},1,{"Pattern"},"",0,0,1,{12,{70,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"НастроитьРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},0,15,0,1,0,0,0,3,3,3,0,0,1,0,0,0,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "Button");
+        assert_eq!(item.auto_max_width, Some(false));
+        assert_eq!(item.max_width.as_deref(), Some("15"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        let auto_at = xml.find("<AutoMaxWidth>false</AutoMaxWidth>").unwrap();
+        let max_at = xml.find("<MaxWidth>15</MaxWidth>").unwrap();
+        let picture_at = xml.find("<Picture>").unwrap();
+        assert!(auto_at < max_at);
+        assert!(max_at < picture_at);
+    }
+
+    #[test]
+    fn extracts_label_field_visibility_width_and_format_from_layout_code() {
+        let date_label_layout = r#"{37,{32,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СписокЗаказовДата",1,0,{1,1,{"ru","Принят"}},{1,0},{2,{2},{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,10,0,2,2,2,{1,1,{"ru","ДФ='дд.ММ, ЧЧ:мм'"}},0,{3,4,{0}},{3,4,{0}},{7,2,60,{-31},700,0,0,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,0,1,0},{0,1,0},1,{22,{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗаказовДатаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗаказовДатаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+        let date_label = parse_form_child_item(
+            date_label_layout,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(date_label.tag, "LabelField");
+        assert_eq!(date_label.width.as_deref(), Some("10"));
+        assert_eq!(date_label.auto_max_width, Some(false));
+        assert_eq!(date_label.format.len(), 1);
+        assert_eq!(
+            date_label.font_xml.as_deref(),
+            Some(
+                r#"<Font ref="style:NormalTextFont" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#
+            )
+        );
+
+        let hidden_label = parse_form_child_item(
+            r#"{37,{217,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СписокЗаказовСсылка",1,0,{1,0},{1,0},{2,{2},{23}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,0,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{218,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗаказовСсылкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},0,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{219,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗаказовСсылкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(hidden_label.visible, Some(false));
+
+        let xml = format_form_child_items_xml(&[date_label, hidden_label], 1);
+        assert!(xml.contains("<Width>10</Width>"));
+        assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+        assert!(xml.contains("<Format>"));
+        assert!(xml.contains(
+            r#"<Font ref="style:NormalTextFont" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#
+        ));
+        assert!(xml.contains("<Visible>false</Visible>"));
+    }
+
+    #[test]
+    fn extracts_label_field_height_from_options_bag() {
+        let item = parse_form_child_item(
+            r#"{37,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Статус",0,0,{1,1,{"ru","Статус"}},{1,0},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,1,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СтатусКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СтатусРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "LabelField");
+        assert_eq!(item.height.as_deref(), Some("1"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Height>1</Height>"));
+    }
+
+    #[test]
+    fn omits_default_table_label_field_height_from_options_bag() {
+        let item = parse_form_child_item_with_context(
+            r#"{37,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Статус",0,0,{1,1,{"ru","Статус"}},{1,0},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,1,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СтатусКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СтатусРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            None,
+            Some("Список"),
+            Some("Table"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.height, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(!xml.contains("<Height>1</Height>"));
+    }
+
+    #[test]
+    fn extracts_label_decoration_and_standard_close_command_from_layout_code() {
+        let button = parse_form_child_item(
+            r#"{31,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Закрыть",{1,0},1,{0,3772996b-41f4-4c47-a5a8-ea397db424ae},{0},0,1,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",0,0,1,{12,{24,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗакрытьРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            button.command_name.as_deref(),
+            Some("Form.StandardCommand.Close")
+        );
+
+        let decoration = parse_form_child_item(
+            r#"{12,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСек",{1,1,{"ru","(сек)"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияСекКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,0,{1,{1,1,{"ru","(сек)"}},0},0,1,{12,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияСекРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(decoration.tag, "LabelDecoration");
+        assert_eq!(decoration.auto_max_width, Some(false));
+        assert_eq!(decoration.skip_on_input, Some(false));
+        assert_eq!(
+            decoration.extended_tooltip,
+            Some((
+                "ДекорацияСекРасширеннаяПодсказка".to_string(),
+                "27".to_string()
+            ))
+        );
+        assert_eq!(decoration.child_items.len(), 1);
+        assert_eq!(decoration.child_items[0].tag, "ContextMenu");
+
+        let info_decoration = parse_form_child_item(
+            r#"{12,{32,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстом",{1,1,{"ru","Количество файлов с неизвлеченным текстом: 1234"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{33,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстомКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Количество файлов с неизвлеченным текстом: 1234"}},0},0,1,{12,{34,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ИнформацияОКоличествеФайловСНеизвлеченнымТекстомРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(info_decoration.tag, "LabelDecoration");
+        assert_eq!(info_decoration.auto_max_width, None);
+        assert_eq!(info_decoration.skip_on_input, None);
+
+        let button_xml = format_form_child_items_xml(&[button], 1);
+        assert!(button_xml.contains("<CommandName>Form.StandardCommand.Close</CommandName>"));
+        let default_at = button_xml
+            .find("<DefaultButton>true</DefaultButton>")
+            .unwrap();
+        let skip_at = button_xml.find("<SkipOnInput>false</SkipOnInput>").unwrap();
+        let command_at = button_xml
+            .find("<CommandName>Form.StandardCommand.Close</CommandName>")
+            .unwrap();
+        assert!(default_at < skip_at);
+        assert!(skip_at < command_at);
+
+        let decoration_xml = format_form_child_items_xml(&[decoration], 1);
+        let auto_at = decoration_xml
+            .find("<AutoMaxWidth>false</AutoMaxWidth>")
+            .unwrap();
+        let skip_at = decoration_xml
+            .find("<SkipOnInput>false</SkipOnInput>")
+            .unwrap();
+        let title_at = decoration_xml.find("<Title formatted=\"false\">").unwrap();
+        let menu_at = decoration_xml
+            .find(r#"<ContextMenu name="ДекорацияСекКонтекстноеМеню" id="10"/>"#)
+            .unwrap();
+        let tooltip_at = decoration_xml
+            .find(r#"<ExtendedTooltip name="ДекорацияСекРасширеннаяПодсказка" id="27"/>"#)
+            .unwrap();
+        assert!(auto_at < skip_at);
+        assert!(skip_at < title_at);
+        assert!(title_at < menu_at);
+        assert!(menu_at < tooltip_at);
+    }
+
+    #[test]
+    fn extracts_label_decoration_text_color_from_style_reference() {
+        let decoration = parse_form_child_item(
+            r#"{12,{299,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияПояснение",{1,1,{"ru","Text"}},{1,0},1,0,0,2,2,{3,3,{0,ad87bd29-0ad1-4da4-ac62-38e714e0cb9f}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{300,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ДекорацияПояснениеКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Text"}},0},0,1,{12,{301,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ДекорацияПояснениеРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,1,0,3,3,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::from([(
+                "ad87bd29-0ad1-4da4-ac62-38e714e0cb9f".to_string(),
+                "StyleItem.ПоясняющийТекст".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            decoration.text_color.as_deref(),
+            Some("style:ПоясняющийТекст")
+        );
+
+        let xml = format_form_child_items_xml(&[decoration], 1);
+        assert!(xml.contains("<TextColor>style:ПоясняющийТекст</TextColor>"));
+    }
+
+    #[test]
+    fn extracts_label_decoration_auto_max_width_from_extended_tail() {
+        let decoration = parse_form_child_item(
+            r#"{12,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"Пояснение",{1,1,{"ru","Если регулярно требуется загрузка данных, то можно настроить наименование колонок, их отображение и порядок следования для упрощения загрузки."}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПояснениеКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Если регулярно требуется загрузка данных, то можно настроить наименование колонок, их отображение и порядок следования для упрощения загрузки."}},0},0,1,{12,{24,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПояснениеРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,1,0,3,3,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(decoration.tag, "LabelDecoration");
+        assert_eq!(decoration.auto_max_width, Some(false));
+
+        let xml = format_form_child_items_xml(&[decoration], 1);
+        assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    }
+
+    #[test]
+    fn extracts_live_label_field_hyperlink_without_synthetic_footer_fields() {
+        let item = parse_form_child_item(
+            r#"{37,{92,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Ссылка",1,0,{1,0},{1,0},{1,{14}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,0,2,2,2,{1,0},1,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{93,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СсылкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{94,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СсылкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "LabelField");
+        assert_eq!(item.hiperlink, Some(true));
+        assert_eq!(item.text_color, None);
+        assert_eq!(item.width, None);
+        assert_eq!(item.height, None);
+        assert_eq!(item.max_width, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Hiperlink>true</Hiperlink>"));
+        assert!(!xml.contains("<CellHyperlink>true</CellHyperlink>"));
+        assert!(!xml.contains("<ShowInFooter>false</ShowInFooter>"));
+        assert!(!xml.contains("<FooterHorizontalAlign>"));
+        assert!(!xml.contains("<TextColor>auto</TextColor>"));
+    }
+
+    #[test]
+    fn extracts_live_label_decoration_hyperlink_width_and_nested_click_event() {
+        let decoration = parse_form_child_item(
+            r#"{12,{114,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СоздатьКонтрагента",{1,1,{"ru","Создать"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,1,0,3,0,{1,11707a99-4eb9-4373-bc8c-84891483a034,"СоздатьКонтрагентаНажатие",1,0,11707a99-4eb9-4373-bc8c-84891483a034,0,1},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{115,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СоздатьКонтрагентаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Создать"}},0},0,1,{12,{116,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СоздатьКонтрагентаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,3,3,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(decoration.tag, "LabelDecoration");
+        assert_eq!(decoration.hiperlink, Some(true));
+        assert_eq!(decoration.text_color, None);
+        assert!(
+            decoration.events.iter().any(|event| {
+                event.name == "Click" && event.handler == "СоздатьКонтрагентаНажатие"
+            })
+        );
+
+        let xml = format_form_child_items_xml(&[decoration], 1);
+        assert!(xml.contains("<Hyperlink>true</Hyperlink>"));
+        assert!(xml.contains(r#"<Event name="Click">СоздатьКонтрагентаНажатие</Event>"#));
+        assert!(!xml.contains("<TextColor>auto</TextColor>"));
+    }
+
+    #[test]
+    fn extracts_live_label_decoration_width_without_auto_text_color() {
+        let decoration = parse_form_child_item(
+            r#"{12,{117,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗаголовокНовыйКонтрагент",{1,1,{"ru","Контрагент:"}},{1,0},1,13,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{118,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ЗаголовокНовыйКонтрагентКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Контрагент:"}},0},0,1,{12,{119,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЗаголовокНовыйКонтрагентРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,3,3,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(decoration.tag, "LabelDecoration");
+        assert_eq!(decoration.width.as_deref(), Some("13"));
+        assert_eq!(decoration.text_color, None);
+
+        let xml = format_form_child_items_xml(&[decoration], 1);
+        assert!(xml.contains("<Width>13</Width>"));
+        assert!(!xml.contains("<TextColor>auto</TextColor>"));
+    }
+
+    #[test]
+    fn extracts_live_label_decoration_font_align_and_horizontal_stretch() {
+        let aligned = parse_form_child_item(
+            r#"{12,{42,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПодписьФамилия",{1,1,{"ru","Фамилия"}},{1,0},1,0,0,2,2,{3,3,{0,ad87bd29-0ad1-4da4-ac62-38e714e0cb9f}},{7,2,2,{-31},80,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},1,{22,{43,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ПодписьФамилияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Фамилия"}},0},0,1,{12,{44,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ПодписьФамилияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,0,3,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::from([(
+                "ad87bd29-0ad1-4da4-ac62-38e714e0cb9f".to_string(),
+                "StyleItem.ПоясняющийТекст".to_string(),
+            )]),
+        )
+        .unwrap();
+        assert_eq!(aligned.group_horizontal_align, Some("Left"));
+        assert_eq!(
+            aligned.font_xml.as_deref(),
+            Some(r#"<Font ref="style:NormalTextFont" height="8" kind="StyleItem"/>"#)
+        );
+
+        let xml = format_form_child_items_xml(&[aligned], 1);
+        assert!(xml.contains("<GroupHorizontalAlign>Left</GroupHorizontalAlign>"));
+        assert!(xml.contains(r#"<Font ref="style:NormalTextFont" height="8" kind="StyleItem"/>"#));
+    }
+
+    #[test]
+    fn extracts_input_field_format_and_edit_format_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{37,{259,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"СписокЗаказовВремяДоставкиС",1,0,{1,0},{1,0},{2,{2},{29}},{0},1,0,2,0,2,{1,0},{1,0},0,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,1,{"ru","ДФ=ЧЧ:мм"}},{1,1,{"ru","ДФ=ЧЧ:мм"}},2,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,2,62,{-31},120,700,0,0,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{0,1,0},1,{22,{260,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗаказовВремяДоставкиСКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{261,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗаказовВремяДоставкиСРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.format.len(), 1);
+        assert_eq!(item.edit_format.len(), 1);
+        assert_eq!(
+            item.font_xml.as_deref(),
+            Some(
+                r#"<Font ref="style:NormalTextFont" height="12" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#
+            )
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Format>"));
+        assert!(xml.contains("<EditFormat>"));
+        assert!(xml.contains(
+            r#"<Font ref="style:NormalTextFont" height="12" bold="true" italic="false" underline="false" strikeout="false" kind="StyleItem"/>"#
+        ));
+    }
+
+    #[test]
+    fn extracts_form_button_picture_and_group_horizontal_align_from_layout_code() {
+        let right_aligned = parse_form_child_item(
+            r#"{31,{239,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"НазначитьКурьера",{1,1,{"ru","Курьера"}},1,{3,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{240,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"НазначитьКурьераРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0,0,2,3,3,0,0,0,0,0,0,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(right_aligned.group_horizontal_align, Some("Right"));
+
+        let pictured = parse_form_child_item(
+            r#"{31,{110,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СписокЗаказовНовыйЗаказ",{1,1,{"ru","Оформить документы"}},1,{1,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},2,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,1,{0,894afc03-9904-465d-b671-f555ffb9b21c},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{111,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗаказовНовыйЗаказРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(pictured.picture_ref.as_deref(), Some("StdPicture.Document"));
+        assert!(pictured.picture_load_transparent);
+
+        let xml = format_form_child_items_xml(&[pictured], 1);
+        let picture_at = xml.find("<Picture>").unwrap();
+        let title_at = xml.find("<Title>").unwrap();
+        assert!(picture_at < title_at);
+        assert!(xml.contains("<xr:Ref>StdPicture.Document</xr:Ref>"));
+    }
+
+    #[test]
+    fn extracts_form_popup_picture_from_layout_code() {
+        let popup = parse_form_child_item(
+            r#"{22,{251,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"ГруппаКомандСоздать",{1,1,{"ru","Создать"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{7,{4,1,{0,977e831a-0e73-4d60-af51-091a6fa8612e},"",-1,-1,1,0,""},{0},2,3,0,0,{3,4,{0}},{3,4,{0}}},2,a9f3b1ac-f51b-431e-b102-55a69acdecad,{31,{145,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СоздатьЗаказ",{1,1,{"ru","Заказ клиента"}},1,{1,409b9a53-7f7e-4178-86c1-33176c7c7a7a},{0},2,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1,{12,{146,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СоздатьЗаказРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},{"U"},1,0,0,1,0,0,0,0,3,3,0,0,0,0,0,0,1,0},1,0,1,{12,{252,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ГруппаКомандСоздатьРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(popup.tag, "Popup");
+        assert_eq!(
+            popup.picture_ref.as_deref(),
+            Some("StdPicture.CreateListItem")
+        );
+        assert!(popup.picture_load_transparent);
+
+        let xml = format_form_child_items_xml(&[popup], 1);
+        let title_at = xml.find("<Title>").unwrap();
+        let picture_at = xml.find("<Picture>").unwrap();
+        let tooltip_at = xml.find("<ExtendedTooltip").unwrap();
+        assert!(title_at < picture_at);
+        assert!(picture_at < tooltip_at);
+        assert!(xml.contains("<xr:Ref>StdPicture.CreateListItem</xr:Ref>"));
+    }
+
+    #[test]
+    fn extracts_form_command_customize_list_standard_picture() {
+        let command = parse_form_command(
+            r#"{9,{4,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"УстановитОтбор",{1,1,{"ru","Настроить список"}},{1,1,{"ru","Установит отбор"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,f04794cb-c198-4172-86c3-649386013c85},"",-1,-1,1,0,""},"",3,0,0,{0,0},1,0,1,0,0,1}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(command.picture_ref.as_deref(), Some("StdPicture.CustomizeList"));
+        assert!(command.picture_load_transparent);
+    }
+
+    #[test]
+    fn extracts_form_command_filter_standard_pictures() {
+        for (raw, expected) in [
+            (
+                r#"{9,{4,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"УстановитьОтбор",{1,1,{"ru","Установить отбор"}},{1,1,{"ru","Установить отбор"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,2ef82795-06fe-4365-bd0c-44b486264620},"",-1,-1,1,0,""},"УстановитьОтбор",1,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.FilterCriterion",
+            ),
+            (
+                r#"{9,{5,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"УстановитьОтборПоЗначению",{1,1,{"ru","Установить отбор по значению в колонке"}},{1,1,{"ru","Установить отбор по значению в колонке"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,b1406535-6cc2-4410-95ea-753556e8460f},"",-1,-1,1,0,""},"УстановитьОтборПоЗначениюВТекущейКолонке",3,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.FilterByCurrentValue",
+            ),
+            (
+                r#"{9,{6,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"ОтключитьОтбор",{1,1,{"ru","Отключить отбор"}},{1,1,{"ru","Отключить отбор"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,479470e0-ea0f-4266-8549-e2b1e8c06534},"",-1,-1,1,0,""},"ОтключитьОтбор",3,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.ClearFilter",
+            ),
+            (
+                r#"{9,{7,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"РазвернутьВсеНеудачныеЗамены",{1,1,{"ru","Развернуть все неудачные замены"}},{1,1,{"ru","Развернуть все неудачные замены"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,fb7e9fb5-110b-41cb-adc6-753969ae1c81},"",-1,-1,1,0,""},"РазвернутьВсеНеудачныеЗамены",3,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.ExpandAll",
+            ),
+            (
+                r#"{9,{8,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"СвернутьВсеНеудачныеЗамены",{1,1,{"ru","Свернуть все неудачные замены"}},{1,1,{"ru","Свернуть все неудачные замены"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,27ee3053-952c-49e5-8261-9215098e0e9c},"",-1,-1,1,0,""},"СвернутьВсеНеудачныеЗамены",3,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.CollapseAll",
+            ),
+            (
+                r#"{9,{9,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"ОткрытьXML",{1,1,{"ru","Открыть XML"}},{1,1,{"ru","Открыть XML"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,785362cb-3756-48ed-87d2-292ded17054a},"",-1,-1,1,0,""},"ОткрытьXML",1,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.OpenFile",
+            ),
+            (
+                r#"{9,{10,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"СохранитьНастройки",{1,1,{"ru","Сохранить настройки"}},{1,1,{"ru","Сохранить настройки"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,23f940bf-7381-4c2b-85a1-e541ed428042},"",-1,-1,1,0,""},"СохранитьНастройки",1,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.SaveValues",
+            ),
+            (
+                r#"{9,{11,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"ВосстановитьНастройки",{1,1,{"ru","Восстановить настройки"}},{1,1,{"ru","Восстановить настройки"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{0,a7707ed1-39b0-418f-974d-4d500d27a9c6},"",-1,-1,1,0,""},"ВосстановитьНастройки",1,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.RestoreValues",
+            ),
+            (
+                r#"{9,{12,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"ПредыдущееИзображение",{1,1,{"ru","Предыдущее изображение"}},{1,1,{"ru","Предыдущее изображение"}},{0,{0,{"B",1},0}},{0,0,0},{4,1,{-8},"",-1,-1,1,0,""},"ПредыдущееИзображение",3,0,0,{0,0},1,0,1,0,0,1}"#,
+                "StdPicture.MoveLeft",
+            ),
+        ] {
+            let command = parse_form_command(raw, &BTreeMap::new()).unwrap();
+            assert_eq!(command.picture_ref.as_deref(), Some(expected));
+            assert!(command.picture_load_transparent);
+        }
+    }
+
+    #[test]
+    fn extracts_form_picture_decoration_standard_picture() {
+        let (reference, load_transparent) = parse_form_child_item_picture_value(
+            r#"{4,1,{0,5289d9a4-b012-4d54-9bce-50473fe29b57},"",-1,-1,1,0,""}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(reference, "StdPicture.DialogExclamation");
+        assert!(load_transparent);
+    }
+
+    #[test]
     fn extracts_form_input_field_read_only_from_layout_code() {
         let item = parse_form_child_item(
             r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Author",1,0,{1,0},{1,0},{0},{0},1,1,2,0,2,{1,0},{1,0},1,1,0,3,0}"#,
@@ -31549,6 +41024,30 @@ mod tests {
     }
 
     #[test]
+    fn extracts_label_and_checkbox_title_location_from_layout_code() {
+        for (field_type, expected_tag) in [("1", "LabelField"), ("3", "CheckBoxField")] {
+            let item = parse_form_child_item(
+                &format!(
+                    r#"{{48,{{78,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,{field_type},"Field",4,0,{{1,0}},{{1,0}},{{0}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0}}"#
+                ),
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+
+            assert_eq!(item.tag, expected_tag);
+            assert_eq!(item.title_location, Some("Right"));
+
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(xml.contains("<TitleLocation>Right</TitleLocation>"));
+        }
+    }
+
+    #[test]
     fn extracts_form_input_field_enter_on_input_from_layout_code() {
         let item = parse_form_child_item(
             r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Field",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2}"#,
@@ -31567,7 +41066,122 @@ mod tests {
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<EditMode>EnterOnInput</EditMode>"));
-        assert!(xml.contains("<AutoEditMode>true</AutoEditMode>"));
+        assert!(!xml.contains("<AutoEditMode>true</AutoEditMode>"));
+    }
+
+    #[test]
+    fn extracts_checkbox_edit_mode_from_layout_code() {
+        let item = parse_form_child_item(
+            r#"{37,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,3,"СписокКолонокВидимость",0,0,{1,1,{"ru","Видимость"}},{1,0},{2,{2},{1}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,{3,4,{0}},{3,4,{0}},0,{1,0},{3,4,{0}},{7,3,0,1,100},0,0,0,2,0},{0,1,0},1,{22,{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокКолонокВидимостьКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокКолонокВидимостьРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "CheckBoxField");
+        assert_eq!(item.edit_mode, Some("EnterOnInput"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<EditMode>EnterOnInput</EditMode>"));
+    }
+
+    #[test]
+    fn extracts_radio_button_field_with_choice_list_from_layout_code() {
+        let mut attribute_names = BTreeMap::new();
+        attribute_names.insert("2".to_string(), "ВариантОбработки".to_string());
+        let item = parse_form_child_item(
+            r##"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ВариантОбработки",1,0,{1,1,{"ru","Выберите действие"}},{1,0},{1,{2}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{3,2,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",1},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Удаление чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}},0,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2},{0,1,0},1,{22,{39,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ВариантОбработкиКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ВариантОбработкиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##,
+            None,
+            None,
+            &attribute_names,
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "RadioButtonField");
+        assert_eq!(item.data_path.as_deref(), Some("ВариантОбработки"));
+        assert_eq!(item.radio_button_type, Some("Auto"));
+        assert_eq!(item.choice_list.len(), 2);
+        assert_eq!(
+            item.choice_list[0].value,
+            FormChoiceListValue::Decimal("0".to_string())
+        );
+        assert_eq!(
+            item.choice_list[1].value,
+            FormChoiceListValue::Decimal("1".to_string())
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains(r#"<RadioButtonField name="ВариантОбработки" id="38">"#));
+        assert!(xml.contains("<DataPath>ВариантОбработки</DataPath>"));
+        assert!(xml.contains("<RadioButtonType>Auto</RadioButtonType>"));
+        assert!(xml.contains(r#"<Value xsi:type="xs:decimal">0</Value>"#));
+        assert!(xml.contains(r#"<Value xsi:type="xs:decimal">1</Value>"#));
+        assert!(xml.contains(r#"<ContextMenu name="ВариантОбработкиКонтекстноеМеню" id="39"/>"#));
+    }
+
+    #[test]
+    fn parses_radio_button_type_and_columns_count_from_options() {
+        for (code, expected) in [("0", "Auto"), ("1", "RadioButtons"), ("2", "Tumbler")] {
+            let mut options = vec!["0"; 12];
+            options[7] = code;
+            assert_eq!(
+                parse_form_radio_button_type(Some(&options)),
+                Some(expected),
+                "code={code}"
+            );
+        }
+
+        let mut options = vec!["0"; 12];
+        options[2] = "3";
+        assert_eq!(
+            parse_form_radio_button_columns_count(Some(&options)),
+            Some(3)
+        );
+        options[2] = "0";
+        assert_eq!(parse_form_radio_button_columns_count(Some(&options)), None);
+    }
+
+    #[test]
+    fn parses_radio_button_choice_list_value_variants() {
+        let mut object_refs = BTreeMap::new();
+        object_refs.insert(
+            "16edd24a-02b8-432a-ab20-de3fe0039ac3".to_string(),
+            "Enum.ВариантыЗагрузкиОтчетаБанкаПоСБП.EnumValue.ЗагрузкаОтчета".to_string(),
+        );
+
+        let mut decimal_options = vec!["0"; 12];
+        decimal_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+        let decimal_items =
+            parse_form_radio_button_choice_list(Some(&decimal_options), &object_refs);
+        assert_eq!(
+            decimal_items[0].value,
+            FormChoiceListValue::Decimal("0".to_string())
+        );
+
+        let mut string_options = vec!["0"; 12];
+        string_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"S","ПоОтдельности"},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Загрузить категории по отдельности"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+        let string_items = parse_form_radio_button_choice_list(Some(&string_options), &object_refs);
+        assert_eq!(
+            string_items[0].value,
+            FormChoiceListValue::String("ПоОтдельности".to_string())
+        );
+
+        let mut ref_options = vec!["0"; 12];
+        ref_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,0,{"U"},e914059f-4304-4438-82fc-8ebf2019b331,16edd24a-02b8-432a-ab20-de3fe0039ac3,{1,1,{"ru","Загрузка отчета"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+        let ref_items = parse_form_radio_button_choice_list(Some(&ref_options), &object_refs);
+        assert_eq!(
+            ref_items[0].value,
+            FormChoiceListValue::DesignTimeRef(
+                "Enum.ВариантыЗагрузкиОтчетаБанкаПоСБП.EnumValue.ЗагрузкаОтчета".to_string()
+            )
+        );
     }
 
     #[test]
@@ -32036,6 +41650,30 @@ mod tests {
 
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains(r#"<ColumnGroup name="DebitAccountGroup" id="140">"#));
+        assert!(xml.contains("<Group>InCell</Group>"));
+        assert!(xml.contains("<ShowInHeader>true</ShowInHeader>"));
+    }
+
+    #[test]
+    fn extracts_form_column_group_show_in_header_from_wrapper_two_layout_code() {
+        let field = r#"{22,{140,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Доставка",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,2,60,{-31},700,0,0,0,1,100},{0,0,0},1,{2,2,1,1,3,{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0},{"Pattern"},"",{1,0},0},0}"#;
+
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "ColumnGroup");
+        assert_eq!(item.group, Some("InCell"));
+        assert_eq!(item.show_in_header, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<Group>InCell</Group>"));
         assert!(xml.contains("<ShowInHeader>true</ShowInHeader>"));
     }
@@ -32577,6 +42215,42 @@ mod tests {
     }
 
     #[test]
+    fn extracts_form_input_field_choice_folders_and_items_from_layout_code() {
+        let mut input_fields = vec!["0".to_string(); 45];
+        input_fields[0] = "48".to_string();
+        input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+        input_fields[5] = "2".to_string();
+        input_fields[6] = r#""Field""#.to_string();
+        let mut options = vec!["2".to_string(); 66];
+        options[0] = "38".to_string();
+        options[24] = "0".to_string();
+        input_fields[39] = format!("{{{}}}", options.join(","));
+        let field = format!("{{{}}}", input_fields.join(","));
+
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.choice_folders_and_items, Some("Items"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
+        assert!(
+            xml.find("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>")
+                .unwrap()
+                < xml.find("<AutoMarkIncomplete>").unwrap_or(usize::MAX)
+        );
+    }
+
+    #[test]
     fn extracts_field_context_menu_as_direct_child() {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let mut fields = vec!["0".to_string(); 43];
@@ -32713,9 +42387,26 @@ mod tests {
     }
 
     #[test]
+    fn parses_uuid_before_row_change_event() {
+        let fields = split_1c_braced_fields(
+            r#"{1,ab930362-ff94-4dcb-ad16-188805d23e3c,"BeforeChangeHandler"}"#,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_form_child_item_event_record(&fields),
+            vec![FormBodyEvent {
+                name: "BeforeRowChange".to_string(),
+                handler: "BeforeChangeHandler".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn extracts_table_command_set_from_layout_field() {
         let fields = [
-            r#"{7,0ae4bea5-23be-42a7-b69e-97b11b29c453,37740564-9e86-44a0-bea9-3f485a5a3f91,8af6ebff-cd02-4bfe-a984-44a292623708,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+            r#"{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
         ];
 
         assert_eq!(
@@ -32727,7 +42418,467 @@ mod tests {
                 "EndEdit",
                 "MoveDown",
                 "MoveUp",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_history_command_set_from_layout_field() {
+        let fields = [
+            r#"{9,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,44ad3ec9-f3c2-4913-9224-5f9fb6418743,58b2a785-23f6-4b0e-a324-9a1323285595,8af6ebff-cd02-4bfe-a984-44a292623708,9ef79140-3de6-436a-8dda-610bb963f5db,c0519548-2a9a-44de-a25e-faf01e089d4d,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "CancelSearch",
+                "Copy",
+                "EndEdit",
+                "Find",
+                "MoveDown",
+                "MoveUp",
                 "ShowRowRearrangement",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_pickup_history_command_set_from_layout_field() {
+        let fields = [
+            r#"{13,0ae4bea5-23be-42a7-b69e-97b11b29c453,51c99108-107c-43e1-8918-e48835bf2495,59b4387d-f5be-4658-901f-bd3068217469,714d44cc-63da-4431-b33a-428e398d2a08,7b683784-b474-441a-ba63-3d757bd0ffd4,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,d96b0c03-b209-4d01-a3fc-17a14f873b64,e7216412-03ac-4a81-99c2-1d7c28e88e31}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "FindByCurrentValue",
+                "Pickup",
+                "SearchEverywhere",
+                "SearchHistory",
+                "SelectAll",
+                "ShowMultipleSelection",
+                "ShowRowRearrangement",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_selection_search_command_set_from_layout_field() {
+        let fields = [
+            r#"{12,0ae4bea5-23be-42a7-b69e-97b11b29c453,37740564-9e86-44a0-bea9-3f485a5a3f91,51c99108-107c-43e1-8918-e48835bf2495,7b683784-b474-441a-ba63-3d757bd0ffd4,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,e7216412-03ac-4a81-99c2-1d7c28e88e31,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "SearchEverywhere",
+                "SelectAll",
+                "ShowMultipleSelection",
+                "ShowRowRearrangement",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_mobile_device_command_set_from_layout_field() {
+        let fields = [
+            r#"{14,0ae4bea5-23be-42a7-b69e-97b11b29c453,37740564-9e86-44a0-bea9-3f485a5a3f91,44ad3ec9-f3c2-4913-9224-5f9fb6418743,714d44cc-63da-4431-b33a-428e398d2a08,7b683784-b474-441a-ba63-3d757bd0ffd4,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,c0519548-2a9a-44de-a25e-faf01e089d4d,d96b0c03-b209-4d01-a3fc-17a14f873b64,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "CancelSearch",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "Find",
+                "FindByCurrentValue",
+                "MoveDown",
+                "MoveUp",
+                "SearchEverywhere",
+                "SearchHistory",
+                "ShowRowRearrangement",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_check_all_pickup_command_set_from_layout_field() {
+        let fields = [
+            r#"{11,0ae4bea5-23be-42a7-b69e-97b11b29c453,18248aa8-e621-4e19-a611-54fb8923644c,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,59b4387d-f5be-4658-901f-bd3068217469,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "CheckAll",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "Pickup",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_choose_command_set_from_layout_field() {
+        let fields = [
+            r#"{12,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,49602716-fea6-497f-8047-726404038857,58b2a785-23f6-4b0e-a324-9a1323285595,88078230-1f6b-415f-99e4-ad2ff73810cf,8969c93a-23e5-4bef-941d-aaef315858d2,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,fa51b106-eae6-44c7-8054-76cbb3100603},1"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Choose",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "OutputList",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_dynamic_list_command_set_from_layout_field() {
+        let fields = [
+            r#"{19,04ac7211-e74f-4776-9749-35a9282b1d52,0ae4bea5-23be-42a7-b69e-97b11b29c453,0f8d6d98-2f8b-405a-b8b3-0538e9d95da5,11761e12-cf32-4826-a175-b23213e3b229,182a793b-22a5-4625-b316-6a5be7f88078,33b7b9cd-6979-4435-8c58-d9bc8250edec,403bc6e6-b98e-4181-9f43-9c75cbbf82cf,44ad3ec9-f3c2-4913-9224-5f9fb6418743,714d44cc-63da-4431-b33a-428e398d2a08,7b683784-b474-441a-ba63-3d757bd0ffd4,825c1c15-ef8f-47ab-b002-e6b84b3e5b10,88078230-1f6b-415f-99e4-ad2ff73810cf,95b4bc12-2ece-4d7a-b3e2-6f9293620a06,a2f737a8-0114-4e86-a214-45e5c213fa65,b41f5bbc-ba5d-4888-8cd1-db246a371418,daa306cd-a78a-4e74-a14c-739daba624cb,e3dd8850-fc3c-41b1-bbb3-7c66af082608,e7216412-03ac-4a81-99c2-1d7c28e88e31,ec576e13-1e76-4c33-98aa-a33204514227}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "CancelSearch",
+                "Change",
+                "ChangeHistory",
+                "Copy",
+                "CopyToClipboard",
+                "Create",
+                "Delete",
+                "DynamicListStandardSettings",
+                "FindByCurrentValue",
+                "LoadDynamicListSettings",
+                "OutputList",
+                "Post",
+                "Refresh",
+                "SaveDynamicListSettings",
+                "SearchEverywhere",
+                "SetDateInterval",
+                "SetDeletionMark",
+                "ShowMultipleSelection",
+                "UndoPosting",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_dynamic_list_short_command_set_from_layout_field() {
+        let fields = [
+            r#"{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,0f8d6d98-2f8b-405a-b8b3-0538e9d95da5,182a793b-22a5-4625-b316-6a5be7f88078,33b7b9cd-6979-4435-8c58-d9bc8250edec,403bc6e6-b98e-4181-9f43-9c75cbbf82cf,8d772f97-c0ef-47c0-9cb0-efea28c61341,95b4bc12-2ece-4d7a-b3e2-6f9293620a06,b41f5bbc-ba5d-4888-8cd1-db246a371418}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Change",
+                "Copy",
+                "Create",
+                "Delete",
+                "DynamicListStandardSettings",
+                "LoadDynamicListSettings",
+                "Refresh",
+                "SaveDynamicListSettings",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_tree_mode_command_set_from_layout_field() {
+        let fields = [
+            r#"{8,01833a5a-6553-4c49-b445-095018107bb5,05468165-f954-45a5-84f2-6641c51f9f23,0ae4bea5-23be-42a7-b69e-97b11b29c453,0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "HierarchicalList",
+                "List",
+                "Tree",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_selection_short_command_set_from_layout_field() {
+        let fields = [
+            r#"{9,0ae4bea5-23be-42a7-b69e-97b11b29c453,37740564-9e86-44a0-bea9-3f485a5a3f91,51c99108-107c-43e1-8918-e48835bf2495,88078230-1f6b-415f-99e4-ad2ff73810cf,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "SelectAll",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_find_selection_command_set_from_layout_field() {
+        let fields = [
+            r#"{10,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,44ad3ec9-f3c2-4913-9224-5f9fb6418743,51c99108-107c-43e1-8918-e48835bf2495,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,c0519548-2a9a-44de-a25e-faf01e089d4d}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "CancelSearch",
+                "Change",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "Find",
+                "SelectAll",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_rearrangement_command_set_from_layout_field() {
+        let fields = [
+            r#"{10,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "ShowRowRearrangement",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_cancel_search_and_find_command_set_from_layout_field() {
+        let fields = [
+            r#"{11,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,44ad3ec9-f3c2-4913-9224-5f9fb6418743,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,c0519548-2a9a-44de-a25e-faf01e089d4d,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "CancelSearch",
+                "Change",
+                "Copy",
+                "Delete",
+                "EndEdit",
+                "Find",
+                "MoveDown",
+                "MoveUp",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_output_list_selection_command_set_from_layout_field() {
+        let fields = [
+            r#"{13,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,49602716-fea6-497f-8047-726404038857,51c99108-107c-43e1-8918-e48835bf2495,58b2a785-23f6-4b0e-a324-9a1323285595,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,e7216412-03ac-4a81-99c2-1d7c28e88e31,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "EndEdit",
+                "MoveDown",
+                "MoveUp",
+                "OutputList",
+                "SelectAll",
+                "ShowMultipleSelection",
+                "ShowRowRearrangement",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_cancel_search_output_list_command_set_from_layout_field() {
+        let fields = [
+            r#"{14,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,44ad3ec9-f3c2-4913-9224-5f9fb6418743,49602716-fea6-497f-8047-726404038857,51c99108-107c-43e1-8918-e48835bf2495,58b2a785-23f6-4b0e-a324-9a1323285595,88078230-1f6b-415f-99e4-ad2ff73810cf,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,c0519548-2a9a-44de-a25e-faf01e089d4d,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "CancelSearch",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "Find",
+                "MoveDown",
+                "MoveUp",
+                "OutputList",
+                "SelectAll",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_full_selection_command_set_from_layout_field() {
+        let fields = [
+            r#"{16,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,44ad3ec9-f3c2-4913-9224-5f9fb6418743,49602716-fea6-497f-8047-726404038857,51c99108-107c-43e1-8918-e48835bf2495,58b2a785-23f6-4b0e-a324-9a1323285595,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,c0519548-2a9a-44de-a25e-faf01e089d4d,e7216412-03ac-4a81-99c2-1d7c28e88e31,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "CancelSearch",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "Find",
+                "MoveDown",
+                "MoveUp",
+                "OutputList",
+                "SelectAll",
+                "ShowMultipleSelection",
+                "ShowRowRearrangement",
+                "SortListAsc",
+                "SortListDesc",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_hierarchical_command_set_from_layout_field() {
+        let fields = [
+            r#"{17,01833a5a-6553-4c49-b445-095018107bb5,05468165-f954-45a5-84f2-6641c51f9f23,0ae4bea5-23be-42a7-b69e-97b11b29c453,0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,49602716-fea6-497f-8047-726404038857,51c99108-107c-43e1-8918-e48835bf2495,58b2a785-23f6-4b0e-a324-9a1323285595,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,e7216412-03ac-4a81-99c2-1d7c28e88e31,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "HierarchicalList",
+                "List",
+                "MoveDown",
+                "MoveUp",
+                "OutputList",
+                "SelectAll",
+                "ShowMultipleSelection",
+                "ShowRowRearrangement",
+                "SortListAsc",
+                "SortListDesc",
+                "Tree",
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_regular_table_search_history_command_set_from_layout_field() {
+        let fields = [
+            r#"{19,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,44ad3ec9-f3c2-4913-9224-5f9fb6418743,49602716-fea6-497f-8047-726404038857,51c99108-107c-43e1-8918-e48835bf2495,58b2a785-23f6-4b0e-a324-9a1323285595,714d44cc-63da-4431-b33a-428e398d2a08,7b683784-b474-441a-ba63-3d757bd0ffd4,88078230-1f6b-415f-99e4-ad2ff73810cf,8af6ebff-cd02-4bfe-a984-44a292623708,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,b41f5bbc-ba5d-4888-8cd1-db246a371418,c0519548-2a9a-44de-a25e-faf01e089d4d,d96b0c03-b209-4d01-a3fc-17a14f873b64,e7216412-03ac-4a81-99c2-1d7c28e88e31,fa51b106-eae6-44c7-8054-76cbb3100603}"#,
+        ];
+
+        assert_eq!(
+            parse_form_table_command_set_excluded_commands(&fields),
+            vec![
+                "Add",
+                "CancelSearch",
+                "Change",
+                "Copy",
+                "CopyToClipboard",
+                "Delete",
+                "EndEdit",
+                "Find",
+                "FindByCurrentValue",
+                "MoveDown",
+                "MoveUp",
+                "OutputList",
+                "SearchEverywhere",
+                "SearchHistory",
+                "SelectAll",
+                "ShowMultipleSelection",
+                "ShowRowRearrangement",
+                "SortListAsc",
+                "SortListDesc",
             ]
         );
     }
@@ -32781,7 +42932,11 @@ mod tests {
             name: "Run".to_string(),
             title: Vec::new(),
             tooltip: Vec::new(),
+            picture_ref: None,
+            picture_load_transparent: false,
+            shortcut: None,
             action: String::new(),
+            representation: None,
             functional_options: Vec::new(),
             modifies_saved_data: None,
             current_row_use: None,
@@ -32850,28 +43005,54 @@ mod tests {
             auto_refresh: None,
             auto_refresh_period: None,
             period: None,
+            change_row_set: None,
+            change_row_order: None,
             command_set_excluded_commands: Vec::new(),
             use_alternation_row_color: None,
             default_item: None,
+            row_input_mode: None,
+            show_root: None,
+            allow_root_choice: None,
             choice_folders_and_items: None,
             restore_current_row: None,
             row_filter_nil: None,
             row_picture_data_path: None,
+            rows_picture_ref: None,
+            rows_picture_load_transparent: false,
+            top_level_parent_nil: None,
             update_on_data_change: None,
             user_settings_group: None,
             allow_getting_current_row_url: None,
             button_representation: None,
+            group_horizontal_align: None,
+            horizontal_location: None,
             location_in_command_bar: None,
             default_button: None,
             scroll_on_compress: None,
             show_title: None,
             show_in_header: None,
+            user_visible_common: None,
+            visible: None,
             read_only: None,
             skip_on_input: None,
             title_location: None,
+            tooltip_representation: None,
             edit_mode: None,
+            horizontal_align: None,
+            check_box_type: None,
+            radio_button_type: None,
+            columns_count: None,
+            cell_hyperlink: None,
+            show_in_footer: None,
+            footer_horizontal_align: None,
+            hiperlink: None,
+            text_color: None,
             mark_required_complete: None,
             auto_edit_mode: None,
+            auto_insert_new_row: None,
+            format: Vec::new(),
+            edit_format: Vec::new(),
+            font_xml: None,
             width: None,
             height: None,
             auto_max_width: None,
@@ -32895,18 +43076,24 @@ mod tests {
             list_choice_mode: None,
             quick_choice: None,
             choose_type: None,
+            auto_choice_incomplete: None,
             auto_mark_incomplete: None,
             choice_button_representation: None,
             item_type: None,
             addition_source_item: None,
+            picture_ref: None,
+            picture_load_transparent: false,
+            picture_size: None,
             picture_file_name: None,
             title: Vec::new(),
             tooltip: Vec::new(),
             input_hint: Vec::new(),
+            choice_list: Vec::new(),
             extended_tooltip: None,
             events: Vec::new(),
             data_path: Some("List".to_string()),
             command_name: None,
+            command_source: None,
             child_items: vec![
                 FormChildItem {
                     tag: "SearchStringAddition",
@@ -32925,28 +43112,54 @@ mod tests {
                     auto_refresh: None,
                     auto_refresh_period: None,
                     period: None,
+                    change_row_set: None,
+                    change_row_order: None,
                     command_set_excluded_commands: Vec::new(),
                     use_alternation_row_color: None,
                     default_item: None,
+                    row_input_mode: None,
+                    show_root: None,
+                    allow_root_choice: None,
                     choice_folders_and_items: None,
                     restore_current_row: None,
                     row_filter_nil: None,
                     row_picture_data_path: None,
+                    rows_picture_ref: None,
+                    rows_picture_load_transparent: false,
+                    top_level_parent_nil: None,
                     update_on_data_change: None,
                     user_settings_group: None,
                     allow_getting_current_row_url: None,
                     button_representation: None,
+                    group_horizontal_align: None,
+                    horizontal_location: None,
                     location_in_command_bar: None,
                     default_button: None,
                     scroll_on_compress: None,
                     show_title: None,
                     show_in_header: None,
+                    user_visible_common: None,
+                    visible: None,
                     read_only: None,
                     skip_on_input: None,
                     title_location: None,
+                    tooltip_representation: None,
                     edit_mode: None,
+                    horizontal_align: None,
+                    check_box_type: None,
+                    radio_button_type: None,
+                    columns_count: None,
+                    cell_hyperlink: None,
+                    show_in_footer: None,
+                    footer_horizontal_align: None,
+                    hiperlink: None,
+                    text_color: None,
                     mark_required_complete: None,
                     auto_edit_mode: None,
+                    auto_insert_new_row: None,
+                    format: Vec::new(),
+                    edit_format: Vec::new(),
+                    font_xml: None,
                     width: None,
                     height: None,
                     auto_max_width: None,
@@ -32970,18 +43183,24 @@ mod tests {
                     list_choice_mode: None,
                     quick_choice: None,
                     choose_type: None,
+                    auto_choice_incomplete: None,
                     auto_mark_incomplete: None,
                     choice_button_representation: None,
                     item_type: Some("SearchStringRepresentation"),
                     addition_source_item: Some("Rows".to_string()),
+                    picture_ref: None,
+                    picture_load_transparent: false,
+                    picture_size: None,
                     picture_file_name: None,
                     title: Vec::new(),
                     tooltip: Vec::new(),
                     input_hint: Vec::new(),
+                    choice_list: Vec::new(),
                     extended_tooltip: None,
                     events: Vec::new(),
                     data_path: None,
                     command_name: None,
+                    command_source: None,
                     child_items: Vec::new(),
                 },
                 FormChildItem {
@@ -33001,28 +43220,54 @@ mod tests {
                     auto_refresh: None,
                     auto_refresh_period: None,
                     period: None,
+                    change_row_set: None,
+                    change_row_order: None,
                     command_set_excluded_commands: Vec::new(),
                     use_alternation_row_color: None,
                     default_item: None,
+                    row_input_mode: None,
+                    show_root: None,
+                    allow_root_choice: None,
                     choice_folders_and_items: None,
                     restore_current_row: None,
                     row_filter_nil: None,
                     row_picture_data_path: None,
+                    rows_picture_ref: None,
+                    rows_picture_load_transparent: false,
+                    top_level_parent_nil: None,
                     update_on_data_change: None,
                     user_settings_group: None,
                     allow_getting_current_row_url: None,
                     button_representation: None,
+                    group_horizontal_align: None,
+                    horizontal_location: None,
                     location_in_command_bar: None,
                     default_button: None,
                     scroll_on_compress: None,
                     show_title: None,
                     show_in_header: None,
+                    user_visible_common: None,
+                    visible: None,
                     read_only: None,
                     skip_on_input: None,
                     title_location: None,
+                    tooltip_representation: None,
                     edit_mode: None,
+                    horizontal_align: None,
+                    check_box_type: None,
+                    radio_button_type: None,
+                    columns_count: None,
+                    cell_hyperlink: None,
+                    show_in_footer: None,
+                    footer_horizontal_align: None,
+                    hiperlink: None,
+                    text_color: None,
                     mark_required_complete: None,
                     auto_edit_mode: None,
+                    auto_insert_new_row: None,
+                    format: Vec::new(),
+                    edit_format: Vec::new(),
+                    font_xml: None,
                     width: None,
                     height: None,
                     auto_max_width: None,
@@ -33046,18 +43291,24 @@ mod tests {
                     list_choice_mode: None,
                     quick_choice: None,
                     choose_type: None,
+                    auto_choice_incomplete: None,
                     auto_mark_incomplete: None,
                     choice_button_representation: None,
                     item_type: None,
                     addition_source_item: None,
+                    picture_ref: None,
+                    picture_load_transparent: false,
+                    picture_size: None,
                     picture_file_name: None,
                     title: Vec::new(),
                     tooltip: Vec::new(),
                     input_hint: Vec::new(),
+                    choice_list: Vec::new(),
                     extended_tooltip: None,
                     events: Vec::new(),
                     data_path: Some("List.Name".to_string()),
                     command_name: None,
+                    command_source: None,
                     child_items: Vec::new(),
                 },
             ],
@@ -33099,6 +43350,34 @@ mod tests {
     }
 
     #[test]
+    fn omits_property_bag_usual_group_show_title_false_for_title_variant() {
+        let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{8,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
+
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "UsualGroup");
+        assert_eq!(item.group, Some("Vertical"));
+        assert_eq!(item.behavior, Some("Usual"));
+        assert_eq!(item.representation, Some("NormalSeparation"));
+        assert_eq!(item.show_title, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Group>Vertical</Group>"));
+        assert!(xml.contains("<Behavior>Usual</Behavior>"));
+        assert!(xml.contains("<Representation>NormalSeparation</Representation>"));
+        assert!(!xml.contains("<ShowTitle>false</ShowTitle>"));
+    }
+
+    #[test]
     fn parses_property_bag_usual_group_horizontal_stretch() {
         let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,1,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},1,0,0,1,{1,0},2,0,3,3,2,0,1,1,{3,4,{0}},0,2,0,3,0},0,1,0,1}"#;
 
@@ -33122,6 +43401,54 @@ mod tests {
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<HorizontalStretch>true</HorizontalStretch>"));
         assert!(xml.contains("<Group>AlwaysHorizontal</Group>"));
+    }
+
+    #[test]
+    fn parses_live_usual_group_width_false_stretch_and_usual_behavior() {
+        let item = parse_form_child_item(
+            r#"{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ГруппаОсновная",{1,1,{"ru","Группа основная"}},{1,0},0,1,0,66,0,0,1,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,1,0,1}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "UsualGroup");
+        assert_eq!(item.width.as_deref(), Some("66"));
+        assert_eq!(item.horizontal_stretch, Some(false));
+        assert_eq!(item.vertical_stretch, Some(true));
+        assert_eq!(item.behavior, Some("Usual"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Width>66</Width>"));
+        assert!(xml.contains("<HorizontalStretch>false</HorizontalStretch>"));
+        assert!(xml.contains("<VerticalStretch>true</VerticalStretch>"));
+        assert!(xml.contains("<Behavior>Usual</Behavior>"));
+    }
+
+    #[test]
+    fn parses_live_usual_group_vertical_stretch_false_and_usual_behavior() {
+        let item = parse_form_child_item(
+            r#"{22,{37,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ГруппаФамилия",{1,0},{1,0},0,1,0,0,0,2,0,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,1,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,1,0,1}"#,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "UsualGroup");
+        assert_eq!(item.vertical_stretch, Some(false));
+        assert_eq!(item.behavior, Some("Usual"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<VerticalStretch>false</VerticalStretch>"));
+        assert!(xml.contains("<Behavior>Usual</Behavior>"));
     }
 
     #[test]
@@ -33165,6 +43492,216 @@ mod tests {
             2
         );
         assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
+    }
+
+    #[test]
+    fn extracts_form_command_interface_command_bar() {
+        let first_command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let form_body = deflate_for_test(
+            format!(
+                r#"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}}, "",{{0}},{{0,0}},{{0,0}},{{0,2,{{3,0,{{0,{first_command_uuid}}},{{0}},1,{{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b}},1,0,{{0,{{0,{{"B",0}},0}}}}}},{{3,1,{{0,{second_command_uuid}}},{{0}},1,{{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}},{{0}},0,0}}"#
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (
+                first_command_uuid.to_string(),
+                "CommonCommand.ДополнительныеСведенияКоманднаяПанель".to_string(),
+            ),
+            (
+                second_command_uuid.to_string(),
+                "CommonCommand.СозданиеСвязанныхОбъектов".to_string(),
+            ),
+        ]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains("<CommandInterface>"));
+        assert!(form_xml.contains("<CommandBar>"));
+        assert!(
+            form_xml.contains(
+                "<Command>CommonCommand.ДополнительныеСведенияКоманднаяПанель</Command>"
+            )
+        );
+        assert!(form_xml.contains("<Command>CommonCommand.СозданиеСвязанныхОбъектов</Command>"));
+        assert!(
+            form_xml.contains("<CommandGroup>FormCommandBarImportant</CommandGroup>")
+        );
+        assert!(
+            form_xml.contains("<CommandGroup>FormCommandBarCreateBasedOn</CommandGroup>")
+        );
+        assert!(form_xml.contains("<Index>1</Index>"));
+        assert_eq!(
+            form_xml
+                .matches("<DefaultVisible>false</DefaultVisible>")
+                .count(),
+            2
+        );
+        assert_eq!(form_xml.matches("<xr:Common>false</xr:Common>").count(), 2);
+    }
+
+    #[test]
+    fn extracts_real_world_form_command_interface_command_bar_variants() {
+        let object_refs = BTreeMap::from([
+            (
+                "becf53b6-3fbc-4c70-822f-4a70b0434353".to_string(),
+                "CommonCommand.ДополнительныеСведенияКоманднаяПанель".to_string(),
+            ),
+            (
+                "c7ba1f2c-139f-4ec0-b410-5f1c90152e91".to_string(),
+                "CommonCommand.ИнтеграцияС1СДокументооборотСоздатьПисьмо".to_string(),
+            ),
+            (
+                "08d33868-b05e-472f-9e9d-04014831420f".to_string(),
+                "CommonCommand.ИнтеграцияС1СДокументооборотСоздатьБизнесПроцесс".to_string(),
+            ),
+            (
+                "dad11c2e-08fc-4a6b-8829-8be6c64c15fc".to_string(),
+                "BusinessProcess.Задание".to_string(),
+            ),
+            (
+                "75666bb9-f6d3-4dd6-8220-427a81f23fc9".to_string(),
+                "CommonCommand.СозданиеСвязанныхОбъектов".to_string(),
+            ),
+            (
+                "25896075-2484-4879-8310-7f5680d80b48".to_string(),
+                "CommonCommand.Напомнить".to_string(),
+            ),
+            (
+                "9da27139-0bed-47b0-aef6-246929968502".to_string(),
+                "CommonCommand.СоздатьЗаметкуПоПредмету".to_string(),
+            ),
+        ]);
+        let form_body = deflate_for_test(
+            concat!(
+                "{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1},\"\",{0},{0,0},",
+                "{0,0},",
+                "{0,14,",
+                "{3,0,{0,becf53b6-3fbc-4c70-822f-4a70b0434353},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},1,0,{0,{0,{\"B\",1},0}}},",
+                "{3,1,{0},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},3,0,{0,{0,{\"B\",1},0}}},",
+                "{3,2,{0},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},4,0,{0,{0,{\"B\",1},0}}},",
+                "{3,3,{0,c7ba1f2c-139f-4ec0-b410-5f1c90152e91},{0},1,{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0},0,0,{0,{0,{\"B\",0},0}}},",
+                "{3,4,{0,08d33868-b05e-472f-9e9d-04014831420f},{0},1,{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0},1,0,{0,{0,{\"B\",0},0}}},",
+                "{3,5,{2,dad11c2e-08fc-4a6b-8829-8be6c64c15fc},{0},1,{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0},2,0,{0,{0,{\"B\",0},0}}},",
+                "{3,6,{0,75666bb9-f6d3-4dd6-8220-427a81f23fc9},{0},1,{0,dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0},3,0,{0,{0,{\"B\",0},0}}},",
+                "{3,7,{0,25896075-2484-4879-8310-7f5680d80b48},{0},1,{0,c59e11f3-6bcb-404a-9d76-1416c12be354},0,0,{0,{0,{\"B\",1},0}}},",
+                "{3,8,{0,9da27139-0bed-47b0-aef6-246929968502},{0},1,{0,c59e11f3-6bcb-404a-9d76-1416c12be354},1,0,{0,{0,{\"B\",1},0}}},",
+                "{3,9,{0,25896075-2484-4879-8310-7f5680d80b48},{0},1,{0,c59e11f3-6bcb-404a-9d76-1416c12be354},2,0,{0,{0,{\"B\",1},0}}},",
+                "{3,10,{0,9da27139-0bed-47b0-aef6-246929968502},{0},1,{0,c59e11f3-6bcb-404a-9d76-1416c12be354},3,0,{0,{0,{\"B\",1},0}}},",
+                "{3,11,{0},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},6,0,{0,{0,{\"B\",1},0}}},",
+                "{3,12,{0},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},7,0,{0,{0,{\"B\",1},0}}},",
+                "{3,13,{0,becf53b6-3fbc-4c70-822f-4a70b0434353},{0},1,{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b},5,0,{0,{0,{\"B\",1},0}}}",
+                "},0,0}"
+            )
+            .as_bytes(),
+        );
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains("<CommandInterface>"), "{form_xml}");
+        assert!(form_xml.contains("<CommandBar>"), "{form_xml}");
+        assert!(form_xml.contains("<Command>0</Command>"), "{form_xml}");
+        assert!(
+            form_xml.contains(
+                "<Command>BusinessProcess.Задание.StandardCommand.CreateBasedOn</Command>"
+            ),
+            "{form_xml}"
+        );
+        assert!(form_xml.contains("<CommandGroup>CommandGroup.Органайзер</CommandGroup>"), "{form_xml}");
+        assert!(form_xml.contains("<Command>CommonCommand.Напомнить</Command>"), "{form_xml}");
+        assert!(
+            form_xml.contains("<Command>CommonCommand.СоздатьЗаметкуПоПредмету</Command>"),
+            "{form_xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_form_command_interface_from_shifted_trailing_slot() {
+        let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let trailing = vec![
+            "{0}".to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+            "{1}".to_string(),
+            format!(
+                r#"{{0,1,{{3,0,{{0,{command_uuid}}},{{0}},1,{{0,cb50f5c0-8013-4262-93a2-f0db379d6b6b}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}}"#
+            ),
+        ];
+        let object_refs = BTreeMap::from([(
+            command_uuid.to_string(),
+            "CommonCommand.ДополнительныеСведенияКоманднаяПанель".to_string(),
+        )]);
+
+        let command_interface =
+            extract_form_command_interface(&trailing, &object_refs).expect("command interface");
+
+        assert_eq!(command_interface.command_bar.len(), 1);
+        assert!(command_interface.navigation_panel.is_empty());
+        assert_eq!(
+            command_interface.command_bar[0].command,
+            "CommonCommand.ДополнительныеСведенияКоманднаяПанель"
+        );
+        assert_eq!(command_interface.command_bar[0].item_type, "Added");
+        assert_eq!(
+            command_interface.command_bar[0].command_group.as_deref(),
+            Some("FormCommandBarImportant")
+        );
+    }
+
+    #[test]
+    fn extracts_form_command_interface_without_command_group_as_auto_items() {
+        let first_command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let second_command_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let form_body = deflate_for_test(
+            format!(
+                concat!(
+                    "{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}},\"\",{{0}},{{0,0}},",
+                    "{{0,0}},{{0,2,",
+                    "{{3,0,{{0,{}}},{{0}},0,{{0}},2,1,{{0,{{0,{{\"B\",1}},0}}}}}},",
+                    "{{3,1,{{2,{}}},{{0}},0,{{0}},0,0,{{0,{{0,{{\"B\",0}},0}}}}}}",
+                    "}},0,0}}"
+                ),
+                first_command_uuid,
+                second_command_uuid
+            )
+            .as_bytes(),
+        );
+        let object_refs = BTreeMap::from([
+            (
+                first_command_uuid.to_string(),
+                "CommonCommand.ЗагрузитьПерезаполнитьОбъектИзФайла".to_string(),
+            ),
+            (
+                second_command_uuid.to_string(),
+                "Document.ВозвратТоваровПоставщику".to_string(),
+            ),
+        ]);
+
+        let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
+
+        assert!(form_xml.contains("<CommandInterface>"), "{form_xml}");
+        assert!(form_xml.contains("<Type>Auto</Type>"), "{form_xml}");
+        assert!(form_xml.contains("<Index>2</Index>"), "{form_xml}");
+        assert!(
+            !form_xml.contains("<CommandGroup>"),
+            "{form_xml}"
+        );
+        assert!(
+            !form_xml.contains("<DefaultVisible>true</DefaultVisible>"),
+            "{form_xml}"
+        );
+        assert!(
+            form_xml.contains(
+                "<Command>Document.ВозвратТоваровПоставщику.StandardCommand.CreateBasedOn</Command>"
+            ),
+            "{form_xml}"
+        );
+        assert!(
+            form_xml.contains("<DefaultVisible>false</DefaultVisible>"),
+            "{form_xml}"
+        );
+        assert!(form_xml.contains("<xr:Common>false</xr:Common>"), "{form_xml}");
     }
 
     #[test]
@@ -33280,6 +43817,253 @@ mod tests {
             ]
         );
         assert!(assets.iter().all(|asset| asset.content == b"GIF89a"));
+    }
+
+    #[test]
+    fn extracts_picture_decoration_picture_ref_and_context_menu_from_live_blob() {
+        let field = r#"{12,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Логотип",{1,1,{"ru","Логотип"}},{1,0},1,0,0,2,2,{3,3,{-22}},{7,3,0,1,100},{0,0,0},1,{4,{4,1,{0,1b11ff6e-925c-4556-9810-b7266ffb3e30},"",-1,-1,0,0,""},0,2,0,{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},0,100},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ЛоготипКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Логотип"}},0},0,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ЛоготипРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,3,3,0,0},1,0,1}"#;
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::from([(
+                "1b11ff6e-925c-4556-9810-b7266ffb3e30".to_string(),
+                "CommonPicture.БизнесСетьЛоготип".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "PictureDecoration");
+        assert_eq!(
+            item.picture_ref.as_deref(),
+            Some("CommonPicture.БизнесСетьЛоготип")
+        );
+        assert!(!item.picture_load_transparent);
+        assert_eq!(item.picture_size, Some("Proportionally"));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+        assert_eq!(item.text_color.as_deref(), Some("style:BorderColor"));
+        assert!(
+            item.child_items
+                .iter()
+                .any(|child| child.tag == "ContextMenu" && child.name == "ЛоготипКонтекстноеМеню")
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<TextColor>style:BorderColor</TextColor>"));
+        assert!(xml.contains("<Title formatted=\"false\">"));
+        assert!(xml.contains("<PictureSize>Proportionally</PictureSize>"));
+        assert!(xml.contains("<xr:Ref>CommonPicture.БизнесСетьЛоготип</xr:Ref>"));
+        assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+        assert!(xml.contains(r#"<ContextMenu name="ЛоготипКонтекстноеМеню" id="57"/>"#));
+    }
+
+    #[test]
+    fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blob() {
+        let field = r#"{12,{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"КартинкаШаблонДокументаСQRКодом",{1,1,{"ru","Картинка шаблон документа СQRКодом"}},{1,0},1,50,7,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,{4,1,{0,8da0dcfb-6ece-4f68-abb1-e6f9897eec6b},"",-1,-1,0,0,""},0,2,0,{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,100},1,{22,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартинкаШаблонДокументаСQRКодомКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Картинка шаблон документа СQRКодом"}},0},0,1,{12,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартинкаШаблонДокументаСQRКодомРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,0,0,3,3,0,0}"#;
+        let item = parse_form_child_item(
+            field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::from([(
+                "8da0dcfb-6ece-4f68-abb1-e6f9897eec6b".to_string(),
+                "CommonPicture.QRКодНаДокументеБЭД".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "PictureDecoration");
+        assert_eq!(item.width.as_deref(), Some("50"));
+        assert_eq!(item.height.as_deref(), Some("7"));
+        assert_eq!(item.auto_max_width, Some(false));
+        assert_eq!(item.auto_max_height, Some(false));
+        assert_eq!(item.picture_size, Some("Proportionally"));
+        assert_eq!(
+            item.picture_ref.as_deref(),
+            Some("CommonPicture.QRКодНаДокументеБЭД")
+        );
+        assert_eq!(item.file_drag_mode, None);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<Width>50</Width>"));
+        assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+        assert!(xml.contains("<Height>7</Height>"));
+        assert!(xml.contains("<AutoMaxHeight>false</AutoMaxHeight>"));
+        assert!(xml.contains("<PictureSize>Proportionally</PictureSize>"));
+        assert!(!xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    }
+
+    #[test]
+    fn extracts_live_input_field_tooltip_and_extended_input_hint() {
+        let field = r#"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+        let item = parse_form_child_item_with_attrs(
+            field,
+            None,
+            None,
+            &BTreeMap::from([("3".to_string(), "Организация".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.data_path.as_deref(), Some("Организация"));
+        assert_eq!(item.tooltip.len(), 1);
+        assert_eq!(
+            item.tooltip.first().map(|value| value.1.as_str()),
+            Some("Организация, от имени которой будете приглашать.")
+        );
+        assert_eq!(item.input_hint, item.tooltip);
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ToolTip>"));
+        assert!(xml.contains("<InputHint>"));
+        assert!(
+            xml.find("<ToolTip>").unwrap() < xml.find("<InputHint>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<AutoMarkIncomplete>").unwrap() < xml.find("<InputHint>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
+        let field = r##"{37,{114,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"РежимОтправки",1,0,{1,1,{"ru","Текст приглашения"}},{1,1,{"ru","Режим приглашения определяет текст приглашения контрагентов - общее, к поставщику, к покупателю."}},{1,{4}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,3,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Для всех контрагентов"}}}},"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",1},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Для поставщиков"}}}},"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",2},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Для покупателей"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}},7,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",1,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},2,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"РежимОтправкиПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{115,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"РежимОтправкиКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{116,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"РежимОтправкиРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##;
+        let item = parse_form_child_item_with_attrs(
+            field,
+            None,
+            None,
+            &BTreeMap::from([("4".to_string(), "РежимОтправки".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.width.as_deref(), Some("7"));
+        assert_eq!(item.list_choice_mode, Some(true));
+        assert!(item.input_hint.is_empty());
+        assert_eq!(item.choice_list.len(), 3);
+        assert_eq!(
+            item.choice_list[0].value,
+            FormChoiceListValue::Decimal("0".to_string())
+        );
+        assert_eq!(
+            item.choice_list[1].value,
+            FormChoiceListValue::Decimal("1".to_string())
+        );
+        assert_eq!(
+            item.choice_list[2].value,
+            FormChoiceListValue::Decimal("2".to_string())
+        );
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ToolTip>"));
+        assert!(!xml.contains("<InputHint>"), "{xml}");
+        assert!(
+            xml.find("<ToolTip>").unwrap() < xml.find("<Width>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<Width>").unwrap() < xml.find("<ChoiceList>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_live_input_field_auto_choice_incomplete() {
+        let field = r#"{37,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"СписокЭлектроннаяПочта",1,0,{1,0},{1,0},{2,{1},{4}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,0,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},1,{1,0},{1,0},1,0,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{0,1,0},1,{22,{28,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЭлектроннаяПочтаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{29,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЭлектроннаяПочтаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+        let item = parse_form_child_item_with_attrs(
+            field,
+            None,
+            Some("Список"),
+            &BTreeMap::from([("1".to_string(), "Список".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "1".to_string(),
+                BTreeMap::from([("4".to_string(), "ЭлектроннаяПочта".to_string())]),
+            )]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "InputField");
+        assert_eq!(item.auto_choice_incomplete, Some(true));
+        assert_eq!(item.auto_mark_incomplete, Some(true));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<AutoChoiceIncomplete>true</AutoChoiceIncomplete>"));
+        assert!(
+            xml.find("<AutoChoiceIncomplete>").unwrap()
+                < xml.find("<AutoMarkIncomplete>").unwrap(),
+            "{xml}"
+        );
+        assert!(
+            xml.find("<AutoMarkIncomplete>").unwrap() < xml.find("<ChooseType>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn extracts_live_picture_field_values_picture_and_file_drag_mode() {
+        let field = r#"{37,{145,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"СписокЗарегистрированКартинка",0,0,{1,1,{"ru","Зарегистрирован"}},{1,0},{2,{1},{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{10,0,0,1,1,{4,1,{0,d465bd06-1042-4dd5-9967-6a3a020a0a40},"",-1,-1,0,0,""},0,0,0,{1,0},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,0,0,1,0,0,100},{0,1,0},1,{22,{146,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗарегистрированКартинкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{147,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗарегистрированКартинкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+        let item = parse_form_child_item_with_attrs(
+            field,
+            None,
+            Some("Список"),
+            &BTreeMap::from([("1".to_string(), "Список".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                "1".to_string(),
+                BTreeMap::from([("3".to_string(), "Зарегистрирован".to_string())]),
+            )]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::from([(
+                "d465bd06-1042-4dd5-9967-6a3a020a0a40".to_string(),
+                "CommonPicture.БизнесСеть".to_string(),
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(item.tag, "PictureField");
+        assert_eq!(item.data_path.as_deref(), Some("Список.Зарегистрирован"));
+        assert_eq!(item.title_location, Some("None"));
+        assert_eq!(item.edit_mode, Some("EnterOnInput"));
+        assert_eq!(item.picture_ref.as_deref(), Some("CommonPicture.БизнесСеть"));
+        assert_eq!(item.file_drag_mode, Some("AsFile"));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<ValuesPicture>"));
+        assert!(xml.contains("<xr:Ref>CommonPicture.БизнесСеть</xr:Ref>"));
+        assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+        assert!(!xml.contains("<Picture>"), "{xml}");
+    }
+
+    #[test]
+    fn parses_button_group_command_source_from_live_layout() {
+        let mut fields = vec!["0"; 21];
+        fields[20] = "{2,{0,02023637-7868-4a5f-8576-835a76e0c9ba},2,0}";
+        assert_eq!(parse_form_button_group_command_source(&fields), Some("Form"));
     }
 
     #[test]
@@ -33438,6 +44222,130 @@ mod tests {
             common_command_standard_picture_name("723765ab-0b92-4745-a621-1ba0f77c92c9"),
             Some("StdPicture.EventLog")
         );
+        assert_eq!(
+            common_command_standard_picture_name("4fddea39-5129-4b4c-83fe-4e443cd61940"),
+            Some("StdPicture.EventLogByUser")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("ffab30f1-da11-44b5-b34c-24da22badcf4"),
+            Some("StdPicture.Find")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("91022b99-b610-48ad-954e-a297848081ce"),
+            Some("StdPicture.SortListAsc")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("1fa32fdb-a180-418f-a6eb-db7516b7a30b"),
+            Some("StdPicture.SortListDesc")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("18492a87-2fe4-44af-b218-304897fed020"),
+            Some("StdPicture.MarkToDelete")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("20ebc47b-f4d9-439c-acd3-fdc624fbac2a"),
+            Some("StdPicture.Post")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("8f29e0e2-d5e6-41e8-a34d-9a0288156322"),
+            Some("StdPicture.Reread")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("db817ee1-fd28-4e7f-bb4a-53686b2b153c"),
+            Some("StdPicture.Report")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("1970a480-9b38-405e-9d9e-8209f3fad5f1"),
+            Some("StdPicture.ScheduledJob")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("58174855-39be-462e-8723-cb2d95182146"),
+            Some("StdPicture.SetDateInterval")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("942e0303-a3ec-4fe8-887c-5aea8516d424"),
+            Some("StdPicture.ReportSettings")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("fb7e9fb5-110b-41cb-adc6-753969ae1c81"),
+            Some("StdPicture.ExpandAll")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("27ee3053-952c-49e5-8261-9215098e0e9c"),
+            Some("StdPicture.CollapseAll")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("5289d9a4-b012-4d54-9bce-50473fe29b57"),
+            Some("StdPicture.DialogExclamation")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("785362cb-3756-48ed-87d2-292ded17054a"),
+            Some("StdPicture.OpenFile")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("23f940bf-7381-4c2b-85a1-e541ed428042"),
+            Some("StdPicture.SaveValues")
+        );
+        assert_eq!(
+            common_command_standard_picture_name("a7707ed1-39b0-418f-974d-4d500d27a9c6"),
+            Some("StdPicture.RestoreValues")
+        );
+        let (show_data_reference, show_data_load_transparent) = parse_common_command_picture_value(
+            r#"{4,1,{0,a064544f-6037-48ca-b19f-8ad63e43af23},"",-1,-1,1,0,""}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(show_data_reference, Some("StdPicture.ShowData".to_string()));
+        assert!(show_data_load_transparent);
+        let (print_reference, print_load_transparent) =
+            parse_common_command_picture_value(r#"{4,1,{-13},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(print_reference, Some("StdPicture.Print".to_string()));
+        assert!(print_load_transparent);
+        let (active_users_reference, active_users_load_transparent) =
+            parse_common_command_picture_value(
+                r#"{4,1,{0,47f01799-7968-4f44-9acc-fe1bdde8beb2},"",-1,-1,1,0,""}"#,
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            active_users_reference,
+            Some("StdPicture.ActiveUsers".to_string())
+        );
+        assert!(active_users_load_transparent);
+        let (stop_reference, stop_load_transparent) = parse_common_command_picture_value(
+            r#"{4,1,{0,1cd7b762-ec6a-4e92-ac9a-1832be228ec3},"",-1,-1,1,0,""}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(stop_reference, Some("StdPicture.Stop".to_string()));
+        assert!(stop_load_transparent);
+        let (check_all_reference, check_all_load_transparent) =
+            parse_common_command_picture_value(r#"{4,1,{-10},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(check_all_reference, Some("StdPicture.CheckAll".to_string()));
+        assert!(check_all_load_transparent);
+        let (uncheck_all_reference, uncheck_all_load_transparent) =
+            parse_common_command_picture_value(r#"{4,1,{-11},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(
+            uncheck_all_reference,
+            Some("StdPicture.UncheckAll".to_string())
+        );
+        assert!(uncheck_all_load_transparent);
+        let (move_right_reference, move_right_load_transparent) =
+            parse_common_command_picture_value(r#"{4,1,{-9},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(
+            move_right_reference,
+            Some("StdPicture.MoveRight".to_string())
+        );
+        assert!(move_right_load_transparent);
+        let (move_left_reference, move_left_load_transparent) =
+            parse_common_command_picture_value(r#"{4,1,{-8},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(move_left_reference, Some("StdPicture.MoveLeft".to_string()));
+        assert!(move_left_load_transparent);
         let (group_reference, group_load_transparent) = parse_command_group_picture_value(
             r#"{4,1,{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c},"",-1,-1,1,0,""}"#,
             &BTreeMap::new(),
@@ -34002,8 +44910,52 @@ mod tests {
     #[test]
     fn formats_event_subscription_type_sets() {
         assert_eq!(
+            builtin_type_reference("acf6192e-81ca-46ef-93a6-5a6968b78663"),
+            Some("v8:ValueTable")
+        );
+        assert_eq!(
+            builtin_type_reference("140b5ff4-37b1-4df5-b5ec-a0bfd2b94f8f"),
+            Some("v8ui:FormattedString")
+        );
+        assert_eq!(
+            builtin_type_reference("9cd510c7-abfc-11d4-9434-004095e12fc7"),
+            Some("v8ui:Color")
+        );
+        assert_eq!(
+            builtin_type_reference("9cd510c8-abfc-11d4-9434-004095e12fc7"),
+            Some("v8ui:Font")
+        );
+        assert_eq!(
+            builtin_type_reference("e603c0f2-92fb-4d47-8f38-a44a381cf235"),
+            Some("v8:ValueTree")
+        );
+        assert_eq!(
             builtin_type_reference("857c4a91-e5f4-4fac-86ec-787626f1c108"),
             Some("cfg:ExchangePlanObject")
+        );
+        assert_eq!(
+            builtin_type_reference("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88"),
+            Some("v8:StandardPeriod")
+        );
+        assert_eq!(
+            builtin_type_reference("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3"),
+            Some("v8:ValueListType")
+        );
+        assert_eq!(
+            builtin_type_reference("e603103e-a318-4edc-a014-b1c6cf94d49f"),
+            Some("mxl:SpreadsheetDocument")
+        );
+        assert_eq!(
+            builtin_type_reference("280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
+            Some("cfg:AnyIBRef")
+        );
+        assert_eq!(
+            builtin_type_reference("38bfd075-3e63-4aaa-a93e-94521380d579"),
+            Some("cfg:DocumentRef")
+        );
+        assert_eq!(
+            builtin_type_reference("e61ef7b8-f3e1-4f4b-8ac7-676e90524997"),
+            Some("cfg:CatalogRef")
         );
         assert_eq!(
             event_subscription_source_type_tag("cfg:DefinedType.AttachedFileObject"),
@@ -34766,6 +45718,264 @@ mod tests {
     }
 
     #[test]
+    fn builds_data_processor_object_generated_type_index() {
+        let type_id = "7e631758-9404-4398-868d-12437ff752db";
+        let row = MetadataTextRow {
+            file_name: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            text: format!(
+                r#"{{17,{{0,{type_id}}},"Loader",0,0,0,{{0}},{{0,11111111-1111-4111-8111-111111111111}}}}"#
+            ),
+            object_code: Some(17),
+            header: Some(MetadataHeader {
+                uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+                name: "Loader".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("DataProcessor".to_string()),
+            folder: Some("DataProcessors"),
+        };
+
+        let index = build_metadata_type_index_from_texts(&[row]);
+
+        assert_eq!(
+            index.get(type_id).map(String::as_str),
+            Some("cfg:DataProcessorObject.Loader")
+        );
+    }
+
+    #[test]
+    fn parses_data_processor_tabular_section_generated_types_from_code_11_fields() {
+        let section_uuid = "3068be84-a401-4701-8ac9-411fae130f84";
+        let text = concat!(
+            "{11,",
+            "7b3e8d23-7486-49de-b196-7904661e4f9d,",
+            "6be2e5d2-79c3-4f1a-91e7-49081faf2e4b,",
+            "39c0b151-1bbf-424c-bc8f-cc8b7137e8f7,",
+            "7c38f07d-fcc0-4169-b586-36c380d5fb21,",
+            "{0,{3,{1,0,3068be84-a401-4701-8ac9-411fae130f84},\"СписокВалют\",{1,\"ru\",\"Список валют\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},0,{0}},0}"
+        );
+        let marker_start = text.find(section_uuid).unwrap();
+        let header = MetadataHeader {
+            uuid: section_uuid.to_string(),
+            name: "СписокВалют".to_string(),
+            synonyms: vec![("ru".to_string(), "Список валют".to_string())],
+            comment: String::new(),
+            template_type_code: None,
+        };
+
+        let generated_types = parse_data_processor_tabular_section_generated_types(
+            text,
+            marker_start,
+            &header,
+            "ЗагрузкаКурсовВалют",
+        );
+
+        assert_eq!(generated_types.len(), 2);
+        assert_eq!(
+            generated_types[0].name,
+            "DataProcessorTabularSection.ЗагрузкаКурсовВалют.СписокВалют"
+        );
+        assert_eq!(generated_types[0].category, "TabularSection");
+        assert_eq!(
+            generated_types[1].name,
+            "DataProcessorTabularSectionRow.ЗагрузкаКурсовВалют.СписокВалют"
+        );
+        assert_eq!(generated_types[1].category, "TabularSectionRow");
+    }
+
+    #[test]
+    fn formats_data_processor_tabular_section_defaults_without_use_or_line_number_length() {
+        let mut xml = String::new();
+        push_metadata_tabular_section_properties_xml(
+            &mut xml,
+            "\t\t\t",
+            &MetadataTabularSectionProperties {
+                tooltip: Vec::new(),
+                fill_checking: "DontCheck",
+                line_number_fill_checking: "DontCheck",
+                use_mode: None,
+                line_number_length: None,
+            },
+        );
+
+        assert!(xml.contains("<ToolTip/>"));
+        assert!(xml.contains("<FillChecking>DontCheck</FillChecking>"));
+        assert!(xml.contains("<StandardAttributes>"));
+        assert!(!xml.contains("<Use>"));
+        assert!(!xml.contains("<LineNumberLength>"));
+    }
+
+    #[test]
+    fn formats_tabular_section_with_distinct_line_number_fill_checking() {
+        let mut xml = String::new();
+        push_metadata_tabular_section_properties_xml(
+            &mut xml,
+            "\t\t\t",
+            &MetadataTabularSectionProperties {
+                tooltip: Vec::new(),
+                fill_checking: "ShowError",
+                line_number_fill_checking: "DontCheck",
+                use_mode: None,
+                line_number_length: None,
+            },
+        );
+
+        assert!(xml.contains("<FillChecking>ShowError</FillChecking>"));
+        assert!(xml.contains("<xr:FillChecking>DontCheck</xr:FillChecking>"));
+    }
+
+    #[test]
+    fn parses_and_formats_metadata_child_fill_value_variants() {
+        let object_refs = BTreeMap::from([(
+            "3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab".to_string(),
+            "Catalog.Валюты.EmptyRef".to_string(),
+        )]);
+
+        let date_time =
+            parse_metadata_child_fill_value(Some(r#"{"D",00010101000000}"#), &[], &object_refs)
+                .unwrap();
+        let decimal =
+            parse_metadata_child_fill_value(Some(r#"{"N",0}"#), &[], &object_refs).unwrap();
+        let design_time_ref = parse_metadata_child_fill_value(
+            Some(
+                r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab,00000000-0000-0000-0000-000000000000}}"##,
+            ),
+            &[],
+            &object_refs,
+        )
+        .unwrap();
+        let boolean_nil = parse_metadata_child_fill_value(
+            Some(r#"{"U"}"#),
+            &[ConstantValueType::Boolean],
+            &object_refs,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            date_time,
+            MetadataChildFillValue::DateTime(ref value) if value == "0001-01-01T00:00:00"
+        ));
+        assert!(matches!(
+            decimal,
+            MetadataChildFillValue::Decimal(ref value) if value == "0"
+        ));
+        assert!(matches!(
+            design_time_ref,
+            MetadataChildFillValue::DesignTimeRef(ref value) if value == "Catalog.Валюты.EmptyRef"
+        ));
+        assert!(matches!(boolean_nil, MetadataChildFillValue::Nil));
+        assert_eq!(
+            format_metadata_child_fill_value_xml(&MetadataChildFillValue::DateTime(
+                "0001-01-01T00:00:00".to_string()
+            )),
+            r#"<FillValue xsi:type="xs:dateTime">0001-01-01T00:00:00</FillValue>"#
+        );
+        assert_eq!(
+            format_metadata_child_fill_value_xml(&MetadataChildFillValue::Decimal("0".to_string())),
+            r#"<FillValue xsi:type="xs:decimal">0</FillValue>"#
+        );
+        assert_eq!(
+            format_metadata_child_fill_value_xml(&MetadataChildFillValue::DesignTimeRef(
+                "Catalog.Валюты.EmptyRef".to_string()
+            )),
+            r#"<FillValue xsi:type="xr:DesignTimeRef">Catalog.Валюты.EmptyRef</FillValue>"#
+        );
+    }
+
+    #[test]
+    fn parses_metadata_child_choice_parameter_links_from_wrapped_collection() {
+        let object_refs = BTreeMap::from([
+            (
+                "fb9f5bff-ad18-4694-8e4f-9a8e7bd9aa5d".to_string(),
+                "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.Attribute.Партнер".to_string(),
+            ),
+            (
+                "acec7e3d-9efa-4656-84e3-e2f90b295e8a".to_string(),
+                "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.TabularSection.Товары.Attribute.НоменклатураПартнера".to_string(),
+            ),
+            (
+                "296cd400-da83-4189-a85c-0945600b3033".to_string(),
+                "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.TabularSection.Товары.Attribute.Номенклатура".to_string(),
+            ),
+            (
+                "0bb9272d-3127-4e50-8dc2-6651432168b0".to_string(),
+                "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.TabularSection.Товары.Attribute.Характеристика".to_string(),
+            ),
+        ]);
+        let links = parse_metadata_child_choice_parameter_links(
+            Some(
+                r##"{5006,3,"Отбор.ВладелецНоменклатуры",1,{0,fb9f5bff-ad18-4694-8e4f-9a8e7bd9aa5d},0,"Отбор.Номенклатура",2,{0,acec7e3d-9efa-4656-84e3-e2f90b295e8a},{0,296cd400-da83-4189-a85c-0945600b3033},1,"Отбор.Характеристика",2,{0,acec7e3d-9efa-4656-84e3-e2f90b295e8a},{0,0bb9272d-3127-4e50-8dc2-6651432168b0},1}"##,
+            ),
+            &object_refs,
+        )
+        .unwrap();
+
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].name, "Отбор.ВладелецНоменклатуры");
+        assert_eq!(
+            links[0].data_path,
+            "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.Attribute.Партнер"
+        );
+        assert_eq!(links[0].value_change, "Clear");
+        assert_eq!(links[1].name, "Отбор.Номенклатура");
+        assert_eq!(
+            links[1].data_path,
+            "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.TabularSection.Товары.Attribute.Номенклатура"
+        );
+        assert_eq!(links[1].value_change, "DontChange");
+        assert_eq!(links[2].name, "Отбор.Характеристика");
+        assert_eq!(
+            links[2].data_path,
+            "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.TabularSection.Товары.Attribute.Характеристика"
+        );
+        assert_eq!(links[2].value_change, "DontChange");
+    }
+
+    #[test]
+    fn parses_and_formats_metadata_child_choice_parameter_values() {
+        let object_refs = BTreeMap::from([
+            (
+                "11111111-1111-4111-8111-111111111111".to_string(),
+                "Enum.ФормыОплаты.EnumValue.Наличная".to_string(),
+            ),
+            (
+                "22222222-2222-4222-8222-222222222222".to_string(),
+                "Enum.ФормыОплаты.EnumValue.Безналичная".to_string(),
+            ),
+        ]);
+        let parameters = parse_metadata_child_choice_parameters(
+            Some(
+                r##"{0,2,"Отбор.Клиент",{"B",1},"Отбор.Ссылка",{"#",4500381b-db30-4a10-9db4-990038032acf,{0,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222}}}"##,
+            ),
+            &object_refs,
+        )
+        .unwrap();
+
+        assert_eq!(parameters.len(), 2);
+        assert!(matches!(
+            parameters[0].value,
+            MetadataChoiceParameterValue::Boolean(true)
+        ));
+        assert!(matches!(
+            parameters[1].value,
+            MetadataChoiceParameterValue::FixedArray(ref refs)
+                if refs == &vec![
+                    "Enum.ФормыОплаты.EnumValue.Наличная".to_string(),
+                    "Enum.ФормыОплаты.EnumValue.Безналичная".to_string()
+                ]
+        ));
+
+        let mut xml = String::new();
+        push_metadata_child_choice_parameters_xml(&mut xml, "\t\t\t", &parameters);
+        assert!(xml.contains(r#"<app:value xsi:type="xs:boolean">true</app:value>"#));
+        assert!(xml.contains(r#"<app:value xsi:type="v8:FixedArray">"#));
+        assert!(xml.contains("Enum.ФормыОплаты.EnumValue.Наличная"));
+        assert!(xml.contains("Enum.ФормыОплаты.EnumValue.Безналичная"));
+    }
+
+    #[test]
     fn normalizes_dcs_type_id_using_source_xml_generated_type_index() {
         let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
         let row = MetadataTextRow {
@@ -35223,6 +46433,7 @@ mod tests {
 
         assert_eq!(picture.index, 0);
         assert_eq!(picture.ref_name.as_deref(), Some("v8ui:Print"));
+        assert_eq!(picture.payload, None);
     }
 
     #[test]
@@ -35243,7 +46454,26 @@ mod tests {
         for (text, expected_ref) in cases {
             let picture = parse_moxel_picture(text, &BTreeMap::new()).unwrap();
             assert_eq!(picture.ref_name.as_deref(), Some(expected_ref));
+            assert_eq!(picture.payload, None);
         }
+    }
+
+    #[test]
+    fn formats_moxel_embedded_picture_payload_is_preserved() {
+        let picture = parse_moxel_picture(
+            "{4,3,{0},\"\",-1,-1,0,{{#base64:UEsDBA==}}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut xml = String::new();
+
+        assert_eq!(picture.index, 3);
+        assert_eq!(picture.ref_name, None);
+        assert_eq!(picture.payload.as_deref(), Some("UEsDBA=="));
+
+        push_moxel_picture_xml(&mut xml, &picture);
+
+        assert!(xml.contains("<picture t=\"false\">UEsDBA==</picture>"));
     }
 
     #[test]
@@ -35434,6 +46664,70 @@ mod tests {
         assert_eq!(extracted.matches("<verticalUnmerge>").count(), 1);
         assert!(extracted.contains(
             "<verticalUnmerge>\r\n\t\t<r>3</r>\r\n\t\t<c>1</c>\r\n\t\t<w>3</w>\r\n\t</verticalUnmerge>"
+        ));
+    }
+
+    #[test]
+    fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: vec![MoxelColumnSet {
+                id: None,
+                default_format_index: None,
+                source_default_format_index: None,
+                size: 0,
+                columns: Vec::new(),
+            }],
+            column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
+            default_format_width: Some(72),
+            default_format: MoxelFormat::default(),
+            formats: Vec::new(),
+            rows: vec![MoxelRow {
+                index: 0,
+                index_to: None,
+                format_index: 0,
+                source_format_index: None,
+                columns_id: None,
+                cells: Vec::new(),
+            }],
+            vertical_groups: Vec::new(),
+            merges: vec![MoxelMerge {
+                row: -1,
+                column: 5,
+                height: 0,
+                width: 1,
+                columns_id: Some("e3f5122b-a98a-459d-a9ef-d9b6788c0769".to_string()),
+            }],
+            horizontal_unmerges: vec![MoxelMerge {
+                row: 14,
+                column: 2,
+                height: 1,
+                width: 0,
+                columns_id: None,
+            }],
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: Some(1),
+            height: 15,
+        };
+
+        let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(extracted.contains(
+            "<merge>\r\n\t\t<r>-1</r>\r\n\t\t<c>5</c>\r\n\t\t<w>1</w>\r\n\t\t<columnsID>e3f5122b-a98a-459d-a9ef-d9b6788c0769</columnsID>\r\n\t</merge>"
+        ));
+        assert!(extracted.contains(
+            "<horizontalUnmerge>\r\n\t\t<r>14</r>\r\n\t\t<c>2</c>\r\n\t\t<h>1</h>\r\n\t</horizontalUnmerge>"
         ));
     }
 
@@ -35766,10 +47060,13 @@ mod tests {
             column_count: 0,
             column_sets: vec![MoxelColumnSet {
                 id: None,
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 0,
                 columns: Vec::new(),
             }],
             column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
             default_format_width: Some(72),
             default_format: MoxelFormat::default(),
             formats: Vec::new(),
@@ -35777,11 +47074,15 @@ mod tests {
                 index: 0,
                 index_to: None,
                 format_index: 0,
+                source_format_index: None,
                 columns_id: None,
                 cells: Vec::new(),
             }],
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: Some(print_settings),
@@ -35790,6 +47091,7 @@ mod tests {
             drawings: Vec::new(),
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: Some(1),
             height: 0,
         };
@@ -36090,7 +47392,6 @@ mod tests {
         )
         .unwrap();
         let xml = format_moxel_spreadsheet_xml(&spreadsheet);
-        println!("{xml}");
 
         assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
         assert!(xml.contains(
@@ -36127,6 +47428,8 @@ mod tests {
             column_count: 2,
             column_sets: vec![MoxelColumnSet {
                 id: None,
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 2,
                 columns: vec![
                     MoxelColumn {
@@ -36159,6 +47462,7 @@ mod tests {
                     ..MoxelFormat::default()
                 },
             ],
+            extra_formats: BTreeMap::new(),
             default_format_width: None,
             default_format: MoxelFormat {
                 width: Some(70),
@@ -36178,24 +47482,30 @@ mod tests {
                 index: 0,
                 index_to: None,
                 format_index: 6,
+                source_format_index: Some(6),
                 columns_id: None,
                 cells: vec![MoxelCell {
                     column_index: 0,
                     format_index: 5,
+                    source_format_index: Some(5),
                     text: Some("Cell".to_string()),
                     parameter: None,
                     detail_parameter: None,
                     empty_text: false,
                 }],
             }],
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
             lines: Vec::new(),
             fonts: Vec::new(),
             drawings: vec![MoxelDrawing {
+                id: 0,
                 format_index: 3,
                 begin_row: 0,
                 begin_row_offset: 0,
@@ -36212,6 +47522,7 @@ mod tests {
             }],
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: Some(7),
             height: 1,
         };
@@ -36243,6 +47554,8 @@ mod tests {
             column_count: 1,
             column_sets: vec![MoxelColumnSet {
                 id: None,
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 1,
                 columns: vec![MoxelColumn {
                     index: 0,
@@ -36251,12 +47564,16 @@ mod tests {
                 }],
             }],
             column_formats: vec![MoxelFormat::default(); 9],
+            extra_formats: BTreeMap::new(),
             default_format_width: None,
             default_format: MoxelFormat::default(),
             formats: Vec::new(),
             rows: Vec::new(),
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -36265,12 +47582,150 @@ mod tests {
             drawings: Vec::new(),
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: None,
             height: 0,
         };
 
         assert_eq!(moxel_output_format_count(&spreadsheet), 9);
         assert_eq!(moxel_output_format_indices(&spreadsheet)[0], 9);
+    }
+
+    #[test]
+    fn resolves_existing_moxel_default_format_index_from_exact_match() {
+        let column_formats = vec![
+            MoxelFormat {
+                width: Some(45),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                width: Some(72),
+                ..MoxelFormat::default()
+            },
+        ];
+
+        assert_eq!(
+            resolve_existing_moxel_default_format_index(
+                &column_formats,
+                &[],
+                &MoxelFormat::default(),
+                Some(72),
+            ),
+            Some((2, false))
+        );
+    }
+
+    #[test]
+    fn resolves_existing_moxel_default_format_index_when_existing_format_only_adds_font_zero() {
+        let formats = vec![
+            MoxelFormat {
+                font: Some(0),
+                width: Some(72),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                width: Some(45),
+                ..MoxelFormat::default()
+            },
+        ];
+
+        assert_eq!(
+            resolve_existing_moxel_default_format_index(
+                &[],
+                &formats,
+                &MoxelFormat::default(),
+                Some(72),
+            ),
+            Some((1, true))
+        );
+    }
+
+    #[test]
+    fn resolves_existing_moxel_default_format_index_prefers_last_duplicate_match() {
+        let formats = vec![
+            MoxelFormat {
+                width: Some(72),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                width: Some(45),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                font: Some(0),
+                width: Some(72),
+                ..MoxelFormat::default()
+            },
+        ];
+
+        assert_eq!(
+            resolve_existing_moxel_default_format_index(
+                &[],
+                &formats,
+                &MoxelFormat::default(),
+                Some(72),
+            ),
+            Some((3, true))
+        );
+    }
+
+    #[test]
+    fn resolves_existing_moxel_default_format_index_prefers_exact_font_zero_default_width_match() {
+        let formats = vec![
+            MoxelFormat {
+                width: Some(72),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                font: Some(0),
+                width: Some(72),
+                ..MoxelFormat::default()
+            },
+        ];
+
+        assert_eq!(
+            resolve_existing_moxel_default_format_index(
+                &[],
+                &formats,
+                &MoxelFormat::default(),
+                Some(72),
+            ),
+            Some((2, true))
+        );
+    }
+
+    #[test]
+    fn resolves_existing_moxel_default_format_index_reports_width_only_match_without_font_zero() {
+        let formats = vec![MoxelFormat {
+            width: Some(72),
+            ..MoxelFormat::default()
+        }];
+
+        assert_eq!(
+            resolve_existing_moxel_default_format_index(
+                &[],
+                &formats,
+                &MoxelFormat::default(),
+                Some(72),
+            ),
+            Some((1, false))
+        );
+    }
+
+    #[test]
+    fn normalize_moxel_drawing_format_promotes_back_color_from_border_color_slot() {
+        let mut format = MoxelFormat {
+            left_border: Some(2),
+            border_color: Some("style:FieldBackColor".to_string()),
+            ..MoxelFormat::default()
+        };
+
+        normalize_moxel_drawing_format(&mut format);
+
+        assert_eq!(format.drawing_border, Some(2));
+        assert_eq!(format.back_color.as_deref(), Some("style:FieldBackColor"));
+        assert_eq!(format.border_color, None);
+        assert_eq!(format.left_border, None);
     }
 
     #[test]
@@ -36348,6 +47803,95 @@ mod tests {
     }
 
     #[test]
+    fn parses_and_formats_moxel_vertical_groups() {
+        let groups = parse_moxel_vertical_groups(&[
+            "3",
+            "{1,5,0,{1,0},0,0}",
+            "-1",
+            "{2,4,1,{1,0},0,0}",
+            "-1",
+            "{3,3,2,{1,0},0,0}",
+            "-1",
+            "0",
+            "0",
+            "0",
+        ]);
+
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].begin_row, 1);
+        assert_eq!(groups[0].end_row, 5);
+        assert_eq!(groups[0].level, 0);
+        assert_eq!(groups[2].begin_row, 3);
+        assert_eq!(groups[2].end_row, 3);
+        assert_eq!(groups[2].level, 2);
+
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 1,
+            column_sets: default_moxel_column_sets(1),
+            column_formats: vec![MoxelFormat {
+                width: Some(72),
+                ..MoxelFormat::default()
+            }],
+            extra_formats: BTreeMap::new(),
+            default_format_width: Some(72),
+            default_format: MoxelFormat::default(),
+            formats: Vec::new(),
+            rows: vec![MoxelRow {
+                index: 0,
+                index_to: None,
+                format_index: 0,
+                source_format_index: None,
+                columns_id: None,
+                cells: vec![MoxelCell {
+                    column_index: 0,
+                    format_index: 0,
+                    source_format_index: None,
+                    text: Some("Cell".to_string()),
+                    parameter: None,
+                    detail_parameter: None,
+                    empty_text: false,
+                }],
+            }],
+            vertical_groups: groups,
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: vec![MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            }],
+            fonts: vec![MoxelFont {
+                ref_name: None,
+                face_name: Some("Arial".to_string()),
+                height: Some("8".to_string()),
+                bold: false,
+                italic: false,
+                underline: false,
+                strikeout: false,
+                kind: "Absolute",
+                scale: Some(100),
+            }],
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: None,
+            height: 6,
+        };
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("<vgLevels>3</vgLevels>"));
+        assert!(xml.contains("<vgRows>6</vgRows>"));
+        assert!(xml.contains("\t<vg>\r\n\t\t<b>1</b>\r\n\t\t<e>5</e>\r\n\t</vg>"));
+        assert!(xml.contains("\t<vg>\r\n\t\t<b>3</b>\r\n\t</vg>"));
+    }
+
+    #[test]
     fn parses_moxel_named_area_list_with_drawing_items() {
         let areas = parse_moxel_area_list(
             "{3,\"Заголовок\",{1,{1,-1,4,-1,6,00000000-0000-0000-0000-000000000000},0},\"КартинкаШтрихкода\",{2,10},\"Подвал\",{1,{1,-1,11,-1,42,00000000-0000-0000-0000-000000000000},0}}",
@@ -36416,11 +47960,15 @@ mod tests {
         let additional_sets = vec![
             MoxelColumnSet {
                 id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 1,
                 columns: vec![],
             },
             MoxelColumnSet {
                 id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 1,
                 columns: vec![],
             },
@@ -36443,11 +47991,15 @@ mod tests {
         let additional_sets = vec![
             MoxelColumnSet {
                 id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 1,
                 columns: vec![],
             },
             MoxelColumnSet {
                 id: Some("c00ea4cf-0123-4de2-9c91-0ec224c7b2e9".to_string()),
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 1,
                 columns: vec![],
             },
@@ -36499,6 +48051,256 @@ mod tests {
     }
 
     #[test]
+    fn formats_moxel_preserves_zero_column_format_indexes() {
+        let mut column_sets = vec![
+            parse_moxel_column_set(
+                "{12,0,00000000-0000-0000-0000-000000000000,9,0,1,2,2,3,3,4,4,5,5,6,0,7,0,10,6,11,7}",
+            )
+            .unwrap(),
+        ];
+
+        normalize_moxel_column_set_format_indices(&mut column_sets);
+
+        assert_eq!(
+            column_sets[0]
+                .columns
+                .iter()
+                .map(|column| column.format_index)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 0, 0, 6, 7]
+        );
+        assert_eq!(
+            moxel_source_column_format_refs(&column_sets),
+            vec![1, 2, 3, 4, 5, 6, 7]
+        );
+        assert_eq!(moxel_column_format_slots(&column_sets, 12), 7);
+    }
+
+    #[test]
+    fn formats_moxel_column_sets_accept_additional_sets_with_flag_one() {
+        let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&[
+            "{0,0,00000000-0000-0000-0000-000000000000,12,0,113,1,109,2,18,3,19,4,20,6,11,7,12,8,13,10,14,11,15,13,16,14,114}",
+            "38",
+            "3",
+            "{18,1,0f48549f-9d74-4329-92c7-5ce9a8194102,16,0,113,1,115,2,116,3,117,4,118,5,119,6,120,7,11,8,12,9,13,11,14,12,15,14,16,15,121,16,122,17,123}",
+            "{17,1,39a7acbe-e43b-412e-b84b-633884f6d03c,17,0,113,1,124,2,125,3,126,4,127,5,128,6,129,7,130,8,131,9,13,10,130,11,132,12,14,13,19,14,133,15,134,16,135}",
+            "{16,1,9b83ff04-3ddf-4509-a253-695002203973,13,0,113,1,109,2,18,3,19,4,20,6,11,7,12,8,13,10,14,11,15,13,16,14,112,15,136}",
+            "37",
+            "0",
+            "0",
+            "1",
+            "0",
+            "2",
+            "0",
+            "3",
+            "0",
+            "4",
+            "0",
+            "5",
+            "0",
+            "6",
+            "0",
+            "7",
+            "0",
+            "8",
+            "0",
+            "9",
+            "0",
+            "10",
+            "0",
+            "11",
+            "0",
+            "12",
+            "0",
+            "13",
+            "0",
+            "14",
+            "0",
+            "15",
+            "0",
+            "16",
+            "0",
+            "17",
+            "0",
+            "18",
+            "0",
+            "19",
+            "0",
+            "20",
+            "1",
+            "21",
+            "1",
+            "22",
+            "1",
+            "23",
+            "1",
+            "24",
+            "1",
+            "25",
+            "1",
+            "26",
+            "1",
+            "27",
+            "1",
+            "28",
+            "1",
+            "29",
+            "2",
+            "30",
+            "2",
+            "31",
+            "2",
+            "32",
+            "2",
+            "33",
+            "2",
+            "34",
+            "2",
+            "35",
+            "2",
+            "37",
+            "0",
+        ]);
+
+        assert_eq!(column_sets.len(), 4);
+        assert_eq!(
+            column_sets[1].id.as_deref(),
+            Some("0f48549f-9d74-4329-92c7-5ce9a8194102")
+        );
+        assert_eq!(
+            column_sets[2].id.as_deref(),
+            Some("39a7acbe-e43b-412e-b84b-633884f6d03c")
+        );
+        assert_eq!(
+            column_sets[3].id.as_deref(),
+            Some("9b83ff04-3ddf-4509-a253-695002203973")
+        );
+        assert_eq!(
+            row_column_ids.get(&20).map(String::as_str),
+            Some("39a7acbe-e43b-412e-b84b-633884f6d03c")
+        );
+        assert_eq!(
+            row_column_ids.get(&29).map(String::as_str),
+            Some("9b83ff04-3ddf-4509-a253-695002203973")
+        );
+        assert_eq!(
+            row_column_ids.get(&37).map(String::as_str),
+            Some("0f48549f-9d74-4329-92c7-5ce9a8194102")
+        );
+        assert_eq!(declared_sheet_height, Some(38));
+    }
+
+    #[test]
+    fn formats_moxel_column_sets_capture_explicit_source_default_format_indices() {
+        let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&[
+            "{19,29,00000000-0000-0000-0000-000000000000,18,0,97,1,2,2,70,3,98,4,99,5,100,6,20,7,2,8,101,9,50,10,102,12,22,13,21,14,22,15,23,16,103,17,23,18,23}",
+            "62",
+            "5",
+            "{20,29,ed9116b5-69b8-4d11-aeb0-ac86dc40670c,19,0,97,1,2,2,70,3,104,4,105,5,106,6,101,7,2,8,107,9,108,10,50,11,102,13,109,14,21,15,22,16,23,17,103,18,110,19,23}",
+            "{20,29,b6842b32-a858-459f-81ec-04999004f5e4,19,0,97,1,2,2,70,3,103,4,111,5,106,6,101,7,2,8,107,9,108,10,50,11,102,13,109,14,21,15,22,16,23,17,103,18,110,19,23}",
+            "{20,29,1485cd52-21df-4436-a0f3-09eec951c4f4,19,0,97,1,2,2,108,3,98,4,112,5,113,6,20,7,2,8,110,9,114,10,50,11,102,13,115,14,116,15,115,16,117,17,103,18,110,19,23}",
+            "{20,29,fcccd5e5-76a3-490f-8d15-08388c3bbb09,19,0,97,1,2,2,108,3,98,4,112,5,113,6,20,7,2,8,110,9,114,10,50,11,102,13,115,14,116,15,115,16,117,17,103,18,110,19,23}",
+            "{19,29,e898f453-80b9-47d8-a0f2-37067d7f03ca,19,0,97,1,2,2,70,3,98,4,99,5,100,6,20,7,2,8,101,9,118,10,119,11,119,12,115,13,116,14,115,15,117,16,103,17,110,18,23}",
+            "0",
+        ]);
+        let source_refs = moxel_source_column_format_refs(&column_sets);
+
+        assert_eq!(column_sets.len(), 6);
+        assert!(row_column_ids.is_empty());
+        assert_eq!(declared_sheet_height, Some(62));
+        assert_eq!(column_sets[0].default_format_index, None);
+        assert_eq!(column_sets[1].default_format_index, None);
+        assert_eq!(column_sets[0].source_default_format_index, Some(29));
+        assert_eq!(column_sets[1].source_default_format_index, Some(29));
+        assert_eq!(column_sets[0].columns[0].format_index, 1);
+        assert_eq!(column_sets[1].columns[0].format_index, 1);
+        assert_eq!(source_refs.first().copied(), Some(29));
+        assert_eq!(moxel_column_format_slots(&column_sets, 0), 30);
+    }
+
+    #[test]
+    fn formats_moxel_column_sets_accept_negative_column_indexes() {
+        let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&[
+            "{1,0,00000000-0000-0000-0000-000000000000,1,0,1}",
+            "1",
+            "2",
+            "{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,2}",
+            "{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,2,-1,1,0,2}",
+            "0",
+        ]);
+
+        assert_eq!(column_sets.len(), 3);
+        assert_eq!(
+            column_sets[1].id.as_deref(),
+            Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        );
+        assert_eq!(
+            column_sets[2].id.as_deref(),
+            Some("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        );
+        assert_eq!(column_sets[2].columns.len(), 2);
+        assert_eq!(column_sets[2].columns[0].index, -1);
+        assert_eq!(column_sets[2].columns[0].format_index, 1);
+        assert_eq!(column_sets[2].columns[1].index, 0);
+        assert!(row_column_ids.is_empty());
+        assert_eq!(declared_sheet_height, Some(1));
+    }
+
+    #[test]
+    fn formats_moxel_column_sets_accept_zero_sized_default_set() {
+        let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&[
+            "{0,0,00000000-0000-0000-0000-000000000000,2,0,1,2,2}",
+            "1",
+            "1",
+            "{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,3}",
+            "0",
+        ]);
+
+        assert_eq!(column_sets.len(), 2);
+        assert_eq!(column_sets[0].size, 0);
+        assert_eq!(column_sets[0].columns.len(), 2);
+        assert_eq!(column_sets[0].columns[0].index, 0);
+        assert_eq!(column_sets[0].columns[1].index, 2);
+        assert_eq!(
+            column_sets[1].id.as_deref(),
+            Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        );
+        assert!(row_column_ids.is_empty());
+        assert_eq!(declared_sheet_height, Some(1));
+    }
+
+    #[test]
+    fn formats_moxel_column_sets_accept_explicit_empty_default_set() {
+        let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&[
+            "{11,0,00000000-0000-0000-0000-000000000000,0}",
+            "25",
+            "0",
+            "0",
+        ]);
+        let column_format_slots = moxel_column_format_slots(&column_sets, 11);
+        let (column_formats, formats) = parse_moxel_formats(
+            &["3", "{64,165}", "{128,65}", "{64,0}"],
+            column_format_slots,
+            false,
+            &[],
+            &[],
+            &BTreeSet::new(),
+            &[],
+        );
+
+        assert_eq!(column_sets.len(), 1);
+        assert_eq!(column_sets[0].size, 11);
+        assert!(column_sets[0].columns.is_empty());
+        assert!(row_column_ids.is_empty());
+        assert_eq!(column_format_slots, 0);
+        assert!(column_formats.is_empty());
+        assert_eq!(formats.len(), 3);
+        assert_eq!(formats[0].height, Some(165));
+        assert_eq!(formats[1].width, Some(65));
+        assert_eq!(declared_sheet_height, Some(25));
+    }
+
+    #[test]
     fn formats_moxel_alignment_and_text_placement_mappings() {
         assert_eq!(moxel_horizontal_alignment(0), Some("Left"));
         assert_eq!(moxel_horizontal_alignment(2), Some("Right"));
@@ -36511,6 +48313,307 @@ mod tests {
         assert_eq!(moxel_text_placement(1), Some("Cut"));
         assert_eq!(moxel_text_placement(2), Some("Block"));
         assert_eq!(moxel_text_placement(3), Some("Wrap"));
+        assert_eq!(moxel_text_position(0), Some("Left"));
+        assert_eq!(moxel_text_position(1), Some("Right"));
+        assert_eq!(moxel_text_position(5), Some("Auto"));
+    }
+
+    #[test]
+    fn formats_moxel_picture_mappings_match_native_enums() {
+        assert_eq!(moxel_picture_horizontal_alignment(0), Some("Left"));
+        assert_eq!(moxel_picture_horizontal_alignment(2), Some("Right"));
+        assert_eq!(moxel_picture_horizontal_alignment(5), Some("Auto"));
+        assert_eq!(moxel_picture_horizontal_alignment(6), Some("Center"));
+        assert_eq!(moxel_picture_vertical_alignment(0), Some("Top"));
+        assert_eq!(moxel_picture_vertical_alignment(8), Some("Bottom"));
+        assert_eq!(moxel_picture_vertical_alignment(24), Some("Center"));
+        assert_eq!(moxel_picture_size_mode(0), Some("RealSize"));
+        assert_eq!(moxel_picture_size_mode(2), Some("Proportionally"));
+        assert_eq!(moxel_picture_size_mode(4), Some("AutoSize"));
+        assert_eq!(moxel_picture_size_mode(7), Some("ByFontSize"));
+    }
+
+    #[test]
+    fn formats_moxel_decodes_native_picture_format_slots() {
+        let real_size = parse_moxel_format("{515396075648,65,1,2,24,0}", &[], &[]).unwrap();
+        assert_eq!(real_size.width, Some(65));
+        assert_eq!(real_size.pic_index, Some(1));
+        assert_eq!(real_size.picture_size_mode, Some("RealSize"));
+        assert_eq!(real_size.pic_horizontal_alignment, Some("Right"));
+        assert_eq!(real_size.pic_vertical_alignment, Some("Center"));
+
+        let by_font_size = parse_moxel_format("{446676598785,0,1,0,7}", &[], &[]).unwrap();
+        assert_eq!(by_font_size.font, Some(0));
+        assert_eq!(by_font_size.pic_index, Some(1));
+        assert_eq!(by_font_size.picture_size_mode, Some("ByFontSize"));
+        assert_eq!(by_font_size.pic_vertical_alignment, Some("Top"));
+    }
+
+    #[test]
+    fn formats_moxel_decodes_text_position_width_weight_and_negative_height() {
+        let right = parse_moxel_format(
+            "{1065151940583,0,0,0,4,96,20,0,24,4,3,1,2,2,24,4,1}",
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(right.height, Some(96));
+        assert_eq!(right.width, Some(20));
+        assert_eq!(right.pic_index, Some(2));
+        assert_eq!(right.picture_size_mode, Some("AutoSize"));
+        assert_eq!(right.pic_horizontal_alignment, Some("Right"));
+        assert_eq!(right.pic_vertical_alignment, Some("Center"));
+        assert_eq!(right.text_position, Some("Right"));
+
+        let auto =
+            parse_moxel_format("{1065151907798,0,0,0,0,32,0,8,4,0,2,0,24,2,5}", &[], &[]).unwrap();
+        assert_eq!(auto.text_position, Some("Auto"));
+
+        let weighted = parse_moxel_format("{2199023255680,50,1}", &[], &[]).unwrap();
+        assert_eq!(weighted.width, Some(50));
+        assert_eq!(weighted.width_weight_factor, Some(1));
+
+        let negative_height = parse_moxel_format("{64,-20}", &[], &[]).unwrap();
+        assert_eq!(negative_height.height, Some(-20));
+    }
+
+    #[test]
+    fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
+        let mut rows = vec![
+            MoxelRow {
+                index: 0,
+                index_to: None,
+                format_index: 2,
+                source_format_index: Some(2),
+                columns_id: None,
+                cells: vec![
+                    MoxelCell {
+                        column_index: 0,
+                        format_index: 3,
+                        source_format_index: Some(3),
+                        text: None,
+                        parameter: None,
+                        detail_parameter: None,
+                        empty_text: false,
+                    },
+                    MoxelCell {
+                        column_index: 1,
+                        format_index: 0,
+                        source_format_index: None,
+                        text: None,
+                        parameter: None,
+                        detail_parameter: None,
+                        empty_text: false,
+                    },
+                ],
+            },
+            MoxelRow {
+                index: 1,
+                index_to: None,
+                format_index: 1,
+                source_format_index: Some(1),
+                columns_id: None,
+                cells: Vec::new(),
+            },
+        ];
+
+        normalize_moxel_zero_column_format_refs(&mut rows);
+
+        assert_eq!(rows[0].format_index, 1);
+        assert_eq!(rows[0].source_format_index, Some(1));
+        assert_eq!(rows[0].cells[0].format_index, 2);
+        assert_eq!(rows[0].cells[0].source_format_index, Some(2));
+        assert_eq!(rows[0].cells[1].format_index, 0);
+        assert_eq!(rows[0].cells[1].source_format_index, None);
+        assert_eq!(rows[1].format_index, 0);
+        assert_eq!(rows[1].source_format_index, Some(0));
+    }
+
+    #[test]
+    fn formats_moxel_without_format_table_restore_source_refs() {
+        let mut rows = vec![MoxelRow {
+            index: 0,
+            index_to: None,
+            format_index: 53,
+            source_format_index: Some(2),
+            columns_id: None,
+            cells: vec![
+                MoxelCell {
+                    column_index: 0,
+                    format_index: 54,
+                    source_format_index: Some(2),
+                    text: None,
+                    parameter: None,
+                    detail_parameter: None,
+                    empty_text: false,
+                },
+                MoxelCell {
+                    column_index: 1,
+                    format_index: 55,
+                    source_format_index: Some(5),
+                    text: None,
+                    parameter: None,
+                    detail_parameter: None,
+                    empty_text: false,
+                },
+            ],
+        }];
+
+        restore_moxel_source_format_refs_without_format_table(&mut rows);
+
+        assert_eq!(rows[0].format_index, 2);
+        assert_eq!(rows[0].cells[0].format_index, 2);
+        assert_eq!(rows[0].cells[1].format_index, 5);
+    }
+
+    #[test]
+    fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
+        let xml = format_moxel_spreadsheet_xml(&MoxelSpreadsheet {
+            column_count: 1,
+            column_sets: vec![MoxelColumnSet {
+                id: None,
+                default_format_index: None,
+                source_default_format_index: None,
+                size: 1,
+                columns: Vec::new(),
+            }],
+            column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![MoxelFormat {
+                height: Some(165),
+                ..MoxelFormat::default()
+            }],
+            rows: vec![MoxelRow {
+                index: 0,
+                index_to: None,
+                format_index: 1,
+                source_format_index: Some(1),
+                columns_id: None,
+                cells: Vec::new(),
+            }],
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: None,
+            height: 0,
+        });
+
+        assert!(xml.contains(
+            "<rowsItem>\r\n\t\t<index>0</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>1</formatIndex>\r\n"
+        ));
+    }
+
+    #[test]
+    fn formats_moxel_non_zero_column_slots_suppress_row_output_index_one() {
+        let mut xml = String::new();
+        push_moxel_row_xml(
+            &mut xml,
+            &MoxelRow {
+                index: 2,
+                index_to: None,
+                format_index: 19,
+                source_format_index: Some(1),
+                columns_id: None,
+                cells: vec![MoxelCell {
+                    column_index: 0,
+                    format_index: 25,
+                    source_format_index: Some(25),
+                    text: None,
+                    parameter: None,
+                    detail_parameter: None,
+                    empty_text: false,
+                }],
+            },
+            &BTreeMap::from([(19usize, 1usize), (25usize, 25usize)]),
+            false,
+        );
+
+        assert!(!xml.contains("<formatIndex>1</formatIndex>"));
+        assert!(xml.contains("<f>25</f>"));
+    }
+
+    #[test]
+    fn formats_moxel_leading_shared_default_suppresses_shifted_row_output_index_two() {
+        let mut xml = String::new();
+        push_moxel_row_xml(
+            &mut xml,
+            &MoxelRow {
+                index: 2,
+                index_to: None,
+                format_index: 1,
+                source_format_index: Some(1),
+                columns_id: None,
+                cells: vec![MoxelCell {
+                    column_index: 0,
+                    format_index: 20,
+                    source_format_index: Some(20),
+                    text: None,
+                    parameter: None,
+                    detail_parameter: None,
+                    empty_text: false,
+                }],
+            },
+            &BTreeMap::from([(19usize, 1usize), (1usize, 2usize), (20usize, 20usize)]),
+            false,
+        );
+
+        assert!(!xml.contains("<formatIndex>2</formatIndex>"));
+        assert!(xml.contains("<f>20</f>"));
+    }
+
+    #[test]
+    fn formats_moxel_row_columns_id_precedes_format_index() {
+        let mut xml = String::new();
+        push_moxel_row_xml(
+            &mut xml,
+            &MoxelRow {
+                index: 1,
+                index_to: None,
+                format_index: 19,
+                source_format_index: Some(19),
+                columns_id: Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string()),
+                cells: Vec::new(),
+            },
+            &BTreeMap::new(),
+            false,
+        );
+
+        assert!(xml.contains(
+            "\t\t<row>\r\n\t\t\t<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>\r\n\t\t\t<formatIndex>19</formatIndex>\r\n"
+        ));
+    }
+
+    #[test]
+    fn formats_moxel_remapped_explicit_row_format_one_is_preserved() {
+        let mut xml = String::new();
+        push_moxel_row_xml(
+            &mut xml,
+            &MoxelRow {
+                index: 16,
+                index_to: None,
+                format_index: 19,
+                source_format_index: Some(19),
+                columns_id: None,
+                cells: Vec::new(),
+            },
+            &BTreeMap::from([(19usize, 1usize)]),
+            false,
+        );
+
+        assert!(xml.contains("<formatIndex>1</formatIndex>"));
     }
 
     #[test]
@@ -36565,6 +48668,7 @@ mod tests {
             1,
             false,
             &[],
+            &[],
             &BTreeSet::new(),
             &[],
         );
@@ -36574,6 +48678,59 @@ mod tests {
         assert_eq!(formats.len(), 2);
         assert!(formats[0].is_empty());
         assert_eq!(formats[1].width, Some(111));
+    }
+
+    #[test]
+    fn formats_moxel_width_table_equal_to_column_count_uses_column_formats() {
+        let fields = [
+            "{128,72}",
+            "5",
+            "{0}",
+            "{128,173}",
+            "{128,553}",
+            "{128,113}",
+            "{128,552}",
+        ];
+        let (column_formats, formats) =
+            parse_moxel_formats(&fields, 5, false, &[], &[], &BTreeSet::new(), &[]);
+
+        assert_eq!(column_formats.len(), 5);
+        assert!(column_formats[0].is_empty());
+        assert_eq!(column_formats[1].width, Some(173));
+        assert_eq!(column_formats[2].width, Some(553));
+        assert_eq!(column_formats[3].width, Some(113));
+        assert_eq!(column_formats[4].width, Some(552));
+        assert!(formats.is_empty());
+    }
+
+    #[test]
+    fn formats_moxel_width_table_equal_to_column_count_restores_leading_default_width() {
+        let fields = [
+            "{128,72}",
+            "5",
+            "{0}",
+            "{128,173}",
+            "{128,553}",
+            "{128,113}",
+            "{128,552}",
+        ];
+
+        assert_eq!(parse_moxel_default_format_width(&fields, 5), Some(72));
+    }
+
+    #[test]
+    fn formats_moxel_width_table_accepts_extended_129_default_width_entries() {
+        let fields = [
+            "{129,0,72}",
+            "5",
+            "{0}",
+            "{129,0,173}",
+            "{129,0,553}",
+            "{129,0,113}",
+            "{129,0,552}",
+        ];
+
+        assert_eq!(parse_moxel_default_format_width(&fields, 5), Some(72));
     }
 
     #[test]
@@ -36606,10 +48763,25 @@ mod tests {
     }
 
     #[test]
+    fn formats_moxel_edit_format_string_table() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{4311744512,0,0},{1,0},1,{1,1,{\"ru\",\"ЧДЦ=2\"}}}",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<format>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>ЧДЦ=2</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</format>\r\n\t\t<editFormat>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>ЧДЦ=2</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</editFormat>\r\n\t</format>"
+        ));
+    }
+
+    #[test]
     fn formats_moxel_line_style_mappings() {
         assert_eq!(parse_moxel_line("{3,3,{-1}}").unwrap().style, "None");
         assert_eq!(parse_moxel_line("{3,3,{-3}}").unwrap().style, "Solid");
         assert_eq!(parse_moxel_line("{3,3,{-10}}").unwrap().style, "Dotted");
+        assert_eq!(parse_moxel_line("{3,3,{-11}}").unwrap().style, "Dotted");
     }
 
     #[test]
@@ -36649,9 +48821,80 @@ mod tests {
 
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].style, "Solid");
-        assert_eq!(lines[0].width, 2);
+        assert_eq!(lines[0].width, 1);
         assert_eq!(lines[1].style, "Solid");
-        assert_eq!(lines[1].width, 1);
+        assert_eq!(lines[1].width, 2);
+    }
+
+    #[test]
+    fn formats_moxel_two_raw_line_entries_expand_to_three_solid_widths() {
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(1),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(2),
+                ..MoxelFormat::default()
+            },
+        ];
+        let lines = parse_moxel_lines(&["{3,3,{-1}}", "{3,3,{-3}}"], &formats, true);
+
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| (line.style, line.line_type, line.width))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 1),
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 2),
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn formats_moxel_preserve_drawing_line_slot_for_none_solid_dotted_triplet() {
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(1),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(2),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                drawing_border: Some(3),
+                ..MoxelFormat::default()
+            },
+        ];
+        let lines = parse_moxel_lines(
+            &["{3,3,{-1}}", "{3,3,{-3}}", "{3,3,{-10}}"],
+            &formats,
+            true,
+        );
+
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| (line.style, line.line_type, line.width))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 1),
+                ("None", "v8ui:SpreadsheetDocumentCellLineType", 1),
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 2),
+                ("None", "v8ui:SpreadsheetDocumentDrawingLineType", 1),
+            ]
+        );
     }
 
     #[test]
@@ -36720,14 +48963,265 @@ mod tests {
             &BTreeMap::new(),
         );
 
-        assert_eq!(style_refs[0].as_deref(), Some("style:FieldBackColor"));
-        assert_eq!(style_refs[1], None);
-        assert_eq!(style_refs[2], None);
+        assert_eq!(style_refs[0].as_deref(), Some("moxel:f527:1:2"));
+        assert_eq!(style_refs[1].as_deref(), Some("style:FormBackColor"));
+        assert_eq!(style_refs[2].as_deref(), Some("style:FormTextColor"));
         assert_eq!(style_refs[3].as_deref(), Some("style:FieldBackColor"));
         assert_eq!(style_refs[4].as_deref(), Some("d3p1:RoyalBlue"));
         assert_eq!(style_refs[5].as_deref(), Some("d3p1:Crimson"));
         assert_eq!(moxel_details_use(0), Some("Cell"));
         assert_eq!(moxel_details_use(1), Some("Row"));
+        assert_eq!(moxel_details_use(2), Some("WithoutProcessing"));
+    }
+
+    #[test]
+    fn formats_moxel_compact_style_ref_indices_cover_field_form_and_tooltip_colors() {
+        let mut values = [None; 64];
+        values[11] = Some("2");
+        values[10] = Some("1");
+        values[5] = Some("0");
+
+        assert_eq!(
+            parse_moxel_format_style_ref(&values, 11, &[]).as_deref(),
+            Some("style:FieldBackColor")
+        );
+        assert_eq!(
+            parse_moxel_format_style_ref(&values, 10, &[]).as_deref(),
+            Some("style:FormTextColor")
+        );
+        assert_eq!(
+            parse_moxel_format_style_ref(&values, 5, &[]).as_deref(),
+            Some("style:ToolTipBackColor")
+        );
+    }
+
+    #[test]
+    fn formats_moxel_web_color_table_covers_native_template_palette() {
+        let style_refs = parse_moxel_style_refs(
+            &[
+                "{3,2,{27}}",
+                "{3,2,{31}}",
+                "{3,2,{55}}",
+                "{3,2,{67}}",
+                "{3,2,{119}}",
+                "{3,2,{145}}",
+            ],
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(style_refs[0].as_deref(), Some("d3p1:DarkGreen"));
+        assert_eq!(style_refs[1].as_deref(), Some("d3p1:DarkGreen"));
+        assert_eq!(style_refs[2].as_deref(), Some("d3p1:HoneyDew"));
+        assert_eq!(style_refs[3].as_deref(), Some("d3p1:LightCyan"));
+        assert_eq!(style_refs[4].as_deref(), Some("d3p1:Red"));
+        assert_eq!(style_refs[5].as_deref(), Some("d3p1:Yellow"));
+    }
+
+    #[test]
+    fn formats_moxel_web_color_slots_keep_tail_indices_aligned() {
+        let style_refs = parse_moxel_style_refs(
+            &["{3,2,{55}}", "{3,2,{119}}", "{3,2,{121}}"],
+            &BTreeMap::new(),
+        );
+        let format = parse_moxel_format("{3072,0,1}", &style_refs, &[]).unwrap();
+
+        assert_eq!(format.text_color.as_deref(), Some("d3p1:HoneyDew"));
+        assert_eq!(format.back_color.as_deref(), Some("d3p1:Red"));
+    }
+
+    #[test]
+    fn formats_moxel_embedded_form_back_color_kind3_uses_field_selection_back_color() {
+        let style_refs = parse_moxel_style_refs(
+            &[
+                "{3,1,{4,0,{0},0,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0,1,{4,0,{0},1,3,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0,1,{4,0,{0},1,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            ],
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(style_refs.len(), 5);
+        assert_eq!(style_refs[0].as_deref(), Some("moxel:f527:0:1"));
+        assert_eq!(style_refs[1], None);
+        assert_eq!(style_refs[2].as_deref(), Some("moxel:f527:1:3"));
+        assert_eq!(style_refs[3], None);
+        assert_eq!(style_refs[4].as_deref(), Some("moxel:f527:1:1"));
+    }
+
+    #[test]
+    fn formats_moxel_leading_f527_palette_offsets_later_style_refs() {
+        let style_refs = vec![
+            Some("moxel:f527:1:1".to_string()),
+            Some("moxel:f527:1:2".to_string()),
+            Some("moxel:f527:1:3".to_string()),
+            Some("style:FormBackColor".to_string()),
+            Some("style:FormTextColor".to_string()),
+            Some("style:ReportHeaderBackColor".to_string()),
+            Some("#EBEBEB".to_string()),
+            Some("style:SpecialTextColor".to_string()),
+            Some("#000000".to_string()),
+            Some("style:ReportHeaderBackColor".to_string()),
+        ];
+
+        let form_text = parse_moxel_format("{1024,1}", &style_refs, &[]).unwrap();
+        let header_back = parse_moxel_format("{2048,2}", &style_refs, &[]).unwrap();
+        let gray_back = parse_moxel_format("{2048,3}", &style_refs, &[]).unwrap();
+        let black_text = parse_moxel_format("{1024,5}", &style_refs, &[]).unwrap();
+
+        assert_eq!(form_text.text_color.as_deref(), Some("style:FormTextColor"));
+        assert_eq!(
+            header_back.back_color.as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
+        assert_eq!(gray_back.back_color.as_deref(), Some("#EBEBEB"));
+        assert_eq!(black_text.text_color.as_deref(), Some("#000000"));
+    }
+
+    #[test]
+    fn formats_moxel_leading_f527_palette_offsets_shorter_palette_refs() {
+        let style_refs = vec![
+            Some("moxel:f527:1:1".to_string()),
+            Some("moxel:f527:1:2".to_string()),
+            Some("moxel:f527:1:3".to_string()),
+            Some("style:FormBackColor".to_string()),
+            Some("style:FormTextColor".to_string()),
+            Some("style:ReportHeaderBackColor".to_string()),
+            Some("#EBEBEB".to_string()),
+            Some("style:ReportHeaderBackColor".to_string()),
+        ];
+
+        let form_text = parse_moxel_format("{1024,1}", &style_refs, &[]).unwrap();
+        let header_back = parse_moxel_format("{2048,2}", &style_refs, &[]).unwrap();
+        let gray_back = parse_moxel_format("{2048,3}", &style_refs, &[]).unwrap();
+
+        assert_eq!(form_text.text_color.as_deref(), Some("style:FormTextColor"));
+        assert_eq!(
+            header_back.back_color.as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
+        assert_eq!(gray_back.back_color.as_deref(), Some("#EBEBEB"));
+    }
+
+    #[test]
+    fn formats_moxel_embedded_f527_colors_resolve_by_property() {
+        let render = |style_ref: &str, flags: u64| {
+            let style_refs = parse_moxel_style_refs(&[style_ref], &BTreeMap::new());
+            let format = parse_moxel_format(&format!("{{{flags},0}}"), &style_refs, &[]).unwrap();
+            let spreadsheet = MoxelSpreadsheet {
+                column_count: 0,
+                column_sets: Vec::new(),
+                column_formats: Vec::new(),
+                extra_formats: BTreeMap::new(),
+                default_format_width: None,
+                default_format: MoxelFormat::default(),
+                formats: vec![format],
+                rows: Vec::new(),
+                vertical_groups: Vec::new(),
+                merges: Vec::new(),
+                horizontal_unmerges: Vec::new(),
+                vertical_unmerges: Vec::new(),
+                named_items: Vec::new(),
+                areas: Vec::new(),
+                print_area: None,
+                print_settings: None,
+                lines: Vec::new(),
+                fonts: Vec::new(),
+                drawings: Vec::new(),
+                pictures: Vec::new(),
+                empty_headers_footers: false,
+                header_footer_format_index: None,
+                default_format_index: None,
+                height: 0,
+            };
+            let mut xml = String::new();
+            push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+            xml
+        };
+
+        let tooltip_back = render(
+            "{3,1,{4,0,{0},0,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            2048,
+        );
+        let tooltip_text = render(
+            "{3,1,{4,0,{0},0,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            1024,
+        );
+        let form_text = render(
+            "{3,1,{4,0,{0},1,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            1024,
+        );
+        let field_text = render(
+            "{3,1,{4,0,{0},1,2,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            1024,
+        );
+        let selection_text = render(
+            "{3,1,{4,0,{0},1,3,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            1024,
+        );
+
+        assert!(tooltip_back.contains("<backColor>style:ToolTipBackColor</backColor>"));
+        assert!(tooltip_text.contains("<textColor>style:ToolTipTextColor</textColor>"));
+        assert!(form_text.contains("<textColor>style:FormTextColor</textColor>"));
+        assert!(field_text.contains("<textColor>style:FieldTextColor</textColor>"));
+        assert!(selection_text.contains("<textColor>style:FieldSelectionBackColor</textColor>"));
+    }
+
+    #[test]
+    fn formats_moxel_load_goods_style_slots_keep_border_color_at_zero() {
+        let inflated = include_str!("../../tests/fixtures/moxel_load_goods_source_slots.txt");
+        let body_start = inflated.find("{8,").unwrap();
+        let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
+        let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
+
+        assert_eq!(style_refs[0].as_deref(), Some("style:BorderColor"));
+        assert_eq!(style_refs[1].as_deref(), Some("style:FormBackColor"));
+        assert_eq!(style_refs[2].as_deref(), Some("style:FormTextColor"));
+        assert_eq!(style_refs[3].as_deref(), Some("style:ReportLineColor"));
+        assert_eq!(style_refs[4].as_deref(), Some("#F5F2DD"));
+        assert_eq!(style_refs[5].as_deref(), Some("#594304"));
+    }
+
+    #[test]
+    fn formats_moxel_windows_font_serializes_like_native() {
+        let mut xml = String::new();
+        push_moxel_font_xml(
+            &mut xml,
+            &MoxelFont {
+                ref_name: Some("sys:DefaultGUIFont".to_string()),
+                face_name: None,
+                height: Some("10".to_string()),
+                bold: false,
+                italic: false,
+                underline: false,
+                strikeout: false,
+                kind: "WindowsFont",
+                scale: Some(100),
+            },
+        );
+
+        assert_eq!(
+            xml,
+            "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:DefaultGUIFont\" height=\"10\" bold=\"false\" kind=\"WindowsFont\"/>\r\n"
+        );
+    }
+
+    #[test]
+    fn formats_moxel_plain_style_item_font_omits_false_flags() {
+        let mut xml = String::new();
+        push_moxel_font_xml(
+            &mut xml,
+            &MoxelFont {
+                ref_name: Some("style:TextFont".to_string()),
+                face_name: None,
+                height: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                strikeout: false,
+                kind: "StyleItem",
+                scale: None,
+            },
+        );
+
+        assert_eq!(xml, "\t<font ref=\"style:TextFont\" kind=\"StyleItem\"/>\r\n");
     }
 
     #[test]
@@ -36738,12 +49232,16 @@ mod tests {
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
             default_format_width: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
             rows: Vec::new(),
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -36752,6 +49250,44 @@ mod tests {
             drawings: Vec::new(),
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: None,
+            height: 0,
+        };
+        let mut xml = String::new();
+
+        push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+
+        assert!(xml.contains("<backColor>style:FieldSelectionBackColor</backColor>"));
+    }
+
+    #[test]
+    fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() {
+        let style_refs = parse_moxel_style_refs(&["{3,3,{-14}}"], &BTreeMap::new());
+        let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: Vec::new(),
+            column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![format],
+            rows: Vec::new(),
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: None,
             height: 0,
         };
@@ -36770,12 +49306,16 @@ mod tests {
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
             default_format_width: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
             rows: Vec::new(),
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -36784,6 +49324,7 @@ mod tests {
             drawings: Vec::new(),
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: None,
             height: 0,
         };
@@ -36802,12 +49343,16 @@ mod tests {
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
             default_format_width: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
             rows: Vec::new(),
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -36816,6 +49361,7 @@ mod tests {
             drawings: Vec::new(),
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: None,
             height: 0,
         };
@@ -36865,12 +49411,16 @@ mod tests {
             column_count: 0,
             column_sets: Vec::new(),
             column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
             default_format_width: None,
             default_format: MoxelFormat::default(),
             formats: vec![format],
             rows: Vec::new(),
+            vertical_groups: Vec::new(),
             merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
             vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
             areas: Vec::new(),
             print_area: None,
             print_settings: None,
@@ -36879,6 +49429,7 @@ mod tests {
             drawings: Vec::new(),
             pictures: Vec::new(),
             empty_headers_footers: false,
+            header_footer_format_index: None,
             default_format_index: None,
             height: 0,
         };
@@ -36890,10 +49441,243 @@ mod tests {
     }
 
     #[test]
+    fn formats_moxel_wrapped_style_ref_slot_is_preserved() {
+        let style_refs = parse_moxel_style_refs(
+            &[
+                "{3,3,{-1}}",
+                "{3,3,{-3}}",
+                "{3,0,{12971252}}",
+                "{3,0,{15461355}}",
+                "{1,2,{3,3,{-25}}}",
+            ],
+            &BTreeMap::new(),
+        );
+
+        assert_eq!(style_refs.len(), 5);
+        assert_eq!(
+            style_refs[4].as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
+    }
+
+    #[test]
+    fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
+        let format = parse_moxel_format("{148417,2,45,120,0,8,0,0}", &[], &[]).unwrap();
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: Vec::new(),
+            column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![format],
+            rows: Vec::new(),
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: None,
+            height: 0,
+        };
+        let mut xml = String::new();
+
+        push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+
+        assert!(xml.contains("<verticalAlignment>Bottom</verticalAlignment>"));
+        assert!(xml.contains("<hidden>false</hidden>"));
+    }
+
+    #[test]
+    fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
+        let format = parse_moxel_format("{21491613696,0,0,0}", &[], &[Vec::new()]).unwrap();
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: Vec::new(),
+            column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![format],
+            rows: Vec::new(),
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: None,
+            height: 0,
+        };
+        let mut xml = String::new();
+
+        push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+
+        assert!(xml.contains("<format/>"));
+        assert!(xml.contains("<editFormat/>"));
+        assert!(xml.contains("<mask/>"));
+    }
+
+    #[test]
+    fn formats_moxel_merge_region_allows_negative_origin() {
+        let (merge, kind) = parse_moxel_merge_region("{4,-1,5,-1}").unwrap();
+
+        assert_eq!(kind, 0);
+        assert_eq!(merge.row, -1);
+        assert_eq!(merge.column, 4);
+        assert_eq!(merge.height, 0);
+        assert_eq!(merge.width, 1);
+    }
+
+    #[test]
     fn formats_moxel_cell_zero_format_stays_zero() {
         let cell = parse_moxel_cell("{16,0,{0},0}", 0).unwrap();
 
         assert_eq!(cell.format_index, 0);
+    }
+
+    #[test]
+    fn formats_moxel_merge_region_list_supports_horizontal_unmerge_and_columns_id() {
+        let (merges, horizontal_unmerges, vertical_unmerges) = parse_moxel_merge_region_list(
+            "{3,{5,-1,6,-1,0,e3f5122b-a98a-459d-a9ef-d9b6788c0769},{2,14,2,15,1},{5,13,6,13,2}}",
+        )
+        .unwrap();
+
+        assert_eq!(merges.len(), 1);
+        assert_eq!(merges[0].row, -1);
+        assert_eq!(merges[0].column, 5);
+        assert_eq!(merges[0].width, 1);
+        assert_eq!(
+            merges[0].columns_id.as_deref(),
+            Some("e3f5122b-a98a-459d-a9ef-d9b6788c0769")
+        );
+
+        assert_eq!(horizontal_unmerges.len(), 1);
+        assert_eq!(horizontal_unmerges[0].row, 14);
+        assert_eq!(horizontal_unmerges[0].column, 2);
+        assert_eq!(horizontal_unmerges[0].height, 1);
+        assert_eq!(horizontal_unmerges[0].width, 0);
+
+        assert_eq!(vertical_unmerges.len(), 1);
+        assert_eq!(vertical_unmerges[0].row, 13);
+        assert_eq!(vertical_unmerges[0].column, 5);
+        assert_eq!(vertical_unmerges[0].width, 1);
+    }
+
+    #[test]
+    fn formats_moxel_merge_order_moves_negative_row_merges_before_negative_column_merges() {
+        let mut merges = vec![
+            MoxelMerge {
+                row: 10,
+                column: 3,
+                height: 0,
+                width: 1,
+                columns_id: None,
+            },
+            MoxelMerge {
+                row: 16,
+                column: -1,
+                height: 1,
+                width: 0,
+                columns_id: None,
+            },
+            MoxelMerge {
+                row: -1,
+                column: 8,
+                height: 0,
+                width: 1,
+                columns_id: Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()),
+            },
+        ];
+
+        normalize_moxel_merge_order(&mut merges);
+
+        assert_eq!(
+            merges
+                .iter()
+                .map(|merge| (merge.row, merge.column, merge.columns_id.is_some()))
+                .collect::<Vec<_>>(),
+            vec![(10, 3, false), (-1, 8, true), (16, -1, false)]
+        );
+    }
+
+    #[test]
+    fn formats_moxel_inserts_implicit_text_font_before_last_explicit_font() {
+        let mut fonts = vec![
+            MoxelFont {
+                ref_name: None,
+                face_name: Some("Arial".to_string()),
+                height: Some("9".to_string()),
+                bold: false,
+                italic: false,
+                underline: false,
+                strikeout: false,
+                kind: "Absolute",
+                scale: Some(100),
+            },
+            MoxelFont {
+                ref_name: None,
+                face_name: Some("Arial".to_string()),
+                height: Some("10".to_string()),
+                bold: true,
+                italic: false,
+                underline: false,
+                strikeout: false,
+                kind: "Absolute",
+                scale: Some(100),
+            },
+        ];
+        let formats = vec![MoxelFormat {
+            font: Some(2),
+            ..MoxelFormat::default()
+        }];
+
+        normalize_moxel_fonts(&mut fonts, &formats);
+
+        assert_eq!(fonts.len(), 3);
+        assert_eq!(fonts[1].ref_name.as_deref(), Some("style:TextFont"));
+        assert_eq!(fonts[1].kind, "StyleItem");
+        assert_eq!(fonts[2].height.as_deref(), Some("10"));
+    }
+
+    #[test]
+    fn parses_moxel_detail_parameter_cell_variants() {
+        let detail_only = parse_moxel_cell(r#"{8,27,"Расшифровка"}"#, 4).unwrap();
+        assert_eq!(detail_only.column_index, 4);
+        assert_eq!(detail_only.format_index, 28);
+        assert_eq!(detail_only.detail_parameter.as_deref(), Some("Расшифровка"));
+        assert!(detail_only.text.is_none());
+        assert!(detail_only.parameter.is_none());
+
+        let note_bearing = parse_moxel_cell(
+            r#"{56,20,"Расшифровка",{1,1,{"ru","Длинная тонна"}},{1,1,{"ru","Комментарий"}},1,{0},0}"#,
+            5,
+        )
+        .unwrap();
+        assert_eq!(note_bearing.column_index, 5);
+        assert_eq!(note_bearing.format_index, 21);
+        assert_eq!(
+            note_bearing.detail_parameter.as_deref(),
+            Some("Расшифровка")
+        );
+        assert_eq!(note_bearing.text.as_deref(), Some("Длинная тонна"));
     }
 
     #[test]
@@ -36935,6 +49719,8 @@ mod tests {
         let column_sets = vec![
             MoxelColumnSet {
                 id: None,
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 1,
                 columns: vec![MoxelColumn {
                     index: 0,
@@ -36944,6 +49730,8 @@ mod tests {
             },
             MoxelColumnSet {
                 id: Some("5c3926f2-4223-4ca7-a6a7-7160301c991d".to_string()),
+                default_format_index: None,
+                source_default_format_index: None,
                 size: 4,
                 columns: vec![
                     MoxelColumn {
@@ -36979,6 +49767,7 @@ mod tests {
     fn formats_moxel_picture_drawing_and_normalized_picture_index() {
         let drawing = parse_moxel_drawing("{{0,31},5,1,20,24,6,1,20,88,70,1,1,1,0}").unwrap();
 
+        assert_eq!(drawing.id, 1);
         assert_eq!(drawing.format_index, 31);
         assert_eq!(drawing.begin_row, 20);
         assert_eq!(drawing.begin_row_offset, 6);
@@ -36996,6 +49785,7 @@ mod tests {
         let mut xml = String::new();
         push_moxel_drawing_xml(&mut xml, &drawing, &BTreeMap::new());
         assert!(xml.contains("<drawingType>Picture</drawingType>"));
+        assert!(xml.contains("<id>1</id>"));
         assert!(xml.contains("<formatIndex>31</formatIndex>"));
         assert!(xml.contains("<beginRow>20</beginRow>"));
         assert!(xml.contains("<beginRowOffset>6</beginRowOffset>"));
@@ -37007,6 +49797,29 @@ mod tests {
         assert!(xml.contains("<pictureSize>Stretch</pictureSize>"));
         assert!(xml.contains("<zOrder>1</zOrder>"));
         assert!(xml.contains("<pictureIndex>1</pictureIndex>"));
+
+        let real_size = parse_moxel_drawing("{{0,137},5,7,1,6,3,11,3,66,54,2,1,0,0}").unwrap();
+        assert_eq!(real_size.id, 2);
+        assert_eq!(real_size.picture_size, "RealSize");
+        assert_eq!(real_size.z_order, 1);
+        assert_eq!(real_size.picture_index, 1);
+        assert!(!real_size.auto_size);
+
+        let proportional =
+            parse_moxel_drawing("{{0,77},5,1,9,21,9,6,14,12,66,10,1,2,0}").unwrap();
+        assert_eq!(proportional.id, 10);
+        assert_eq!(proportional.picture_size, "Proportionally");
+        assert_eq!(proportional.z_order, 1);
+        assert_eq!(proportional.picture_index, 1);
+        assert!(!proportional.auto_size);
+
+        let auto_size =
+            parse_moxel_drawing("{{0,44},5,5,26,27,30,37,26,15,720,1,1,4,0}").unwrap();
+        assert_eq!(auto_size.id, 1);
+        assert_eq!(auto_size.picture_size, "AutoSize");
+        assert_eq!(auto_size.z_order, 1);
+        assert_eq!(auto_size.picture_index, 1);
+        assert!(!auto_size.auto_size);
 
         let pictures = parse_moxel_pictures(
             &[
@@ -37023,6 +49836,39 @@ mod tests {
         assert_eq!(
             pictures[0].ref_name.as_deref(),
             Some("v8ui:Предупреждение32")
+        );
+    }
+
+    #[test]
+    fn formats_moxel_prefers_leading_width_only_source_column_formats() {
+        let formats = vec![
+            MoxelFormat {
+                width: Some(8),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                width: Some(19),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                back_color: Some("style:ToolTipBackColor".to_string()),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                width: Some(19),
+                ..MoxelFormat::default()
+            },
+        ];
+
+        assert!(prefers_moxel_leading_source_column_formats(&formats, &[1, 2]));
+        let (column_formats, other_formats) = split_moxel_formats_by_source_refs(formats, &[1, 2]);
+        assert_eq!(column_formats.len(), 2);
+        assert_eq!(column_formats[0].width, Some(8));
+        assert_eq!(column_formats[1].width, Some(19));
+        assert_eq!(other_formats.len(), 2);
+        assert_eq!(
+            other_formats[0].back_color.as_deref(),
+            Some("style:ToolTipBackColor")
         );
     }
 
@@ -37047,6 +49893,1275 @@ mod tests {
             "\t<format>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<fillType>Parameter</fillType>\r\n\t\t<hyperLink>true</hyperLink>\r\n\t</format>"
         ));
         assert!(!xml.contains("<line width=\"1\""));
+    }
+
+    #[test]
+    fn formats_moxel_source_slot_refs_with_default_width_do_not_create_empty_formats() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            include_str!("../../tests/fixtures/moxel_gs1_source_slots.txt"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(
+            xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
+            13
+        );
+        assert_eq!(xml.matches("\t<format/>\r\n").count(), 0);
+        assert!(xml.contains("<defaultFormatIndex>13</defaultFormatIndex>"));
+        assert!(xml.contains("<f>12</f>"));
+        assert!(xml.contains("<f>5</f>"));
+        assert!(xml.contains("<f>6</f>"));
+        assert!(xml.contains("<f>3</f>"));
+        assert!(!xml.contains("<f>13</f>"));
+        assert!(!xml.contains("<f>14</f>"));
+        assert!(!xml.contains("<f>15</f>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>279</width>\r\n\t</format>"));
+        assert!(xml.contains("<width>72</width>"));
+    }
+
+    #[test]
+    fn formats_moxel_source_slot_refs_preserve_high_tail_indices() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            include_str!("../../tests/fixtures/moxel_request_offer_source_slots.txt"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert!(xml.contains("<index>97</index>"));
+        assert!(xml.contains("<f>81</f>"));
+        assert!(xml.contains("<f>82</f>"));
+        assert!(xml.contains(
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>1</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>5</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>2</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>8</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>4</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>15</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>9</formatIndex>"
+        ));
+        assert!(!xml.contains("<f>10</f>\r\n\t\t\t\t\t<parameter>Дата</parameter>"));
+        assert!(!xml.contains("<f>11</f>\r\n\t\t\t\t\t<parameter>Дата</parameter>"));
+        assert!(xml.contains("\t<format>\r\n\t\t<width>66</width>\r\n\t</format>"));
+    }
+
+    #[test]
+    fn formats_moxel_request_offer_preserves_native_default_and_report_header_styles() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            include_str!("../../tests/fixtures/moxel_request_offer_source_slots.txt"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(spreadsheet.default_format_index, Some(15));
+        assert_eq!(spreadsheet.column_formats.len(), 9);
+        assert_eq!(spreadsheet.column_formats[0].width, Some(160));
+        assert_eq!(spreadsheet.column_formats[1].width, Some(200));
+        assert_eq!(spreadsheet.column_formats[2].width, Some(91));
+        assert_eq!(spreadsheet.column_formats[3].width, Some(457));
+        assert_eq!(spreadsheet.column_formats[4].width, Some(120));
+        assert_eq!(spreadsheet.column_formats[5].width, Some(234));
+        assert_eq!(spreadsheet.column_formats[6].width, Some(202));
+        assert_eq!(spreadsheet.column_formats[7].width, Some(195));
+        assert_eq!(spreadsheet.column_formats[8].width, Some(682));
+        assert_eq!(spreadsheet.lines.len(), 2);
+        assert_eq!(spreadsheet.lines[0].style, "Solid");
+        assert_eq!(spreadsheet.lines[0].width, 1);
+        assert_eq!(spreadsheet.lines[1].style, "Solid");
+        assert_eq!(spreadsheet.lines[1].width, 2);
+        assert_eq!(spreadsheet.fonts.len(), 3);
+        assert!(spreadsheet.fonts[0].bold);
+        assert!(!spreadsheet.fonts[0].italic);
+        assert!(!spreadsheet.fonts[1].bold);
+        assert!(spreadsheet.fonts[1].italic);
+        assert!(!spreadsheet.fonts[2].bold);
+        assert!(!spreadsheet.fonts[2].italic);
+        assert!(xml.contains("<defaultFormatIndex>15</defaultFormatIndex>"));
+        assert!(xml.contains(
+            "<line width=\"1\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>\r\n\t</line>"
+        ));
+        assert!(xml.contains(
+            "<line width=\"2\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>\r\n\t</line>"
+        ));
+        assert!(xml.contains(
+            "<font faceName=\"Arial\" height=\"8\" bold=\"false\" italic=\"true\" underline=\"false\" strikeout=\"false\" kind=\"Absolute\" scale=\"100\"/>"
+        ));
+        assert!(xml.contains("<verticalAlignment>Bottom</verticalAlignment>"));
+        assert!(xml.contains("<hidden>false</hidden>"));
+        assert!(xml.contains("<textColor>style:FieldTextColor</textColor>"));
+        assert!(xml.contains("\t\t<format/>\r\n\t\t<editFormat/>\r\n\t\t<mask/>\r\n"));
+        assert!(xml.contains("<backColor>style:ReportHeaderBackColor</backColor>"));
+    }
+
+    #[test]
+    fn formats_moxel_clientbank_db_tail_preserves_default_details_lines_and_font_tenths() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            include_str!("../../tests/fixtures/moxel_clientbank_report_raw.txt"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(spreadsheet.default_format_index, Some(48));
+        assert_eq!(spreadsheet.default_format_width, Some(72));
+        assert_eq!(spreadsheet.default_format.vertical_alignment, Some("Top"));
+        assert_eq!(spreadsheet.lines.len(), 3);
+        assert_eq!(spreadsheet.lines[0].style, "Solid");
+        assert_eq!(spreadsheet.lines[0].width, 2);
+        assert_eq!(spreadsheet.lines[1].style, "Solid");
+        assert_eq!(spreadsheet.lines[1].width, 1);
+        assert_eq!(spreadsheet.lines[2].style, "None");
+        assert_eq!(spreadsheet.lines[2].width, 0);
+        assert_eq!(spreadsheet.fonts[3].height.as_deref(), Some("8.3"));
+        assert_eq!(spreadsheet.fonts[5].height.as_deref(), Some("8.3"));
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 13).details_use,
+            Some("WithoutProcessing")
+        );
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 21).details_use,
+            Some("WithoutProcessing")
+        );
+        assert!(xml.contains("<defaultFormatIndex>48</defaultFormatIndex>"));
+        assert!(xml.contains("<detailsUse>WithoutProcessing</detailsUse>"));
+        assert!(xml.contains("<font faceName=\"Arial\" height=\"8.3\" bold=\"false\""));
+        assert!(xml.contains("<font faceName=\"Arial\" height=\"8.3\" bold=\"true\""));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<width>72</width>\r\n\t\t<verticalAlignment>Top</verticalAlignment>\r\n\t</format>"
+        ));
+        assert!(
+            xml.contains(
+                "\t<merge>\r\n\t\t<r>-1</r>\r\n\t\t<c>4</c>\r\n\t\t<w>1</w>\r\n\t</merge>"
+            )
+        );
+    }
+
+    #[test]
+    fn formats_moxel_settlement_db_tail_preserves_form_text_auto_and_group_styles() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            include_str!("../../tests/fixtures/moxel_settlement_registers_raw.txt"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 6)
+                .text_color
+                .as_deref(),
+            Some("auto")
+        );
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 7)
+                .text_color
+                .as_deref(),
+            Some("auto")
+        );
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 8)
+                .text_color
+                .as_deref(),
+            Some("style:FormTextColor")
+        );
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 11)
+                .back_color
+                .as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 15)
+                .back_color
+                .as_deref(),
+            Some("style:ReportGroup1BackColor")
+        );
+        assert_eq!(
+            moxel_format_for_index(&spreadsheet, 16)
+                .text_color
+                .as_deref(),
+            Some("#808080")
+        );
+        assert!(xml.contains("<textColor>auto</textColor>"));
+        assert!(xml.contains("<textColor>style:FormTextColor</textColor>"));
+        assert!(xml.contains("<backColor>style:ReportHeaderBackColor</backColor>"));
+        assert!(xml.contains("<backColor>style:ReportGroup1BackColor</backColor>"));
+        assert!(xml.contains("<textColor>#808080</textColor>"));
+    }
+
+    #[test]
+    fn formats_moxel_source_slot_refs_preserve_native_load_goods_order_and_default() {
+        let inflated = include_str!("../../tests/fixtures/moxel_load_goods_source_slots.txt");
+        let body_start = inflated.find("{8,").unwrap();
+        let spreadsheet =
+            parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let top_level_format_count =
+            xml.matches("\r\n\t<format>\r\n").count() + xml.matches("\r\n\t<format/>\r\n").count();
+
+        assert!(xml.starts_with("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert_eq!(top_level_format_count, 21);
+        assert!(xml.contains("<defaultFormatIndex>21</defaultFormatIndex>"));
+        assert!(xml.contains(
+            "<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:DefaultGUIFont\" height=\"10\" bold=\"false\" kind=\"WindowsFont\"/>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<border>0</border>\r\n\t\t<borderColor>style:ReportLineColor</borderColor>\r\n\t\t<width>154</width>\r\n\t\t<textPlacement>Cut</textPlacement>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<borderColor>style:BorderColor</borderColor>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<borderColor>style:BorderColor</borderColor>\r\n\t</format>"
+        ));
+        assert!(xml.contains("<borderColor>style:BorderColor</borderColor>"));
+        assert!(xml.contains("<textColor>style:FormTextColor</textColor>"));
+        assert!(xml.contains("<backColor>#F5F2DD</backColor>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<font>0</font>\r\n\t\t<borderColor>style:BorderColor</borderColor>\r\n\t\t<width>72</width>\r\n\t</format>"
+        ));
+        assert!(
+            xml.contains("<index>1</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>14</formatIndex>")
+        );
+        assert!(xml.contains(
+            "<index>2</index>\r\n\t\t<row>\r\n\t\t\t<c>\r\n\t\t\t\t<c>\r\n\t\t\t\t\t<f>1</f>"
+        ));
+        assert!(xml.contains(
+            "<index>5</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>5</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>6</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>6</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>12</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>7</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>13</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>8</formatIndex>"
+        ));
+    }
+
+    #[test]
+    fn formats_moxel_zero_offset_sparse_source_refs_preserve_required_fields_order() {
+        let spreadsheet = parse_moxel_spreadsheet_text(
+            include_str!("../../tests/fixtures/moxel_required_fields_template_raw.txt"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(spreadsheet.default_format_index, Some(7));
+        assert_eq!(spreadsheet.column_formats.len(), 3);
+        assert_eq!(spreadsheet.column_formats[0].width, Some(370));
+        assert_eq!(spreadsheet.column_formats[1].width, Some(165));
+        assert_eq!(spreadsheet.column_formats[2].width, Some(528));
+        assert_eq!(spreadsheet.formats.len(), 3);
+        assert_eq!(spreadsheet.formats[0].width, Some(298));
+        assert_eq!(spreadsheet.formats[1].width, Some(317));
+        assert_eq!(spreadsheet.formats[2].width, Some(113));
+        assert_eq!(
+            spreadsheet.column_sets[0]
+                .columns
+                .iter()
+                .map(|column| column.format_index)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(spreadsheet.rows[1].cells[0].format_index, 1);
+        assert_eq!(spreadsheet.rows[8].cells[0].format_index, 4);
+        assert_eq!(spreadsheet.rows[8].cells[1].format_index, 2);
+        assert_eq!(spreadsheet.rows[8].cells[2].format_index, 3);
+        assert!(xml.contains("<defaultFormatIndex>7</defaultFormatIndex>"));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<width>370</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>165</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>528</width>\r\n\t</format>"
+        ));
+        assert!(xml.contains(
+            "\t<format>\r\n\t\t<width>298</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>317</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>113</width>\r\n\t</format>\r\n\t<format>\r\n\t\t<width>72</width>\r\n\t</format>"
+        ));
+        assert!(!xml.contains("\t<format/>\r\n"));
+    }
+
+    #[test]
+    fn formats_moxel_invoice_1096_sparse_column_sets_promote_shared_default_without_remap_regression(
+    ) {
+        let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
+        let fields = split_1c_braced_fields(raw, 0).unwrap();
+        let (_, _, declared_sheet_height) = parse_moxel_column_sets(&fields);
+        let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+        assert_eq!(spreadsheet.column_sets.len(), 4);
+        assert_eq!(spreadsheet.column_formats.len(), 35);
+        assert!(spreadsheet.header_footer_format_index.is_some());
+        assert_eq!(spreadsheet.default_format_index, None);
+        assert_eq!(declared_sheet_height, Some(38));
+        assert!(
+            spreadsheet
+                .column_sets
+                .iter()
+                .skip(1)
+                .all(|column_set| {
+                    column_set.default_format_index == spreadsheet.header_footer_format_index
+                })
+        );
+        assert!(xml.contains(
+            "<id>0f48549f-9d74-4329-92c7-5ce9a8194102</id>\r\n\t\t<formatIndex>13</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<id>39a7acbe-e43b-412e-b84b-633884f6d03c</id>\r\n\t\t<formatIndex>13</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<id>9b83ff04-3ddf-4509-a253-695002203973</id>\r\n\t\t<formatIndex>13</formatIndex>"
+        ));
+        assert!(xml.contains("<leftHeader>\r\n\t\t<f>13</f>\r\n\t</leftHeader>"));
+        assert!(xml.contains("<centerHeader>\r\n\t\t<f>13</f>\r\n\t</centerHeader>"));
+        assert!(xml.contains("<rightHeader>\r\n\t\t<f>13</f>\r\n\t</rightHeader>"));
+        assert!(xml.contains("<leftFooter>\r\n\t\t<f>13</f>\r\n\t</leftFooter>"));
+        assert!(xml.contains("<centerFooter>\r\n\t\t<f>13</f>\r\n\t</centerFooter>"));
+        assert!(xml.contains("<rightFooter>\r\n\t\t<f>13</f>\r\n\t</rightFooter>"));
+        assert!(xml.contains(
+            "<index>0</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>1</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>14</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>12</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>1</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>14</formatIndex>"
+        ));
+        assert!(xml.contains(
+            "<index>16</index>\r\n\t\t\t<column>\r\n\t\t\t\t<formatIndex>21</formatIndex>"
+        ));
+    }
+
+    #[test]
+    fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source_ref() {
+        let mut column_sets = vec![
+            MoxelColumnSet {
+                id: None,
+                default_format_index: None,
+                source_default_format_index: None,
+                size: 1,
+                columns: vec![MoxelColumn {
+                    index: 0,
+                    format_index: 1,
+                    source_format_index: Some(90),
+                }],
+            },
+            MoxelColumnSet {
+                id: Some("alt".to_string()),
+                default_format_index: None,
+                source_default_format_index: None,
+                size: 1,
+                columns: vec![MoxelColumn {
+                    index: 0,
+                    format_index: 2,
+                    source_format_index: Some(91),
+                }],
+            },
+        ];
+
+        let header_footer_format_index = resolve_sparse_moxel_column_set_default_format_index(
+            &mut column_sets,
+            18,
+            &[
+                MoxelFormat::default(),
+                MoxelFormat {
+                    width: Some(24),
+                    ..MoxelFormat::default()
+                },
+            ],
+            Some(1),
+        );
+
+        assert_eq!(header_footer_format_index, Some(19));
+        assert_eq!(column_sets[0].default_format_index, Some(19));
+        assert_eq!(column_sets[1].default_format_index, Some(19));
+    }
+
+    #[test]
+    fn formats_moxel_single_column_set_prefers_explicit_header_footer_source_ref() {
+        let mut column_sets = vec![MoxelColumnSet {
+            id: None,
+            default_format_index: None,
+            source_default_format_index: None,
+            size: 1,
+            columns: vec![MoxelColumn {
+                index: 0,
+                format_index: 1,
+                source_format_index: Some(5),
+            }],
+        }];
+
+        let header_footer_format_index = resolve_sparse_moxel_column_set_default_format_index(
+            &mut column_sets,
+            2,
+            &[
+                MoxelFormat {
+                    width: Some(72),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    font: Some(0),
+                    width: Some(72),
+                    ..MoxelFormat::default()
+                },
+            ],
+            Some(1),
+        );
+
+        assert_eq!(header_footer_format_index, Some(3));
+        assert_eq!(column_sets[0].default_format_index, None);
+    }
+
+    #[test]
+    fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_exists() {
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 2,
+            column_sets: vec![
+                MoxelColumnSet {
+                    id: None,
+                    default_format_index: None,
+                    source_default_format_index: None,
+                    size: 2,
+                    columns: vec![
+                        MoxelColumn {
+                            index: 0,
+                            format_index: 1,
+                            source_format_index: None,
+                        },
+                        MoxelColumn {
+                            index: 1,
+                            format_index: 2,
+                            source_format_index: None,
+                        },
+                    ],
+                },
+                MoxelColumnSet {
+                    id: Some("alt".to_string()),
+                    default_format_index: Some(5),
+                    source_default_format_index: Some(5),
+                    size: 1,
+                    columns: vec![MoxelColumn {
+                        index: 0,
+                        format_index: 3,
+                        source_format_index: None,
+                    }],
+                },
+            ],
+            column_formats: vec![
+                MoxelFormat {
+                    width: Some(10),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(20),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(30),
+                    ..MoxelFormat::default()
+                },
+            ],
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![
+                MoxelFormat {
+                    width: Some(40),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(50),
+                    ..MoxelFormat::default()
+                },
+            ],
+            rows: Vec::new(),
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: Some(5),
+            default_format_index: Some(5),
+            height: 1,
+        };
+
+        assert_eq!(moxel_sparse_source_output_order(&spreadsheet), None);
+        assert_eq!(moxel_output_format_indices(&spreadsheet), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default() {
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 2,
+            column_sets: vec![
+                MoxelColumnSet {
+                    id: None,
+                    default_format_index: Some(4),
+                    source_default_format_index: None,
+                    size: 2,
+                    columns: vec![
+                        MoxelColumn {
+                            index: 0,
+                            format_index: 1,
+                            source_format_index: None,
+                        },
+                        MoxelColumn {
+                            index: 1,
+                            format_index: 2,
+                            source_format_index: None,
+                        },
+                    ],
+                },
+                MoxelColumnSet {
+                    id: Some("alt".to_string()),
+                    default_format_index: Some(4),
+                    source_default_format_index: None,
+                    size: 1,
+                    columns: vec![MoxelColumn {
+                        index: 0,
+                        format_index: 3,
+                        source_format_index: None,
+                    }],
+                },
+            ],
+            column_formats: vec![
+                MoxelFormat {
+                    width: Some(10),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(20),
+                    ..MoxelFormat::default()
+                },
+                MoxelFormat {
+                    width: Some(30),
+                    ..MoxelFormat::default()
+                },
+            ],
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+            rows: Vec::new(),
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: Some(4),
+            default_format_index: Some(5),
+            height: 1,
+        };
+
+        assert_eq!(moxel_sparse_source_output_order(&spreadsheet), Some(vec![4, 1, 2, 3, 5]));
+        assert_eq!(moxel_output_format_indices(&spreadsheet), vec![4, 1, 2, 3, 5]);
+    }
+
+    fn assert_moxel_template_matches_lab_baseline(
+        raw: &str,
+        baseline_relative_path: &[&str],
+        label: &str,
+    ) {
+        let raw = if raw.trim_start().starts_with("{8,") {
+            raw
+        } else {
+            let body_start = raw.find("{8,").unwrap();
+            &raw[body_start..]
+        };
+        let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let baseline_path = baseline_relative_path.iter().fold(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("lab")
+                .join("ut_ibcmd_20260629_164647")
+                .join("ibcmd"),
+            |path, segment| path.join(segment),
+        );
+        let baseline = std::fs::read_to_string(baseline_path).unwrap();
+        let temp_root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-moxel-{label}-{}",
+            std::process::id()
+        ));
+        let left_root = temp_root.join("left");
+        let right_root = temp_root.join("right");
+        let rel_path = std::path::Path::new("Template.xml");
+        std::fs::create_dir_all(&left_root).unwrap();
+        std::fs::create_dir_all(&right_root).unwrap();
+        std::fs::write(
+            left_root.join(rel_path),
+            baseline.trim_start_matches('\u{feff}'),
+        )
+        .unwrap();
+        std::fs::write(right_root.join(rel_path), xml.trim_start_matches('\u{feff}')).unwrap();
+        let report = crate::plan::explain_source_diff_file(
+            &left_root,
+            &right_root,
+            "Template.xml",
+            &[],
+            Some(20),
+        )
+        .unwrap();
+        if report.summary.total_differences != 0 {
+            panic!(
+                "{label} diff summary: left_only={} right_only={} value_or_attr_diff={} first_diffs={:?}",
+                report.summary.left_only,
+                report.summary.right_only,
+                report.summary.value_or_attr_diff,
+                report.differences
+            );
+        }
+        let baseline = baseline.trim_start_matches('\u{feff}');
+        let xml = xml.trim_start_matches('\u{feff}');
+        if baseline != xml {
+            let mismatch = baseline
+                .bytes()
+                .zip(xml.bytes())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| baseline.len().min(xml.len()));
+            panic!(
+                "{label} byte mismatch at {} left_len={} right_len={} left={:?} right={:?}",
+                mismatch,
+                baseline.len(),
+                xml.len(),
+                &baseline[mismatch.saturating_sub(40)..baseline.len().min(mismatch + 40)],
+                &xml[mismatch.saturating_sub(40)..xml.len().min(mismatch + 40)]
+            );
+        }
+    }
+
+    #[test]
+    fn formats_moxel_invoice_1096_matches_lab_baseline_template_xml() {
+        let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
+        assert_moxel_template_matches_lab_baseline(
+            raw,
+            &[
+                "DataProcessors",
+                "ПечатьОбщихФорм",
+                "Templates",
+                "ПФ_MXL_СчетФактура1096_ru",
+                "Ext",
+                "Template.xml",
+            ],
+            "1096",
+        );
+    }
+
+    #[test]
+    fn formats_moxel_ukd_info_buyer_2020_matches_lab_baseline_template_xml() {
+        let raw = include_str!("../../tests/fixtures/moxel_ukd_info_buyer_2020_raw.txt");
+        assert_moxel_template_matches_lab_baseline(
+            raw,
+            &[
+                "DataProcessors",
+                "ОбменСКонтрагентами",
+                "Templates",
+                "УКД_ИнформацияПокупателя_2020",
+                "Ext",
+                "Template.xml",
+            ],
+            "ukd_info_buyer_2020",
+        );
+    }
+
+    #[test]
+    fn formats_moxel_contract_parameter_map_matches_lab_baseline_template_xml() {
+        let raw = include_str!("../../tests/fixtures/moxel_contract_parameter_map_raw.txt");
+        assert_moxel_template_matches_lab_baseline(
+            raw,
+            &[
+                "DataProcessors",
+                "ФорматДоговорнойДокумент101XML",
+                "Templates",
+                "СоответствияПараметровИМеток",
+                "Ext",
+                "Template.xml",
+            ],
+            "contract_parameter_map",
+        );
+    }
+
+    #[test]
+    fn formats_moxel_contract_typical_names_matches_lab_baseline_template_xml() {
+        let raw = include_str!("../../tests/fixtures/moxel_contract_typical_names_raw.txt");
+        assert_moxel_template_matches_lab_baseline(
+            raw,
+            &[
+                "DataProcessors",
+                "ФорматДоговорнойДокумент101XML",
+                "Templates",
+                "ПереченьТиповыхНаименованийЭлементовДоговоров",
+                "Ext",
+                "Template.xml",
+            ],
+            "contract_typical_names",
+        );
+    }
+
+    #[test]
+    fn formats_moxel_eis_appendix_matches_lab_baseline_template_xml() {
+        let raw = include_str!("../../tests/fixtures/moxel_eis_appendix_raw.txt");
+        assert_moxel_template_matches_lab_baseline(
+            raw,
+            &[
+                "DataProcessors",
+                "ЭлектронноеАктированиеЕИС",
+                "Templates",
+                "ЭД_ПриложениеЕИС_ru",
+                "Ext",
+                "Template.xml",
+            ],
+            "eis_appendix",
+        );
+    }
+
+    #[test]
+    fn debug_moxel_card_matches_lab_baseline() {
+        let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
+        let out_dir = out_dir.trim();
+        let raw_path = format!(
+            "{out_dir}\\ibcmd_rs_dump\\Config_inflated\\018b2a34-2af6-49b1-85a2-d1e7fb95bfe0.0__part0.txt"
+        );
+        let raw = std::fs::read_to_string(raw_path).unwrap();
+        assert_moxel_template_matches_lab_baseline(
+            &raw,
+            &[
+                "DataProcessors",
+                "РаботаСНоменклатурой",
+                "Templates",
+                "ПФ_MXL_КарточкаНоменклатуры",
+                "Ext",
+                "Template.xml",
+            ],
+            "card_nomenclature",
+        );
+    }
+
+    #[test]
+    fn debug_moxel_card_output_order() {
+        let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
+        let out_dir = out_dir.trim();
+        let raw_path = format!(
+            "{out_dir}\\ibcmd_rs_dump\\Config_inflated\\018b2a34-2af6-49b1-85a2-d1e7fb95bfe0.0__part0.txt"
+        );
+        let raw = std::fs::read_to_string(raw_path).unwrap();
+        let raw = if raw.trim_start().starts_with("{8,") {
+            raw
+        } else {
+            let body_start = raw.find("{8,").unwrap();
+            raw[body_start..].to_string()
+        };
+        let fields = split_1c_braced_fields(&raw, 0).unwrap();
+        let (column_sets, _, _) = parse_moxel_column_sets(&fields);
+        let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
+        let drawings = parse_moxel_drawings(&fields);
+        let drawing_format_indices = drawings
+            .iter()
+            .map(|drawing| drawing.format_index)
+            .collect::<BTreeSet<_>>();
+        let number_format_refs =
+            parse_moxel_number_format_refs(&fields, moxel_column_format_slots(&column_sets, 0), &style_refs, &drawing_format_indices);
+        let raw_formats = parse_moxel_format_table(
+            &fields,
+            0,
+            &style_refs,
+            &drawing_format_indices,
+            &number_format_refs,
+        )
+        .unwrap();
+        println!(
+            "style_refs={:?} source_refs={:?} source_offset={} first_cols={:?}",
+            style_refs,
+            moxel_source_column_format_refs(&column_sets),
+            moxel_source_column_format_offset(&column_sets),
+            column_sets
+                .iter()
+                .flat_map(|set| set.columns.iter())
+                .take(8)
+                .map(|column| format!(
+                    "c{}:f{}:src{:?}",
+                    column.index, column.format_index, column.source_format_index
+                ))
+                .collect::<Vec<_>>()
+        );
+        for (index, format) in raw_formats.iter().take(12).enumerate() {
+            println!(
+                "rawfmt{} width={:?} height={:?} back={:?} border={:?} text={:?} fill={:?} indent={:?} font={:?} valign={:?}",
+                index + 1,
+                format.width,
+                format.height,
+                format.back_color,
+                format.border_color,
+                format.text_color,
+                format.fill_type,
+                format.indent,
+                format.font,
+                format.vertical_alignment
+            );
+        }
+        let spreadsheet = parse_moxel_spreadsheet_text(&raw, &BTreeMap::new()).unwrap();
+        println!(
+            "column_formats={} formats={} drawings={} output_first60={:?}",
+            spreadsheet.column_formats.len(),
+            spreadsheet.formats.len(),
+            spreadsheet.drawings.len(),
+            &moxel_output_format_indices(&spreadsheet)[..60.min(moxel_output_format_indices(&spreadsheet).len())]
+        );
+        for drawing in &spreadsheet.drawings {
+            println!(
+                "drawing id={} fmt={} pic={} size={} begin=({}, {}) end=({}, {})",
+                drawing.id,
+                drawing.format_index,
+                drawing.picture_index,
+                drawing.picture_size,
+                drawing.begin_column,
+                drawing.begin_column_offset,
+                drawing.end_column,
+                drawing.end_column_offset
+            );
+        }
+        for row in spreadsheet.rows.iter().take(12) {
+            println!(
+                "row {} fmt={} cells={}",
+                row.index,
+                row.format_index,
+                row.cells
+                    .iter()
+                    .take(4)
+                    .map(|cell| format!("c{}:f{}", cell.column_index, cell.format_index))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+        }
+    }
+
+    #[test]
+    fn debug_moxel_bank_transfer_style_slots() {
+        let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
+        let out_dir = out_dir.trim();
+        let raw_path = format!(
+            "{out_dir}\\ibcmd_rs_dump\\Config_inflated\\ee72017c-cb7a-44ab-b20c-39214975ce60.0__part0.txt"
+        );
+        let raw = std::fs::read_to_string(raw_path).unwrap();
+        let raw = if raw.trim_start().starts_with("{8,") {
+            raw
+        } else {
+            let body_start = raw.find("{8,").unwrap();
+            raw[body_start..].to_string()
+        };
+        let fields = split_1c_braced_fields(&raw, 0).unwrap();
+        let (column_sets, _, _) = parse_moxel_column_sets(&fields);
+        let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
+        let drawings = parse_moxel_drawings(&fields);
+        let drawing_format_indices = drawings
+            .iter()
+            .map(|drawing| drawing.format_index)
+            .collect::<BTreeSet<_>>();
+        let number_format_refs = parse_moxel_number_format_refs(
+            &fields,
+            moxel_column_format_slots(&column_sets, 0),
+            &style_refs,
+            &drawing_format_indices,
+        );
+        let raw_formats = parse_moxel_format_table(
+            &fields,
+            0,
+            &style_refs,
+            &drawing_format_indices,
+            &number_format_refs,
+        )
+        .unwrap();
+        let mut raw_format_fields = Vec::new();
+        for index in 0..fields.len() {
+            let Some(count) = fields
+                .get(index)
+                .and_then(|field| field.trim().parse::<usize>().ok())
+            else {
+                continue;
+            };
+            if count == raw_formats.len() && index + count < fields.len() {
+                raw_format_fields = fields[index + 1..=index + count].to_vec();
+                break;
+            }
+        }
+        println!(
+            "style_refs={:?}",
+            style_refs
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index, value.as_deref()))
+                .collect::<Vec<_>>()
+        );
+        let used_line_indexes = moxel_used_line_indexes(&raw_formats);
+        let raw_lines = fields
+            .iter()
+            .filter_map(|field| parse_moxel_line(field))
+            .map(|line| (line.style, line.line_type, line.width))
+            .collect::<Vec<_>>();
+        let lines = parse_moxel_lines(&fields, &raw_formats, true);
+        println!("used_line_indexes={used_line_indexes:?}");
+        println!("raw_lines={raw_lines:?}");
+        println!(
+            "lines={:?}",
+            lines.iter()
+                .map(|line| (line.style, line.line_type, line.width))
+                .collect::<Vec<_>>()
+        );
+        for (index, format) in raw_formats.iter().enumerate().skip(20).take(45) {
+            let format_field = raw_format_fields.get(index).copied().unwrap_or("{0}");
+            let format_fields = split_1c_braced_fields(format_field, 0).unwrap();
+            let flags = format_fields[0].trim().parse::<u64>().unwrap();
+            let values = moxel_format_values(flags, &format_fields).unwrap();
+            println!(
+                "rawfmt{} i5={:?} i10={:?} i11={:?} back={:?} border={:?} text={:?}",
+                index + 1,
+                parse_moxel_format_usize(&values, 5),
+                parse_moxel_format_usize(&values, 10),
+                parse_moxel_format_usize(&values, 11),
+                format.back_color,
+                format.border_color,
+                format.text_color,
+            );
+        }
+        for (index, format) in raw_formats.iter().enumerate().skip(129).take(25) {
+            let format_field = raw_format_fields.get(index).copied().unwrap_or("{0}");
+            let format_fields = split_1c_braced_fields(format_field, 0).unwrap();
+            let flags = format_fields[0].trim().parse::<u64>().unwrap();
+            let values = moxel_format_values(flags, &format_fields).unwrap();
+            println!(
+                "rawfmt{} i5={:?} i10={:?} i11={:?} back={:?} border={:?} text={:?} fill={:?} font={:?} valign={:?}",
+                index + 1,
+                parse_moxel_format_usize(&values, 5),
+                parse_moxel_format_usize(&values, 10),
+                parse_moxel_format_usize(&values, 11),
+                format.back_color,
+                format.border_color,
+                format.text_color,
+                format.fill_type,
+                format.font,
+                format.vertical_alignment
+            );
+        }
+    }
+
+    #[test]
+    fn debug_moxel_bank_purchase_style_slots() {
+        let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
+        let out_dir = out_dir.trim();
+        let raw_path = format!(
+            "{out_dir}\\ibcmd_rs_dump\\Config_inflated\\52b9e8af-f063-45c8-9e62-e2443b30966b.0__part0.txt"
+        );
+        let raw = std::fs::read_to_string(raw_path).unwrap();
+        let raw = if raw.trim_start().starts_with("{8,") {
+            raw
+        } else {
+            let body_start = raw.find("{8,").unwrap();
+            raw[body_start..].to_string()
+        };
+        let fields = split_1c_braced_fields(&raw, 0).unwrap();
+        let (column_sets, _, _) = parse_moxel_column_sets(&fields);
+        let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
+        let drawings = parse_moxel_drawings(&fields);
+        let drawing_format_indices = drawings
+            .iter()
+            .map(|drawing| drawing.format_index)
+            .collect::<BTreeSet<_>>();
+        let number_format_refs = parse_moxel_number_format_refs(
+            &fields,
+            moxel_column_format_slots(&column_sets, 0),
+            &style_refs,
+            &drawing_format_indices,
+        );
+        let raw_formats = parse_moxel_format_table(
+            &fields,
+            0,
+            &style_refs,
+            &drawing_format_indices,
+            &number_format_refs,
+        )
+        .unwrap();
+        let mut raw_format_fields = Vec::new();
+        for index in 0..fields.len() {
+            let Some(count) = fields
+                .get(index)
+                .and_then(|field| field.trim().parse::<usize>().ok())
+            else {
+                continue;
+            };
+            if count == raw_formats.len() && index + count < fields.len() {
+                raw_format_fields = fields[index + 1..=index + count].to_vec();
+                break;
+            }
+        }
+        println!(
+            "style_refs={:?}",
+            style_refs
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index, value.as_deref()))
+                .collect::<Vec<_>>()
+        );
+        let used_line_indexes = moxel_used_line_indexes(&raw_formats);
+        let raw_lines = fields
+            .iter()
+            .filter_map(|field| parse_moxel_line(field))
+            .map(|line| (line.style, line.line_type, line.width))
+            .collect::<Vec<_>>();
+        let lines = parse_moxel_lines(&fields, &raw_formats, true);
+        println!("used_line_indexes={used_line_indexes:?}");
+        println!("raw_lines={raw_lines:?}");
+        println!(
+            "lines={:?}",
+            lines.iter()
+                .map(|line| (line.style, line.line_type, line.width))
+                .collect::<Vec<_>>()
+        );
+        for (index, format) in raw_formats.iter().enumerate().skip(20).take(45) {
+            let format_field = raw_format_fields.get(index).copied().unwrap_or("{0}");
+            let format_fields = split_1c_braced_fields(format_field, 0).unwrap();
+            let flags = format_fields[0].trim().parse::<u64>().unwrap();
+            let values = moxel_format_values(flags, &format_fields).unwrap();
+            println!(
+                "rawfmt{} i5={:?} i10={:?} i11={:?} back={:?} border={:?} text={:?}",
+                index + 1,
+                parse_moxel_format_usize(&values, 5),
+                parse_moxel_format_usize(&values, 10),
+                parse_moxel_format_usize(&values, 11),
+                format.back_color,
+                format.border_color,
+                format.text_color,
+            );
+        }
+        for (index, format) in raw_formats.iter().enumerate().skip(95).take(40) {
+            let format_field = raw_format_fields.get(index).copied().unwrap_or("{0}");
+            let format_fields = split_1c_braced_fields(format_field, 0).unwrap();
+            let flags = format_fields[0].trim().parse::<u64>().unwrap();
+            let values = moxel_format_values(flags, &format_fields).unwrap();
+            println!(
+                "rawfmt{} i5={:?} i10={:?} i11={:?} back={:?} border={:?} text={:?} fill={:?} font={:?} valign={:?}",
+                index + 1,
+                parse_moxel_format_usize(&values, 5),
+                parse_moxel_format_usize(&values, 10),
+                parse_moxel_format_usize(&values, 11),
+                format.back_color,
+                format.border_color,
+                format.text_color,
+                format.fill_type,
+                format.font,
+                format.vertical_alignment
+            );
+        }
+    }
+
+    #[test]
+    fn debug_moxel_invoice_1096_raw_format_slots() {
+        let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
+        let fields = split_1c_braced_fields(raw, 0).unwrap();
+        let rows = parse_moxel_rows(&fields);
+        let (column_sets, _, _) = parse_moxel_column_sets(&fields);
+        let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
+        let drawings = parse_moxel_drawings(&fields);
+        let drawing_format_indices = drawings
+            .iter()
+            .map(|drawing| drawing.format_index)
+            .collect::<BTreeSet<_>>();
+        let default_format = parse_moxel_default_format(&fields, &BTreeMap::new());
+        let default_format_width = parse_moxel_default_format_width(
+            &fields,
+            moxel_column_format_slots(&column_sets, 0),
+        );
+        let sparse_source_format_refs =
+            moxel_uses_sparse_source_format_refs(&column_sets, 0, &rows, &default_format, default_format_width);
+        let source_refs = moxel_source_column_format_refs(&column_sets);
+        let number_format_refs = parse_moxel_number_format_refs(
+            &fields,
+            moxel_column_format_slots(&column_sets, 0),
+            &style_refs,
+            &drawing_format_indices,
+        );
+        let all_formats = parse_moxel_format_table(
+            &fields,
+            0,
+            &style_refs,
+            &drawing_format_indices,
+            &number_format_refs,
+        )
+        .unwrap();
+        let (column_formats, other_formats) = parse_moxel_formats(
+            &fields,
+            0,
+            sparse_source_format_refs,
+            &source_refs,
+            &style_refs,
+            &drawing_format_indices,
+            &number_format_refs,
+        );
+
+        println!("source_refs={source_refs:?}");
+        for source_ref in &source_refs {
+            let format = &all_formats[*source_ref - 1];
+            println!(
+                "src[{source_ref}] width={:?} font={:?} h={:?} v={:?} tp={:?} fill={:?}",
+                format.width,
+                format.font,
+                format.horizontal_alignment,
+                format.vertical_alignment,
+                format.text_placement,
+                format.fill_type
+            );
+        }
+        for (index, format) in all_formats.iter().enumerate().take(20) {
+            println!(
+                "all[{}] width={:?} font={:?} h={:?} v={:?} tp={:?} fill={:?}",
+                index + 1,
+                format.width,
+                format.font,
+                format.horizontal_alignment,
+                format.vertical_alignment,
+                format.text_placement,
+                format.fill_type
+            );
+        }
+        println!(
+            "column_formats_len={} other_formats_len={}",
+            column_formats.len(),
+            other_formats.len()
+        );
+        let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
+        let output_indices = moxel_output_format_indices(&spreadsheet);
+        println!(
+            "header_footer_format_index={:?} drawing_format_index={:?} output_len={} output_first20={:?}",
+            spreadsheet.header_footer_format_index,
+            spreadsheet.drawings.first().map(|drawing| drawing.format_index),
+            output_indices.len(),
+            &output_indices[..output_indices.len().min(20)]
+        );
+        println!(
+            "output_95_140={:?}",
+            output_indices
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index + 1 >= 95 && *index + 1 <= 140)
+                .map(|(index, format_index)| (index + 1, *format_index))
+                .collect::<Vec<_>>()
+        );
+        for output_pos in 95..=140 {
+            if let Some(format_index) = output_indices.get(output_pos - 1).copied() {
+                let format = moxel_format_for_index(&spreadsheet, format_index);
+                println!(
+                    "out[{output_pos}] -> internal[{format_index}] width={:?} font={:?} h={:?} v={:?} tp={:?} fill={:?} border={:?} lb={:?} tb={:?} rb={:?} bb={:?} bySel={:?} fmt={:?}",
+                    format.width,
+                    format.font,
+                    format.horizontal_alignment,
+                    format.vertical_alignment,
+                    format.text_placement,
+                    format.fill_type,
+                    format.border,
+                    format.left_border,
+                    format.top_border,
+                    format.right_border,
+                    format.bottom_border,
+                    format.by_selected_columns,
+                    format
+                        .number_format
+                        .iter()
+                        .map(|value| format!("{}={}", value.lang, value.content))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn formats_moxel_stamp_offer_uses_field_selection_colors() {
+        let inflated = include_str!("../../tests/fixtures/moxel_stamp_offer_raw.txt");
+        let body_start = inflated.find("{8,").unwrap();
+        let spreadsheet =
+            parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+        let matching_formats = spreadsheet
+            .formats
+            .iter()
+            .enumerate()
+            .filter_map(|(index, format)| {
+                (format.left_border == Some(1)
+                    && format.top_border == Some(1)
+                    && format.height == Some(45)
+                    && format.width == Some(72)
+                    && format.fill_type == Some("Text")
+                    && format.pic_index == Some(1))
+                .then(|| {
+                    (
+                        index,
+                        format.border_color.clone(),
+                        format.text_color.clone(),
+                        format.back_color.clone(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            matching_formats.iter().any(|(_, border, text, _)| {
+                border.as_deref() == Some("style:FieldSelectionBackColor")
+                    && text.as_deref() == Some("style:FieldSelectionBackColor")
+            }),
+            "{matching_formats:?}"
+        );
+    }
+
+
+    #[test]
+    fn formats_moxel_stamp_crypto_preserves_native_line_widths() {
+        let inflated = include_str!("../../tests/fixtures/moxel_stamp_crypto_raw.txt");
+        let body_start = inflated.find("{8,").unwrap();
+        let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
+        let spreadsheet =
+            parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
+
+        let line_widths = spreadsheet
+            .lines
+            .iter()
+            .map(|line| (line.width, line.style))
+            .collect::<Vec<_>>();
+        let raw_lines = fields
+            .iter()
+            .filter_map(|field| parse_moxel_line(field))
+            .map(|line| (line.width, line.style, line.line_type))
+            .collect::<Vec<_>>();
+        let used_line_indexes = moxel_used_line_indexes(
+            &spreadsheet
+                .column_formats
+                .iter()
+                .chain(spreadsheet.formats.iter())
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+
+        assert_eq!(
+            line_widths,
+            vec![(1, "None"), (3, "Solid"), (2, "Solid"), (1, "Solid")],
+            "raw_lines={raw_lines:?} used={used_line_indexes:?}"
+        );
     }
 
     #[test]
@@ -45591,6 +59706,82 @@ mod tests {
     }
 
     #[test]
+    fn formats_data_processor_with_empty_child_objects_as_self_closing_node() {
+        let header = MetadataHeader {
+            uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            name: "Loader".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+        let xml = format_data_processor_source_xml(
+            &header,
+            &DataProcessorProperties {
+                generated_types: Vec::new(),
+                use_standard_commands: true,
+                default_form: None,
+                auxiliary_form: None,
+                include_help_in_contents: true,
+                extended_presentation: Vec::new(),
+                explanation: Vec::new(),
+                child_metadata_objects: Vec::new(),
+                child_forms: Vec::new(),
+                child_templates: Vec::new(),
+                child_commands: Vec::new(),
+            },
+            InfobaseConfigSourceVersion::V2_20,
+        );
+
+        assert!(xml.contains("\t\t<ChildObjects/>\r\n"), "{xml}");
+        assert!(!xml.contains("\t\t<ChildObjects>\r\n"), "{xml}");
+    }
+
+    #[test]
+    fn formats_data_processor_attribute_without_resolved_type_as_empty_type_node() {
+        let header = MetadataHeader {
+            uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+            name: "Loader".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        };
+        let xml = format_data_processor_source_xml(
+            &header,
+            &DataProcessorProperties {
+                generated_types: Vec::new(),
+                use_standard_commands: true,
+                default_form: None,
+                auxiliary_form: None,
+                include_help_in_contents: true,
+                extended_presentation: Vec::new(),
+                explanation: Vec::new(),
+                child_metadata_objects: vec![MetadataChildObject {
+                    tag: "Attribute",
+                    header: MetadataHeader {
+                        uuid: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+                        name: "MissingType".to_string(),
+                        synonyms: Vec::new(),
+                        comment: String::new(),
+                        template_type_code: None,
+                    },
+                    generated_types: Vec::new(),
+                    value_types: Vec::new(),
+                    emit_empty_type: true,
+                    properties: None,
+                    tabular_section_properties: None,
+                    child_objects: Vec::new(),
+                }],
+                child_forms: Vec::new(),
+                child_templates: Vec::new(),
+                child_commands: Vec::new(),
+            },
+            InfobaseConfigSourceVersion::V2_20,
+        );
+
+        assert!(xml.contains("\t\t\t\t\t<Type/>\r\n"), "{xml}");
+    }
+
+    #[test]
     fn extracts_data_processor_child_forms_and_templates_to_metadata_xml() {
         let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let default_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -45816,6 +60007,51 @@ mod tests {
     }
 
     #[test]
+    fn keeps_data_processor_top_level_attribute_before_tabular_section_when_raw_order_is_reversed()
+    {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Rows\",{{1,\"en\",\"Rows\"}},\"\"}},{{0}}}},\
+{{27,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"FileName\",{{1,\"en\",\"File name\"}},\"file comment\"}}\r\n}}\
+\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(
+            xml.find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+                .unwrap()
+                < xml
+                    .find(r#"<TabularSection uuid="cccccccc-cccc-4ccc-8ccc-cccccccccccc">"#)
+                    .unwrap(),
+            "{xml}"
+        );
+    }
+
+    #[test]
     fn extracts_data_processor_child_attribute_types() {
         let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
         let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -46008,6 +60244,388 @@ mod tests {
                 < attribute_xml.find("<ChoiceHistoryOnInput>").unwrap(),
             "{xml}"
         );
+    }
+
+    #[test]
+    fn extracts_data_processor_child_attribute_property_tail_from_wrapped_layout() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{27,\r\n\
+{{2,\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"StartDate\",{{1,\"en\",\"Start date\"}},\"\"}},\
+{{\"Pattern\",{{\"D\",\"D\"}}}},\
+0,{{0}},{{1,\"en\",\"Date tooltip\"}},0,\"\",0,{{\"U\"}},{{\"U\"}},0,\
+00000000-0000-0000-0000-000000000000,2,1,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{{\"S\",\"\"}},0,0,0}},0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(attribute_xml.contains("<ToolTip>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<v8:content>Date tooltip</v8:content>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains(r#"<FillValue xsi:type="xs:string"/>"#),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<FillChecking>ShowError</FillChecking>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<ChoiceParameterLinks/>"), "{xml}");
+        assert!(attribute_xml.contains("<ChoiceParameters/>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<QuickChoice>Auto</QuickChoice>"),
+            "{xml}"
+        );
+        assert!(
+            attribute_xml.contains("<CreateOnInput>Auto</CreateOnInput>"),
+            "{xml}"
+        );
+        assert!(attribute_xml.contains("<ChoiceForm/>"), "{xml}");
+        assert!(attribute_xml.contains("<LinkByType/>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"),
+            "{xml}"
+        );
+        assert!(!attribute_xml.contains("<DataHistory>"), "{xml}");
+    }
+
+    #[test]
+    fn parses_data_processor_wrapped_child_edit_format_from_tail_slot() {
+        let attribute_uuid = "3db5ca36-3577-4af8-82e8-2d8eabfb1e0a";
+        let raw = [
+            "{0,\r\n",
+            "{27,\r\n",
+            "{2,\r\n",
+            "{3,\r\n",
+            "{1,0,3db5ca36-3577-4af8-82e8-2d8eabfb1e0a},\"ДатаАкта\",\r\n",
+            "{1,\"ru\",\"Дата акта\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n",
+            "{\"Pattern\",\r\n",
+            "{\"D\",\"D\"}\r\n",
+            "}\r\n",
+            "},0,\r\n",
+            "{0},\r\n",
+            "{1,\"ru\",\"Дата документа (акт о приемке выполненных работ)\"},0,\"\",0,\r\n",
+            "{\"U\"},\r\n",
+            "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,1,\r\n",
+            "{5006,0},\r\n",
+            "{3,0,0},\r\n",
+            "{0,0},0,\r\n",
+            "{1,\"ru\",\"ДФ=dd.MM.yyyy\"},\r\n",
+            "{\"U\"},0,0,0}\r\n",
+            "},0}",
+        ]
+        .concat();
+
+        let properties = parse_metadata_child_properties(
+            "DataProcessor",
+            &raw,
+            raw.find(attribute_uuid).unwrap(),
+            attribute_uuid,
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert!(properties.format.is_empty());
+        assert_eq!(
+            properties.edit_format,
+            vec![("ru".to_string(), "ДФ=dd.MM.yyyy".to_string())]
+        );
+        assert_eq!(
+            properties.tooltip,
+            vec![(
+                "ru".to_string(),
+                "Дата документа (акт о приемке выполненных работ)".to_string()
+            )]
+        );
+        assert_eq!(properties.fill_checking, "ShowError");
+    }
+
+    #[test]
+    fn extracts_data_processor_tabular_section_defined_type_as_typeset() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let defined_type_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
+{{27,\r\n\
+{{2,\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"ExchangeRate\",{{1,\"en\",\"Exchange rate\"}},\"\"}},\
+{{\"Pattern\",{{\"#\",{defined_type_uuid}}}}},\
+0,{{0}},{{0}},0,\"\",0,{{\"U\"}},{{\"U\"}},0,\
+00000000-0000-0000-0000-000000000000,2,1,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{{\"S\",\"\"}},0,0,0}},0}}\r\n\
+}}\r\n}}"
+            )
+            .as_bytes(),
+        );
+        let type_index = BTreeMap::from([(
+            defined_type_uuid.to_string(),
+            "cfg:DefinedType.ExchangeRate".to_string(),
+        )]);
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(
+            attribute_xml.contains("<v8:TypeSet>cfg:DefinedType.ExchangeRate</v8:TypeSet>"),
+            "{xml}"
+        );
+        assert!(
+            !attribute_xml.contains("<v8:Type>cfg:DefinedType.ExchangeRate</v8:Type>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn omits_fill_tail_for_data_processor_legacy_top_level_attribute_list() {
+        let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let manager_type_id = "11111111-1111-4111-8111-111111111111";
+        let manager_value_id = "22222222-2222-4222-8222-222222222222";
+        let data_processor_blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
+00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
+00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},5,\r\n\
+{{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,1,\r\n\
+{{\r\n{{0,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"StartDate\",{{1,\"en\",\"Start date\"}},\"\"}},\
+{{\"Pattern\",{{\"D\"}}}},\
+0,{{0}},{{1,\"en\",\"Date tooltip\"}},0,\"\",0,{{\"U\"}},{{\"U\"}},0,\
+00000000-0000-0000-0000-000000000000,2,1,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{{\"S\",\"\"}},0,0,0}}\r\n\
+}},0}}\r\n\
+}}\r\n\
+}}\r\n\
+}}"
+            )
+            .as_bytes(),
+        );
+
+        let extracted = extract_metadata_source_xml_with_refs(
+            &data_processor_blob,
+            data_processor_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let attribute_start = xml
+            .find(r#"<Attribute uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">"#)
+            .unwrap();
+        let attribute_end = attribute_start + xml[attribute_start..].find("</Attribute>").unwrap();
+        let attribute_xml = &xml[attribute_start..attribute_end];
+
+        assert!(attribute_xml.contains("<ToolTip>"), "{xml}");
+        assert!(
+            attribute_xml.contains("<v8:content>Date tooltip</v8:content>"),
+            "{xml}"
+        );
+        assert!(!attribute_xml.contains("<FillFromFillingValue>"), "{xml}");
+        assert!(!attribute_xml.contains("<FillValue"), "{xml}");
+        assert!(
+            attribute_xml.contains("<FillChecking>ShowError</FillChecking>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn formats_metadata_types_with_typeset_for_defined_type_references() {
+        let xml = format_metadata_types_xml_with_indent(
+            &[
+                ConstantValueType::Reference {
+                    reference: "cfg:CatalogRef.Products".to_string(),
+                },
+                ConstantValueType::Reference {
+                    reference: "cfg:DefinedType.TradeOffer".to_string(),
+                },
+                ConstantValueType::String {
+                    length: Some(25),
+                    allowed_length_flag: 0,
+                },
+            ],
+            "\t\t\t",
+        );
+
+        assert!(
+            xml.contains("<v8:Type>cfg:CatalogRef.Products</v8:Type>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<v8:TypeSet>cfg:DefinedType.TradeOffer</v8:TypeSet>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "{xml}");
+        assert!(xml.contains("<v8:StringQualifiers>"), "{xml}");
+    }
+
+    #[test]
+    fn parses_data_processor_tabular_section_child_attribute_property_tail_from_wrapped_layout() {
+        let attribute_uuid = "296cd400-da83-4189-a85c-0945600b3033";
+        let raw = [
+            "{0,\r\n",
+            "{27,\r\n",
+            "{2,\r\n",
+            "{3,\r\n",
+            "{1,0,296cd400-da83-4189-a85c-0945600b3033},\"Номенклатура\",\r\n",
+            "{1,\"ru\",\"Номенклатура\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n",
+            "{\"Pattern\",\r\n",
+            "{\"#\",190a7469-3325-4d33-b5ec-28a63ac83b06}\r\n",
+            "}\r\n",
+            "},0,\r\n",
+            "{0},\r\n",
+            "{1,\"ru\",\"Необходимо выбрать номенклатуру.\"},0,\"\",0,\r\n",
+            "{\"U\"},\r\n",
+            "{\"U\"},0,00000000-0000-0000-0000-000000000000,2,1,\r\n",
+            "{5006,0},\r\n",
+            "{3,0,0},\r\n",
+            "{0,0},0,\r\n",
+            "{0},\r\n",
+            "{\"U\"},0,0,0}\r\n",
+            "},0}",
+        ]
+        .concat();
+
+        let properties = parse_metadata_child_properties(
+            "DataProcessor",
+            &raw,
+            raw.find(attribute_uuid).unwrap(),
+            attribute_uuid,
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            properties.tooltip,
+            vec![(
+                "ru".to_string(),
+                "Необходимо выбрать номенклатуру.".to_string()
+            )]
+        );
+        assert!(matches!(
+            properties.fill_value,
+            Some(MetadataChildFillValue::Nil)
+        ));
+        assert_eq!(properties.fill_checking, "ShowError");
+        assert!(matches!(
+            properties.choice_form,
+            Some(MetadataChoiceForm::Empty)
+        ));
+        assert!(properties.link_by_type_empty);
+        assert_eq!(properties.choice_history_on_input, Some("Auto"));
+        assert!(matches!(
+            properties.choice_parameter_links,
+            Some(ref links) if links.is_empty()
+        ));
+        assert!(matches!(
+            properties.choice_parameters,
+            Some(ref parameters) if parameters.is_empty()
+        ));
+    }
+
+    #[test]
+    fn parses_data_processor_tabular_section_property_tail_from_code_11_layout() {
+        let tabular_section_uuid = "afbd0acd-47c2-40e0-b60c-4cc0b0f05d3b";
+        let raw = [
+            "{11,\r\n",
+            "b5640d66-7f1c-4ef4-9d86-5c7866d60621,\r\n",
+            "60abf5d8-9197-476d-8401-29dde3d193cc,\r\n",
+            "2a6c762b-be39-48c4-a4e0-5c9076a1a223,\r\n",
+            "6de439e8-3c1f-4c1e-bc31-e95d56aca60e,\r\n",
+            "{0,\r\n",
+            "{3,\r\n",
+            "{1,0,afbd0acd-47c2-40e0-b60c-4cc0b0f05d3b},\"АдресКЛАДР\",\r\n",
+            "{1,\"ru\",\"Адрес КЛАДР\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0}\r\n",
+            "},\r\n",
+            "1,\r\n",
+            "{0},\r\n",
+            "{1,\"ru\",\"Сведения об адресе в Российской Федерации в структуре КЛАДР, содержащиеся в ЕГРЮЛ\"}\r\n",
+            "}",
+        ]
+        .concat();
+
+        let properties = parse_metadata_tabular_section_properties(
+            "DataProcessor",
+            &raw,
+            raw.find(tabular_section_uuid).unwrap(),
+            tabular_section_uuid,
+        )
+        .unwrap();
+
+        assert_eq!(
+            properties.tooltip,
+            vec![(
+                "ru".to_string(),
+                "Сведения об адресе в Российской Федерации в структуре КЛАДР, содержащиеся в ЕГРЮЛ"
+                    .to_string()
+            )]
+        );
+        assert_eq!(properties.fill_checking, "ShowError");
+        assert_eq!(properties.line_number_fill_checking, "DontCheck");
+        assert_eq!(properties.use_mode, None);
+        assert_eq!(properties.line_number_length, None);
     }
 
     #[test]
@@ -47272,3 +61890,5 @@ mod tests {
         target.extend_from_slice(binary);
     }
 }
+
+

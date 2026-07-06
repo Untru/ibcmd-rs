@@ -5,63 +5,160 @@ Generated from:
 ```powershell
 target\release\ibcmd-rs.exe mssql-dump-config `
   --database ut_ibcmd `
-  -o E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_dump `
+  -o E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\ibcmd_rs_dump `
   --overwrite `
   --inflate `
   --extract-module-text `
   --extract-metadata-xml `
   --source-version 2.20 `
-  --no-binary-rows
+  --no-binary-rows `
+  > E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\report.json
 
 robocopy `
-  E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_dump `
-  E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_source_only `
+  E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\ibcmd_rs_dump `
+  E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\ibcmd_rs_source_only `
   /E /XD Config_inflated Config_raw ConfigSave_inflated ConfigSave_raw `
   /XF manifest.json *.json
 
 target\release\ibcmd-rs.exe source-diff `
-  -o E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\diff_full_source_only.json `
+  -o E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\diff_full_source_only.json `
   D:\ibcmd-rs\lab\ut_ibcmd_20260629_164647\ibcmd `
-  E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\ibcmd_rs_source_only
+  E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\ibcmd_rs_source_only
+
+target\release\ibcmd-rs.exe mssql-dump-timing-summary `
+  E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\report.json `
+  -o E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\timing-summary.json
 ```
 
 The full JSON report is retained at
-`E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\diff_full_source_only.json`.
+`E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\diff_full_source_only.json`.
+The full dump timing report is retained at
+`E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\report.json`, with the derived
+timing summary at
+`E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1\timing-summary.json`.
 The latest retained DataProcessors-focused signature-mining report remains at
-`E:\ibcmd_lab\full_diff_20260702_0014_dp_commands\diff_dataprocessors_signatures.json`
-to rank repeated XML path differences for the next agent batches.
+`E:\ibcmd_lab\selected_dp_full_20260706_0026_command_interface_release\signatures_dp_only_all.json` to rank
+repeated XML path differences for the next agent batches.
+The latest full DataProcessors scoped verification is retained at
+`E:\ibcmd_lab\selected_dp_full_20260706_0026_command_interface_release\diff_dp_only_all.json`, generated
+from `E:\ibcmd_lab\selected_dp_full_20260706_0026_command_interface_release`; this
+retained run does not have a separate saved `report.json` or
+`timing-summary.json`, so the timing figures below are taken from the verified
+dump stdout captured during the retained run.
 
 Reference: native `ibcmd` export from `ut_ibcmd`.
 Candidate: `ibcmd-rs` full export snapshot generated from the current direct
-MSSQL export path on July 2, 2026.
+MSSQL export path on July 3, 2026.
 
-Direct source-only summary against the native export:
+Direct source-only summary against the native export for the current tree:
 
 | left_only | right_only | different | unchanged |
 |---:|---:|---:|---:|
-| 1 | 0 | 10276 | 39346 |
+| 12499 | 0 | 8871 | 28253 |
 
-The only `left_only` file is `ConfigDumpInfo.xml`; it remains a deliberate
-scope exclusion and is not counted as parity debt.
+`ConfigDumpInfo.xml` remains one deliberate `left_only` scope exclusion, but the
+current tree also has broader structural drift beyond that baseline.
 
-Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **79.3%**
-(`39346 / 49622` byte-identical files; 79.29% exact), with **10276** files still different.
+Overall full-snapshot readiness excluding `ConfigDumpInfo.xml`: **56.9%**
+(`28253 / 49622` byte-identical files; 56.94% exact), with **21369** files still remaining.
 
-Latest full-run timing on the current tree is retained in
-`E:\ibcmd_lab\full_diff_20260702_0016_dp_commands\report.json`:
-`40,576` rows / `927,826,268` bytes (`~884.8 MiB`) exported in `246.829 s`
-on the dump critical path (`fetch_headers + prepare_indexes + fetch_rows +
-process_rows_wall`), which is `164.39 rows/s` and `3.58 MiB/s` overall. Raw BCP
-fetch took `73.061 s` (`12.1 MiB/s`, `10` batches, max batch `150,528,526`
-bytes). The largest CPU buckets became `metadata_xml_cpu_ms=462108`,
-`source_asset_cpu_ms=433442`, `inflate_cpu_ms=393176`,
-`module_text_cpu_ms=306610`, `source_asset_form_cpu_ms=165214`, and
-`source_asset_form_xml_cpu_ms=158605`.
+Latest full-run timing on the current tree was captured from the release dump
+that produced `E:\ibcmd_lab\full_diff_20260703_102243_zeroemptyrow1`:
+`40,576` rows / `927,826,268` bytes (`~884.8 MiB`) exported in `124.419 s`
+on the dump critical path (`process_rows_wall`), which is `326.12 rows/s` and
+`7.11 MiB/s` overall. Raw BCP fetch took `198.186 s` (`4.46 MiB/s`).
+
+Latest full `DataProcessors` scoped verification on the current tree used
+`selected_dp_full_20260706_0026_command_interface_release`: `5,737` rows /
+`39,889,431` bytes (`~38.0 MiB`) exported in `12.863 s` on the dump critical
+path, which is `446.01 rows/s` and `2.96 MiB/s` overall. Raw BCP fetch took
+`1.089 s` (`34.93 MiB/s`). The resulting `source-diff` summary still stands at
+`1572 different / 5486 unchanged`, with `0 left-only / 0 right-only`
+(`77.7274%`, `5486 / 7058`). The same retained run reports
+`fetch_headers_ms=7976`, `prepare_indexes_ms=40783`,
+`prepare_metadata_fetch_ms=20589`, `prepare_reference_indexes_ms=13215`,
+`fetch_rows_ms=1089`, `process_rows_wall_ms=12863`, and
+`source_asset_cpu_ms=58406`; the hottest source-asset buckets are
+`form_xml=34033`, `child_items=13928`, and `help=10325`. Latest signature
+mining on the same retained run keeps `document/rowsItem/row/c/c/f=464` in `1`
+file (`РаботаСНоменклатурой/Templates/ПФ_MXL_КарточкаНоменклатуры`), with the
+largest remaining color tails at `document/format/borderColor=368` and
+`document/format/backColor=324`, while the leading form tails are now
+`Form/Commands/Command/Picture=234`,
+`Form/ChildItems/Table/CommandSet/ExcludedCommand=211`, and
+`Form/CommandInterface/CommandBar/Item=140`. This rerun keeps the same
+`77.7274%` top-line parity while lowering
+`Form/CommandInterface/CommandBar/Item` from `195` across `25` files to `140`
+across `18` files after falling back from a fixed `body.trailing[3]` lookup to
+the first real form `CommandInterface` container.
 
 Verification history:
 
 | Object | Verification | Result |
 |---|---|---|
+| Round 110 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `0026_command_interface_release` keeps `DataProcessors` at `1572` different / `5486` unchanged with `0` left-only / `0` right-only after falling back from a fixed `body.trailing[3]` slot to the first real form `CommandInterface` container; this does not close additional files yet, but it reduces the `Form/CommandInterface/CommandBar/Item` tail from `195` across `25` files to `140` across `18` files and lands at `12.863 s` critical path (`446.01 rows/s`, `2.96 MiB/s`) |
+| Round 109 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `1947_filter_picture_release` keeps `DataProcessors` at `1572` different / `5486` unchanged with `0` left-only / `0` right-only after remapping filter-command standard picture UUIDs back to `StdPicture.FilterCriterion`, `StdPicture.FilterByCurrentValue`, and `StdPicture.ClearFilter`; this does not close additional files yet, but it reduces the `Form/Commands/Command/Picture` tail from `248` across `97` files to `234` across `95` files and lands at `22.574 s` critical path (`254.15 rows/s`, `1.69 MiB/s`) |
+| Round 108 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `1735_root_order_release` improves `DataProcessors` to `1572` different / `5486` unchanged with `0` left-only / `0` right-only after restoring native root-form `CommandBarLocation` / `CommandSet` order and moving `CustomizeForm` back into the standard dialog command order; this closes `6` more files, shifts the leading form tail to `Form/ChildItems/Table/CommandSet/ExcludedCommand=268`, and lands at `16.920 s` critical path (`339.07 rows/s`, `2.25 MiB/s`) |
+| Round 107 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `144331_event_uuid_release` improves `DataProcessors` to `1578` different / `5480` unchanged with `0` left-only / `0` right-only after remapping confirmed form-event UUID aliases back to native event names, keeps the dominant template `document/rowsItem/row/c/c/f` signature at `464` in `1` file, preserves the leading form tail at nested `UsualGroup/.../Width=307`, and lands at `28.909 s` critical path (`198.45 rows/s`, `1.32 MiB/s`) |
+| Round 106 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `141710_readme_refresh_release` reconfirms `DataProcessors` at `1580` different / `5478` unchanged with `0` left-only / `0` right-only after a full current-release rerun, keeps the dominant template `document/rowsItem/row/c/c/f` signature at `464` in `1` file, shifts the leading form tail to nested `UsualGroup/.../Width=307`, and lands at `28.129 s` critical path (`203.95 rows/s`, `1.35 MiB/s`) |
+| Round 105 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `122017_purchase_line_release` improves `DataProcessors` to `1580` different / `5478` unchanged with `0` left-only / `0` right-only after remapping leading `f527` palette-offset MXL style refs and expanding the two-entry `{None, Solid}` line table into the native three-width solid set, which closes `ОбменСБанками/Templates/ПоручениеНаПокупкуВалюты/Ext/Template.xml`, `ОбменСБанками/Templates/ПоручениеНаПереводВалюты/Ext/Template.xml`, and `ОбменСБанками/Templates/РаспоряжениеНаОбязательнуюПродажуВалюты/Ext/Template.xml`, keeps the dominant template `document/rowsItem/row/c/c/f` signature at `464` in `1` file, and lands at `29.071 s` critical path (`197.34 rows/s`, `1.31 MiB/s`) |
+| Round 104 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `110226_slotfix_release` improves `DataProcessors` to `1583` different / `5475` unchanged with `0` left-only / `0` right-only after resolving MXL style-ref slots `{-1}` / `{-3}` to `FormBackColor` / `FormTextColor` instead of dropping them to compact-color fallback, which removes the broad `ToolTipBackColor` misclassification tail, keeps the dominant template `document/rowsItem/row/c/c/f` signature at `464` in `1` file, and lands at `12.943 s` critical path (`443.25 rows/s`, `2.94 MiB/s`) |
+| Round 103 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `101148_eisheader_release` improves `DataProcessors` to `1584` different / `5474` unchanged with `0` left-only / `0` right-only after making single-set sparse MXL header/footer refs prefer the explicit external source slot ahead of the `font=0,width=72` sparse-default heuristic, which closes `ЭлектронноеАктированиеЕИС/Templates/ЭД_ПриложениеЕИС_ru/Ext/Template.xml`, drops the dominant template `document/rowsItem/row/c/c/f` signature from `872` across `2` files to `464` in `1` file, and lands at `11.219 s` critical path (`511.36 rows/s`, `3.39 MiB/s`) |
+| Round 102 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `093104_contracttypical_release` improves `DataProcessors` to `1585` different / `5473` unchanged with `0` left-only / `0` right-only after restoring single-set shared-empty MXL default handling without reopening the `UKD` / `СоответствияПараметровИМеток` cases, adding a new baseline regression for `ФорматДоговорнойДокумент101XML/Templates/ПереченьТиповыхНаименованийЭлементовДоговоров/Ext/Template.xml`, and closing `ОбменСКонтрагентами/Templates/УКД_ИнформацияПокупателя_2020/Ext/Template.xml` plus `ФорматДоговорнойДокумент101XML/Templates/СоответствияПараметровИМеток/Ext/Template.xml`; latest signature mining now concentrates `document/rowsItem/row/c/c/f` at `872` across `2` files and lands at `19.508 s` critical path (`294.08 rows/s`, `2.05 MiB/s`) |
+| Round 101 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `080819_true_scope_release` improves `DataProcessors` to `1587` different / `5471` unchanged with `0` left-only / `0` right-only after batching `sqlcmd` row-header fetches to avoid SQL Server `8623`, resolving sparse shared-header/default MXL slots through explicit source refs only when no native sparse-default format exists, and suppressing the shifted row-level `formatIndex=2` tails that appear after the leading shared default reorder; this closes `ПечатьОтчетовПоКомиссии/Templates/ПФ_MXL_ОтчетПоКомиссии/Ext/Template.xml`, `ПечатьОтчетовПоКомиссии/Templates/ПФ_MXL_ОтчетПоКомиссииОСписании/Ext/Template.xml`, and `ФорматДоговорнойДокумент101XML/Templates/ПереченьТиповыхНаименованийЭлементовДоговоров/Ext/Template.xml`, drops the dominant template `document/rowsItem/row/c/c/f` signature from `1041` (`4` files) to `594` (`3` files), and lands at `11.498 s` critical path (`498.96 rows/s`, `3.31 MiB/s`) |
+| Round 100 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `055344_compactstyle_release` improves `DataProcessors` to `1592` different / `5466` unchanged with `0` left-only / `0` right-only after teaching compact MOXEL style-ref indices to resolve directly to tooltip/form/field colors when the style-ref table omits those slots; this closes the remaining invoice template tails in `ПФ_MXL_СчетФактура451_ru`, `ПФ_MXL_СчетФактура981_ru`, `ПФ_MXL_СчетФактура1137_ru`, and `ПФ_MXL_СчетФактура1137_625_ru`, and lands at `12.925 s` critical path (`443.87 rows/s`, `2.94 MiB/s`) |
+| Round 99 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `052811_exactslot_release` improves `DataProcessors` to `1603` different / `5455` unchanged with `0` left-only / `0` right-only after reading declared sparse-sheet height from the live MXL column-set block, restoring leading `{129,0,width}` default-width detection for sparse source-slot templates without reclassifying the whole width table, and preferring exact existing `font=0 + width` default-format matches before normalized width-only fallbacks; this closes two more files on top of the previous retained run, fixes the `СчетФактура451` `defaultFormatIndex=102` regression while preserving the `1096` and `request_offer` native baselines, and leaves the three invoice tails narrowed to the remaining drawing `backColor=style:FieldBackColor` gap plus their paired native `font=0` default-slot exactness checks; latest release timing is `11.417 s` critical path (`502.50 rows/s`, `3.33 MiB/s`) |
+| Round 98 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `023103_zero_offset_sparse_release` improves `DataProcessors` to `1609` different / `5449` unchanged with `0` left-only / `0` right-only after detecting zero-offset sparse MXL source-format refs, splitting the format table by real source refs, remapping row/cell refs on that path, and recomputing the fallback default-format slot after remap; this closes `ОбменСКонтрагентами/Templates/ПользовательскоеПредставлениеОбязательныхПолей/Ext/Template.xml`, drops the dominant `document/rowsItem/row/c/c/f` signature from `2029` to `1679` (`9 -> 7` files), and lands at `16.033 s` critical path (`357.82 rows/s`, `2.37 MiB/s`) |
+| Round 97 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `225500_zero_colfmt_release` improves `DataProcessors` to `1610` different / `5448` unchanged with `0` left-only / `0` right-only after reusing matching MXL default formats instead of always appending a synthetic tail format and preserving zero-valued MXL column `formatIndex`; this closes `5` more files on top of the previous retained run, drops the dominant `document/rowsItem/row/c/c/f` signature from `3001` to `2857` (`17 -> 9` files), and collapses `ЗаявлениеНаВыпускНовогоКвалифицированногоСертификата/Templates/ЮридическоеЛицо/Ext/Template.xml` from `143` differences to `25`; latest release timing is `15.075 s` critical path (`380.56 rows/s`, `2.52 MiB/s`) |
+| Round 96 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `011557_command_no_action_release` reconfirms `DataProcessors` at `1615` different / `5443` unchanged with `0` left-only / `0` right-only after keeping form `Command` entries with empty `Action` and omitting empty `<Action>` tags; this does not close additional files yet, but narrows `Form/Commands/Command/Picture` from `269` to `252` and trims representative form diffs such as `БизнесСеть/ПрофильУчастника` (`24 -> 18`) and `БизнесСеть/ОтправкаПриглашенийКонтрагентам` (`116 -> 49`); latest release timing is `12.438 s` critical path (`461.25 rows/s`, `3.06 MiB/s`) |
+| Round 95 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `010452_change_row2_release` improves `DataProcessors` to `1615` different / `5443` unchanged with `0` left-only / `0` right-only after refining wrapper-55 ordinary-table `ChangeRowOrder=false` heuristics; this closes `2` more files on top of the radio-button work and lands at `11.079 s` critical path (`517.83 rows/s`, `3.43 MiB/s`) |
+| Round 94 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `004400_radio_release` improves `DataProcessors` to `1617` different / `5441` unchanged with `0` left-only / `0` right-only after adding `RadioButtonField` extraction plus `ChoiceList`, `RadioButtonType`, and `ColumnsCount` support for managed forms; latest release timing is `15.515 s` critical path (`369.76 rows/s`, `2.45 MiB/s`) |
+| Round 93 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `000112_dp_child_order_release` improves `DataProcessors` to `1619` different / `5439` unchanged with `0` left-only / `0` right-only after restoring wrapped-child `EditFormat`, preserving boolean `{"U"}` fill values as `xsi:nil`, separating `TabularSection.FillChecking` from the `LineNumber` standard attribute, and ordering top-level `DataProcessor` attributes before tabular sections; this closes `18` more files and lands at `19.862 s` critical path (`288.84 rows/s`, `1.92 MiB/s`) |
+| Round 92 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `220341_dp_childobjects_release` improves `DataProcessors` to `1637` different / `5421` unchanged with `0` left-only / `0` right-only after rebuilding release and emitting explicit empty `DataProcessor/ChildObjects` plus empty child `Attribute/Type` nodes; this closes `29` files on top of the earlier template palette and dynamic-list fixes, while latest release timing lands at `25.825 s` critical path (`222.15 rows/s`, `1.47 MiB/s`) |
+| Round 91 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `214500_listsettings_rework` improves `DataProcessors` to `1666` different / `5392` unchanged with `0` left-only / `0` right-only after reworking dynamic-list `ListSettings` normalization, restoring implicit defaults only when the native body omits them and reading `Appearance` / `GroupSelectedSettingId`-backed settings without reintroducing wrong default IDs; latest release timing is `14.799 s` critical path (`387.66 rows/s`, `2.57 MiB/s`), and the old `Form/.../ListSettings/...` signature family drops out of the current top block entirely |
+| Round 89 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `220025_valuetreefont` improves `DataProcessors` to `1670` different / `5388` unchanged with `0` left-only / `0` right-only after restoring built-in form attribute types `v8ui:Font` and `v8:ValueTree` on top of the latest `SpreadsheetDocument` / bare-number / `v8ui:Color` fixes; latest signature mining keeps `document/rowsItem/row/c/c/f=3001`, shifts the next template color tails to `document/format/backColor=337` and `document/format/textColor=327`, and pushes the old `Form/Attributes/Attribute/Type` cluster out of the current top signature block; latest release timing is `16.624 s` critical path (`345.10 rows/s`, `2.29 MiB/s`) |
+| Round 88 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `195904_btnchoice` improves `DataProcessors` to `1671` different / `5387` unchanged with `0` left-only / `0` right-only after restoring button `AutoMaxWidth` / `MaxWidth` and input-field `ChoiceFoldersAndItems`; latest signature mining keeps `document/rowsItem/row/c/c/f=3001`, `document/format/textColor=1188`, and reduces the remaining form-level table `ExcludedCommand` gap to `876` combined occurrences (`82` files); latest release timing is `13.647 s` critical path (`420.39 rows/s`, `2.79 MiB/s`) |
+| Round 87 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `192500_wrapper55` reconfirms `DataProcessors` at `1673` different / `5385` unchanged with `0` left-only / `0` right-only, but narrows the remaining form-level `Form/ChildItems/Table/CommandSet/ExcludedCommand` signature cluster from `964` to `948` occurrences (`94 -> 92` files) after broadening ordinary wrapper-55 table detection, restoring 8-command table `CommandSet` variants, and emitting table row-picture metadata; latest release timing is `13.809 s` critical path (`415.45 rows/s`, `2.75 MiB/s`) |
+| Round 86 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `185000_checkall` improves `DataProcessors` to `1673` different / `5385` unchanged with `0` left-only / `0` right-only after restoring more form/root `CommandSet` patterns, wrapper-55 table `ExcludedCommand` variants, and `UncheckAll` standard-command binding; latest release timing is `12.632 s` critical path (`454.16 rows/s`, `3.01 MiB/s`) |
+| Round 84 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `233500_mxlpictext` improves `DataProcessors` to `1680` different / `5378` unchanged with `0` left-only / `0` right-only after preserving embedded MXL picture payloads, `textPosition`, `widthWeightFactor`, negative format heights, and row-level `columnsID` ordering; latest release timing is `15.584 s` critical path (`368.13 rows/s`, `2.44 MiB/s`) |
+| Round 83 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `190500_clientbank_settlement` improves `DataProcessors` to `1683` different / `5375` unchanged with `0` left-only / `0` right-only after restoring standalone MXL default-format tails, `detailsUse=WithoutProcessing`, non-integer font heights, indexed style overrides / `auto`, and aggregating multiple merge-region lists so both `КлиентБанк/Templates/ОтчетОЗагрузке/Ext/Template.xml` and `ЗаполнениеРегистровВзаиморасчетов/Templates/Макет/Ext/Template.xml` become byte-identical; latest release timing is `13.401 s` critical path (`428.10 rows/s`, `2.84 MiB/s`) |
+| Round 82 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `140030_hiddenmerge` improves `DataProcessors` to `1700` different / `5358` unchanged with `0` left-only / `0` right-only after preserving explicit empty `format` / `editFormat`, `hidden=false`, legacy `Bottom` alignment, wrapped MXL style refs, and narrowing the sparse default-format heuristic so `request_offer` becomes byte-identical; latest release timing is `16.896 s` critical path (`339.55 rows/s`, `2.25 MiB/s`) |
+| Round 81 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `113500_emptycols` reconfirms `DataProcessors` at `1703` different / `5355` unchanged with `0` left-only / `0` right-only after restoring sparse-source MXL absolute font flags, `{-11}` line-style handling, and removing the extra sparse row/cell `formatIndex` `+1` remap; signature mining collapses template `document/rowsItem/row/c/c/f` from `65299` to `3001`; latest release timing is `13.170 s` critical path (`435.61 rows/s`, `2.89 MiB/s`) |
+| Round 80 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `113500_emptycols` improves `DataProcessors` to `1703` different / `5355` unchanged with `0` left-only / `0` right-only after restoring native sparse source-slot MXL column format selection, `request_offer`/`load_goods` default-format placement, and `ReportHeaderBackColor` color normalization; latest release timing is `11.978 s` critical path (`478.96 rows/s`, `3.18 MiB/s`) |
+| Round 79 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `113500_emptycols` improves `DataProcessors` to `1706` different / `5352` unchanged with `0` left-only / `0` right-only after normalizing `LockOwnerWindow`, `BeforeRowChange`, and additional table `ExcludedCommand` patterns; latest release timing is `14.977 s` critical path (`383.05 rows/s`, `2.54 MiB/s`) |
+| Round 78 full snapshot refresh | full source-only export and diff verification | fresh snapshot `102243_zeroemptyrow1` captures the current tree at `12499` left-only / `8871` different / `28253` unchanged, with `DataProcessors` improved to `1709` different / `5349` unchanged; latest release timing is `124.419 s` critical path (`326.12 rows/s`, `7.11 MiB/s`) |
+| Round 77 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `113500_emptycols` improves `DataProcessors` to `1709` different / `5349` unchanged with `0` left-only / `0` right-only after emitting zero-column-slot row `formatIndex=1` and preserving native empty default/picture slot handling; latest release timing is `22.464 s` critical path (`255.39 rows/s`, `1.69 MiB/s`) |
+| Round 76 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `092028_mxlrowmap2` improves `DataProcessors` to `1710` different / `5348` unchanged with `0` left-only / `0` right-only after restoring sparse source-derived MXL row/cell remap, `BorderColor` slot 0, `WindowsFont`, and native spreadsheet XML ordering; latest release timing is `12.042 s` critical path (`476.42 rows/s`, `3.16 MiB/s`) |
+| Round 75 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `085640_mxlslots` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only after preserving source-derived MXL style-slot ordering and native default format tails; latest release timing is `14.397 s` critical path (`398.49 rows/s`, `2.64 MiB/s`) |
+| Round 74 full snapshot refresh | full source-only export and diff verification | fresh snapshot `081405_sourcefix` reconfirms overall parity at `12226` different / `37396` unchanged, reconfirms `Reports` at `437` remaining, and reconfirms `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `83.685 s` critical path (`484.87 rows/s`, `10.57 MiB/s`) |
+| Round 73 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `081017_17rc17lo5` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only after remapping source-derived MXL column format refs; latest release timing is `13.050 s` critical path (`439.62 rows/s`, `2.92 MiB/s`) |
+| Round 72 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `013406_zerosize` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only after preserving zero-sized default MXL column sets; latest release timing is `14.493 s` critical path (`395.85 rows/s`, `2.62 MiB/s`) |
+| Round 71 DataProcessors scoped refresh | selected export, source-only diff, signature mining, and timing verification | fresh selected export `012824_negcol` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only after accepting negative MXL column indexes; latest release timing is `14.045 s` critical path (`408.47 rows/s`, `2.71 MiB/s`) |
+| Round 70 full snapshot refresh | full source-only export and diff verification | fresh snapshot `010516_vg` reconfirms overall parity at `12226` different / `37396` unchanged, reconfirms `Reports` at `437` remaining, and reconfirms `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `86.186 s` critical path (`470.80 rows/s`, `10.27 MiB/s`) |
+| Round 69 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `005936_vg` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only after the `vg` MXL roundtrip fix; latest release timing is `13.730 s` critical path (`417.84 rows/s`, `2.77 MiB/s`) |
+| Round 68 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `003832_editformat` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only after the `editFormat` MXL roundtrip fix; latest release timing is `12.405 s` critical path (`462.47 rows/s`, `3.07 MiB/s`) |
+| Round 67 full snapshot refresh | full source-only export and diff verification | fresh snapshot `001609` improves overall parity to `12226` different / `37396` unchanged, improves `Reports` to `437` remaining, and reconfirms `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `86.359 s` critical path (`469.85 rows/s`, `10.25 MiB/s`) |
+| Round 66 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `001157` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only; latest release timing is `13.193 s` critical path (`434.85 rows/s`, `2.88 MiB/s`) |
+| Round 65 full snapshot refresh | full source-only export and diff verification | fresh snapshot `235827` reconfirms overall parity at `12227` different / `37395` unchanged, `Reports` at `438` remaining, and `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `86.750 s` critical path (`467.73 rows/s`, `10.20 MiB/s`) |
+| Round 64 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `235010` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only; latest release timing is `13.324 s` critical path (`430.58 rows/s`, `2.86 MiB/s`) |
+| Round 63 full snapshot refresh | full source-only export and diff verification | fresh snapshot `232306` reconfirms overall parity at `12227` different / `37395` unchanged, `Reports` at `438` remaining, and `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `86.922 s` critical path (`466.81 rows/s`, `10.18 MiB/s`) |
+| Round 62 full snapshot refresh | full source-only export and diff verification | fresh snapshot `230839` reconfirms overall parity at `12227` different / `37395` unchanged, `Reports` at `438` remaining, and `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `86.967 s` critical path (`466.57 rows/s`, `10.17 MiB/s`) |
+| Round 61 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `230510` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only; latest release timing is `13.293 s` critical path (`431.58 rows/s`, `2.86 MiB/s`) |
+| Round 60 full snapshot refresh | full source-only export and diff verification | fresh snapshot `2252236` reconfirms overall parity at `12227` different / `37395` unchanged, `Reports` at `438` remaining, and `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `89.698 s` critical path (`452.36 rows/s`, `9.86 MiB/s`) |
+| Round 59 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `222918` reconfirms `DataProcessors` at `1714` different / `5344` unchanged with `0` left-only / `0` right-only; latest release timing is `13.722 s` critical path (`418.09 rows/s`, `2.77 MiB/s`) |
+| Round 58 full snapshot refresh | full source-only export and diff verification | fresh snapshot `214826` updates overall parity to `12227` different / `37395` unchanged, reconfirms `Reports` at `438` remaining, and captures `DataProcessors` at `1714` different / `5344` unchanged; latest release timing is `89.419 s` critical path (`453.77 rows/s`, `9.90 MiB/s`) |
+| Round 57 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `214301` reduces `DataProcessors` to `1714` different / `5344` unchanged with `0` left-only / `0` right-only; latest release timing is `15.957 s` critical path (`359.53 rows/s`, `2.38 MiB/s`) |
+| Round 56 full snapshot refresh | full source-only export and diff verification | fresh snapshot `212531` updates overall parity to `12238` different / `37384` unchanged, reconfirms `Reports` at `438` remaining, and reconfirms `DataProcessors` at `1725` different / `5333` unchanged; latest release timing is `90.265 s` critical path (`449.52 rows/s`, `9.80 MiB/s`) |
+| Round 55 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `212150` reduces `DataProcessors` to `1725` different / `5333` unchanged with `0` left-only / `0` right-only; latest release timing is `14.474 s` critical path (`396.37 rows/s`, `2.63 MiB/s`) |
+| Round 54 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `211339` reduces `DataProcessors` to `1745` different / `5313` unchanged with `0` left-only / `0` right-only; latest release timing is `12.541 s` critical path (`457.46 rows/s`, `3.03 MiB/s`) |
+| Round 53 full snapshot refresh | full source-only export and diff verification | fresh snapshot `205558` updates overall parity to `12264` different / `37358` unchanged, reconfirms `Reports` at `438` remaining, and reconfirms `DataProcessors` at `1751` different / `5307` unchanged; latest release timing is `89.677 s` critical path (`452.47 rows/s`, `9.87 MiB/s`) |
+| Round 52 DataProcessors scoped refresh | selected export, source-only diff, and timing verification | fresh selected export `2015` updates `DataProcessors` to `1751` different / `5307` unchanged with `0` left-only / `0` right-only; latest release timing is `13.309 s` critical path (`431.06 rows/s`, `2.86 MiB/s`) |
+| Round 51 full snapshot refresh | full source-only export and diff verification | fresh snapshot `185626` reconfirms overall parity at `12307` different / `37315` unchanged, `Reports` at `438` remaining, and `DataProcessors` at `1789` different / `5269` unchanged; latest release timing is `82.381 s` critical path (`492.54 rows/s`, `10.74 MiB/s`) |
+| Round 50 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0022` updates overall parity to `12307` different / `37315` unchanged, improves `Reports` to `438` remaining, and improves `DataProcessors` to `1789` different / `5269` unchanged; latest release timing is `91.909 s` critical path (`441.48 rows/s`, `9.63 MiB/s`) |
+| Round 49 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0021` reconfirms overall parity at `10276` different / `39346` unchanged, `Reports` at `505` remaining, and `DataProcessors` at `3042` different / `4016` unchanged; latest release timing is `133.197 s` critical path (`304.63 rows/s`, `6.64 MiB/s`) |
+| Round 48 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0020` reconfirms overall parity at `10276` different / `39346` unchanged, `Reports` at `505` remaining, and `DataProcessors` at `3042` different / `4016` unchanged; latest release timing is `128.107 s` critical path (`316.74 rows/s`, `6.91 MiB/s`) |
+| Round 47 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0018` reconfirms overall parity at `10276` different / `39346` unchanged, `Reports` at `505` remaining, and `DataProcessors` at `3042` different / `4016` unchanged; latest release timing is `122.111 s` critical path (`332.29 rows/s`, `7.25 MiB/s`) |
+| Round 46 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0017` reconfirms overall parity at `10276` different / `39346` unchanged, `Reports` at `505` remaining, and `DataProcessors` at `3042` different / `4016` unchanged; latest release timing is `133.466 s` critical path (`304.02 rows/s`, `6.63 MiB/s`) |
 | Round 45 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0016` updates overall parity to `10276` different / `39346` unchanged, `Reports` to `505` remaining, and `DataProcessors` to `3042` different / `4016` unchanged; latest release timing is `246.829 s` critical path (`164.39 rows/s`, `3.58 MiB/s`) |
 | Round 44 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0015` reconfirms overall parity at `8956` different / `40666` unchanged and DataProcessors at `1789` different / `5269` unchanged; latest release timing is `127.389 s` critical path (`318.52 rows/s`, `6.95 MiB/s`) |
 | Round 43 full snapshot refresh | full source-only export and diff verification | fresh snapshot `0014` reconfirms overall parity at `8956` different / `40666` unchanged and DataProcessors at `1789` different / `5269` unchanged on the current tree |
@@ -350,29 +447,29 @@ Diff by file kind:
 | StyleItems | done | 400 | 400 | 0 | 100.0 |
 | WSReferences | done | 2 | 2 | 0 | 100.0 |
 | XDTOPackages | done | 814 | 814 | 0 | 100.0 |
-| Enums | partial | 1195 | 1179 | 16 | 98.7 |
+| Enums | partial | 1195 | 1163 | 32 | 97.3 |
 | CommonTemplates | partial | 495 | 414 | 81 | 83.6 |
-| Reports | partial | 2362 | 1857 | 505 | 78.6 |
-| AccumulationRegisters | partial | 449 | 307 | 142 | 68.4 |
+| Reports | partial | 2362 | 1925 | 437 | 81.5 |
+| AccumulationRegisters | partial | 449 | 269 | 180 | 59.9 |
 | Roles | done | 2220 | 2220 | 0 | 100.0 |
-| ExchangePlans | partial | 366 | 271 | 95 | 74.0 |
+| ExchangePlans | partial | 366 | 221 | 145 | 60.4 |
 | HTTPServices | partial | 10 | 8 | 2 | 80.0 |
 | WebServices | partial | 36 | 18 | 18 | 50.0 |
-| DocumentJournals | partial | 121 | 88 | 33 | 72.7 |
-| DataProcessors | partial | 7058 | 4016 | 3042 | 56.9 |
-| Tasks | partial | 49 | 34 | 15 | 69.4 |
-| Catalogs | partial | 6705 | 4726 | 1979 | 70.5 |
-| Documents | partial | 6219 | 4478 | 1741 | 72.0 |
-| ChartsOfCharacteristicTypes | partial | 167 | 116 | 51 | 69.5 |
-| InformationRegisters | partial | 3978 | 2501 | 1477 | 62.9 |
+| DocumentJournals | partial | 121 | 72 | 49 | 59.5 |
+| DataProcessors | partial | 7058 | 5486 | 1572 | 77.73 |
+| Tasks | partial | 49 | 26 | 23 | 53.1 |
+| Catalogs | partial | 6705 | 3486 | 3219 | 52.0 |
+| Documents | partial | 6219 | 3231 | 2988 | 52.0 |
+| ChartsOfCharacteristicTypes | partial | 167 | 81 | 86 | 48.5 |
+| InformationRegisters | partial | 3978 | 1855 | 2123 | 46.6 |
 | CommonAttributes | partial | 7 | 3 | 4 | 42.9 |
-| BusinessProcesses | partial | 152 | 100 | 52 | 65.8 |
-| SettingsStorages | partial | 82 | 53 | 29 | 64.6 |
-| CommonForms | partial | 1116 | 676 | 440 | 60.6 |
+| BusinessProcesses | partial | 152 | 66 | 86 | 43.4 |
+| SettingsStorages | partial | 82 | 36 | 46 | 43.9 |
+| CommonForms | partial | 1116 | 677 | 439 | 60.7 |
 | Subsystems | partial | 766 | 219 | 547 | 28.6 |
 | FilterCriteria | partial | 7 | 1 | 6 | 14.3 |
 | Configuration.xml | partial | 1 | 0 | 1 | 0.0 |
-| **Overall full snapshot** | **partial** | **49622** | **39346** | **10276** | **79.3** |
+| **Overall full snapshot** | **partial** | **49622** | **37396** | **12226** | **75.4** |
 
 ## Scope Exclusions
 

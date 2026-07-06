@@ -33,6 +33,8 @@ pub enum Commands {
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
     SourceDiff(SourceDiffArgs),
+    /// Explain exact indexed XML leaf differences for one source file.
+    SourceDiffExplain(SourceDiffExplainArgs),
     /// Summarize repeated XML diff signatures from a source-diff JSON report.
     SourceDiffSignatures(SourceDiffSignaturesArgs),
     /// Print the current compatibility matrix for implemented operations.
@@ -602,6 +604,30 @@ pub struct SourceDiffArgs {
     /// Optional source path prefix to compare. Can be repeated.
     #[arg(long)]
     pub path_prefix: Vec<String>,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct SourceDiffExplainArgs {
+    /// Source-diff JSON produced by `source-diff`. Supplies left/right roots automatically.
+    #[arg(long)]
+    pub diff: Option<PathBuf>,
+    /// Left/reference source tree. Required when --diff is omitted.
+    #[arg(long)]
+    pub left_root: Option<PathBuf>,
+    /// Right/candidate source tree. Required when --diff is omitted.
+    #[arg(long)]
+    pub right_root: Option<PathBuf>,
+    /// Relative source path to explain, such as DataProcessors/Name/Forms/Form/Ext/Form.xml.
+    pub path: String,
+    /// Optional indexed leaf-path prefix filter. Can be repeated.
+    #[arg(long)]
+    pub leaf_path_prefix: Vec<String>,
+    /// Maximum diff rows to emit. Use 0 for no limit.
+    #[arg(long, default_value_t = 200)]
+    pub limit: usize,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,

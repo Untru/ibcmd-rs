@@ -450,6 +450,32 @@ pub(super) fn fetch_row_headers(
     table: &str,
     selected_file_names: &BTreeSet<String>,
 ) -> Result<Vec<ConfigRowHeader>> {
+    if !selected_file_names.is_empty() {
+        let batches = split_selected_file_names_for_row_headers_query(
+            database,
+            table,
+            selected_file_names,
+            SQLCMD_INLINE_QUERY_MAX_CHARS,
+        );
+        if batches.len() > 1 {
+            let mut rows = Vec::new();
+            for batch in batches {
+                let first = batch.first().map(String::as_str).unwrap_or("<empty>");
+                let last = batch.last().map(String::as_str).unwrap_or("<empty>");
+                let sql = build_fetch_row_headers_sql(database, table, &batch);
+                let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)
+                    .with_context(|| {
+                        format!("failed to fetch row header batch for {table} rows {first}..{last}")
+                    })?;
+                let mut batch_rows = parse_config_row_headers(&stdout).with_context(|| {
+                    format!("failed to parse {table} row header batch for {database} rows {first}..{last}")
+                })?;
+                rows.append(&mut batch_rows);
+            }
+            return Ok(rows);
+        }
+    }
+
     let sql = build_fetch_row_headers_sql(database, table, selected_file_names);
     let stdout = run_sql_capture_tsv(sqlcmd, server, user, password, &sql)?;
     parse_config_row_headers(&stdout)
@@ -484,6 +510,41 @@ pub(super) fn build_fetch_row_headers_sql(
         qualified_table = qualified_storage_table(database, table),
         filter = filter,
     )
+}
+
+fn split_selected_file_names_for_row_headers_query(
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    max_query_chars: usize,
+) -> Vec<BTreeSet<String>> {
+    if selected_file_names.is_empty() {
+        return Vec::new();
+    }
+
+    let mut batches = Vec::new();
+    let mut current = BTreeSet::new();
+    for file_name in selected_file_names {
+        let mut candidate = current.clone();
+        candidate.insert(file_name.clone());
+        if !current.is_empty()
+            && build_fetch_row_headers_sql(database, table, &candidate)
+                .chars()
+                .count()
+                > max_query_chars
+        {
+            batches.push(current);
+            current = BTreeSet::from([file_name.clone()]);
+        } else {
+            current = candidate;
+        }
+    }
+
+    if !current.is_empty() {
+        batches.push(current);
+    }
+
+    batches
 }
 
 pub(super) fn parse_config_row_headers(stdout: &str) -> Result<Vec<ConfigRowHeader>> {
@@ -947,8 +1008,9 @@ mod tests {
 
     use super::{
         BCP_INLINE_QUERY_MAX_CHARS, build_fetch_binary_rows_query,
-        build_fetch_metadata_owner_rows_bcp_query, split_selected_file_names_for_bcp_query,
-        split_selected_file_names_for_owner_rows_query,
+        build_fetch_metadata_owner_rows_bcp_query, build_fetch_row_headers_sql,
+        split_selected_file_names_for_bcp_query, split_selected_file_names_for_owner_rows_query,
+        split_selected_file_names_for_row_headers_query,
     };
 
     #[test]
@@ -1011,6 +1073,32 @@ mod tests {
         for batch in &batches {
             assert!(!batch.is_empty());
             let query = build_fetch_metadata_owner_rows_bcp_query("TestDb", "Config", batch);
+            assert!(query.chars().count() <= BCP_INLINE_QUERY_MAX_CHARS);
+        }
+    }
+
+    #[test]
+    fn split_selected_file_names_for_row_headers_query_caps_each_query_length() {
+        let selected = (0..900)
+            .map(|index| format!("cccccccc-cccc-4ccc-cccc-{index:012x}"))
+            .collect::<BTreeSet<_>>();
+
+        let batches = split_selected_file_names_for_row_headers_query(
+            "TestDb",
+            "Config",
+            &selected,
+            BCP_INLINE_QUERY_MAX_CHARS,
+        );
+
+        assert!(batches.len() > 1);
+        let rebuilt = batches
+            .iter()
+            .flat_map(|batch| batch.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(rebuilt, selected);
+        for batch in &batches {
+            assert!(!batch.is_empty());
+            let query = build_fetch_row_headers_sql("TestDb", "Config", batch);
             assert!(query.chars().count() <= BCP_INLINE_QUERY_MAX_CHARS);
         }
     }

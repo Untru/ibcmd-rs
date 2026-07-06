@@ -109,6 +109,42 @@ pub struct SourceDiffSignatureError {
     pub message: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SourceDiffExplainReport {
+    pub left_root: String,
+    pub right_root: String,
+    pub path: String,
+    pub left_file: String,
+    pub right_file: String,
+    pub summary: SourceDiffExplainSummary,
+    pub differences: Vec<SourceDiffLeafDifference>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct SourceDiffExplainSummary {
+    pub total_differences: usize,
+    pub left_only: usize,
+    pub right_only: usize,
+    pub value_or_attr_diff: usize,
+    pub shown_differences: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceDiffLeafDifferenceKind {
+    LeftOnly,
+    RightOnly,
+    ValueOrAttrDiff,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct SourceDiffLeafDifference {
+    pub kind: SourceDiffLeafDifferenceKind,
+    pub path: String,
+    pub left: Option<String>,
+    pub right: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SourceDiffSignatureOptions {
     pub max_files_per_kind: Option<usize>,
@@ -308,6 +344,47 @@ pub fn read_source_diff(path: &Path) -> Result<SourceDiffReport> {
         .with_context(|| format!("failed to parse source diff {}", path.display()))
 }
 
+pub fn explain_source_diff_file(
+    left_root: &Path,
+    right_root: &Path,
+    relative_path: &str,
+    leaf_path_prefixes: &[String],
+    limit: Option<usize>,
+) -> Result<SourceDiffExplainReport> {
+    let left_path = source_tree_path(left_root, relative_path);
+    let right_path = source_tree_path(right_root, relative_path);
+    let left_values = read_indexed_xml_values(&left_path)?;
+    let right_values = read_indexed_xml_values(&right_path)?;
+    let mut differences = diff_indexed_xml_values(&left_values, &right_values, leaf_path_prefixes);
+
+    let mut summary = SourceDiffExplainSummary {
+        total_differences: differences.len(),
+        ..SourceDiffExplainSummary::default()
+    };
+    for difference in &differences {
+        match difference.kind {
+            SourceDiffLeafDifferenceKind::LeftOnly => summary.left_only += 1,
+            SourceDiffLeafDifferenceKind::RightOnly => summary.right_only += 1,
+            SourceDiffLeafDifferenceKind::ValueOrAttrDiff => summary.value_or_attr_diff += 1,
+        }
+    }
+
+    if let Some(limit) = limit {
+        differences.truncate(limit);
+    }
+    summary.shown_differences = differences.len();
+
+    Ok(SourceDiffExplainReport {
+        left_root: left_root.display().to_string(),
+        right_root: right_root.display().to_string(),
+        path: relative_path.to_string(),
+        left_file: left_path.display().to_string(),
+        right_file: right_path.display().to_string(),
+        summary,
+        differences,
+    })
+}
+
 pub fn build_source_diff_signature_report(
     diff: &SourceDiffReport,
     options: &SourceDiffSignatureOptions,
@@ -423,6 +500,19 @@ pub fn write_source_diff_signature_report(
     fs::write(output, json).with_context(|| format!("failed to write {}", output.display()))
 }
 
+pub fn write_source_diff_explain_report(
+    report: &SourceDiffExplainReport,
+    output: &Path,
+) -> Result<()> {
+    let json = serde_json::to_string_pretty(report)?;
+    fs::write(output, json).with_context(|| {
+        format!(
+            "failed to write source diff explain report {}",
+            output.display()
+        )
+    })
+}
+
 fn by_path(files: &[SourceFile]) -> BTreeMap<String, &SourceFile> {
     files.iter().map(|file| (file.path.clone(), file)).collect()
 }
@@ -530,6 +620,11 @@ fn read_xml_path_shape(path: &Path) -> Result<XmlPathShape> {
     parse_xml_path_shape(&xml).with_context(|| format!("failed to parse {}", path.display()))
 }
 
+fn read_indexed_xml_values(path: &Path) -> Result<BTreeMap<String, String>> {
+    let xml = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    parse_indexed_xml_values(&xml).with_context(|| format!("failed to parse {}", path.display()))
+}
+
 fn parse_xml_path_shape(xml: &[u8]) -> Result<XmlPathShape> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
@@ -572,6 +667,75 @@ fn parse_xml_path_shape(xml: &[u8]) -> Result<XmlPathShape> {
     Ok(shape)
 }
 
+fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, String>> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut values = BTreeMap::<String, String>::new();
+    let mut path = Vec::<String>::new();
+    let mut sibling_counts = vec![BTreeMap::<String, usize>::new()];
+    let mut text_stack = Vec::<String>::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(event)) => {
+                let segment = next_indexed_segment(&mut sibling_counts, local_name(&event));
+                path.push(segment);
+                let current = path.join("/");
+                for attribute in event.attributes() {
+                    let attribute = attribute?;
+                    let name =
+                        String::from_utf8_lossy(attribute.key.local_name().as_ref()).to_string();
+                    let value = attribute.unescape_value()?.into_owned();
+                    values.insert(format!("{current}/@{name}"), value);
+                }
+                sibling_counts.push(BTreeMap::new());
+                text_stack.push(String::new());
+            }
+            Ok(Event::Empty(event)) => {
+                let segment = next_indexed_segment(&mut sibling_counts, local_name(&event));
+                path.push(segment);
+                let current = path.join("/");
+                let mut had_attribute = false;
+                for attribute in event.attributes() {
+                    let attribute = attribute?;
+                    let name =
+                        String::from_utf8_lossy(attribute.key.local_name().as_ref()).to_string();
+                    let value = attribute.unescape_value()?.into_owned();
+                    values.insert(format!("{current}/@{name}"), value);
+                    had_attribute = true;
+                }
+                if !had_attribute {
+                    values.insert(current, String::new());
+                }
+                path.pop();
+            }
+            Ok(Event::Text(text)) => {
+                if let Some(current) = text_stack.last_mut() {
+                    current.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if let Some(current) = text_stack.last_mut() {
+                    current.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            Ok(Event::End(_)) => {
+                let text = text_stack.pop().unwrap_or_default();
+                if !text.trim().is_empty() && !path.is_empty() {
+                    values.insert(path.join("/"), text.trim().to_string());
+                }
+                sibling_counts.pop();
+                path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(anyhow!("invalid XML: {error}")),
+            _ => {}
+        }
+    }
+
+    Ok(values)
+}
+
 #[derive(Debug, Default)]
 struct ElementValue {
     attributes: String,
@@ -608,6 +772,19 @@ fn record_xml_path(stack: &[String], fingerprint: String, shape: &mut XmlPathSha
     *entry.fingerprints.entry(fingerprint).or_insert(0) += 1;
 }
 
+fn next_indexed_segment(
+    sibling_counts: &mut [BTreeMap<String, usize>],
+    local_name: String,
+) -> String {
+    let count = sibling_counts
+        .last_mut()
+        .expect("indexed XML path stack must have a current level")
+        .entry(local_name.clone())
+        .and_modify(|count| *count += 1)
+        .or_insert(1);
+    format!("{local_name}[{count}]")
+}
+
 fn local_name(event: &BytesStart<'_>) -> String {
     String::from_utf8_lossy(event.local_name().as_ref()).to_string()
 }
@@ -622,6 +799,47 @@ fn attributes_fingerprint(event: &BytesStart<'_>) -> Result<String> {
     }
     attributes.sort();
     Ok(attributes.join("|"))
+}
+
+fn diff_indexed_xml_values(
+    left: &BTreeMap<String, String>,
+    right: &BTreeMap<String, String>,
+    leaf_path_prefixes: &[String],
+) -> Vec<SourceDiffLeafDifference> {
+    let mut paths = left.keys().chain(right.keys()).cloned().collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+        .into_iter()
+        .filter(|path| {
+            leaf_path_prefixes.is_empty()
+                || leaf_path_prefixes
+                    .iter()
+                    .any(|prefix| path.starts_with(prefix))
+        })
+        .filter_map(|path| match (left.get(&path), right.get(&path)) {
+            (Some(left_value), Some(right_value)) if left_value == right_value => None,
+            (Some(left_value), Some(right_value)) => Some(SourceDiffLeafDifference {
+                kind: SourceDiffLeafDifferenceKind::ValueOrAttrDiff,
+                path,
+                left: Some(left_value.clone()),
+                right: Some(right_value.clone()),
+            }),
+            (Some(left_value), None) => Some(SourceDiffLeafDifference {
+                kind: SourceDiffLeafDifferenceKind::LeftOnly,
+                path,
+                left: Some(left_value.clone()),
+                right: None,
+            }),
+            (None, Some(right_value)) => Some(SourceDiffLeafDifference {
+                kind: SourceDiffLeafDifferenceKind::RightOnly,
+                path,
+                left: None,
+                right: Some(right_value.clone()),
+            }),
+            (None, None) => None,
+        })
+        .collect()
 }
 
 fn accumulate_xml_shape_diff(
@@ -740,9 +958,10 @@ mod tests {
     use crate::source::{SourceFile, SourceKind, SourceManifest};
 
     use super::{
-        ActionKind, SourceDiffEntry, SourceDiffReport, SourceDiffSignatureKind,
-        SourceDiffSignatureOptions, SourceDiffStatus, SourceDiffSummary, build_load_plan,
-        build_source_diff, build_source_diff_signature_report, parse_xml_path_shape,
+        ActionKind, SourceDiffEntry, SourceDiffLeafDifference, SourceDiffLeafDifferenceKind,
+        SourceDiffReport, SourceDiffSignatureKind, SourceDiffSignatureOptions, SourceDiffStatus,
+        SourceDiffSummary, build_load_plan, build_source_diff, build_source_diff_signature_report,
+        explain_source_diff_file, parse_indexed_xml_values, parse_xml_path_shape,
     };
 
     #[test]
@@ -954,6 +1173,80 @@ mod tests {
             1,
             vec!["sample.xml".to_string()],
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn parses_indexed_xml_values_for_repeated_siblings() -> anyhow::Result<()> {
+        let values = parse_indexed_xml_values(
+            br#"<Form><Commands><Command name="A"><Representation>Picture</Representation></Command><Command name="B"><Representation>TextPicture</Representation></Command></Commands></Form>"#,
+        )?;
+
+        assert_eq!(
+            values.get("Form[1]/Commands[1]/Command[1]/@name"),
+            Some(&"A".to_string())
+        );
+        assert_eq!(
+            values.get("Form[1]/Commands[1]/Command[1]/Representation[1]"),
+            Some(&"Picture".to_string())
+        );
+        assert_eq!(
+            values.get("Form[1]/Commands[1]/Command[2]/Representation[1]"),
+            Some(&"TextPicture".to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explains_exact_indexed_xml_file_differences() -> anyhow::Result<()> {
+        let root = temp_root("ibcmd-rs-source-diff-explain");
+        let left = root.join("left");
+        let right = root.join("right");
+        let relative = "DataProcessors/Test/Forms/Форма/Ext/Form.xml";
+        let left_path = left.join("DataProcessors/Test/Forms/Форма/Ext");
+        let right_path = right.join("DataProcessors/Test/Forms/Форма/Ext");
+        fs::create_dir_all(&left_path)?;
+        fs::create_dir_all(&right_path)?;
+        fs::write(
+            left_path.join("Form.xml"),
+            r#"<Form><Commands><Command name="A"><Representation>Picture</Representation></Command><Command name="B"><Representation>Text</Representation></Command></Commands></Form>"#,
+        )?;
+        fs::write(
+            right_path.join("Form.xml"),
+            r#"<Form><Commands><Command name="A"><Representation>Picture</Representation></Command><Command name="B"><Representation>TextPicture</Representation><ToolTip>Go</ToolTip></Command></Commands></Form>"#,
+        )?;
+
+        let report = explain_source_diff_file(
+            &left,
+            &right,
+            relative,
+            &["Form[1]/Commands[1]/Command[2]".to_string()],
+            None,
+        )?;
+
+        assert_eq!(report.summary.total_differences, 2);
+        assert_eq!(report.summary.left_only, 0);
+        assert_eq!(report.summary.right_only, 1);
+        assert_eq!(report.summary.value_or_attr_diff, 1);
+        assert_eq!(
+            report.differences,
+            vec![
+                SourceDiffLeafDifference {
+                    kind: SourceDiffLeafDifferenceKind::ValueOrAttrDiff,
+                    path: "Form[1]/Commands[1]/Command[2]/Representation[1]".to_string(),
+                    left: Some("Text".to_string()),
+                    right: Some("TextPicture".to_string()),
+                },
+                SourceDiffLeafDifference {
+                    kind: SourceDiffLeafDifferenceKind::RightOnly,
+                    path: "Form[1]/Commands[1]/Command[2]/ToolTip[1]".to_string(),
+                    left: None,
+                    right: Some("Go".to_string()),
+                },
+            ]
+        );
+
+        fs::remove_dir_all(root)?;
         Ok(())
     }
 

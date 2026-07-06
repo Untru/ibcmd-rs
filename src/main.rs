@@ -107,6 +107,42 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::SourceDiffExplain(args) => {
+            let (left_root, right_root) = if let Some(diff_path) = &args.diff {
+                let diff = ibcmd_rs::plan::read_source_diff(diff_path)?;
+                (
+                    std::path::PathBuf::from(diff.left_root),
+                    std::path::PathBuf::from(diff.right_root),
+                )
+            } else {
+                let left_root = args
+                    .left_root
+                    .clone()
+                    .ok_or_else(|| anyhow!("--left-root is required when --diff is omitted"))?;
+                let right_root = args
+                    .right_root
+                    .clone()
+                    .ok_or_else(|| anyhow!("--right-root is required when --diff is omitted"))?;
+                (left_root, right_root)
+            };
+            let limit = if args.limit == 0 {
+                None
+            } else {
+                Some(args.limit)
+            };
+            let report = ibcmd_rs::plan::explain_source_diff_file(
+                &left_root,
+                &right_root,
+                &args.path,
+                &args.leaf_path_prefix,
+                limit,
+            )?;
+            if let Some(output) = args.output {
+                ibcmd_rs::plan::write_source_diff_explain_report(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::SourceDiffSignatures(args) => {
             let diff = ibcmd_rs::plan::read_source_diff(&args.diff)?;
             let options = SourceDiffSignatureOptions {

@@ -1,0 +1,2 @@
+DataProcessors/БизнесСеть/Forms/ОтправкаПриглашенийКонтрагентам/Ext/Form.xml
+DataProcessors/БизнесСеть/Forms/ПрофильУчастника/Ext/Form.xml
