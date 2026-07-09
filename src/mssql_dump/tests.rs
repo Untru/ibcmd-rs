@@ -4816,7 +4816,7 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     assert!(xml.contains("<v8:startDate>0001-01-01T00:00:00</v8:startDate>"));
     assert!(xml.contains("<v8:endDate>0001-01-01T00:00:00</v8:endDate>"));
     assert!(xml.contains("<UseAlternationRowColor>true</UseAlternationRowColor>"));
-    assert!(!xml.contains("<DefaultItem>true</DefaultItem>"));
+    assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
     assert!(xml.contains("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>"));
     assert!(xml.contains("<RestoreCurrentRow>false</RestoreCurrentRow>"));
     assert!(!xml.contains(r#"<RowFilter xsi:nil="true"/>"#));
@@ -5015,6 +5015,59 @@ fn extracts_business_network_table_flags_from_ordinary_wrapper55() {
     assert!(xml.contains("<RowInputMode>AfterCurrentRow</RowInputMode>"));
     assert!(xml.contains("<UseAlternationRowColor>true</UseAlternationRowColor>"));
     assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+}
+
+#[test]
+fn formats_hierarchical_table_properties_in_schema_order() {
+    let mut item = parse_form_child_item(
+            r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,2,13,{"U"},19,{"S",""}}"#,
+            None,
+            None,
+            &BTreeMap::from([("7".to_string(), "Список".to_string())]),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    item.top_level_parent_nil = Some(true);
+    item.show_root = Some(true);
+    item.allow_root_choice = Some(false);
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Representation>List</Representation>"));
+    assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
+    assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    assert!(
+        xml.find("<Representation>List</Representation>").unwrap()
+            < xml.find("<DefaultItem>true</DefaultItem>").unwrap()
+    );
+    assert!(
+        xml.find("<DefaultItem>true</DefaultItem>").unwrap()
+            < xml
+                .find("<UseAlternationRowColor>true</UseAlternationRowColor>")
+                .unwrap()
+    );
+    assert!(
+        xml.find("<UseAlternationRowColor>true</UseAlternationRowColor>")
+            .unwrap()
+            < xml.find("<EnableStartDrag>true</EnableStartDrag>").unwrap()
+    );
+    assert!(
+        xml.find("<FileDragMode>AsFile</FileDragMode>").unwrap()
+            < xml.find("<DataPath>Список</DataPath>").unwrap()
+    );
+    assert!(
+        xml.find("<DataPath>Список</DataPath>").unwrap()
+            < xml.find("<Title>").unwrap()
+    );
+    assert!(
+        xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
+            < xml.find("<ShowRoot>true</ShowRoot>").unwrap()
+    );
+    assert!(
+        xml.find("<ShowRoot>true</ShowRoot>").unwrap()
+            < xml.find("<AllowRootChoice>false</AllowRootChoice>").unwrap()
+    );
 }
 
 #[test]
@@ -18423,7 +18476,7 @@ fn writes_business_process_connection_line_font_from_serialized_style() {
     let line_item = format!("{{{line_head},3,-1,0,-1,0,{line_shape}}}");
     let text = format!("{{5,{{{{1,{default_style},1,20,20}}}},1,1,{line_item}}}");
 
-    let flowchart = parse_business_process_flowchart_text(&text).unwrap();
+    let flowchart = parse_business_process_flowchart_text(&text, &BTreeMap::new()).unwrap();
     let xml = format_business_process_flowchart_xml(&flowchart);
     let line_xml = xml
         .split(r#"<ConnectionLine id="2">"#)
@@ -18455,7 +18508,7 @@ fn parses_business_process_flowchart_processing_split_and_join_items() {
         "{{5,{{{{1,{style},1,20,20}}}},3,9,{processing_item},7,{split_item},8,{join_item}}}"
     );
 
-    let flowchart = parse_business_process_flowchart_text(&text).unwrap();
+    let flowchart = parse_business_process_flowchart_text(&text, &BTreeMap::new()).unwrap();
 
     assert_eq!(flowchart.items[0].tag, "Processing");
     assert_eq!(

@@ -1,7 +1,7 @@
 use super::*;
 use crate::form_schema::{
     FORM_INPUT_FIELD_BUTTON_XML_ORDER, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldXmlProperty,
+    FORM_TABLE_XML_ORDER, FormInputFieldXmlProperty, FormTableXmlProperty,
 };
 
 #[allow(dead_code)]
@@ -8067,6 +8067,211 @@ fn format_form_input_field_button_option_xml(
     }
 }
 
+fn format_form_table_properties_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "Table" {
+        return String::new();
+    }
+    let mut xml = String::new();
+    for property in FORM_TABLE_XML_ORDER {
+        xml.push_str(&format_form_table_property_xml(item, *property, indent));
+    }
+    xml
+}
+
+fn format_form_table_property_xml(
+    item: &FormChildItem,
+    property: FormTableXmlProperty,
+    indent: usize,
+) -> String {
+    let tab = "\t".repeat(indent);
+    let hierarchical_table = form_table_has_hierarchical_navigation(item);
+    match property {
+        FormTableXmlProperty::Representation => item
+            .table_representation
+            .map(|value| format!("{tab}<Representation>{}</Representation>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::CommandBarLocation => String::new(),
+        FormTableXmlProperty::DefaultItem => match item.default_item {
+            Some(true) => format!("{tab}<DefaultItem>true</DefaultItem>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::UseAlternationRowColor => item
+            .use_alternation_row_color
+            .map(|value| format!("{tab}<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::InitialTreeView => String::new(),
+        FormTableXmlProperty::AutoMarkIncomplete => match item.auto_mark_incomplete {
+            Some(true) => format!("{tab}<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::SkipOnInput => item
+            .skip_on_input
+            .filter(|value| *value || should_emit_explicit_table_skip_on_input(item))
+            .map(|value| format!("{tab}<SkipOnInput>{}</SkipOnInput>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::ReadOnly => match item.read_only {
+            Some(true) => format!("{tab}<ReadOnly>true</ReadOnly>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::ChangeRowSet => match item.change_row_set {
+            Some(false) => format!("{tab}<ChangeRowSet>false</ChangeRowSet>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::Height => item
+            .height
+            .as_ref()
+            .map(|value| format!("{tab}<Height>{}</Height>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::AutoMaxHeight => match item.auto_max_height {
+            Some(false) => format!("{tab}<AutoMaxHeight>false</AutoMaxHeight>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::HeightInTableRows => item
+            .height_in_table_rows
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<HeightInTableRows>{}</HeightInTableRows>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::ChangeRowOrder => match item.change_row_order {
+            Some(false) => format!("{tab}<ChangeRowOrder>false</ChangeRowOrder>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::AutoMaxWidth => match item.auto_max_width {
+            Some(false) if !hierarchical_table => format!("{tab}<AutoMaxWidth>false</AutoMaxWidth>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::RowInputMode => item
+            .row_input_mode
+            .map(|value| format!("{tab}<RowInputMode>{}</RowInputMode>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::AutoInsertNewRow => match item.auto_insert_new_row {
+            Some(true) => format!("{tab}<AutoInsertNewRow>true</AutoInsertNewRow>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::EnableStartDrag => match item.enable_start_drag {
+            Some(true) => format!("{tab}<EnableStartDrag>true</EnableStartDrag>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::EnableDrag => match item.enable_drag {
+            Some(true) if !hierarchical_table || item.read_only == Some(true) => {
+                format!("{tab}<EnableDrag>true</EnableDrag>\r\n")
+            }
+            _ => String::new(),
+        },
+        FormTableXmlProperty::FileDragMode => item
+            .file_drag_mode
+            .map(|value| format!("{tab}<FileDragMode>{}</FileDragMode>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::DataPath => item
+            .data_path
+            .as_ref()
+            .map(|value| format!("{tab}<DataPath>{}</DataPath>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::RowPictureDataPath => item
+            .row_picture_data_path
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<RowPictureDataPath>{}</RowPictureDataPath>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::RowsPicture => item
+            .rows_picture_ref
+            .as_ref()
+            .map(|reference| {
+                format!(
+                    "{tab}<RowsPicture>\r\n\
+{tab}\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}</RowsPicture>\r\n",
+                    escape_xml_text(reference),
+                    xml_bool(item.rows_picture_load_transparent)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::Title => format_form_localized_section("Title", &item.title, indent),
+        FormTableXmlProperty::CommandSet => {
+            if item.command_set_excluded_commands.is_empty() {
+                String::new()
+            } else {
+                let mut xml = format!("{tab}<CommandSet>\r\n");
+                for command in &item.command_set_excluded_commands {
+                    xml.push_str(&format!(
+                        "{tab}\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
+                        escape_xml_text(command)
+                    ));
+                }
+                xml.push_str(&format!("{tab}</CommandSet>\r\n"));
+                xml
+            }
+        }
+        FormTableXmlProperty::AutoRefresh => item
+            .auto_refresh
+            .map(|value| format!("{tab}<AutoRefresh>{}</AutoRefresh>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::AutoRefreshPeriod => item
+            .auto_refresh_period
+            .as_ref()
+            .map(|value| format!("{tab}<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::Period => item
+            .period
+            .as_ref()
+            .map(|period| {
+                format!(
+                    "{tab}<Period>\r\n\
+{tab}\t<v8:variant xsi:type=\"v8:StandardPeriodVariant\">{}</v8:variant>\r\n\
+{tab}\t<v8:startDate>{}</v8:startDate>\r\n\
+{tab}\t<v8:endDate>{}</v8:endDate>\r\n\
+{tab}</Period>\r\n",
+                    escape_xml_text(period.variant),
+                    escape_xml_text(&period.start_date),
+                    escape_xml_text(&period.end_date)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::ChoiceFoldersAndItems => item
+            .choice_folders_and_items
+            .map(|value| format!("{tab}<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::RestoreCurrentRow => item
+            .restore_current_row
+            .map(|value| format!("{tab}<RestoreCurrentRow>{}</RestoreCurrentRow>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::TopLevelParent => match item.top_level_parent_nil {
+            Some(true) => format!("{tab}<TopLevelParent xsi:nil=\"true\"/>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::ShowRoot => match item.show_root {
+            Some(true) => format!("{tab}<ShowRoot>true</ShowRoot>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::AllowRootChoice => match item.allow_root_choice {
+            Some(false) => format!("{tab}<AllowRootChoice>false</AllowRootChoice>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::UpdateOnDataChange => item
+            .update_on_data_change
+            .map(|value| format!("{tab}<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::UserSettingsGroup => item
+            .user_settings_group
+            .as_ref()
+            .map(|value| format!("{tab}<UserSettingsGroup>{}</UserSettingsGroup>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::AllowGettingCurrentRowURL => item
+            .allow_getting_current_row_url
+            .map(|value| format!("{tab}<AllowGettingCurrentRowURL>{}</AllowGettingCurrentRowURL>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+    }
+}
+
 pub(super) fn format_form_child_item_xml(
     item: &FormChildItem,
     indent: usize,
@@ -8175,208 +8380,7 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<Autofill>false</Autofill>\r\n"));
     }
     if item.tag == "Table" {
-        let hierarchical_table = form_table_has_hierarchical_navigation(item);
-        if let Some(representation) = item.table_representation {
-            if !hierarchical_table {
-                xml.push_str(&format!(
-                    "{tab}\t<Representation>{}</Representation>\r\n",
-                    escape_xml_text(representation)
-                ));
-            }
-        }
-        if item.auto_mark_incomplete == Some(true) {
-            xml.push_str(&format!(
-                "{tab}\t<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"
-            ));
-        }
-        if let Some(skip_on_input) = item.skip_on_input
-            && (skip_on_input || should_emit_explicit_table_skip_on_input(item))
-        {
-            xml.push_str(&format!(
-                "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
-                if skip_on_input { "true" } else { "false" }
-            ));
-        }
-        if hierarchical_table && item.use_alternation_row_color == Some(true) {
-            xml.push_str(&format!(
-                "{tab}\t<UseAlternationRowColor>true</UseAlternationRowColor>\r\n"
-            ));
-        }
-        if item.read_only == Some(true) {
-            xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
-        }
-        if item.change_row_set == Some(false) {
-            xml.push_str(&format!("{tab}\t<ChangeRowSet>false</ChangeRowSet>\r\n"));
-        }
-        if let Some(height) = &item.height {
-            xml.push_str(&format!(
-                "{tab}\t<Height>{}</Height>\r\n",
-                escape_xml_text(height)
-            ));
-        }
-        if item.auto_max_height == Some(false) {
-            xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
-        }
-        if let Some(height) = &item.height_in_table_rows {
-            xml.push_str(&format!(
-                "{tab}\t<HeightInTableRows>{}</HeightInTableRows>\r\n",
-                escape_xml_text(height)
-            ));
-        }
-        if item.default_item == Some(true) && !hierarchical_table {
-            xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
-        }
-        if item.change_row_order == Some(false) {
-            xml.push_str(&format!(
-                "{tab}\t<ChangeRowOrder>false</ChangeRowOrder>\r\n"
-            ));
-        }
-        if !hierarchical_table && item.auto_max_width == Some(false) {
-            xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
-        }
-        if let Some(row_input_mode) = item.row_input_mode {
-            xml.push_str(&format!(
-                "{tab}\t<RowInputMode>{}</RowInputMode>\r\n",
-                escape_xml_text(row_input_mode)
-            ));
-        }
-        if !hierarchical_table
-            && let Some(use_alternation_row_color) = item.use_alternation_row_color
-        {
-            xml.push_str(&format!(
-                "{tab}\t<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n",
-                if use_alternation_row_color {
-                    "true"
-                } else {
-                    "false"
-                }
-            ));
-        }
-        if item.auto_insert_new_row == Some(true) {
-            xml.push_str(&format!(
-                "{tab}\t<AutoInsertNewRow>true</AutoInsertNewRow>\r\n"
-            ));
-        }
-        if item.enable_start_drag == Some(true) {
-            xml.push_str(&format!(
-                "{tab}\t<EnableStartDrag>true</EnableStartDrag>\r\n"
-            ));
-        }
-        if item.enable_drag == Some(true) && (!hierarchical_table || item.read_only == Some(true)) {
-            xml.push_str(&format!("{tab}\t<EnableDrag>true</EnableDrag>\r\n"));
-        }
-        if !hierarchical_table && let Some(file_drag_mode) = item.file_drag_mode {
-            xml.push_str(&format!(
-                "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
-                escape_xml_text(file_drag_mode)
-            ));
-        }
-        if let Some(data_path) = &item.data_path {
-            xml.push_str(&format!(
-                "{tab}\t<DataPath>{}</DataPath>\r\n",
-                escape_xml_text(data_path)
-            ));
-        }
-        if let Some(row_picture_data_path) = &item.row_picture_data_path {
-            xml.push_str(&format!(
-                "{tab}\t<RowPictureDataPath>{}</RowPictureDataPath>\r\n",
-                escape_xml_text(row_picture_data_path)
-            ));
-        }
-        if let Some(reference) = &item.rows_picture_ref {
-            xml.push_str(&format!(
-                "{tab}\t<RowsPicture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</RowsPicture>\r\n",
-                escape_xml_text(reference),
-                xml_bool(item.rows_picture_load_transparent)
-            ));
-        }
-        xml.push_str(&format_form_localized_section(
-            "Title",
-            &item.title,
-            indent + 1,
-        ));
-        if !item.command_set_excluded_commands.is_empty() {
-            xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
-            for command in &item.command_set_excluded_commands {
-                xml.push_str(&format!(
-                    "{tab}\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
-                    escape_xml_text(command)
-                ));
-            }
-            xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
-        }
-        if let Some(auto_refresh) = item.auto_refresh {
-            xml.push_str(&format!(
-                "{tab}\t<AutoRefresh>{}</AutoRefresh>\r\n",
-                if auto_refresh { "true" } else { "false" }
-            ));
-        }
-        if let Some(auto_refresh_period) = &item.auto_refresh_period {
-            xml.push_str(&format!(
-                "{tab}\t<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n",
-                escape_xml_text(auto_refresh_period)
-            ));
-        }
-        if let Some(period) = &item.period {
-            xml.push_str(&format!(
-                "{tab}\t<Period>\r\n\
-{tab}\t\t<v8:variant xsi:type=\"v8:StandardPeriodVariant\">{}</v8:variant>\r\n\
-{tab}\t\t<v8:startDate>{}</v8:startDate>\r\n\
-{tab}\t\t<v8:endDate>{}</v8:endDate>\r\n\
-{tab}\t</Period>\r\n",
-                escape_xml_text(period.variant),
-                escape_xml_text(&period.start_date),
-                escape_xml_text(&period.end_date)
-            ));
-        }
-        if let Some(choice_folders_and_items) = item.choice_folders_and_items {
-            xml.push_str(&format!(
-                "{tab}\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
-                escape_xml_text(choice_folders_and_items)
-            ));
-        }
-        if let Some(restore_current_row) = item.restore_current_row {
-            xml.push_str(&format!(
-                "{tab}\t<RestoreCurrentRow>{}</RestoreCurrentRow>\r\n",
-                if restore_current_row { "true" } else { "false" }
-            ));
-        }
-        if item.top_level_parent_nil == Some(true) {
-            xml.push_str(&format!("{tab}\t<TopLevelParent xsi:nil=\"true\"/>\r\n"));
-        }
-        if item.show_root == Some(true) {
-            xml.push_str(&format!("{tab}\t<ShowRoot>true</ShowRoot>\r\n"));
-        }
-        if item.allow_root_choice == Some(false) {
-            xml.push_str(&format!(
-                "{tab}\t<AllowRootChoice>false</AllowRootChoice>\r\n"
-            ));
-        }
-        if let Some(update_on_data_change) = item.update_on_data_change {
-            xml.push_str(&format!(
-                "{tab}\t<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n",
-                escape_xml_text(update_on_data_change)
-            ));
-        }
-        if let Some(user_settings_group) = &item.user_settings_group {
-            xml.push_str(&format!(
-                "{tab}\t<UserSettingsGroup>{}</UserSettingsGroup>\r\n",
-                escape_xml_text(user_settings_group)
-            ));
-        }
-        if let Some(allow_getting_current_row_url) = item.allow_getting_current_row_url {
-            xml.push_str(&format!(
-                "{tab}\t<AllowGettingCurrentRowURL>{}</AllowGettingCurrentRowURL>\r\n",
-                if allow_getting_current_row_url {
-                    "true"
-                } else {
-                    "false"
-                }
-            ));
-        }
+        xml.push_str(&format_form_table_properties_xml(item, indent + 1));
     }
     if item.tag != "Table"
         && let Some(data_path) = &item.data_path
