@@ -1175,12 +1175,13 @@ pub(super) fn write_source_asset(
             )?;
         }
         SourceAssetKind::AccumulationRegisterAggregates { register_name } => {
-            let aggregates = parse_accumulation_register_aggregates_blob(bytes).with_context(|| {
-                format!(
-                    "failed to parse accumulation register aggregates from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+            let aggregates =
+                parse_accumulation_register_aggregates_blob(bytes).with_context(|| {
+                    format!(
+                        "failed to parse accumulation register aggregates from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let xml = format_accumulation_register_aggregates_xml(
                 &aggregates,
                 register_name,
@@ -1563,10 +1564,13 @@ pub(super) fn format_accumulation_register_aggregates_xml(
     );
     for aggregate in aggregates {
         let use_token = aggregate_use_token(aggregate.use_code).with_context(|| {
-            format!("unsupported accumulation register aggregate Use code {}", aggregate.use_code)
+            format!(
+                "unsupported accumulation register aggregate Use code {}",
+                aggregate.use_code
+            )
         })?;
-        let periodicity_token =
-            aggregate_periodicity_token(aggregate.periodicity_code).with_context(|| {
+        let periodicity_token = aggregate_periodicity_token(aggregate.periodicity_code)
+            .with_context(|| {
                 format!(
                     "unsupported accumulation register aggregate Periodicity code {}",
                     aggregate.periodicity_code
@@ -1581,9 +1585,7 @@ pub(super) fn format_accumulation_register_aggregates_xml(
         ));
         for (dimension_uuid, included) in &aggregate.dimensions {
             let dimension_name = field_refs.get(dimension_uuid).with_context(|| {
-                format!(
-                    "unknown accumulation register aggregate dimension {dimension_uuid}"
-                )
+                format!("unknown accumulation register aggregate dimension {dimension_uuid}")
             })?;
             xml.push_str(&format!(
                 "\t\t\t<Dimension ref=\"AccumulationRegister.{}.Dimension.{}\">{}</Dimension>\r\n",

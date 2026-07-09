@@ -9675,6 +9675,10 @@ fn extracts_picture_decoration_picture_ref_and_context_menu_from_live_blob() {
 #[test]
 fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blob() {
     let field = r#"{12,{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"КартинкаШаблонДокументаСQRКодом",{1,1,{"ru","Картинка шаблон документа СQRКодом"}},{1,0},1,50,7,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,{4,1,{0,8da0dcfb-6ece-4f68-abb1-e6f9897eec6b},"",-1,-1,0,0,""},0,2,0,{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,100},1,{22,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"КартинкаШаблонДокументаСQRКодомКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{"ru","Картинка шаблон документа СQRКодом"}},0},0,1,{12,{8,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"КартинкаШаблонДокументаСQRКодомРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,0,0,0,0,3,3,0,0}"#;
+    let object_refs = BTreeMap::from([(
+        "8da0dcfb-6ece-4f68-abb1-e6f9897eec6b".to_string(),
+        "CommonPicture.QRКодНаДокументеБЭД".to_string(),
+    )]);
     let item = parse_form_child_item(
         field,
         None,
@@ -9682,10 +9686,7 @@ fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blo
         &BTreeMap::new(),
         &BTreeMap::new(),
         &[],
-        &BTreeMap::from([(
-            "8da0dcfb-6ece-4f68-abb1-e6f9897eec6b".to_string(),
-            "CommonPicture.QRКодНаДокументеБЭД".to_string(),
-        )]),
+        &object_refs,
     )
     .unwrap();
 
@@ -9708,6 +9709,42 @@ fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blo
     assert!(xml.contains("<AutoMaxHeight>false</AutoMaxHeight>"));
     assert!(xml.contains("<PictureSize>Proportionally</PictureSize>"));
     assert!(!xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+
+    let stretch_field = field.replace(
+        r#"},"",-1,-1,0,0,""},0,2,0,{1,0}"#,
+        r#"},"",-1,-1,0,0,""},0,1,0,{1,0}"#,
+    );
+    let stretch_item = parse_form_child_item(
+        &stretch_field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(stretch_item.picture_size, Some("Stretch"));
+    let stretch_xml = format_form_child_items_xml(&[stretch_item], 1);
+    assert!(stretch_xml.contains("<PictureSize>Stretch</PictureSize>"));
+
+    let real_size_field = field.replace(
+        r#"},"",-1,-1,0,0,""},0,2,0,{1,0}"#,
+        r#"},"",-1,-1,0,0,""},0,0,0,{1,0}"#,
+    );
+    let real_size_item = parse_form_child_item(
+        &real_size_field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(real_size_item.picture_size, Some("RealSize"));
+    let real_size_xml = format_form_child_items_xml(&[real_size_item], 1);
+    assert!(!real_size_xml.contains("<PictureSize>RealSize</PictureSize>"));
 }
 
 #[test]
@@ -9836,23 +9873,26 @@ fn extracts_live_input_field_auto_choice_incomplete() {
 #[test]
 fn extracts_live_picture_field_values_picture_and_file_drag_mode() {
     let field = r#"{37,{145,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,4,"СписокЗарегистрированКартинка",0,0,{1,1,{"ru","Зарегистрирован"}},{1,0},{2,{1},{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{10,0,0,1,1,{4,1,{0,d465bd06-1042-4dd5-9967-6a3a020a0a40},"",-1,-1,0,0,""},0,0,0,{1,0},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},1,0,0,1,0,0,100},{0,1,0},1,{22,{146,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СписокЗарегистрированКартинкаКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{147,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СписокЗарегистрированКартинкаРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+    let attribute_names_by_id = BTreeMap::from([("1".to_string(), "Список".to_string())]);
+    let table_column_names_by_id = BTreeMap::from([(
+        "1".to_string(),
+        BTreeMap::from([("3".to_string(), "Зарегистрирован".to_string())]),
+    )]);
+    let object_refs = BTreeMap::from([(
+        "d465bd06-1042-4dd5-9967-6a3a020a0a40".to_string(),
+        "CommonPicture.БизнесСеть".to_string(),
+    )]);
     let item = parse_form_child_item_with_attrs(
         field,
         None,
         Some("Список"),
-        &BTreeMap::from([("1".to_string(), "Список".to_string())]),
+        &attribute_names_by_id,
         &BTreeMap::new(),
-        &BTreeMap::from([(
-            "1".to_string(),
-            BTreeMap::from([("3".to_string(), "Зарегистрирован".to_string())]),
-        )]),
+        &table_column_names_by_id,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &[],
-        &BTreeMap::from([(
-            "d465bd06-1042-4dd5-9967-6a3a020a0a40".to_string(),
-            "CommonPicture.БизнесСеть".to_string(),
-        )]),
+        &object_refs,
     )
     .unwrap();
 
@@ -9864,13 +9904,36 @@ fn extracts_live_picture_field_values_picture_and_file_drag_mode() {
         item.picture_ref.as_deref(),
         Some("CommonPicture.БизнесСеть")
     );
+    assert_eq!(item.picture_size, Some("RealSize"));
     assert_eq!(item.file_drag_mode, Some("AsFile"));
 
     let xml = format_form_child_items_xml(&[item], 1);
     assert!(xml.contains("<ValuesPicture>"));
     assert!(xml.contains("<xr:Ref>CommonPicture.БизнесСеть</xr:Ref>"));
     assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    assert!(!xml.contains("<PictureSize>RealSize</PictureSize>"));
     assert!(!xml.contains("<Picture>"), "{xml}");
+
+    let proportional_field = field.replace(
+        r#"},"",-1,-1,0,0,""},0,0,0,{1,0}"#,
+        r#"},"",-1,-1,0,0,""},0,0,2,{1,0}"#,
+    );
+    let proportional_item = parse_form_child_item_with_attrs(
+        &proportional_field,
+        None,
+        Some("Список"),
+        &attribute_names_by_id,
+        &BTreeMap::new(),
+        &table_column_names_by_id,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(proportional_item.picture_size, Some("Proportionally"));
+    let proportional_xml = format_form_child_items_xml(&[proportional_item], 1);
+    assert!(proportional_xml.contains("<PictureSize>Proportionally</PictureSize>"));
 }
 
 #[test]
@@ -14137,6 +14200,7 @@ fn formats_moxel_picture_mappings_match_native_enums() {
     assert_eq!(moxel_picture_vertical_alignment(8), Some("Bottom"));
     assert_eq!(moxel_picture_vertical_alignment(24), Some("Center"));
     assert_eq!(moxel_picture_size_mode(0), Some("RealSize"));
+    assert_eq!(moxel_picture_size_mode(1), Some("Stretch"));
     assert_eq!(moxel_picture_size_mode(2), Some("Proportionally"));
     assert_eq!(moxel_picture_size_mode(4), Some("AutoSize"));
     assert_eq!(moxel_picture_size_mode(7), Some("ByFontSize"));
