@@ -465,7 +465,7 @@ pub(super) struct FormChildItem {
     pub(super) events: Vec<FormBodyEvent>,
     pub(super) data_path: Option<String>,
     pub(super) command_name: Option<String>,
-    pub(super) command_source: Option<&'static str>,
+    pub(super) command_source: Option<String>,
     pub(super) child_items: Vec<FormChildItem>,
 }
 
@@ -1109,6 +1109,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             None,
             None,
             None,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -3289,6 +3290,7 @@ pub(super) fn extract_form_child_items(
         None,
         &attribute_names_by_id,
         &indexes.table_name_by_id,
+        &indexes.item_name_by_id,
         &indexes.table_column_names_by_id,
         &indexes.data_path_by_binding_key,
         &indexes.bound_table_path_by_binding_key,
@@ -3540,6 +3542,7 @@ pub(super) fn parse_form_child_item_pairs(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
@@ -3575,6 +3578,7 @@ pub(super) fn parse_form_child_item_pairs(
                 parent_tag,
                 attribute_names_by_id,
                 table_name_by_id,
+                item_name_by_id,
                 table_column_names_by_id,
                 data_path_by_binding_key,
                 bound_table_path_by_binding_key,
@@ -3713,6 +3717,7 @@ pub(super) fn parse_form_child_item_with_attrs(
         None,
         attribute_names_by_id,
         table_name_by_id,
+        table_name_by_id,
         table_column_names_by_id,
         &BTreeMap::new(),
         bound_table_path_by_binding_key,
@@ -3729,6 +3734,7 @@ pub(super) fn parse_form_child_item_with_context(
     _parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
@@ -3792,6 +3798,7 @@ pub(super) fn parse_form_child_item_with_context(
         Some(tag),
         attribute_names_by_id,
         table_name_by_id,
+        item_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
@@ -3809,6 +3816,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
@@ -3826,6 +3834,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
@@ -3843,6 +3852,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
@@ -3860,6 +3870,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
@@ -4832,9 +4843,9 @@ pub(super) fn parse_form_child_item_with_context(
         data_path,
         command_name,
         command_source: if tag == "CommandBar" {
-            parse_form_command_bar_source(&fields)
+            parse_form_command_bar_source_with_items(&fields, item_name_by_id)
         } else if tag == "ButtonGroup" {
-            parse_form_button_group_command_source(&fields)
+            parse_form_button_group_command_source_with_items(&fields, item_name_by_id)
         } else {
             None
         },
@@ -4867,6 +4878,7 @@ pub(super) fn append_form_table_service_child_items(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
@@ -4889,6 +4901,7 @@ pub(super) fn append_form_table_service_child_items(
         parent_tag,
         attribute_names_by_id,
         table_name_by_id,
+        item_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
@@ -4907,6 +4920,7 @@ pub(super) fn append_form_child_items_by_tag(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
@@ -4922,6 +4936,7 @@ pub(super) fn append_form_child_items_by_tag(
             parent_tag,
             attribute_names_by_id,
             table_name_by_id,
+            item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
@@ -4961,6 +4976,7 @@ pub(super) fn parse_form_text_document_context_menu(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
@@ -4978,6 +4994,7 @@ pub(super) fn parse_form_text_document_context_menu(
         parent_tag,
         attribute_names_by_id,
         table_name_by_id,
+        item_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
@@ -6326,29 +6343,63 @@ pub(super) fn parse_form_table_file_drag_mode_from_fields(
         .and_then(|field| parse_form_table_file_drag_mode(field))
 }
 
-pub(super) fn parse_form_button_group_command_source(fields: &[&str]) -> Option<&'static str> {
+#[cfg(test)]
+pub(super) fn parse_form_button_group_command_source(fields: &[&str]) -> Option<String> {
+    parse_form_button_group_command_source_with_items(fields, &BTreeMap::new())
+}
+
+pub(super) fn parse_form_button_group_command_source_with_items(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
     let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
     let form_ref = split_1c_braced_fields(source.get(1)?.trim(), 0)?;
     match (
         source.first().map(|field| field.trim()),
-        form_ref.first().map(|field| field.trim()),
         form_ref.get(1).map(|field| field.trim()),
         source.get(2).map(|field| field.trim()),
         source.get(3).map(|field| field.trim()),
     ) {
-        (Some("2"), Some("0"), Some(FORM_ITEM_TYPE_UUID), Some("2"), Some("0")) => Some("Form"),
+        (Some("2"), Some(FORM_ITEM_TYPE_UUID), Some("2"), Some("0")) => {
+            form_command_source_name(form_ref.first()?.trim(), item_name_by_id)
+        }
         _ => None,
     }
 }
 
-pub(super) fn parse_form_command_bar_source(fields: &[&str]) -> Option<&'static str> {
+#[cfg(test)]
+pub(super) fn parse_form_command_bar_source(fields: &[&str]) -> Option<String> {
+    parse_form_command_bar_source_with_items(fields, &BTreeMap::new())
+}
+
+pub(super) fn parse_form_command_bar_source_with_items(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
     let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    let form_ref = split_1c_braced_fields(source.get(2)?.trim(), 0)?;
     match (
         source.first().map(|field| field.trim()),
+        form_ref.get(1).map(|field| field.trim()),
         fields.get(21).map(|field| field.trim()),
     ) {
-        (Some("1"), Some("5")) => Some("Form"),
+        (Some("1"), Some(FORM_ITEM_TYPE_UUID), Some("5")) => {
+            form_command_source_name(form_ref.first()?.trim(), item_name_by_id)
+        }
         _ => None,
+    }
+}
+
+pub(super) fn form_command_source_name(
+    item_id: &str,
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    match item_id {
+        "0" => Some("Form".to_string()),
+        "-1" => Some("FormCommandPanelGlobalCommands".to_string()),
+        _ => item_name_by_id
+            .get(item_id)
+            .map(|name| format!("Item.{name}")),
     }
 }
 
@@ -7901,19 +7952,26 @@ pub(super) fn parse_form_button_command_name(
     let kind = fields.first()?.trim();
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
-        return form_standard_button_command_name(&uuid)
+        if let Some(command_name) = form_standard_button_command_name(&uuid)
             .or_else(|| form_standard_command_name(&uuid))
-            .map(ToOwned::to_owned)
-            .or_else(|| object_refs.get(&uuid).cloned());
+        {
+            return Some(command_name.to_owned());
+        }
+        if let Some(command_name) = object_refs.get(&uuid) {
+            return Some(form_object_reference_command_name(command_name));
+        }
+        return None;
     }
     if kind == "10" || kind == "21" {
-        let standard = form_table_standard_command_suffix(&uuid)?;
-        let table_name = if table_name_by_id.len() == 1 {
-            table_name_by_id.values().next()?.as_str()
-        } else {
-            form_standard_command_table_name(button_name, table_name_by_id)?
-        };
-        return Some(format!("Form.Item.{table_name}.StandardCommand.{standard}"));
+        if let Some(standard) = form_table_standard_command_suffix(&uuid) {
+            let table_name = if table_name_by_id.len() == 1 {
+                table_name_by_id.values().next()?.as_str()
+            } else {
+                form_standard_command_table_name(button_name, table_name_by_id)?
+            };
+            return Some(format!("Form.Item.{table_name}.StandardCommand.{standard}"));
+        }
+        return None;
     }
     commands
         .iter()
@@ -7935,10 +7993,32 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
         "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
         "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Form.StandardCommand.Close"),
+        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Form.StandardCommand.Change"),
+        "8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b" => Some("Form.StandardCommand.Choose"),
+        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Form.StandardCommand.Find"),
+        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Form.StandardCommand.Post"),
+        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("Form.StandardCommand.SetDeletionMark"),
+        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("Form.StandardCommand.SetDeletionMark"),
         "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
+        "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Form.StandardCommand.Cancel"),
         "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("Form.StandardCommand.WriteAndClose"),
+        "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("Form.StandardCommand.OK"),
         "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Form.StandardCommand.Write"),
         _ => None,
+    }
+}
+
+pub(super) fn form_object_reference_command_name(reference: &str) -> String {
+    if reference.contains(".Command.") || reference.starts_with("CommonCommand.") {
+        return reference.to_string();
+    }
+    let Some((kind, _)) = reference.split_once('.') else {
+        return reference.to_string();
+    };
+    let standard = super::command_interface::command_interface_standard_command(kind);
+    match standard {
+        Some(standard) => format!("{reference}.StandardCommand.{standard}"),
+        None => reference.to_string(),
     }
 }
 
@@ -7966,18 +8046,13 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
 }
 
 pub(super) fn form_standard_command_table_name<'a>(
-    button_name: &str,
+    _button_name: &str,
     table_name_by_id: &'a BTreeMap<String, String>,
 ) -> Option<&'a String> {
     if table_name_by_id.len() == 1 {
         return table_name_by_id.values().next();
     }
-    match button_name {
-        "Найти" | "ОтменитьПоиск" | "ВывестиСписок" | "Удалить" => {
-            table_name_by_id.values().next()
-        }
-        _ => None,
-    }
+    None
 }
 
 pub(super) fn collect_form_table_column_names_for_table(
@@ -8981,6 +9056,7 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format_form_table_properties_xml(item, indent + 1));
     }
     if item.tag != "Table"
+        && item.tag != "Button"
         && let Some(data_path) = &item.data_path
     {
         xml.push_str(&format!(
@@ -9157,6 +9233,14 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<CommandName>{}</CommandName>\r\n",
             escape_xml_text(command_name)
+        ));
+    }
+    if item.tag == "Button"
+        && let Some(data_path) = &item.data_path
+    {
+        xml.push_str(&format!(
+            "{tab}\t<DataPath>{}</DataPath>\r\n",
+            escape_xml_text(data_path)
         ));
     }
     if item.tag == "Button"
@@ -9448,7 +9532,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(location)
         ));
     }
-    if let Some(command_source) = item.command_source {
+    if let Some(command_source) = &item.command_source {
         xml.push_str(&format!(
             "{tab}\t<CommandSource>{}</CommandSource>\r\n",
             escape_xml_text(command_source)

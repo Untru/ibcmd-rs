@@ -26,11 +26,12 @@ pub(super) fn normalize_data_composition_schema_template_xml(
     })?;
     let mut xml = canonicalize_data_composition_schema_document(schema_doc)?;
     rewrite_data_composition_type_ids(&mut xml, type_index);
-    if let Some(settings_doc) = documents
+    let settings = documents
         .iter()
-        .find(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
-        && let Some(settings) = canonicalize_data_composition_settings_document(settings_doc)
-    {
+        .filter(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
+        .filter_map(|document| canonicalize_data_composition_settings_document(document))
+        .collect::<Vec<_>>();
+    if !settings.is_empty() {
         insert_data_composition_settings(&mut xml, &settings);
     }
     Some(xml.into_bytes())
@@ -256,15 +257,28 @@ fn canonicalize_data_composition_settings_document(document: &str) -> Option<Str
     Some(indent_data_composition_settings(&settings))
 }
 
-fn insert_data_composition_settings(xml: &mut String, settings: &str) {
+fn insert_data_composition_settings(xml: &mut String, settings: &[String]) {
     let marker = "\r\n\t</settingsVariant>";
-    if let Some(index) = xml.find(marker) {
-        xml.insert_str(index, settings);
+    let mut cursor = 0usize;
+    let mut inserted = 0usize;
+    for settings_block in settings {
+        let Some(relative_index) = xml[cursor..].find(marker) else {
+            break;
+        };
+        let index = cursor + relative_index;
+        xml.insert_str(index, settings_block);
+        cursor = index + settings_block.len() + marker.len();
+        inserted += 1;
+    }
+    if inserted == settings.len() {
         return;
     }
     let root_marker = "\r\n</DataCompositionSchema>";
-    if let Some(index) = xml.find(root_marker) {
-        xml.insert_str(index, settings);
+    if let Some(mut index) = xml.find(root_marker) {
+        for settings_block in &settings[inserted..] {
+            xml.insert_str(index, settings_block);
+            index += settings_block.len();
+        }
     }
 }
 
