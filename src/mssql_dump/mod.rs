@@ -3734,93 +3734,17 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
     let mut entries = Vec::new();
     let header_index = metadata_header_field_index(&fields, &row.file_name);
 
-    if object_code == 0 {
-        push_indexed_generated_type(&mut entries, &fields, 1, "DefinedType", &header.name);
-    }
-    if object_code == 16 {
-        push_indexed_generated_type(&mut entries, &fields, 2, "ConstantManager", &header.name);
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            4,
-            "ConstantValueManager",
-            &header.name,
-        );
-    }
-    if object_code == 30 {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            3,
-            "BusinessProcessObject",
-            &header.name,
-        );
-        push_indexed_generated_type(&mut entries, &fields, 5, "BusinessProcessRef", &header.name);
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            11,
-            "BusinessProcessManager",
-            &header.name,
-        );
-    }
-    if object_code == 37 {
-        push_indexed_generated_type(&mut entries, &fields, 1, "ExchangePlanObject", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 3, "ExchangePlanRef", &header.name);
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            9,
-            "ExchangePlanManager",
-            &header.name,
-        );
-    }
-    if object_code == 40 {
-        push_indexed_generated_type(&mut entries, &fields, 1, "DocumentObject", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 3, "DocumentRef", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 26, "DocumentManager", &header.name);
-    }
-    if object_code == 17 {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            1,
-            "DataProcessorObject",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            7,
-            "DataProcessorManager",
-            &header.name,
-        );
-    }
-    if object_code == 19 {
-        push_indexed_generated_type(&mut entries, &fields, 12, "ReportManager", &header.name);
-    }
-    if object_code == 2 && header_index == Some(1) && field_starts_with(fields.get(1), "{0,") {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            2,
-            "SettingsStorageManager",
-            &header.name,
-        );
-    }
-    if object_code == 57 {
-        push_indexed_generated_type(&mut entries, &fields, 1, "CatalogObject", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 3, "CatalogRef", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 5, "CatalogSelection", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 7, "CatalogList", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 34, "CatalogManager", &header.name);
-    }
-
-    if object_code == 20 && header_index == Some(5) {
-        if let Some(type_id) = fields.get(1).copied().and_then(parse_uuid_field) {
-            entries.push((type_id, format!("cfg:EnumRef.{}", header.name)));
+    for schema in raw_generated_type_schemas() {
+        if schema.matches(object_code, header_index, &fields) {
+            push_indexed_generated_type_slots(
+                &mut entries,
+                &fields,
+                schema.slots,
+                &header.name,
+            );
         }
     }
+
     if object_code == 21 {
         let register_kind = if is_code21_accounting_register_fields(&fields, &row.file_name) {
             "AccountingRegister"
@@ -3844,141 +3768,371 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
             &header.name,
         );
     }
-    if object_code == 28 {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            9,
-            "AccumulationRegisterRecordSet",
-            &header.name,
-        );
-    }
-    if object_code == 33 && fields.get(1).copied().and_then(parse_uuid_field).is_some() {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            1,
-            "InformationRegisterRecord",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            3,
-            "InformationRegisterManager",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            5,
-            "InformationRegisterSelection",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            7,
-            "InformationRegisterList",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            9,
-            "InformationRegisterRecordSet",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            11,
-            "InformationRegisterRecordKey",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            13,
-            "InformationRegisterRecordManager",
-            &header.name,
-        );
-    }
-    if object_code == 33 && header_index == Some(1) {
-        push_indexed_generated_type(&mut entries, &fields, 3, "TaskObject", &header.name);
-        push_indexed_generated_type(&mut entries, &fields, 5, "TaskRef", &header.name);
-    }
-    if object_code == 34 {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            1,
-            "ChartOfCharacteristicTypesObject",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            3,
-            "ChartOfCharacteristicTypesRef",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            5,
-            "ChartOfCharacteristicTypesSelection",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            7,
-            "ChartOfCharacteristicTypesList",
-            &header.name,
-        );
-        push_indexed_generated_type(&mut entries, &fields, 9, "Characteristic", &header.name);
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            11,
-            "ChartOfCharacteristicTypesManager",
-            &header.name,
-        );
-    }
-    if object_code == 32 {
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            1,
-            "ChartOfAccountsObject",
-            &header.name,
-        );
-        push_indexed_generated_type(&mut entries, &fields, 3, "ChartOfAccountsRef", &header.name);
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            5,
-            "ChartOfAccountsSelection",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            7,
-            "ChartOfAccountsList",
-            &header.name,
-        );
-        push_indexed_generated_type(
-            &mut entries,
-            &fields,
-            9,
-            "ChartOfAccountsManager",
-            &header.name,
-        );
-    }
 
     Some(entries)
+}
+
+#[derive(Clone, Copy)]
+struct RawGeneratedTypeSlot {
+    field_index: usize,
+    generated_type: &'static str,
+}
+
+#[derive(Clone, Copy)]
+enum RawGeneratedTypeCondition {
+    HeaderIndex(usize),
+    FieldPrefix(usize, &'static str),
+    FieldUuid(usize),
+}
+
+#[derive(Clone, Copy)]
+struct RawGeneratedTypeSchema {
+    object_codes: &'static [u32],
+    conditions: &'static [RawGeneratedTypeCondition],
+    slots: &'static [RawGeneratedTypeSlot],
+}
+
+impl RawGeneratedTypeSchema {
+    fn matches(
+        self,
+        object_code: u32,
+        header_index: Option<usize>,
+        fields: &[&str],
+    ) -> bool {
+        self.object_codes.contains(&object_code)
+            && self.conditions.iter().all(|condition| match *condition {
+                RawGeneratedTypeCondition::HeaderIndex(expected) => header_index == Some(expected),
+                RawGeneratedTypeCondition::FieldPrefix(index, prefix) => {
+                    field_starts_with(fields.get(index), prefix)
+                }
+                RawGeneratedTypeCondition::FieldUuid(index) => fields
+                    .get(index)
+                    .copied()
+                    .and_then(parse_uuid_field)
+                    .is_some(),
+            })
+    }
+}
+
+const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
+    RawGeneratedTypeSchema {
+        object_codes: &[0],
+        conditions: &[],
+        slots: &[RawGeneratedTypeSlot {
+            field_index: 1,
+            generated_type: "DefinedType",
+        }],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[16],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 2,
+                generated_type: "ConstantManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 4,
+                generated_type: "ConstantValueManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 13,
+                generated_type: "ConstantValueKey",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[30],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "BusinessProcessObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "BusinessProcessRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "BusinessProcessSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 9,
+                generated_type: "BusinessProcessList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 11,
+                generated_type: "BusinessProcessManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 13,
+                generated_type: "BusinessProcessRoutePointRef",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[37],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "ExchangePlanObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "ExchangePlanRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "ExchangePlanSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "ExchangePlanList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 9,
+                generated_type: "ExchangePlanManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[40],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "DocumentObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "DocumentRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 26,
+                generated_type: "DocumentManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[17],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "DataProcessorObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "DataProcessorManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[19],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "ReportObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 12,
+                generated_type: "ReportManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[2],
+        conditions: &[
+            RawGeneratedTypeCondition::HeaderIndex(1),
+            RawGeneratedTypeCondition::FieldPrefix(1, "{0,"),
+        ],
+        slots: &[RawGeneratedTypeSlot {
+            field_index: 2,
+            generated_type: "SettingsStorageManager",
+        }],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[56, 57],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "CatalogObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "CatalogRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "CatalogSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "CatalogList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 34,
+                generated_type: "CatalogManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[20],
+        conditions: &[RawGeneratedTypeCondition::HeaderIndex(5)],
+        slots: &[RawGeneratedTypeSlot {
+            field_index: 1,
+            generated_type: "EnumRef",
+        }],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[28],
+        conditions: &[],
+        slots: &[RawGeneratedTypeSlot {
+            field_index: 9,
+            generated_type: "AccumulationRegisterRecordSet",
+        }],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[33],
+        conditions: &[RawGeneratedTypeCondition::FieldUuid(1)],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "InformationRegisterRecord",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "InformationRegisterManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "InformationRegisterSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "InformationRegisterList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 9,
+                generated_type: "InformationRegisterRecordSet",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 11,
+                generated_type: "InformationRegisterRecordKey",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 13,
+                generated_type: "InformationRegisterRecordManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[33],
+        conditions: &[RawGeneratedTypeCondition::HeaderIndex(1)],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "TaskObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "TaskRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "TaskSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 9,
+                generated_type: "TaskList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 11,
+                generated_type: "TaskManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[34],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "ChartOfCharacteristicTypesObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "ChartOfCharacteristicTypesRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "ChartOfCharacteristicTypesSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "ChartOfCharacteristicTypesList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 9,
+                generated_type: "Characteristic",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 11,
+                generated_type: "ChartOfCharacteristicTypesManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[32],
+        conditions: &[],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "ChartOfAccountsObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "ChartOfAccountsRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "ChartOfAccountsSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 7,
+                generated_type: "ChartOfAccountsList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 9,
+                generated_type: "ChartOfAccountsManager",
+            },
+        ],
+    },
+];
+
+fn raw_generated_type_schemas() -> &'static [RawGeneratedTypeSchema] {
+    RAW_GENERATED_TYPE_SCHEMAS
+}
+
+fn push_indexed_generated_type_slots(
+    entries: &mut Vec<(String, String)>,
+    fields: &[&str],
+    slots: &[RawGeneratedTypeSlot],
+    name: &str,
+) {
+    for slot in slots {
+        push_indexed_generated_type(
+            entries,
+            fields,
+            slot.field_index,
+            slot.generated_type,
+            name,
+        );
+    }
 }
 
 fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(String, String)>> {
