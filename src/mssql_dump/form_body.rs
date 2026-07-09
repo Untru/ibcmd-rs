@@ -1,4 +1,8 @@
 use super::*;
+use crate::form_schema::{
+    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldXmlProperty,
+};
 
 #[allow(dead_code)]
 pub(crate) fn extract_form_body_xml(
@@ -5334,7 +5338,7 @@ pub(super) fn parse_form_input_field_format(
     extended_options: Option<&[&str]>,
 ) -> Vec<(String, String)> {
     extended_options
-        .and_then(|options| options.get(29))
+        .and_then(|options| options.get(InputFieldSlot::Format.index()))
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default()
 }
@@ -5343,14 +5347,14 @@ pub(super) fn parse_form_input_field_edit_format(
     extended_options: Option<&[&str]>,
 ) -> Vec<(String, String)> {
     extended_options
-        .and_then(|options| options.get(30))
+        .and_then(|options| options.get(InputFieldSlot::EditFormat.index()))
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default()
 }
 
 pub(super) fn parse_form_input_field_font_xml(extended_options: Option<&[&str]>) -> Option<String> {
     extended_options
-        .and_then(|options| options.get(40))
+        .and_then(|options| options.get(InputFieldSlot::Font.index()))
         .and_then(|field| parse_form_font_tuple_xml(field))
 }
 
@@ -5393,19 +5397,22 @@ pub(super) fn parse_form_button_max_width(field: Option<&str>) -> Option<String>
 }
 
 pub(super) fn parse_form_input_field_width(extended_options: Option<&[&str]>) -> Option<String> {
-    let value = extended_options?.get(2)?.trim();
+    let value = extended_options?.get(InputFieldSlot::Width.index())?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 pub(super) fn parse_form_input_field_height(extended_options: Option<&[&str]>) -> Option<String> {
-    let value = extended_options?.get(3)?.trim();
+    let value = extended_options?.get(InputFieldSlot::Height.index())?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 pub(super) fn parse_form_input_field_auto_max_width(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(49).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::AutoMaxWidth.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
@@ -5414,14 +5421,17 @@ pub(super) fn parse_form_input_field_auto_max_width(
 pub(super) fn parse_form_input_field_max_width(
     extended_options: Option<&[&str]>,
 ) -> Option<String> {
-    let value = extended_options?.get(50)?.trim();
+    let value = extended_options?.get(InputFieldSlot::MaxWidth.index())?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 pub(super) fn parse_form_input_field_auto_max_height(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(52).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::AutoMaxHeight.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
@@ -5430,14 +5440,17 @@ pub(super) fn parse_form_input_field_auto_max_height(
 pub(super) fn parse_form_input_field_max_height(
     extended_options: Option<&[&str]>,
 ) -> Option<String> {
-    let value = extended_options?.get(53)?.trim();
+    let value = extended_options?.get(InputFieldSlot::MaxHeight.index())?.trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 pub(super) fn parse_form_input_field_horizontal_stretch(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(4).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::HorizontalStretch.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5447,7 +5460,10 @@ pub(super) fn parse_form_input_field_horizontal_stretch(
 pub(super) fn parse_form_input_field_vertical_stretch(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(5).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::VerticalStretch.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5457,7 +5473,10 @@ pub(super) fn parse_form_input_field_vertical_stretch(
 pub(super) fn parse_form_input_field_password_mode(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(7).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::PasswordMode.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5465,7 +5484,10 @@ pub(super) fn parse_form_input_field_password_mode(
 }
 
 pub(super) fn parse_form_input_field_multi_line(extended_options: Option<&[&str]>) -> Option<bool> {
-    match extended_options?.get(8).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::MultiLine.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5473,14 +5495,20 @@ pub(super) fn parse_form_input_field_multi_line(extended_options: Option<&[&str]
 }
 
 pub(super) fn parse_form_input_field_wrap(extended_options: Option<&[&str]>) -> Option<bool> {
-    match extended_options?.get(6).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::Wrap.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
 }
 
 pub(super) fn parse_form_input_field_text_edit(extended_options: Option<&[&str]>) -> Option<bool> {
-    match extended_options?.get(41).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::TextEdit.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
@@ -5497,7 +5525,10 @@ pub(super) fn parse_form_input_field_auto_cell_height(fields: &[&str]) -> Option
 pub(super) fn parse_form_input_field_drop_list_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(47).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::DropListButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5507,7 +5538,10 @@ pub(super) fn parse_form_input_field_drop_list_button(
 pub(super) fn parse_form_input_field_clear_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(13).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::ClearButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5517,7 +5551,10 @@ pub(super) fn parse_form_input_field_clear_button(
 pub(super) fn parse_form_input_field_open_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(15).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::OpenButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5527,7 +5564,10 @@ pub(super) fn parse_form_input_field_open_button(
 pub(super) fn parse_form_input_field_create_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(45).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::CreateButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5537,7 +5577,10 @@ pub(super) fn parse_form_input_field_create_button(
 pub(super) fn parse_form_input_field_choice_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(12).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::ChoiceButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5547,7 +5590,10 @@ pub(super) fn parse_form_input_field_choice_button(
 pub(super) fn parse_form_input_field_choice_list_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(11).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::ChoiceListButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5557,7 +5603,10 @@ pub(super) fn parse_form_input_field_choice_list_button(
 pub(super) fn parse_form_input_field_spin_button(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(14).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::SpinButton.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5567,7 +5616,10 @@ pub(super) fn parse_form_input_field_spin_button(
 pub(super) fn parse_form_input_field_list_choice_mode(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(19).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::ListChoiceMode.index())
+        .map(|field| field.trim())?
+    {
         "1" => Some(true),
         _ => None,
     }
@@ -5576,7 +5628,10 @@ pub(super) fn parse_form_input_field_list_choice_mode(
 pub(super) fn parse_form_input_field_quick_choice(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(23).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::QuickChoice.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5586,7 +5641,10 @@ pub(super) fn parse_form_input_field_quick_choice(
 pub(super) fn parse_form_input_field_choose_type(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(32).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::ChooseType.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         _ => None,
     }
@@ -5595,7 +5653,10 @@ pub(super) fn parse_form_input_field_choose_type(
 pub(super) fn parse_form_input_field_auto_choice_incomplete(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(28).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::AutoChoiceIncomplete.index())
+        .map(|field| field.trim())?
+    {
         "1" => Some(true),
         _ => None,
     }
@@ -5604,7 +5665,10 @@ pub(super) fn parse_form_input_field_auto_choice_incomplete(
 pub(super) fn parse_form_input_field_auto_mark_incomplete(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
-    match extended_options?.get(31).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::AutoMarkIncomplete.index())
+        .map(|field| field.trim())?
+    {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
@@ -5620,7 +5684,10 @@ pub(super) fn parse_form_input_field_mark_required_complete(
 pub(super) fn parse_form_input_field_choice_button_representation(
     extended_options: Option<&[&str]>,
 ) -> Option<&'static str> {
-    match extended_options?.get(46).map(|field| field.trim())? {
+    match extended_options?
+        .get(InputFieldSlot::ChoiceButtonRepresentation.index())
+        .map(|field| field.trim())?
+    {
         "1" => Some("ShowInDropList"),
         "2" => Some("ShowInDropListAndInInputField"),
         "3" => Some("ShowInInputField"),
@@ -5631,7 +5698,11 @@ pub(super) fn parse_form_input_field_choice_button_representation(
 pub(super) fn parse_form_input_field_choice_folders_and_items(
     extended_options: Option<&[&str]>,
 ) -> Option<&'static str> {
-    metadata_choice_folders_and_items_xml(extended_options?.get(24)?.trim())
+    metadata_choice_folders_and_items_xml(
+        extended_options?
+            .get(InputFieldSlot::ChoiceFoldersAndItems.index())?
+            .trim(),
+    )
 }
 
 pub(super) fn parse_form_checkbox_type(fields: &[&str]) -> Option<&'static str> {
@@ -7936,6 +8007,66 @@ pub(super) fn format_form_child_items_xml(items: &[FormChildItem], indent: usize
     xml
 }
 
+fn format_form_input_field_button_options_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "InputField" {
+        return String::new();
+    }
+    let mut xml = String::new();
+    for property in FORM_INPUT_FIELD_BUTTON_XML_ORDER {
+        xml.push_str(&format_form_input_field_button_option_xml(
+            item, *property, indent,
+        ));
+    }
+    xml
+}
+
+fn format_form_input_field_button_option_xml(
+    item: &FormChildItem,
+    property: FormInputFieldXmlProperty,
+    indent: usize,
+) -> String {
+    let tab = "\t".repeat(indent);
+    match property {
+        FormInputFieldXmlProperty::DropListButton => item
+            .drop_list_button
+            .map(|value| format!("{tab}<DropListButton>{}</DropListButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::ChoiceButton => item
+            .choice_button
+            .map(|value| format!("{tab}<ChoiceButton>{}</ChoiceButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::ChoiceButtonRepresentation => item
+            .choice_button_representation
+            .map(|value| {
+                format!(
+                    "{tab}<ChoiceButtonRepresentation>{}</ChoiceButtonRepresentation>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::ClearButton => item
+            .clear_button
+            .map(|value| format!("{tab}<ClearButton>{}</ClearButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::SpinButton => item
+            .spin_button
+            .map(|value| format!("{tab}<SpinButton>{}</SpinButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::OpenButton => item
+            .open_button
+            .map(|value| format!("{tab}<OpenButton>{}</OpenButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::CreateButton => item
+            .create_button
+            .map(|value| format!("{tab}<CreateButton>{}</CreateButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormInputFieldXmlProperty::ChoiceListButton => item
+            .choice_list_button
+            .map(|value| format!("{tab}<ChoiceListButton>{}</ChoiceListButton>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+    }
+}
+
 pub(super) fn format_form_child_item_xml(
     item: &FormChildItem,
     indent: usize,
@@ -8506,48 +8637,7 @@ pub(super) fn format_form_child_item_xml(
     if item.auto_cell_height == Some(true) {
         xml.push_str(&format!("{tab}\t<AutoCellHeight>true</AutoCellHeight>\r\n"));
     }
-    if let Some(drop_list_button) = item.drop_list_button {
-        xml.push_str(&format!(
-            "{tab}\t<DropListButton>{}</DropListButton>\r\n",
-            if drop_list_button { "true" } else { "false" }
-        ));
-    }
-    if let Some(clear_button) = item.clear_button {
-        xml.push_str(&format!(
-            "{tab}\t<ClearButton>{}</ClearButton>\r\n",
-            if clear_button { "true" } else { "false" }
-        ));
-    }
-    if let Some(open_button) = item.open_button {
-        xml.push_str(&format!(
-            "{tab}\t<OpenButton>{}</OpenButton>\r\n",
-            if open_button { "true" } else { "false" }
-        ));
-    }
-    if let Some(create_button) = item.create_button {
-        xml.push_str(&format!(
-            "{tab}\t<CreateButton>{}</CreateButton>\r\n",
-            if create_button { "true" } else { "false" }
-        ));
-    }
-    if let Some(choice_button) = item.choice_button {
-        xml.push_str(&format!(
-            "{tab}\t<ChoiceButton>{}</ChoiceButton>\r\n",
-            if choice_button { "true" } else { "false" }
-        ));
-    }
-    if let Some(choice_list_button) = item.choice_list_button {
-        xml.push_str(&format!(
-            "{tab}\t<ChoiceListButton>{}</ChoiceListButton>\r\n",
-            if choice_list_button { "true" } else { "false" }
-        ));
-    }
-    if let Some(spin_button) = item.spin_button {
-        xml.push_str(&format!(
-            "{tab}\t<SpinButton>{}</SpinButton>\r\n",
-            if spin_button { "true" } else { "false" }
-        ));
-    }
+    xml.push_str(&format_form_input_field_button_options_xml(item, indent + 1));
     if item.list_choice_mode == Some(true) {
         xml.push_str(&format!("{tab}\t<ListChoiceMode>true</ListChoiceMode>\r\n"));
     }
@@ -8565,12 +8655,6 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.text_edit == Some(false) {
         xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
-    }
-    if let Some(choice_button_representation) = item.choice_button_representation {
-        xml.push_str(&format!(
-            "{tab}\t<ChoiceButtonRepresentation>{}</ChoiceButtonRepresentation>\r\n",
-            escape_xml_text(choice_button_representation)
-        ));
     }
     if !item.input_hint.is_empty() {
         xml.push_str(&format_form_localized_section(

@@ -3086,12 +3086,12 @@ fn module_owner_module_file(kind: &str, suffix: &str) -> Option<&'static str> {
         ("Enum", "0") => Some("ManagerModule.bsl"),
         ("ExchangePlan", "2") => Some("ObjectModule.bsl"),
         ("ExchangePlan", "3") => Some("ManagerModule.bsl"),
+        ("AccountingRegister", "6") => Some("RecordSetModule.bsl"),
+        ("AccountingRegister", "7") => Some("ManagerModule.bsl"),
         ("AccumulationRegister", "1")
-        | ("AccountingRegister", "1")
         | ("CalculationRegister", "1")
         | ("InformationRegister", "1") => Some("RecordSetModule.bsl"),
         ("AccumulationRegister", "2")
-        | ("AccountingRegister", "2")
         | ("CalculationRegister", "2")
         | ("InformationRegister", "2") => Some("ManagerModule.bsl"),
         ("DocumentJournal", "1") => Some("ManagerModule.bsl"),

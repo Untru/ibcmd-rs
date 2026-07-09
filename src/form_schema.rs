@@ -1,0 +1,93 @@
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormInputFieldXmlProperty {
+    DropListButton,
+    ChoiceButton,
+    ChoiceButtonRepresentation,
+    ClearButton,
+    SpinButton,
+    OpenButton,
+    CreateButton,
+    ChoiceListButton,
+}
+
+pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty] = &[
+    FormInputFieldXmlProperty::DropListButton,
+    FormInputFieldXmlProperty::ChoiceButton,
+    FormInputFieldXmlProperty::ChoiceButtonRepresentation,
+    FormInputFieldXmlProperty::ClearButton,
+    FormInputFieldXmlProperty::SpinButton,
+    FormInputFieldXmlProperty::OpenButton,
+    FormInputFieldXmlProperty::CreateButton,
+    FormInputFieldXmlProperty::ChoiceListButton,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormInputFieldExtendedOptionSlot {
+    Width,
+    Height,
+    HorizontalStretch,
+    VerticalStretch,
+    Wrap,
+    PasswordMode,
+    MultiLine,
+    ChoiceListButton,
+    ChoiceButton,
+    ClearButton,
+    SpinButton,
+    OpenButton,
+    ListChoiceMode,
+    QuickChoice,
+    AutoCellHeight,
+    ChoiceFoldersAndItems,
+    AutoChoiceIncomplete,
+    AutoMarkIncomplete,
+    ChooseType,
+    Format,
+    EditFormat,
+    Font,
+    TextEdit,
+    CreateButton,
+    ChoiceButtonRepresentation,
+    DropListButton,
+    AutoMaxWidth,
+    MaxWidth,
+    AutoMaxHeight,
+    MaxHeight,
+}
+
+impl FormInputFieldExtendedOptionSlot {
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::Width => 2,
+            Self::Height => 3,
+            Self::HorizontalStretch => 4,
+            Self::VerticalStretch => 5,
+            Self::Wrap => 6,
+            Self::PasswordMode => 7,
+            Self::MultiLine => 8,
+            Self::ChoiceListButton => 11,
+            Self::ChoiceButton => 12,
+            Self::ClearButton => 13,
+            Self::SpinButton => 14,
+            Self::OpenButton => 15,
+            Self::ListChoiceMode => 19,
+            Self::QuickChoice => 23,
+            Self::ChoiceFoldersAndItems => 24,
+            Self::AutoCellHeight => 28,
+            Self::AutoChoiceIncomplete => 28,
+            Self::Format => 29,
+            Self::EditFormat => 30,
+            Self::AutoMarkIncomplete => 31,
+            Self::ChooseType => 32,
+            Self::Font => 40,
+            Self::TextEdit => 41,
+            Self::CreateButton => 45,
+            Self::ChoiceButtonRepresentation => 46,
+            Self::DropListButton => 47,
+            Self::AutoMaxWidth => 49,
+            Self::MaxWidth => 50,
+            Self::AutoMaxHeight => 52,
+            Self::MaxHeight => 53,
+        }
+    }
+}

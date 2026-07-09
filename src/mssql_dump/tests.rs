@@ -7635,6 +7635,61 @@ fn extracts_form_input_field_choice_button_representation_from_layout_code() {
 }
 
 #[test]
+fn formats_form_input_field_button_options_in_schema_order() {
+    let mut input_fields = vec!["0".to_string(); 40];
+    input_fields[0] = "48".to_string();
+    input_fields[1] = "{78,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+    input_fields[5] = "2".to_string();
+    input_fields[6] = r#""Field""#.to_string();
+    let mut options = vec!["2".to_string(); 54];
+    options[0] = "38".to_string();
+    options[11] = "1".to_string();
+    options[12] = "1".to_string();
+    options[13] = "1".to_string();
+    options[14] = "0".to_string();
+    options[15] = "1".to_string();
+    options[45] = "0".to_string();
+    options[46] = "3".to_string();
+    options[47] = "1".to_string();
+    input_fields[39] = format!("{{{}}}", options.join(","));
+    let field = format!("{{{}}}", input_fields.join(","));
+
+    let item = parse_form_child_item(
+        &field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    let tags = [
+        "DropListButton",
+        "ChoiceButton",
+        "ChoiceButtonRepresentation",
+        "ClearButton",
+        "SpinButton",
+        "OpenButton",
+        "CreateButton",
+        "ChoiceListButton",
+    ];
+    let mut previous = 0;
+    for tag in tags {
+        let position = xml
+            .find(&format!("<{tag}>"))
+            .unwrap_or_else(|| panic!("missing {tag} in {xml}"));
+        assert!(
+            position >= previous,
+            "{tag} is out of order in generated InputField XML:\n{xml}"
+        );
+        previous = position;
+    }
+}
+
+#[test]
 fn extracts_form_input_field_choice_folders_and_items_from_layout_code() {
     let mut input_fields = vec!["0".to_string(); 45];
     input_fields[0] = "48".to_string();

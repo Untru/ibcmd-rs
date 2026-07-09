@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod compatibility;
 pub mod dump_sources;
+pub(crate) mod form_schema;
 pub mod form_matrix;
 pub mod infobase;
 pub mod module_blob;

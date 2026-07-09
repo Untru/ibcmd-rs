@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
+use crate::form_schema::FormInputFieldExtendedOptionSlot as InputFieldSlot;
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
 };
@@ -11171,86 +11172,103 @@ fn format_form_layout_new_input_field_extended_options(item: &FormXmlChildItem) 
     let mut fields = vec!["2".to_string(); 54];
     fields[0] = "38".to_string();
     if let Some(width) = &item.width {
-        fields[2] = width.clone();
+        fields[InputFieldSlot::Width.index()] = width.clone();
     }
     if let Some(height) = &item.height {
-        fields[3] = height.clone();
+        fields[InputFieldSlot::Height.index()] = height.clone();
     }
     if let Some(horizontal_stretch) = item.horizontal_stretch {
-        fields[4] = if horizontal_stretch { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::HorizontalStretch.index()] =
+            if horizontal_stretch { "1" } else { "0" }.to_string();
     }
     if let Some(vertical_stretch) = item.vertical_stretch {
-        fields[5] = if vertical_stretch { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::VerticalStretch.index()] =
+            if vertical_stretch { "1" } else { "0" }.to_string();
     }
     if let Some(wrap) = item.wrap {
-        fields[6] = if wrap { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::Wrap.index()] = if wrap { "1" } else { "0" }.to_string();
     }
     if let Some(password_mode) = item.password_mode {
-        fields[7] = if password_mode { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::PasswordMode.index()] =
+            if password_mode { "1" } else { "0" }.to_string();
     }
     if let Some(multi_line) = item.multi_line {
-        fields[8] = if multi_line { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::MultiLine.index()] =
+            if multi_line { "1" } else { "0" }.to_string();
     }
     if let Some(choice_list_button) = item.choice_list_button {
-        fields[11] = if choice_list_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::ChoiceListButton.index()] =
+            if choice_list_button { "1" } else { "0" }.to_string();
     }
     if let Some(choice_button) = item.choice_button {
-        fields[12] = if choice_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::ChoiceButton.index()] =
+            if choice_button { "1" } else { "0" }.to_string();
     }
     if let Some(clear_button) = item.clear_button {
-        fields[13] = if clear_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::ClearButton.index()] =
+            if clear_button { "1" } else { "0" }.to_string();
     }
     if let Some(spin_button) = item.spin_button {
-        fields[14] = if spin_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::SpinButton.index()] =
+            if spin_button { "1" } else { "0" }.to_string();
     }
     if let Some(open_button) = item.open_button {
-        fields[15] = if open_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::OpenButton.index()] =
+            if open_button { "1" } else { "0" }.to_string();
     }
     if let Some(list_choice_mode) = item.list_choice_mode {
-        fields[19] = if list_choice_mode { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::ListChoiceMode.index()] =
+            if list_choice_mode { "1" } else { "0" }.to_string();
     }
     if let Some(quick_choice) = item.quick_choice {
-        fields[23] = if quick_choice { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::QuickChoice.index()] =
+            if quick_choice { "1" } else { "0" }.to_string();
     }
     if let Some(auto_cell_height) = item.auto_cell_height {
-        fields[28] = if auto_cell_height { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::AutoCellHeight.index()] =
+            if auto_cell_height { "1" } else { "0" }.to_string();
     }
     if let Some(mark_required_complete) = item.mark_required_complete {
-        fields[31] = if mark_required_complete { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::AutoMarkIncomplete.index()] =
+            if mark_required_complete { "1" } else { "0" }.to_string();
     }
     if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
-        fields[31] = if auto_mark_incomplete { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::AutoMarkIncomplete.index()] =
+            if auto_mark_incomplete { "1" } else { "0" }.to_string();
     }
     if let Some(choose_type) = item.choose_type {
-        fields[32] = if choose_type { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::ChooseType.index()] =
+            if choose_type { "1" } else { "0" }.to_string();
     }
     if let Some(text_edit) = item.text_edit {
-        fields[41] = if text_edit { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::TextEdit.index()] = if text_edit { "1" } else { "0" }.to_string();
     }
     if let Some(create_button) = item.create_button {
-        fields[45] = if create_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::CreateButton.index()] =
+            if create_button { "1" } else { "0" }.to_string();
     }
     if let Some(choice_button_representation) = item.choice_button_representation {
-        fields[46] =
+        fields[InputFieldSlot::ChoiceButtonRepresentation.index()] =
             form_choice_button_representation_code(choice_button_representation).to_string();
     }
     if let Some(drop_list_button) = item.drop_list_button {
-        fields[47] = if drop_list_button { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::DropListButton.index()] =
+            if drop_list_button { "1" } else { "0" }.to_string();
     }
     if item.auto_max_width == Some(false) {
-        fields[49] = "0".to_string();
+        fields[InputFieldSlot::AutoMaxWidth.index()] = "0".to_string();
         if item.max_width.is_none() {
-            fields[50] = "0".to_string();
+            fields[InputFieldSlot::MaxWidth.index()] = "0".to_string();
         }
     }
     if let Some(max_width) = &item.max_width {
-        fields[50] = max_width.clone();
+        fields[InputFieldSlot::MaxWidth.index()] = max_width.clone();
     }
     if item.auto_max_height == Some(false) {
-        fields[52] = "0".to_string();
+        fields[InputFieldSlot::AutoMaxHeight.index()] = "0".to_string();
     }
     if let Some(max_height) = &item.max_height {
-        fields[53] = max_height.clone();
+        fields[InputFieldSlot::MaxHeight.index()] = max_height.clone();
     }
     format!("{{{}}}", fields.join(","))
 }
@@ -12812,161 +12830,236 @@ fn patch_form_layout_input_field_extended_options(
         return Ok(None);
     }
     if let Some(horizontal_stretch) = item.horizontal_stretch
-        && fields.get(4).is_some()
+        && fields.get(InputFieldSlot::HorizontalStretch.index()).is_some()
     {
-        replace_braced_field(&mut text, 4, if horizontal_stretch { "1" } else { "0" })?;
+        replace_braced_field(
+            &mut text,
+            InputFieldSlot::HorizontalStretch.index(),
+            if horizontal_stretch { "1" } else { "0" },
+        )?;
     }
     if let Some(vertical_stretch) = item.vertical_stretch {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(5).is_some() {
-            replace_braced_field(&mut text, 5, if vertical_stretch { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::VerticalStretch.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::VerticalStretch.index(),
+                if vertical_stretch { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(password_mode) = item.password_mode {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(7).is_some() {
-            replace_braced_field(&mut text, 7, if password_mode { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::PasswordMode.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::PasswordMode.index(),
+                if password_mode { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(multi_line) = item.multi_line {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(8).is_some() {
-            replace_braced_field(&mut text, 8, if multi_line { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::MultiLine.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::MultiLine.index(),
+                if multi_line { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(wrap) = item.wrap {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(6).is_some() {
-            replace_braced_field(&mut text, 6, if wrap { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::Wrap.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::Wrap.index(),
+                if wrap { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(text_edit) = item.text_edit {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(41).is_some() {
-            replace_braced_field(&mut text, 41, if text_edit { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::TextEdit.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::TextEdit.index(),
+                if text_edit { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(mark_required_complete) = item.mark_required_complete {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(31).is_some() {
+        if fields.get(InputFieldSlot::AutoMarkIncomplete.index()).is_some() {
             replace_braced_field(
                 &mut text,
-                31,
+                InputFieldSlot::AutoMarkIncomplete.index(),
                 if mark_required_complete { "1" } else { "0" },
             )?;
         }
     }
     if let Some(list_choice_mode) = item.list_choice_mode {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(19).is_some() {
-            replace_braced_field(&mut text, 19, if list_choice_mode { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::ListChoiceMode.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::ListChoiceMode.index(),
+                if list_choice_mode { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(width) = &item.width {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(2).is_some() {
-            replace_braced_field(&mut text, 2, width)?;
+        if fields.get(InputFieldSlot::Width.index()).is_some() {
+            replace_braced_field(&mut text, InputFieldSlot::Width.index(), width)?;
         }
     }
     if let Some(height) = &item.height {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(3).is_some() {
-            replace_braced_field(&mut text, 3, height)?;
+        if fields.get(InputFieldSlot::Height.index()).is_some() {
+            replace_braced_field(&mut text, InputFieldSlot::Height.index(), height)?;
         }
     }
     if item.auto_max_width == Some(false) {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(49).is_some() {
-            replace_braced_field(&mut text, 49, "0")?;
-            if item.max_width.is_none() && scan_braced_fields(&text, 0)?.get(50).is_some() {
-                replace_braced_field(&mut text, 50, "0")?;
+        if fields.get(InputFieldSlot::AutoMaxWidth.index()).is_some() {
+            replace_braced_field(&mut text, InputFieldSlot::AutoMaxWidth.index(), "0")?;
+            if item.max_width.is_none()
+                && scan_braced_fields(&text, 0)?
+                    .get(InputFieldSlot::MaxWidth.index())
+                    .is_some()
+            {
+                replace_braced_field(&mut text, InputFieldSlot::MaxWidth.index(), "0")?;
             }
         }
     }
     if let Some(max_width) = &item.max_width {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(50).is_some() {
-            replace_braced_field(&mut text, 50, max_width)?;
+        if fields.get(InputFieldSlot::MaxWidth.index()).is_some() {
+            replace_braced_field(&mut text, InputFieldSlot::MaxWidth.index(), max_width)?;
         }
     }
     if item.auto_max_height == Some(false) {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(52).is_some() {
-            replace_braced_field(&mut text, 52, "0")?;
+        if fields.get(InputFieldSlot::AutoMaxHeight.index()).is_some() {
+            replace_braced_field(&mut text, InputFieldSlot::AutoMaxHeight.index(), "0")?;
         }
     }
     if let Some(max_height) = &item.max_height {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(53).is_some() {
-            replace_braced_field(&mut text, 53, max_height)?;
+        if fields.get(InputFieldSlot::MaxHeight.index()).is_some() {
+            replace_braced_field(&mut text, InputFieldSlot::MaxHeight.index(), max_height)?;
         }
     }
     if let Some(drop_list_button) = item.drop_list_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(47).is_some() {
-            replace_braced_field(&mut text, 47, if drop_list_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::DropListButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::DropListButton.index(),
+                if drop_list_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(clear_button) = item.clear_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(13).is_some() {
-            replace_braced_field(&mut text, 13, if clear_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::ClearButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::ClearButton.index(),
+                if clear_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(open_button) = item.open_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(15).is_some() {
-            replace_braced_field(&mut text, 15, if open_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::OpenButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::OpenButton.index(),
+                if open_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(create_button) = item.create_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(45).is_some() {
-            replace_braced_field(&mut text, 45, if create_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::CreateButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::CreateButton.index(),
+                if create_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(choice_button) = item.choice_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(12).is_some() {
-            replace_braced_field(&mut text, 12, if choice_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::ChoiceButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::ChoiceButton.index(),
+                if choice_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(choice_list_button) = item.choice_list_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(11).is_some() {
-            replace_braced_field(&mut text, 11, if choice_list_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::ChoiceListButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::ChoiceListButton.index(),
+                if choice_list_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(spin_button) = item.spin_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(14).is_some() {
-            replace_braced_field(&mut text, 14, if spin_button { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::SpinButton.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::SpinButton.index(),
+                if spin_button { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(quick_choice) = item.quick_choice {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(23).is_some() {
-            replace_braced_field(&mut text, 23, if quick_choice { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::QuickChoice.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::QuickChoice.index(),
+                if quick_choice { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(choose_type) = item.choose_type {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(32).is_some() {
-            replace_braced_field(&mut text, 32, if choose_type { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::ChooseType.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::ChooseType.index(),
+                if choose_type { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(31).is_some() {
-            replace_braced_field(&mut text, 31, if auto_mark_incomplete { "1" } else { "0" })?;
+        if fields.get(InputFieldSlot::AutoMarkIncomplete.index()).is_some() {
+            replace_braced_field(
+                &mut text,
+                InputFieldSlot::AutoMarkIncomplete.index(),
+                if auto_mark_incomplete { "1" } else { "0" },
+            )?;
         }
     }
     if let Some(choice_button_representation) = item.choice_button_representation {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(46).is_some() {
+        if fields
+            .get(InputFieldSlot::ChoiceButtonRepresentation.index())
+            .is_some()
+        {
             replace_braced_field(
                 &mut text,
-                46,
+                InputFieldSlot::ChoiceButtonRepresentation.index(),
                 form_choice_button_representation_code(choice_button_representation),
             )?;
         }
