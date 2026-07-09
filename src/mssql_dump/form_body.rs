@@ -5202,7 +5202,7 @@ pub(super) fn parse_form_usual_group_extended_options(
     match options.first()?.trim() {
         "29" => Some(FormUsualGroupExtendedOptions {
             group: parse_form_usual_group_property_bag_group(&options),
-            behavior: parse_form_usual_group_property_bag_behavior(fields, &options),
+            behavior: parse_form_usual_group_property_bag_behavior(&options),
             representation: options
                 .get(3)
                 .and_then(|field| parse_form_child_item_representation(field)),
@@ -5250,18 +5250,15 @@ pub(super) fn parse_form_usual_group_property_bag_group(options: &[&str]) -> Opt
 }
 
 pub(super) fn parse_form_usual_group_property_bag_behavior(
-    fields: &[&str],
     options: &[&str],
 ) -> Option<&'static str> {
-    if options.get(13).map(|value| value.trim()) == Some("1") {
-        return Some("Usual");
+    match options.get(28).map(|value| value.trim())? {
+        "0" => Some("Usual"),
+        "1" => Some("Collapsible"),
+        "2" => Some("PopUp"),
+        "3" => None,
+        _ => None,
     }
-    if fields.get(15).map(|value| value.trim()) == Some("2")
-        && options.get(13).map(|value| value.trim()) == Some("1")
-    {
-        return Some("Usual");
-    }
-    None
 }
 
 pub(super) fn parse_form_usual_group_horizontal_stretch(fields: &[&str]) -> Option<bool> {
@@ -9300,10 +9297,7 @@ pub(super) fn format_form_child_item_xml(
             if scroll_on_compress { "true" } else { "false" }
         ));
     }
-    if let Some(behavior) = item
-        .behavior
-        .filter(|behavior| should_emit_form_child_behavior(item, behavior))
-    {
+    if let Some(behavior) = item.behavior {
         xml.push_str(&format!(
             "{tab}\t<Behavior>{}</Behavior>\r\n",
             escape_xml_text(behavior)
@@ -9531,13 +9525,6 @@ pub(super) fn format_form_child_item_xml(
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
-}
-
-fn should_emit_form_child_behavior(item: &FormChildItem, behavior: &str) -> bool {
-    !(item.tag == "UsualGroup"
-        && behavior == "Usual"
-        && item.show_title == Some(false)
-        && matches!(item.representation, None | Some("WeakSeparation")))
 }
 
 pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
