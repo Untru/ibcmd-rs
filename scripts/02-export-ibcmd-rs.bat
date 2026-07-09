@@ -7,7 +7,7 @@ if not defined DB_NAME set "DB_NAME=bsp"
 if not defined DB_SERVER set "DB_SERVER=localhost"
 if not defined DB_USER set "DB_USER=sa"
 if not defined SOURCE_VERSION set "SOURCE_VERSION=2.20"
-if not defined RUN_ROOT set "RUN_ROOT=E:\ibcmd_lab\manual_ours"
+if not defined RUN_ROOT set "RUN_ROOT=E:\ibcmd_lab\bsp_test"
 if not "%~1"=="" set "RUN_ROOT=%~1"
 
 if not defined IBCMD_DB_PSW (
@@ -23,7 +23,7 @@ if not exist "%EXE%" (
     exit /b 1
 )
 
-set "OUT_DIR=%RUN_ROOT%\ibcmd_rs_source_only"
+set "OUT_DIR=%RUN_ROOT%\bsp"
 
 mkdir "%RUN_ROOT%" 2>nul
 

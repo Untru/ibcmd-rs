@@ -1,4 +1,3 @@
-
 use super::*;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
