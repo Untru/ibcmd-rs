@@ -3348,8 +3348,10 @@ pub(super) fn collect_form_child_item_indexes(
         .filter(|(binding_key, _)| !indexes.data_path_by_binding_key.contains_key(*binding_key))
         .filter_map(|(binding_key, names)| {
             let attribute_name = indexes.attribute_name_by_binding_key.get(binding_key)?;
-            let property_name =
-                normalize_form_standard_data_path_name(&infer_form_bound_property_name(names)?);
+            let property_name = normalize_form_data_path_child_name(
+                attribute_name,
+                &infer_form_bound_property_name(names)?,
+            );
             Some((
                 binding_key.clone(),
                 format!("{attribute_name}.{property_name}"),
@@ -3498,7 +3500,7 @@ pub(super) fn collect_form_child_item_indexes_from_field(
                     let column_name = if column_key == "-2" {
                         "LineNumber".to_string()
                     } else {
-                        normalize_form_standard_data_path_name(&name)
+                        name.clone()
                     };
                     indexes
                         .table_column_names_by_binding_key
@@ -7610,7 +7612,7 @@ pub(super) fn parse_form_child_item_data_path(
             .find_map(parse_bound)
             .or_else(|| {
                 parent_data_path.map(|parent| {
-                    let name = normalize_form_standard_data_path_name(name);
+                    let name = normalize_form_data_path_child_name(parent, name);
                     format!("{parent}.{name}")
                 })
             }),
@@ -7657,7 +7659,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(table_id)
                 .and_then(|columns| columns.get(&column))
                 .cloned()
-                .or_else(|| (column == "8").then(|| "Ref".to_string()))?;
+                .or_else(|| (column == "8").then(|| "Ссылка".to_string()))?;
             let field_name = normalize_form_table_column_name(table_name, &field_name);
             Some(format!("{table_name}.{field_name}"))
         }
@@ -7669,7 +7671,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(&table_key)
                 .and_then(|columns| columns.get(&column_key))
                 .cloned()
-                .or_else(|| (column_key == "8").then(|| "Ref".to_string()))?;
+                .or_else(|| (column_key == "8").then(|| "Ссылка".to_string()))?;
             let field_name = normalize_form_table_column_name(table_path, &field_name);
             Some(format!("{table_path}.{field_name}"))
         }
@@ -7707,7 +7709,19 @@ pub(super) fn normalize_form_table_column_name(table_name: &str, field_name: &st
         })
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| field_name.to_string());
-    normalize_form_standard_data_path_name(&field_name)
+    normalize_form_data_path_child_name(table_name, &field_name)
+}
+
+pub(super) fn normalize_form_data_path_child_name(parent_path: &str, name: &str) -> String {
+    if form_data_path_uses_standard_property_names(parent_path) {
+        normalize_form_standard_data_path_name(name)
+    } else {
+        name.to_string()
+    }
+}
+
+pub(super) fn form_data_path_uses_standard_property_names(path: &str) -> bool {
+    matches!(path.split('.').next().unwrap_or(path), "Объект" | "Запись")
 }
 
 pub(super) fn normalize_form_standard_data_path_name(name: &str) -> String {
@@ -7849,8 +7863,8 @@ pub(super) fn parse_form_attribute_data_path(
     let attribute_id = ids.first()?.trim();
     attribute_names_by_id
         .get(attribute_id)
-        .map(|name| normalize_form_standard_data_path_name(name))
-        .or_else(|| Some(normalize_form_standard_data_path_name(name)))
+        .cloned()
+        .or_else(|| Some(name.to_string()))
 }
 
 pub(super) fn parse_form_button_command_name(
