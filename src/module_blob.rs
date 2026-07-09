@@ -104,7 +104,6 @@ struct FormXmlBodyProperties {
     horizontal_align: Option<FormXmlHorizontalAlign>,
     conversations_representation: Option<FormXmlConversationsRepresentation>,
     show_title: Option<bool>,
-    show_command_bar: Option<bool>,
     show_close_button: Option<bool>,
     report_result: Option<String>,
     details_data: Option<String>,
@@ -4375,7 +4374,6 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || properties.horizontal_align.is_some()
             || properties.conversations_representation.is_some()
             || properties.show_title.is_some()
-            || properties.show_command_bar.is_some()
             || properties.show_close_button.is_some()
             || properties.report_result.is_some()
             || properties.details_data.is_some()
@@ -4581,7 +4579,6 @@ fn form_xml_root_layout_signal_count(properties: &FormXmlBodyProperties) -> usiz
         + usize::from(properties.horizontal_align.is_some())
         + usize::from(properties.conversations_representation.is_some())
         + usize::from(properties.show_title.is_some())
-        + usize::from(properties.show_command_bar.is_some())
         + usize::from(properties.show_close_button.is_some())
         + usize::from(properties.report_result.is_some())
         + usize::from(properties.details_data.is_some())
@@ -4621,7 +4618,6 @@ fn form_xml_requires_existing_layout(properties: &FormXmlBodyProperties) -> bool
         || properties.horizontal_align.is_some()
         || properties.conversations_representation.is_some()
         || properties.show_title.is_some()
-        || properties.show_command_bar.is_some()
         || properties.show_close_button.is_some()
         || properties.report_result.is_some()
         || properties.details_data.is_some()
@@ -4880,7 +4876,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CommandBarLocation"
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
-                        | "ShowCommandBar"
                         | "ShowCloseButton"
                         | "ReportResult"
                         | "DetailsData"
@@ -5255,7 +5250,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowTitle"])
-                    || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "ShowCloseButton"])
                     || path_ends_with(&path, &["Form", "ReportResult"])
                     || path_ends_with(&path, &["Form", "DetailsData"])
@@ -5743,7 +5737,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "HorizontalAlign"])
                     || path_ends_with(&path, &["Form", "ConversationsRepresentation"])
                     || path_ends_with(&path, &["Form", "ShowTitle"])
-                    || path_ends_with(&path, &["Form", "ShowCommandBar"])
                     || path_ends_with(&path, &["Form", "ShowCloseButton"])
                     || path_ends_with(&path, &["Form", "ReportResult"])
                     || path_ends_with(&path, &["Form", "DetailsData"])
@@ -6260,10 +6253,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "ShowTitle" if path_ends_with(&path, &["Form", "ShowTitle"]) => {
                         properties.show_title =
                             Some(parse_form_xml_bool("ShowTitle", text_value.trim())?);
-                    }
-                    "ShowCommandBar" if path_ends_with(&path, &["Form", "ShowCommandBar"]) => {
-                        properties.show_command_bar =
-                            Some(parse_form_xml_bool("ShowCommandBar", text_value.trim())?);
                     }
                     "ShowCloseButton" if path_ends_with(&path, &["Form", "ShowCloseButton"]) => {
                         properties.show_close_button =
@@ -9456,9 +9445,6 @@ fn patch_form_layout_properties(
     if let Some(show_title) = properties.show_title {
         replace_form_show_title(layout, show_title)?;
     }
-    if let Some(show_command_bar) = properties.show_command_bar {
-        replace_form_show_command_bar(layout, show_command_bar)?;
-    }
     if let Some(show_close_button) = properties.show_close_button {
         replace_form_show_close_button(layout, show_close_button)?;
     }
@@ -9740,28 +9726,6 @@ fn replace_form_save_data_in_settings(
         layout.replace_range(range.clone(), form_save_data_in_settings_code(value));
     }
     Ok(())
-}
-
-fn replace_form_show_command_bar(layout: &mut String, value: bool) -> Result<()> {
-    let fields = scan_braced_fields(layout, 0)?;
-    let Some(range) = fields.get(18) else {
-        return Ok(());
-    };
-    match layout[range.clone()].trim() {
-        "0" | "1" => {
-            layout.replace_range(range.clone(), if value { "0" } else { "1" });
-            Ok(())
-        }
-        _ if form_layout_uses_property_bag(layout, &fields) => {
-            if let Some(range) = fields.get(6)
-                && matches!(layout[range.clone()].trim(), "0" | "1")
-            {
-                layout.replace_range(range.clone(), if value { "0" } else { "1" });
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
 }
 
 fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScroll) -> Result<()> {
@@ -25645,7 +25609,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 	<AutoSaveDataInSettings>Use</AutoSaveDataInSettings>
 	<Group>Horizontal</Group>
 	<CommandBarLocation>Bottom</CommandBarLocation>
-	<ShowCommandBar>true</ShowCommandBar>
 </Form>
 "#
         .as_bytes();
@@ -25669,7 +25632,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[fields[13].clone()], "0");
         assert_eq!(&parsed.layout[fields[14].clone()], "0");
         assert_eq!(&parsed.layout[fields[17].clone()], "3");
-        assert_eq!(&parsed.layout[fields[18].clone()], "0");
+        assert_eq!(&parsed.layout[fields[18].clone()], "1");
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(
             packed.plain_bytes,
@@ -25988,49 +25951,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::form_layout_child_item_pairs_tail_start(&parsed.layout, &fields).unwrap();
 
         assert_eq!(&parsed.layout[fields[tail_start + 6].clone()], "2");
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_report_form_body_xml_show_command_bar_property_bag() -> anyhow::Result<()> {
-        let base = super::deflate_raw(
-            b"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,21,5,{\"B\",0}},\"Old module\",{0}}",
-        )?;
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
-	<ShowCommandBar>true</ShowCommandBar>
-</Form>
-"#;
-
-        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
-        let parsed = super::parse_form_body_blob(&packed.blob)?;
-        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
-
-        assert_eq!(&parsed.layout[fields[6].clone()], "0");
-        assert_eq!(&parsed.layout[fields[18].clone()], "21");
-        assert_eq!(parsed.module_text, "Old module");
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_form_body_xml_explicit_show_command_bar_true() -> anyhow::Result<()> {
-        let base = super::deflate_raw(
-            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,1,0,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
-        )?;
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
-	<ShowCommandBar>true</ShowCommandBar>
-</Form>
-"#;
-
-        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
-        let parsed = super::parse_form_body_blob(&packed.blob)?;
-        let fields = super::scan_braced_fields(&parsed.layout, 0)?;
-
-        assert_eq!(&parsed.layout[fields[18].clone()], "0");
-        assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
     }

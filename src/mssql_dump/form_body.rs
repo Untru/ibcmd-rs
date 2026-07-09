@@ -151,7 +151,6 @@ pub(super) struct FormBodyProperties {
     pub(super) horizontal_align: Option<&'static str>,
     pub(super) conversations_representation: Option<&'static str>,
     pub(super) show_title: Option<bool>,
-    pub(super) show_command_bar: Option<bool>,
     pub(super) show_close_button: Option<bool>,
     pub(super) report_result: Option<String>,
     pub(super) details_data: Option<String>,
@@ -486,7 +485,6 @@ pub(super) fn extract_form_body_properties(fields: &[&str]) -> FormBodyPropertie
         horizontal_align: extract_form_horizontal_align(fields),
         conversations_representation: extract_form_conversations_representation(fields),
         show_title: extract_form_show_title(fields),
-        show_command_bar: extract_form_show_command_bar(fields),
         show_close_button: extract_form_show_close_button(fields),
         report_result: None,
         details_data: None,
@@ -903,23 +901,6 @@ pub(super) fn extract_form_show_title(fields: &[&str]) -> Option<bool> {
     match fields.get(tail_start + 17).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
-    }
-}
-
-pub(super) fn extract_form_show_command_bar(fields: &[&str]) -> Option<bool> {
-    match fields.get(18).map(|field| field.trim())? {
-        "0" => return None,
-        "1" => return Some(false),
-        _ => {}
-    }
-    if form_root_uses_property_bag(fields) {
-        match fields.get(6).map(|field| field.trim())? {
-            "0" => None,
-            "1" => Some(false),
-            _ => None,
-        }
-    } else {
-        None
     }
 }
 
@@ -7782,12 +7763,6 @@ pub(super) fn format_form_body_xml(
     }
     if properties.show_title == Some(false) {
         xml.push_str("\t<ShowTitle>false</ShowTitle>\r\n");
-    }
-    if let Some(show_command_bar) = properties.show_command_bar {
-        xml.push_str(&format!(
-            "\t<ShowCommandBar>{}</ShowCommandBar>\r\n",
-            if show_command_bar { "true" } else { "false" }
-        ));
     }
     if properties.show_close_button == Some(false) {
         xml.push_str("\t<ShowCloseButton>false</ShowCloseButton>\r\n");

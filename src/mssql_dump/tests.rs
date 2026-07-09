@@ -2599,7 +2599,7 @@ fn extracts_form_scaling_mode_when_root_child_item_is_pages() {
 }
 
 #[test]
-fn extracts_form_show_command_bar_false_to_body_xml() {
+fn does_not_extract_form_show_command_bar_from_root_slot() {
     let form_body = deflate_for_test(
             r#"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,1,{0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"#.as_bytes(),
         );
@@ -2607,7 +2607,7 @@ fn extracts_form_show_command_bar_false_to_body_xml() {
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
     assert!(form_xml.contains("<CommandBarLocation>None</CommandBarLocation>"));
-    assert!(form_xml.contains("<ShowCommandBar>false</ShowCommandBar>"));
+    assert!(!form_xml.contains("<ShowCommandBar>"));
 }
 
 #[test]
@@ -3000,7 +3000,7 @@ fn extracts_form_save_data_in_settings_to_body_xml() {
 }
 
 #[test]
-fn extracts_report_form_show_command_bar_from_property_bag_layout() {
+fn does_not_extract_report_form_show_command_bar_from_property_bag_layout() {
     let form_body = deflate_for_test(
             r#"{4,{59,0,0,0,0,1,1,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,0,21,5,{"B",0}},"",{0}}"#.as_bytes(),
         );
@@ -3008,7 +3008,7 @@ fn extracts_report_form_show_command_bar_from_property_bag_layout() {
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
     assert!(form_xml.contains("<CommandBarLocation>None</CommandBarLocation>"));
-    assert!(form_xml.contains("<ShowCommandBar>false</ShowCommandBar>"));
+    assert!(!form_xml.contains("<ShowCommandBar>"));
 }
 
 #[test]
@@ -3020,7 +3020,7 @@ fn does_not_extract_save_data_in_settings_from_property_bag_show_command_bar_slo
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
     assert!(!form_xml.contains("<SaveDataInSettings>"));
-    assert!(form_xml.contains("<ShowCommandBar>false</ShowCommandBar>"));
+    assert!(!form_xml.contains("<ShowCommandBar>"));
 }
 
 #[test]
