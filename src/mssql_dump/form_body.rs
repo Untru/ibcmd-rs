@@ -167,6 +167,7 @@ pub(super) struct FormBodyProperties {
 
 pub(super) const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 pub(super) const FORM_STANDARD_PERIOD_UUID: &str = "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88";
+pub(super) const FORM_ITEM_TYPE_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 pub(super) const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 pub(super) const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 pub(super) const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str =
@@ -3931,6 +3932,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         initial_tree_view: if tag == "Table" {
             parse_form_table_initial_tree_view(wrapper, &fields)
+                .or_else(|| parse_form_table_default_initial_tree_view(wrapper, &fields))
         } else {
             None
         },
@@ -4022,6 +4024,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         top_level_parent_nil: if tag == "Table" && !ordinary_table_layout {
             parse_form_table_property_bag_undefined(&fields, TableBagKey::TopLevelParent)
+                .or_else(|| parse_form_table_default_top_level_parent_nil(wrapper, &fields))
         } else {
             None
         },
@@ -5925,6 +5928,18 @@ pub(super) fn parse_form_table_initial_tree_view(
     }
 }
 
+pub(super) fn parse_form_table_default_initial_tree_view(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    if form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_some() {
+        return None;
+    }
+    (form_table_wrapper55_root_defaults(wrapper, fields)
+        && fields.get(22).map(|field| field.trim()) == Some("0"))
+    .then_some("ExpandTopLevel")
+}
+
 pub(super) fn parse_form_table_use_alternation_row_color_from_slots(
     wrapper: &str,
     fields: &[&str],
@@ -5953,6 +5968,22 @@ pub(super) fn parse_form_table_default_row_picture_data_path(
             .get(43)
             .is_some_and(|field| form_table_default_picture_marker(field)))
     .then(|| format!("{data_path}.DefaultPicture"))
+}
+
+pub(super) fn parse_form_table_default_top_level_parent_nil(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<bool> {
+    if form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_some() {
+        return None;
+    }
+    form_table_wrapper55_root_defaults(wrapper, fields).then_some(true)
+}
+
+pub(super) fn form_table_wrapper55_root_defaults(wrapper: &str, fields: &[&str]) -> bool {
+    wrapper == "55"
+        && fields.get(36).map(|field| field.trim()) == Some("1")
+        && fields.get(37).map(|field| field.trim()) == Some("0")
 }
 
 pub(super) fn form_table_default_picture_marker(field: &str) -> bool {
@@ -5998,10 +6029,11 @@ pub(super) fn parse_form_button_group_command_source(fields: &[&str]) -> Option<
     match (
         source.first().map(|field| field.trim()),
         form_ref.first().map(|field| field.trim()),
+        form_ref.get(1).map(|field| field.trim()),
         source.get(2).map(|field| field.trim()),
         source.get(3).map(|field| field.trim()),
     ) {
-        (Some("2"), Some("0"), Some("2"), Some("0")) => Some("Form"),
+        (Some("2"), Some("0"), Some(FORM_ITEM_TYPE_UUID), Some("2"), Some("0")) => Some("Form"),
         _ => None,
     }
 }

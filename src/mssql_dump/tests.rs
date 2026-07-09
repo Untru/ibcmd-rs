@@ -4927,6 +4927,56 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
 }
 
 #[test]
+fn extracts_wrapper55_table_root_defaults_without_explicit_top_level_parent() {
+    let mut attribute_names_by_id = BTreeMap::new();
+    attribute_names_by_id.insert("6".to_string(), "Список".to_string());
+
+    let item = parse_form_child_item_with_attrs(
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Список",0,0,2,{1,1,{"ru","Список"}},{1,0},{1,{6}},0,1,0,0,0,1,1,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,1,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,11,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",1},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},16,{"N",123},20,{"B",1},{0}}"##,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(item.table_representation, Some("List"));
+    assert_eq!(item.table_command_bar_location, Some("Top"));
+    assert_eq!(item.default_item, Some(true));
+    assert_eq!(item.use_alternation_row_color, Some(true));
+    assert_eq!(item.initial_tree_view, Some("ExpandTopLevel"));
+    assert_eq!(item.row_picture_data_path.as_deref(), Some("Список.DefaultPicture"));
+    assert_eq!(item.top_level_parent_nil, Some(true));
+    assert_eq!(item.show_root, Some(true));
+    assert_eq!(item.allow_root_choice, Some(false));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<InitialTreeView>ExpandTopLevel</InitialTreeView>"));
+    assert!(xml.contains(r#"<TopLevelParent xsi:nil="true"/>"#));
+    assert!(
+        xml.find("<UseAlternationRowColor>true</UseAlternationRowColor>")
+            .unwrap()
+            < xml
+                .find("<InitialTreeView>ExpandTopLevel</InitialTreeView>")
+                .unwrap()
+    );
+    assert!(
+        xml.find("<RestoreCurrentRow>false</RestoreCurrentRow>")
+            .unwrap()
+            < xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
+    );
+    assert!(
+        xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
+            < xml.find("<ShowRoot>true</ShowRoot>").unwrap()
+    );
+}
+
+#[test]
 fn omits_table_default_skip_on_input_but_keeps_true() {
     let mut attribute_names_by_id = BTreeMap::new();
     attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
@@ -9691,6 +9741,32 @@ fn parses_button_group_command_source_from_live_layout() {
         parse_form_button_group_command_source(&fields),
         Some("Form")
     );
+}
+
+#[test]
+fn omits_button_group_command_source_for_bare_form_source() {
+    let mut fields = vec!["0"; 21];
+    fields[20] = "{2,{0},2,0}";
+    assert_eq!(parse_form_button_group_command_source(&fields), None);
+}
+
+#[test]
+fn omits_button_group_command_source_xml_for_bare_form_source() {
+    let item = parse_form_child_item(
+        r#"{22,{84,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,6,"ФормаГруппаАктивностьПроводок",{1,1,{"ru","Активность проводок"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{2,{0},2,0},1,a9f3b1ac-f51b-431e-b102-55a69acdecad}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.tag, "ButtonGroup");
+    assert_eq!(item.command_source, None);
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(!xml.contains("<CommandSource>"), "{xml}");
 }
 
 #[test]
