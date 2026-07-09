@@ -4091,7 +4091,6 @@ pub(super) fn parse_form_child_item_with_context(
         },
         initial_tree_view: if tag == "Table" {
             parse_form_table_initial_tree_view(wrapper, &fields)
-                .or_else(|| parse_form_table_default_initial_tree_view(wrapper, &fields))
         } else {
             None
         },
@@ -6151,6 +6150,14 @@ pub(super) fn parse_form_search_addition_source_item(
 
 pub(super) fn parse_form_table_representation(field: &str) -> Option<&'static str> {
     match field.trim() {
+        "0" => Some("List"),
+        "2" => Some("Tree"),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_wrapper73_representation(field: &str) -> Option<&'static str> {
+    match field.trim() {
         "1" => Some("List"),
         _ => None,
     }
@@ -6162,16 +6169,20 @@ pub(super) fn parse_form_table_representation_from_fields(
 ) -> Option<&'static str> {
     match wrapper {
         "55" => fields
-            .get(8)
-            .and_then(|field| parse_form_table_representation(field))
-            .or_else(|| {
-                fields
-                    .get(13)
-                    .and_then(|field| parse_form_table_representation(field))
-            }),
+            .get(3)
+            .and_then(|field| parse_form_table_representation(field)),
         "73" => fields
             .get(8)
-            .and_then(|field| parse_form_table_representation(field)),
+            .and_then(|field| parse_form_table_wrapper73_representation(field)),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_command_bar_location_field(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("None"),
+        "2" => Some("Top"),
+        "3" => Some("Bottom"),
         _ => None,
     }
 }
@@ -6181,19 +6192,9 @@ pub(super) fn parse_form_table_command_bar_location(
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" if form_table_wrapper55_uses_split_head_slots(fields) => {
-            fields.get(18).and_then(|field| match field.trim() {
-                "0" => Some("None"),
-                "1" => Some("Top"),
-                _ => None,
-            })
-        }
-        "55" if form_table_wrapper55_uses_root_default_command_bar_none(fields) => {
-            fields.get(18).and_then(|field| match field.trim() {
-                "0" => Some("None"),
-                _ => None,
-            })
-        }
+        "55" => fields
+            .get(8)
+            .and_then(|field| parse_form_table_command_bar_location_field(field)),
         _ => None,
     }
 }
@@ -6202,34 +6203,18 @@ pub(super) fn form_table_wrapper55_uses_split_head_slots(fields: &[&str]) -> boo
     fields.get(8).map(|field| field.trim()) == Some("2")
 }
 
-pub(super) fn form_table_wrapper55_uses_root_default_command_bar_none(fields: &[&str]) -> bool {
-    form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_none()
-        && form_table_wrapper55_root_defaults("55", fields)
-}
-
 pub(super) fn parse_form_table_initial_tree_view(
     wrapper: &str,
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" => fields.get(22).and_then(|field| match field.trim() {
+        "55" => fields.get(39).and_then(|field| match field.trim() {
             "1" => Some("ExpandTopLevel"),
+            "2" => Some("ExpandAllLevels"),
             _ => None,
         }),
         _ => None,
     }
-}
-
-pub(super) fn parse_form_table_default_initial_tree_view(
-    wrapper: &str,
-    fields: &[&str],
-) -> Option<&'static str> {
-    if form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_some() {
-        return None;
-    }
-    (form_table_wrapper55_root_defaults(wrapper, fields)
-        && fields.get(22).map(|field| field.trim()) == Some("0"))
-    .then_some("ExpandTopLevel")
 }
 
 pub(super) fn parse_form_table_use_alternation_row_color_from_slots(

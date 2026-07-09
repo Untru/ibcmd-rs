@@ -17,8 +17,7 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
-    FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormTablePropertyBagKey as TableBagKey,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormTablePropertyBagKey as TableBagKey,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -7328,8 +7327,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         ) =>
                     {
                         if let Some(item) = current_child_items.last_mut() {
-                            item.table_command_bar_location =
-                                Some(parse_form_table_command_bar_location_xml(text_value.trim())?);
+                            item.table_command_bar_location = Some(
+                                parse_form_table_command_bar_location_xml(text_value.trim())?,
+                            );
                         }
                     }
                     "Representation"
@@ -9010,10 +9010,7 @@ fn path_ends_with_for_child_default_item(path: &[String], items: &[FormXmlChildI
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
 }
 
-fn path_ends_with_for_child_initial_tree_view(
-    path: &[String],
-    items: &[FormXmlChildItem],
-) -> bool {
+fn path_ends_with_for_child_initial_tree_view(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
@@ -9283,7 +9280,9 @@ fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepres
 fn parse_form_table_command_bar_location_xml(value: &str) -> Result<String> {
     match value {
         "Top" => Ok(value.to_string()),
-        other => Err(anyhow!("unsupported Form Table CommandBarLocation: {other}")),
+        other => Err(anyhow!(
+            "unsupported Form Table CommandBarLocation: {other}"
+        )),
     }
 }
 
@@ -10603,9 +10602,11 @@ fn patch_form_layout_table_user_settings_group(
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if form_layout_child_item_matches(text, &fields, item) && item.tag == "Table" {
-        if let Some(value_range) =
-            form_layout_table_property_bag_value_range(text, &fields, TableBagKey::UserSettingsGroup)
-            && is_form_property_bag_number_value(&text[value_range.clone()])
+        if let Some(value_range) = form_layout_table_property_bag_value_range(
+            text,
+            &fields,
+            TableBagKey::UserSettingsGroup,
+        ) && is_form_property_bag_number_value(&text[value_range.clone()])
         {
             text.replace_range(value_range, &format!(r#"{{"N",{group_id}}}"#));
             return Ok(true);
@@ -11268,8 +11269,7 @@ fn format_form_layout_new_input_field_extended_options(item: &FormXmlChildItem) 
             if password_mode { "1" } else { "0" }.to_string();
     }
     if let Some(multi_line) = item.multi_line {
-        fields[InputFieldSlot::MultiLine.index()] =
-            if multi_line { "1" } else { "0" }.to_string();
+        fields[InputFieldSlot::MultiLine.index()] = if multi_line { "1" } else { "0" }.to_string();
     }
     if let Some(choice_list_button) = item.choice_list_button {
         fields[InputFieldSlot::ChoiceListButton.index()] =
@@ -12103,8 +12103,7 @@ fn patch_form_layout_child_item_entry(
     if item.tag == "Table" {
         if let Some(representation) = &item.table_representation
             && let Some(code) = form_table_representation_code(representation)
-            && let Some(representation_range) =
-                form_layout_table_representation_range(text, fields)
+            && let Some(representation_range) = form_layout_table_representation_range(text, fields)
         {
             replacements.push((representation_range.clone(), code.to_string()));
         }
@@ -12184,8 +12183,11 @@ fn patch_form_layout_child_item_entry(
             ));
         }
         if let Some(auto_refresh_period) = &item.auto_refresh_period
-            && let Some(period_range) =
-                form_layout_table_property_bag_value_range(text, fields, TableBagKey::AutoRefreshPeriod)
+            && let Some(period_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::AutoRefreshPeriod,
+            )
             && is_form_property_bag_number_value(&text[period_range.clone()])
         {
             replacements.push((
@@ -12202,12 +12204,11 @@ fn patch_form_layout_child_item_entry(
             replacements.push((period_range.clone(), replacement));
         }
         if let Some(use_alternation_row_color) = item.use_alternation_row_color
-            && let Some(alternation_range) =
-                form_layout_table_property_bag_value_range(
-                    text,
-                    fields,
-                    TableBagKey::UseAlternationRowColor,
-                )
+            && let Some(alternation_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::UseAlternationRowColor,
+            )
             && is_form_property_bag_bool_value(&text[alternation_range.clone()])
         {
             replacements.push((
@@ -12243,12 +12244,11 @@ fn patch_form_layout_child_item_entry(
             replacements.push((initial_tree_view_range.clone(), code.to_string()));
         }
         if let Some(choice_folders_and_items) = item.choice_folders_and_items
-            && let Some(choice_range) =
-                form_layout_table_property_bag_value_range(
-                    text,
-                    fields,
-                    TableBagKey::ChoiceFoldersAndItems,
-                )
+            && let Some(choice_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::ChoiceFoldersAndItems,
+            )
             && is_form_use_for_folders_and_items_value(&text[choice_range.clone()])
         {
             replacements.push((
@@ -12260,8 +12260,11 @@ fn patch_form_layout_child_item_entry(
             ));
         }
         if let Some(restore_current_row) = item.restore_current_row
-            && let Some(restore_range) =
-                form_layout_table_property_bag_value_range(text, fields, TableBagKey::RestoreCurrentRow)
+            && let Some(restore_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::RestoreCurrentRow,
+            )
             && is_form_property_bag_bool_value(&text[restore_range.clone()])
         {
             replacements.push((
@@ -12282,8 +12285,11 @@ fn patch_form_layout_child_item_entry(
             replacements.push((row_filter_range.clone(), r#"{"U"}"#.to_string()));
         }
         if let Some(row_picture_data_path) = &item.row_picture_data_path
-            && let Some(row_picture_range) =
-                form_layout_table_property_bag_value_range(text, fields, TableBagKey::RowPictureDataPath)
+            && let Some(row_picture_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::RowPictureDataPath,
+            )
             && is_form_property_bag_string_value(&text[row_picture_range.clone()])
         {
             replacements.push((
@@ -12292,12 +12298,11 @@ fn patch_form_layout_child_item_entry(
             ));
         }
         if let Some(update_on_data_change) = item.update_on_data_change
-            && let Some(update_range) =
-                form_layout_table_property_bag_value_range(
-                    text,
-                    fields,
-                    TableBagKey::UpdateOnDataChange,
-                )
+            && let Some(update_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::UpdateOnDataChange,
+            )
             && is_form_update_on_data_change_value(&text[update_range.clone()])
         {
             replacements.push((
@@ -12936,7 +12941,9 @@ fn patch_form_layout_input_field_extended_options(
         return Ok(None);
     }
     if let Some(horizontal_stretch) = item.horizontal_stretch
-        && fields.get(InputFieldSlot::HorizontalStretch.index()).is_some()
+        && fields
+            .get(InputFieldSlot::HorizontalStretch.index())
+            .is_some()
     {
         replace_braced_field(
             &mut text,
@@ -12946,7 +12953,10 @@ fn patch_form_layout_input_field_extended_options(
     }
     if let Some(vertical_stretch) = item.vertical_stretch {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(InputFieldSlot::VerticalStretch.index()).is_some() {
+        if fields
+            .get(InputFieldSlot::VerticalStretch.index())
+            .is_some()
+        {
             replace_braced_field(
                 &mut text,
                 InputFieldSlot::VerticalStretch.index(),
@@ -12996,7 +13006,10 @@ fn patch_form_layout_input_field_extended_options(
     }
     if let Some(mark_required_complete) = item.mark_required_complete {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(InputFieldSlot::AutoMarkIncomplete.index()).is_some() {
+        if fields
+            .get(InputFieldSlot::AutoMarkIncomplete.index())
+            .is_some()
+        {
             replace_braced_field(
                 &mut text,
                 InputFieldSlot::AutoMarkIncomplete.index(),
@@ -13109,7 +13122,10 @@ fn patch_form_layout_input_field_extended_options(
     }
     if let Some(choice_list_button) = item.choice_list_button {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(InputFieldSlot::ChoiceListButton.index()).is_some() {
+        if fields
+            .get(InputFieldSlot::ChoiceListButton.index())
+            .is_some()
+        {
             replace_braced_field(
                 &mut text,
                 InputFieldSlot::ChoiceListButton.index(),
@@ -13149,7 +13165,10 @@ fn patch_form_layout_input_field_extended_options(
     }
     if let Some(auto_mark_incomplete) = item.auto_mark_incomplete {
         let fields = scan_braced_fields(&text, 0)?;
-        if fields.get(InputFieldSlot::AutoMarkIncomplete.index()).is_some() {
+        if fields
+            .get(InputFieldSlot::AutoMarkIncomplete.index())
+            .is_some()
+        {
             replace_braced_field(
                 &mut text,
                 InputFieldSlot::AutoMarkIncomplete.index(),
