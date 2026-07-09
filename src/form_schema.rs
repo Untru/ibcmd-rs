@@ -218,3 +218,47 @@ impl FormInputFieldExtendedOptionSlot {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormFieldTopLevelSlot {
+    DefaultItem,
+    TitleFont,
+}
+
+impl FormFieldTopLevelSlot {
+    pub(crate) const fn index(self, top_level_offset: usize) -> usize {
+        match self {
+            Self::DefaultItem => 16 + top_level_offset,
+            Self::TitleFont => 32 + top_level_offset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormLabelFieldOptionSlot {
+    Width,
+    Height,
+    HorizontalStretch,
+    Format,
+    MaxWidth,
+    TextColor,
+    Font,
+    AutoMaxWidth,
+    AutoMaxHeight,
+}
+
+impl FormLabelFieldOptionSlot {
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::Width => 1,
+            Self::Height => 2,
+            Self::HorizontalStretch => 3,
+            Self::Format => 6,
+            Self::MaxWidth => 7,
+            Self::TextColor => 8,
+            Self::Font => 10,
+            Self::AutoMaxWidth => 15,
+            Self::AutoMaxHeight => 18,
+        }
+    }
+}

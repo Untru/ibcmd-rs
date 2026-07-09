@@ -1,7 +1,8 @@
 use super::*;
 use crate::form_schema::{
-    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FORM_TABLE_XML_ORDER, FormInputFieldXmlProperty, FormTableOrdinaryTailKey as TableTailKey,
+    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_TABLE_XML_ORDER, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
+    FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
 };
 
@@ -398,6 +399,7 @@ pub(super) struct FormChildItem {
     pub(super) auto_insert_new_row: Option<bool>,
     pub(super) format: Vec<(String, String)>,
     pub(super) edit_format: Vec<(String, String)>,
+    pub(super) title_font_xml: Option<String>,
     pub(super) font_xml: Option<String>,
     pub(super) width: Option<String>,
     pub(super) height: Option<String>,
@@ -3571,7 +3573,7 @@ pub(super) fn parse_form_child_item_with_context(
     field: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
-    parent_tag: Option<&str>,
+    _parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
@@ -3722,7 +3724,7 @@ pub(super) fn parse_form_child_item_with_context(
         .then(|| parse_form_column_group_options(&fields))
         .flatten();
     let label_decoration_options = (tag == "LabelDecoration")
-        .then(|| parse_form_label_decoration_options(&fields))
+        .then(|| parse_form_label_decoration_options(&fields, object_refs))
         .flatten();
     let label_field_options = (tag == "LabelField")
         .then(|| parse_form_label_field_options(&fields, object_refs))
@@ -3913,9 +3915,7 @@ pub(super) fn parse_form_child_item_with_context(
         use_alternation_row_color: if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, TableBagKey::UseAlternationRowColor)
                 .filter(|value| *value)
-                .or_else(|| {
-                    parse_form_table_use_alternation_row_color_from_slots(wrapper, &fields)
-                })
+                .or_else(|| parse_form_table_use_alternation_row_color_from_slots(wrapper, &fields))
         } else {
             None
         },
@@ -3927,6 +3927,21 @@ pub(super) fn parse_form_child_item_with_context(
                     .filter(|value| *value)
                     .or_else(|| parse_form_table_default_item_from_slots(wrapper, &fields))
             }
+        } else if matches!(wrapper, "37" | "48")
+            && matches!(
+                tag,
+                "InputField"
+                    | "LabelField"
+                    | "CheckBoxField"
+                    | "PictureField"
+                    | "RadioButtonField"
+                    | "TextDocumentField"
+            )
+        {
+            fields
+                .get(FieldSlot::DefaultItem.index(input_field_top_level_offset))
+                .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| *value)
         } else {
             None
         },
@@ -4278,6 +4293,23 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             Vec::new()
         },
+        title_font_xml: if matches!(wrapper, "37" | "48")
+            && matches!(
+                tag,
+                "InputField"
+                    | "LabelField"
+                    | "CheckBoxField"
+                    | "PictureField"
+                    | "RadioButtonField"
+                    | "TextDocumentField"
+            )
+        {
+            fields
+                .get(FieldSlot::TitleFont.index(input_field_top_level_offset))
+                .and_then(|field| parse_form_title_font_tuple_xml(field, object_refs))
+        } else {
+            None
+        },
         font_xml: if tag == "LabelField" {
             label_field_options
                 .as_ref()
@@ -4287,9 +4319,9 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_ref()
                 .and_then(|options| options.font_xml.clone())
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_font_xml(input_field_extended_options.as_deref())
+            parse_form_input_field_font_xml(input_field_extended_options.as_deref(), object_refs)
         } else if tag == "RadioButtonField" {
-            parse_form_radio_button_font_xml(radio_button_options.as_deref())
+            parse_form_radio_button_font_xml(radio_button_options.as_deref(), object_refs)
         } else {
             None
         },
@@ -4335,7 +4367,6 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.height.clone())
-                .filter(|value| !(parent_tag == Some("Table") && value == "1"))
         } else if tag == "PictureDecoration" {
             fields
                 .get(11)
@@ -4395,6 +4426,10 @@ pub(super) fn parse_form_child_item_with_context(
         },
         auto_max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_height(input_field_extended_options.as_deref())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.auto_max_height)
         } else if tag == "PictureDecoration" {
             fields
                 .get(11)
@@ -4416,6 +4451,10 @@ pub(super) fn parse_form_child_item_with_context(
         },
         horizontal_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_horizontal_stretch(input_field_extended_options.as_deref())
+        } else if tag == "LabelField" {
+            label_field_options
+                .as_ref()
+                .and_then(|options| options.horizontal_stretch)
         } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -4814,6 +4853,8 @@ pub(super) struct FormLabelFieldOptions {
     pub(super) height: Option<String>,
     pub(super) auto_max_width: Option<bool>,
     pub(super) max_width: Option<String>,
+    pub(super) auto_max_height: Option<bool>,
+    pub(super) horizontal_stretch: Option<bool>,
     pub(super) format: Vec<(String, String)>,
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
@@ -4878,17 +4919,17 @@ pub(super) fn parse_form_label_field_options(
         return None;
     }
     let width = options
-        .get(1)
+        .get(LabelFieldSlot::Width.index())
         .map(|field| field.trim())
         .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
         .map(str::to_string);
     let max_width = options
-        .get(7)
+        .get(LabelFieldSlot::MaxWidth.index())
         .map(|field| field.trim())
         .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
         .map(str::to_string);
     let text_color = options
-        .get(8)
+        .get(LabelFieldSlot::TextColor.index())
         .and_then(|field| parse_form_label_field_text_color(field, object_refs));
     let hyperlink_style = width.is_none() && max_width.is_some();
     Some(FormLabelFieldOptions {
@@ -4897,7 +4938,7 @@ pub(super) fn parse_form_label_field_options(
             None
         } else {
             options
-                .get(15)
+                .get(LabelFieldSlot::Height.index())
                 .map(|field| field.trim())
                 .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
                 .map(str::to_string)
@@ -4905,26 +4946,45 @@ pub(super) fn parse_form_label_field_options(
         auto_max_width: if hyperlink_style {
             None
         } else {
-            match options.get(2).map(|field| field.trim()) {
-                Some("0")
-                    if options.get(1).map(|field| field.trim()) != Some("0")
-                        || (fields.get(7).map(|field| field.trim()) == Some("0")
-                            && options.get(15).map(|field| field.trim()) == Some("0")
-                            && options.get(16).map(|field| field.trim()) == Some("0")) =>
-                {
-                    Some(false)
-                }
+            match options
+                .get(LabelFieldSlot::AutoMaxWidth.index())
+                .map(|field| field.trim())
+            {
+                Some("0") => Some(false),
                 _ => None,
             }
         },
         max_width: if hyperlink_style { None } else { max_width },
+        auto_max_height: if hyperlink_style {
+            None
+        } else {
+            match options
+                .get(LabelFieldSlot::AutoMaxHeight.index())
+                .map(|field| field.trim())
+            {
+                Some("0") => Some(false),
+                _ => None,
+            }
+        },
+        horizontal_stretch: if hyperlink_style {
+            None
+        } else {
+            match options
+                .get(LabelFieldSlot::HorizontalStretch.index())
+                .map(|field| field.trim())
+            {
+                Some("0") => Some(false),
+                Some("1") => Some(true),
+                _ => None,
+            }
+        },
         format: options
-            .get(6)
+            .get(LabelFieldSlot::Format.index())
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default(),
         font_xml: options
-            .get(10)
-            .and_then(|field| parse_form_font_tuple_xml(field)),
+            .get(LabelFieldSlot::Font.index())
+            .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
         text_color: if hyperlink_style { None } else { text_color },
         hyperlink_style,
     })
@@ -4957,6 +5017,7 @@ pub(super) fn parse_form_label_field_text_color(
 
 pub(super) fn parse_form_label_decoration_options(
     fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<FormLabelDecorationOptions> {
     let options = split_1c_braced_fields(fields.get(18)?.trim(), 0)?;
     if options.first()?.trim() != "5" {
@@ -4966,7 +5027,7 @@ pub(super) fn parse_form_label_decoration_options(
         hyperlink: options.get(1).map(|field| field.trim()) == Some("1"),
         font_xml: fields
             .get(15)
-            .and_then(|field| parse_form_font_tuple_xml(field)),
+            .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
         group_horizontal_align: fields
             .get(32)
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
@@ -5366,13 +5427,34 @@ pub(super) fn parse_form_input_field_edit_format(
         .unwrap_or_default()
 }
 
-pub(super) fn parse_form_input_field_font_xml(extended_options: Option<&[&str]>) -> Option<String> {
+pub(super) fn parse_form_input_field_font_xml(
+    extended_options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
     extended_options
         .and_then(|options| options.get(InputFieldSlot::Font.index()))
-        .and_then(|field| parse_form_font_tuple_xml(field))
+        .and_then(|field| parse_form_font_tuple_xml(field, object_refs))
 }
 
-pub(super) fn parse_form_font_tuple_xml(field: &str) -> Option<String> {
+pub(super) fn parse_form_font_tuple_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    parse_form_font_tuple_xml_tag(field, object_refs, "Font")
+}
+
+pub(super) fn parse_form_title_font_tuple_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    parse_form_font_tuple_xml_tag(field, object_refs, "TitleFont")
+}
+
+pub(super) fn parse_form_font_tuple_xml_tag(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    tag_name: &str,
+) -> Option<String> {
     let trimmed = field.trim();
     let fields = split_1c_braced_fields(trimmed, 0)?;
     if fields.first()?.trim() != "7" {
@@ -5387,7 +5469,29 @@ pub(super) fn parse_form_font_tuple_xml(field: &str) -> Option<String> {
     let attrs = value_xml
         .strip_prefix(r#"<Value xsi:type="v8ui:Font""#)?
         .strip_suffix("/>")?;
-    Some(format!("<Font{attrs}/>"))
+    let attrs = if attrs.contains(" ref=") {
+        attrs.to_string()
+    } else if let Some(style_ref) = parse_form_font_style_ref(&fields, object_refs) {
+        format!(r#" ref="{}"{attrs}"#, escape_xml_text(&style_ref))
+    } else {
+        attrs.to_string()
+    };
+    Some(format!("<{tag_name}{attrs}/>"))
+}
+
+pub(super) fn parse_form_font_style_ref(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if fields.get(1).map(|value| value.trim()) != Some("2") {
+        return None;
+    }
+    let style_slot = split_1c_braced_fields(fields.get(3)?.trim(), 0)?;
+    if style_slot.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let uuid = parse_uuid_field(style_slot.get(1)?.trim())?;
+    moxel_style_ref_for_uuid(&uuid, object_refs)
 }
 
 pub(super) fn parse_form_input_field_skip_on_input(field: &str) -> Option<bool> {
@@ -5416,7 +5520,9 @@ pub(super) fn parse_form_input_field_width(extended_options: Option<&[&str]>) ->
 }
 
 pub(super) fn parse_form_input_field_height(extended_options: Option<&[&str]>) -> Option<String> {
-    let value = extended_options?.get(InputFieldSlot::Height.index())?.trim();
+    let value = extended_options?
+        .get(InputFieldSlot::Height.index())?
+        .trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
@@ -5435,7 +5541,9 @@ pub(super) fn parse_form_input_field_auto_max_width(
 pub(super) fn parse_form_input_field_max_width(
     extended_options: Option<&[&str]>,
 ) -> Option<String> {
-    let value = extended_options?.get(InputFieldSlot::MaxWidth.index())?.trim();
+    let value = extended_options?
+        .get(InputFieldSlot::MaxWidth.index())?
+        .trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
@@ -5454,7 +5562,9 @@ pub(super) fn parse_form_input_field_auto_max_height(
 pub(super) fn parse_form_input_field_max_height(
     extended_options: Option<&[&str]>,
 ) -> Option<String> {
-    let value = extended_options?.get(InputFieldSlot::MaxHeight.index())?.trim();
+    let value = extended_options?
+        .get(InputFieldSlot::MaxHeight.index())?
+        .trim();
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
@@ -5752,10 +5862,11 @@ pub(super) fn parse_form_radio_button_columns_count(
 
 pub(super) fn parse_form_radio_button_font_xml(
     extended_options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     extended_options
         .and_then(|options| options.get(4))
-        .and_then(|field| parse_form_font_tuple_xml(field))
+        .and_then(|field| parse_form_font_tuple_xml(field, object_refs))
 }
 
 pub(super) fn parse_form_radio_button_choice_list(
@@ -8180,7 +8291,12 @@ fn format_form_input_field_button_option_xml(
     match property {
         FormInputFieldXmlProperty::DropListButton => item
             .drop_list_button
-            .map(|value| format!("{tab}<DropListButton>{}</DropListButton>\r\n", xml_bool(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<DropListButton>{}</DropListButton>\r\n",
+                    xml_bool(value)
+                )
+            })
             .unwrap_or_default(),
         FormInputFieldXmlProperty::ChoiceButton => item
             .choice_button
@@ -8213,7 +8329,12 @@ fn format_form_input_field_button_option_xml(
             .unwrap_or_default(),
         FormInputFieldXmlProperty::ChoiceListButton => item
             .choice_list_button
-            .map(|value| format!("{tab}<ChoiceListButton>{}</ChoiceListButton>\r\n", xml_bool(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<ChoiceListButton>{}</ChoiceListButton>\r\n",
+                    xml_bool(value)
+                )
+            })
             .unwrap_or_default(),
     }
 }
@@ -8239,11 +8360,21 @@ fn format_form_table_property_xml(
     match property {
         FormTableXmlProperty::Representation => item
             .table_representation
-            .map(|value| format!("{tab}<Representation>{}</Representation>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<Representation>{}</Representation>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::CommandBarLocation => item
             .table_command_bar_location
-            .map(|value| format!("{tab}<CommandBarLocation>{}</CommandBarLocation>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<CommandBarLocation>{}</CommandBarLocation>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::DefaultItem => match item.default_item {
             Some(true) => format!("{tab}<DefaultItem>true</DefaultItem>\r\n"),
@@ -8251,11 +8382,21 @@ fn format_form_table_property_xml(
         },
         FormTableXmlProperty::UseAlternationRowColor => item
             .use_alternation_row_color
-            .map(|value| format!("{tab}<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n", xml_bool(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n",
+                    xml_bool(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::InitialTreeView => item
             .initial_tree_view
-            .map(|value| format!("{tab}<InitialTreeView>{}</InitialTreeView>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<InitialTreeView>{}</InitialTreeView>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::AutoMarkIncomplete => match item.auto_mark_incomplete {
             Some(true) => format!("{tab}<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"),
@@ -8298,12 +8439,19 @@ fn format_form_table_property_xml(
             _ => String::new(),
         },
         FormTableXmlProperty::AutoMaxWidth => match item.auto_max_width {
-            Some(false) if !hierarchical_table => format!("{tab}<AutoMaxWidth>false</AutoMaxWidth>\r\n"),
+            Some(false) if !hierarchical_table => {
+                format!("{tab}<AutoMaxWidth>false</AutoMaxWidth>\r\n")
+            }
             _ => String::new(),
         },
         FormTableXmlProperty::RowInputMode => item
             .row_input_mode
-            .map(|value| format!("{tab}<RowInputMode>{}</RowInputMode>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<RowInputMode>{}</RowInputMode>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::AutoInsertNewRow => match item.auto_insert_new_row {
             Some(true) => format!("{tab}<AutoInsertNewRow>true</AutoInsertNewRow>\r\n"),
@@ -8321,7 +8469,12 @@ fn format_form_table_property_xml(
         },
         FormTableXmlProperty::FileDragMode => item
             .file_drag_mode
-            .map(|value| format!("{tab}<FileDragMode>{}</FileDragMode>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<FileDragMode>{}</FileDragMode>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::DataPath => item
             .data_path
@@ -8375,7 +8528,12 @@ fn format_form_table_property_xml(
         FormTableXmlProperty::AutoRefreshPeriod => item
             .auto_refresh_period
             .as_ref()
-            .map(|value| format!("{tab}<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<AutoRefreshPeriod>{}</AutoRefreshPeriod>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::Period => item
             .period
@@ -8395,11 +8553,21 @@ fn format_form_table_property_xml(
             .unwrap_or_default(),
         FormTableXmlProperty::ChoiceFoldersAndItems => item
             .choice_folders_and_items
-            .map(|value| format!("{tab}<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::RestoreCurrentRow => item
             .restore_current_row
-            .map(|value| format!("{tab}<RestoreCurrentRow>{}</RestoreCurrentRow>\r\n", xml_bool(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<RestoreCurrentRow>{}</RestoreCurrentRow>\r\n",
+                    xml_bool(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::TopLevelParent => match item.top_level_parent_nil {
             Some(true) => format!("{tab}<TopLevelParent xsi:nil=\"true\"/>\r\n"),
@@ -8415,16 +8583,31 @@ fn format_form_table_property_xml(
         },
         FormTableXmlProperty::UpdateOnDataChange => item
             .update_on_data_change
-            .map(|value| format!("{tab}<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<UpdateOnDataChange>{}</UpdateOnDataChange>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::UserSettingsGroup => item
             .user_settings_group
             .as_ref()
-            .map(|value| format!("{tab}<UserSettingsGroup>{}</UserSettingsGroup>\r\n", escape_xml_text(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<UserSettingsGroup>{}</UserSettingsGroup>\r\n",
+                    escape_xml_text(value)
+                )
+            })
             .unwrap_or_default(),
         FormTableXmlProperty::AllowGettingCurrentRowURL => item
             .allow_getting_current_row_url
-            .map(|value| format!("{tab}<AllowGettingCurrentRowURL>{}</AllowGettingCurrentRowURL>\r\n", xml_bool(value)))
+            .map(|value| {
+                format!(
+                    "{tab}<AllowGettingCurrentRowURL>{}</AllowGettingCurrentRowURL>\r\n",
+                    xml_bool(value)
+                )
+            })
             .unwrap_or_default(),
     }
 }
@@ -8547,6 +8730,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(data_path)
         ));
     }
+    if item.tag != "Table" && item.default_item == Some(true) {
+        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
+    }
     if item.visible == Some(false) {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
@@ -8568,6 +8754,9 @@ pub(super) fn format_form_child_item_xml(
         {
             xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
         }
+    }
+    if let Some(title_font_xml) = &item.title_font_xml {
+        xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
     }
     if item.tag == "Table"
         && !form_table_has_hierarchical_navigation(item)
@@ -8798,7 +8987,10 @@ pub(super) fn format_form_child_item_xml(
     if item.auto_cell_height == Some(true) {
         xml.push_str(&format!("{tab}\t<AutoCellHeight>true</AutoCellHeight>\r\n"));
     }
-    xml.push_str(&format_form_input_field_button_options_xml(item, indent + 1));
+    xml.push_str(&format_form_input_field_button_options_xml(
+        item,
+        indent + 1,
+    ));
     if item.list_choice_mode == Some(true) {
         xml.push_str(&format!("{tab}\t<ListChoiceMode>true</ListChoiceMode>\r\n"));
     }

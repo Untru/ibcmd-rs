@@ -4900,7 +4900,8 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
     assert!(xml.contains(r#"<TopLevelParent xsi:nil="true"/>"#));
     assert!(
         xml.find("<Representation>List</Representation>").unwrap()
-            < xml.find("<CommandBarLocation>Top</CommandBarLocation>")
+            < xml
+                .find("<CommandBarLocation>Top</CommandBarLocation>")
                 .unwrap()
     );
     assert!(
@@ -4911,7 +4912,8 @@ fn extracts_wrapper55_table_head_properties_from_split_slots() {
     assert!(
         xml.find("<UseAlternationRowColor>true</UseAlternationRowColor>")
             .unwrap()
-            < xml.find("<InitialTreeView>ExpandTopLevel</InitialTreeView>")
+            < xml
+                .find("<InitialTreeView>ExpandTopLevel</InitialTreeView>")
                 .unwrap()
     );
     assert!(
@@ -4950,7 +4952,10 @@ fn extracts_wrapper55_table_root_defaults_without_explicit_top_level_parent() {
     assert_eq!(item.default_item, Some(true));
     assert_eq!(item.use_alternation_row_color, Some(true));
     assert_eq!(item.initial_tree_view, Some("ExpandTopLevel"));
-    assert_eq!(item.row_picture_data_path.as_deref(), Some("Список.DefaultPicture"));
+    assert_eq!(
+        item.row_picture_data_path.as_deref(),
+        Some("Список.DefaultPicture")
+    );
     assert_eq!(item.top_level_parent_nil, Some(true));
     assert_eq!(item.show_root, Some(true));
     assert_eq!(item.allow_root_choice, Some(false));
@@ -5198,17 +5203,16 @@ fn formats_hierarchical_table_properties_in_schema_order() {
         xml.find("<FileDragMode>AsFile</FileDragMode>").unwrap()
             < xml.find("<DataPath>Список</DataPath>").unwrap()
     );
-    assert!(
-        xml.find("<DataPath>Список</DataPath>").unwrap()
-            < xml.find("<Title>").unwrap()
-    );
+    assert!(xml.find("<DataPath>Список</DataPath>").unwrap() < xml.find("<Title>").unwrap());
     assert!(
         xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
             < xml.find("<ShowRoot>true</ShowRoot>").unwrap()
     );
     assert!(
         xml.find("<ShowRoot>true</ShowRoot>").unwrap()
-            < xml.find("<AllowRootChoice>false</AllowRootChoice>").unwrap()
+            < xml
+                .find("<AllowRootChoice>false</AllowRootChoice>")
+                .unwrap()
     );
 }
 
@@ -6147,9 +6151,9 @@ fn extracts_label_field_height_from_options_bag() {
 }
 
 #[test]
-fn omits_default_table_label_field_height_from_options_bag() {
+fn extracts_table_label_field_default_item_and_horizontal_stretch_without_height() {
     let item = parse_form_child_item_with_context(
-            r#"{37,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Статус",0,0,{1,1,{"ru","Статус"}},{1,0},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,1,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СтатусКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СтатусРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
+            r#"{37,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"Статус",0,0,{1,1,{"ru","Статус"}},{1,0},{1,{3}},{0},1,0,2,1,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,0,0,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СтатусКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СтатусРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#,
             None,
             Some("Список"),
             Some("Table"),
@@ -6164,10 +6168,84 @@ fn omits_default_table_label_field_height_from_options_bag() {
         )
         .unwrap();
 
+    assert_eq!(item.default_item, Some(true));
     assert_eq!(item.height, None);
+    assert_eq!(item.horizontal_stretch, Some(false));
 
     let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
     assert!(!xml.contains("<Height>1</Height>"));
+    assert!(xml.contains("<HorizontalStretch>false</HorizontalStretch>"));
+    assert!(
+        xml.find("<DefaultItem>true</DefaultItem>").unwrap()
+            < xml
+                .find("<HorizontalStretch>false</HorizontalStretch>")
+                .unwrap()
+    );
+}
+
+#[test]
+fn extracts_table_label_field_title_font_and_font_from_style_item_ref() {
+    let style_uuid = "3aa020db-a811-4fb9-9ea9-00a3359fbb53";
+    let style_tuple = format!("{{7,2,0,{{0,{style_uuid}}},1,100}}");
+    let base_layout = r#"{37,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"СчетДт",0,0,{1,1,{"ru","Счет Дт"}},{1,0},{1,{3}},{0},1,0,2,1,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,0,0,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"СчетДтКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,0,1,{12,{31,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"СчетДтРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+    let font_options_prefix =
+        "{11,0,0,0,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2";
+    let font_options_replacement = [
+        "{11,7,0,0,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},",
+        &style_tuple,
+        ",2",
+    ]
+    .concat();
+    let layout = base_layout
+        .replacen("{7,3,0,1,100}", &style_tuple, 1)
+        .replace(font_options_prefix, &font_options_replacement);
+    let item = parse_form_child_item_with_context(
+        &layout,
+        None,
+        Some("Список"),
+        Some("Table"),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::from([(
+            style_uuid.to_string(),
+            "StyleItem.ОсновнойЭлементСписка".to_string(),
+        )]),
+    )
+    .unwrap();
+
+    assert_eq!(
+        item.title_font_xml.as_deref(),
+        Some(r#"<TitleFont ref="style:ОсновнойЭлементСписка" kind="StyleItem"/>"#)
+    );
+    assert_eq!(
+        item.font_xml.as_deref(),
+        Some(r#"<Font ref="style:ОсновнойЭлементСписка" kind="StyleItem"/>"#)
+    );
+    assert_eq!(item.width.as_deref(), Some("7"));
+    assert_eq!(item.horizontal_stretch, Some(false));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    let data_path_at = xml.find("<DataPath>").unwrap();
+    let title_font_at = xml
+        .find(r#"<TitleFont ref="style:ОсновнойЭлементСписка" kind="StyleItem"/>"#)
+        .unwrap();
+    let width_at = xml.find("<Width>7</Width>").unwrap();
+    let stretch_at = xml
+        .find("<HorizontalStretch>false</HorizontalStretch>")
+        .unwrap();
+    let font_at = xml
+        .find(r#"<Font ref="style:ОсновнойЭлементСписка" kind="StyleItem"/>"#)
+        .unwrap();
+    assert!(data_path_at < title_font_at);
+    assert!(title_font_at < width_at);
+    assert!(width_at < stretch_at);
+    assert!(stretch_at < font_at);
 }
 
 #[test]
@@ -8723,6 +8801,7 @@ fn formats_table_search_additions_as_direct_sections() {
         auto_insert_new_row: None,
         format: Vec::new(),
         edit_format: Vec::new(),
+        title_font_xml: None,
         font_xml: None,
         width: None,
         height: None,
@@ -8832,6 +8911,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 auto_insert_new_row: None,
                 format: Vec::new(),
                 edit_format: Vec::new(),
+                title_font_xml: None,
                 font_xml: None,
                 width: None,
                 height: None,
@@ -8942,6 +9022,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 auto_insert_new_row: None,
                 format: Vec::new(),
                 edit_format: Vec::new(),
+                title_font_xml: None,
                 font_xml: None,
                 width: None,
                 height: None,
