@@ -4884,20 +4884,31 @@ fn parse_subsystem_properties_from_text(
     {
         return None;
     }
+    let first_scalar = fields
+        .get(2)
+        .and_then(|field| parse_1c_bool_field(Some(*field)));
     let second_scalar = fields
         .get(3)
         .and_then(|field| parse_1c_bool_field(Some(*field)));
-    let include_help_in_contents = if second_scalar.is_some() {
-        parse_1c_bool_field(fields.get(2).copied()).unwrap_or(false)
-    } else {
-        false
-    };
-    let include_in_command_interface = second_scalar
-        .unwrap_or_else(|| parse_1c_bool_field(fields.get(2).copied()).unwrap_or(true));
-    let use_one_command = fields
+    let third_scalar = fields
         .get(4)
-        .and_then(|field| parse_1c_bool_field(Some(*field)))
-        .unwrap_or(false);
+        .and_then(|field| parse_1c_bool_field(Some(*field)));
+    let (include_help_in_contents, include_in_command_interface, use_one_command) =
+        if third_scalar.is_some() {
+            (
+                second_scalar.unwrap_or(false),
+                third_scalar.unwrap_or(true),
+                first_scalar.unwrap_or(false),
+            )
+        } else if second_scalar.is_some() {
+            (
+                first_scalar.unwrap_or(false),
+                second_scalar.unwrap_or(true),
+                false,
+            )
+        } else {
+            (false, first_scalar.unwrap_or(true), false)
+        };
     Some(SubsystemProperties {
         include_help_in_contents,
         include_in_command_interface,

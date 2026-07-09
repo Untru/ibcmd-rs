@@ -461,6 +461,7 @@ pub(super) struct FormChildItem {
     pub(super) input_hint: Vec<(String, String)>,
     pub(super) choice_list: Vec<FormChoiceListItem>,
     pub(super) extended_tooltip: Option<(String, String)>,
+    pub(super) extended_tooltip_auto_max_width: Option<bool>,
     pub(super) events: Vec<FormBodyEvent>,
     pub(super) data_path: Option<String>,
     pub(super) command_name: Option<String>,
@@ -3759,7 +3760,7 @@ pub(super) fn parse_form_child_item_with_context(
         table_column_names_by_binding_key,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
-    let input_field_extended_options = (tag == "InputField"
+    let input_field_extended_options = (matches!(tag, "InputField" | "TextDocumentField")
         && form_input_field_layout_is_extended(&fields))
     .then(|| form_input_field_extended_options(&fields))
     .flatten();
@@ -4541,7 +4542,9 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        auto_max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        auto_max_width: if matches!(tag, "InputField" | "TextDocumentField")
+            && form_input_field_layout_is_extended(&fields)
+        {
             parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             parse_form_button_auto_max_width(fields.get(34).copied())
@@ -4550,22 +4553,9 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_ref()
                 .and_then(|options| options.auto_max_width)
         } else if tag == "LabelDecoration" {
-            if fields.get(22).map(|field| field.trim()) == Some("0") {
-                Some(false)
-            } else if fields.get(27).map(|field| field.trim()) == Some("0")
-                && fields.get(30).map(|field| field.trim()) == Some("1")
-                && fields.get(31).map(|field| field.trim()) == Some("0")
-            {
-                Some(false)
-            } else {
-                None
-            }
+            parse_form_decoration_auto_max_width(&fields)
         } else if tag == "PictureDecoration" {
-            fields
-                .get(10)
-                .map(|field| field.trim())
-                .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
-                .map(|_| false)
+            parse_form_decoration_auto_max_width(&fields)
         } else if ordinary_table_layout {
             match fields.get(53).map(|field| field.trim()) {
                 Some("0") if fields.get(54).map(|field| field.trim()) == Some("2") => Some(false),
@@ -4715,11 +4705,6 @@ pub(super) fn parse_form_child_item_with_context(
         auto_mark_incomplete: if tag == "InputField" && form_input_field_layout_is_extended(&fields)
         {
             parse_form_input_field_auto_mark_incomplete(input_field_extended_options.as_deref())
-        } else if ordinary_table_layout
-            && fields.get(53).map(|field| field.trim()) == Some("1")
-            && fields.get(54).map(|field| field.trim()) == Some("2")
-        {
-            Some(true)
         } else {
             None
         },
@@ -4819,6 +4804,9 @@ pub(super) fn parse_form_child_item_with_context(
             Vec::new()
         },
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields),
+        extended_tooltip_auto_max_width: parse_form_child_item_extended_tooltip_auto_max_width(
+            &fields,
+        ),
         events: {
             let mut events = parse_form_child_item_event_fields(&fields);
             if tag == "InputField" {
@@ -5706,6 +5694,19 @@ pub(super) fn parse_form_input_field_auto_max_width(
     {
         "0" => Some(false),
         _ => None,
+    }
+}
+
+pub(super) fn parse_form_decoration_auto_max_width(fields: &[&str]) -> Option<bool> {
+    if fields.get(22).map(|field| field.trim()) == Some("0") {
+        Some(false)
+    } else if fields.get(27).map(|field| field.trim()) == Some("0")
+        && fields.get(30).map(|field| field.trim()) == Some("1")
+        && fields.get(31).map(|field| field.trim()) == Some("0")
+    {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -7270,6 +7271,25 @@ pub(super) fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<
         }
         let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
         is_form_extended_tooltip_name(&name).then(|| (name, id.to_string()))
+    })
+}
+
+pub(super) fn parse_form_child_item_extended_tooltip_auto_max_width(
+    fields: &[&str],
+) -> Option<bool> {
+    fields.iter().find_map(|field| {
+        let nested = split_1c_braced_fields(field.trim(), 0)?;
+        if nested.first().map(|value| value.trim()) != Some("12") {
+            return None;
+        }
+        if nested.get(5).map(|value| value.trim()) == Some("1") {
+            return None;
+        }
+        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
+        if !is_form_extended_tooltip_name(&name) {
+            return None;
+        }
+        parse_form_decoration_auto_max_width(&nested)
     })
 }
 
@@ -9459,10 +9479,11 @@ pub(super) fn format_form_child_item_xml(
     if item.tag != "Table"
         && let Some((name, id)) = &item.extended_tooltip
     {
-        xml.push_str(&format!(
-            "{tab}\t<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
-            escape_xml_text(name),
-            escape_xml_text(id)
+        xml.push_str(&format_form_extended_tooltip_xml(
+            name,
+            id,
+            item.extended_tooltip_auto_max_width,
+            indent + 1,
         ));
     }
     if let Some(file_name) = item.picture_file_name {
@@ -9512,10 +9533,11 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
         }
         if let Some((name, id)) = &item.extended_tooltip {
-            xml.push_str(&format!(
-                "{tab}\t<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
-                escape_xml_text(name),
-                escape_xml_text(id)
+            xml.push_str(&format_form_extended_tooltip_xml(
+                name,
+                id,
+                item.extended_tooltip_auto_max_width,
+                indent + 1,
             ));
         }
         for child in &addition_children {
@@ -9553,6 +9575,30 @@ pub(super) fn format_form_child_item_xml(
 
 fn should_emit_form_picture_size(picture_size: &str) -> bool {
     picture_size != "RealSize"
+}
+
+fn format_form_extended_tooltip_xml(
+    name: &str,
+    id: &str,
+    auto_max_width: Option<bool>,
+    indent: usize,
+) -> String {
+    let tab = "\t".repeat(indent);
+    if auto_max_width == Some(false) {
+        format!(
+            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\">\r\n\
+{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n\
+{tab}</ExtendedTooltip>\r\n",
+            escape_xml_text(name),
+            escape_xml_text(id)
+        )
+    } else {
+        format!(
+            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
+            escape_xml_text(name),
+            escape_xml_text(id)
+        )
+    }
 }
 
 pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {

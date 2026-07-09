@@ -8922,6 +8922,7 @@ fn formats_table_search_additions_as_direct_sections() {
         input_hint: Vec::new(),
         choice_list: Vec::new(),
         extended_tooltip: None,
+        extended_tooltip_auto_max_width: None,
         events: Vec::new(),
         data_path: Some("List".to_string()),
         command_name: None,
@@ -9033,6 +9034,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 input_hint: Vec::new(),
                 choice_list: Vec::new(),
                 extended_tooltip: None,
+                extended_tooltip_auto_max_width: None,
                 events: Vec::new(),
                 data_path: None,
                 command_name: None,
@@ -9145,6 +9147,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 input_hint: Vec::new(),
                 choice_list: Vec::new(),
                 extended_tooltip: None,
+                extended_tooltip_auto_max_width: None,
                 events: Vec::new(),
                 data_path: Some("List.Name".to_string()),
                 command_name: None,
@@ -9718,7 +9721,7 @@ fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blo
     assert_eq!(item.tag, "PictureDecoration");
     assert_eq!(item.width.as_deref(), Some("50"));
     assert_eq!(item.height.as_deref(), Some("7"));
-    assert_eq!(item.auto_max_width, Some(false));
+    assert_eq!(item.auto_max_width, None);
     assert_eq!(item.auto_max_height, Some(false));
     assert_eq!(item.picture_size, Some("Proportionally"));
     assert_eq!(
@@ -9729,7 +9732,7 @@ fn extracts_picture_decoration_picture_size_without_file_drag_mode_from_live_blo
 
     let xml = format_form_child_items_xml(&[item], 1);
     assert!(xml.contains("<Width>50</Width>"));
-    assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    assert!(!xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
     assert!(xml.contains("<Height>7</Height>"));
     assert!(xml.contains("<AutoMaxHeight>false</AutoMaxHeight>"));
     assert!(xml.contains("<PictureSize>Proportionally</PictureSize>"));
@@ -19282,8 +19285,8 @@ fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
             PathBuf::from("Subsystems/Admin.xml")
         );
         assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
-        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
-        assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
+        assert!(xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"));
+        assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
         assert!(xml.contains("<UseOneCommand>true</UseOneCommand>"));
         assert!(!xml.contains("<UseStandardCommands>"));
         assert!(
