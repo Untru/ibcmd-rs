@@ -231,6 +231,7 @@ pub(super) struct FormMetadataProperties {
     pub(super) include_help_in_contents: bool,
     pub(super) use_purposes: Vec<&'static str>,
     pub(super) use_standard_commands: bool,
+    pub(super) extended_presentation_present: bool,
     pub(super) extended_presentation: Vec<(String, String)>,
     pub(super) explanation: Vec<(String, String)>,
 }
@@ -241,6 +242,7 @@ impl Default for FormMetadataProperties {
             include_help_in_contents: false,
             use_purposes: default_form_use_purposes(),
             use_standard_commands: false,
+            extended_presentation_present: false,
             extended_presentation: Vec::new(),
             explanation: Vec::new(),
         }
@@ -253,11 +255,19 @@ pub(super) fn parse_form_metadata_properties_from_text(
     uuid: &str,
 ) -> FormMetadataProperties {
     let mut properties = FormMetadataProperties::default();
-    if let Some(form_fields) = form_metadata_fields_from_text(text, uuid) {
+    if let Some((form_fields, form_extended_presentation)) =
+        form_metadata_fields_and_extended_presentation_from_text(text, uuid)
+    {
         properties.include_help_in_contents =
             parse_1c_bool_field(form_fields.get(2).copied()).unwrap_or(false);
         properties.use_purposes = parse_form_use_purposes(form_fields.get(4).copied())
             .unwrap_or_else(default_form_use_purposes);
+        if kind == "Form"
+            && let Some(extended_presentation) = form_extended_presentation
+        {
+            properties.extended_presentation_present = true;
+            properties.extended_presentation = parse_1c_synonyms(extended_presentation);
+        }
     }
 
     if kind == "CommonForm"
@@ -275,21 +285,52 @@ pub(super) fn parse_form_metadata_properties_from_text(
     properties
 }
 
-fn form_metadata_fields_from_text<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
-    let mut offset = 0usize;
-    while let Some(relative_index) = text[offset..].find('{') {
-        let block_start = offset + relative_index;
-        offset = block_start + 1;
-        let Some(block_end) = scan_1c_braced_value(text, block_start) else {
+fn form_metadata_fields_and_extended_presentation_from_text<'a>(
+    text: &'a str,
+    uuid: &str,
+) -> Option<(Vec<&'a str>, Option<&'a str>)> {
+    form_metadata_fields_and_extended_presentation_in_block(
+        text.trim_start_matches('\u{feff}'),
+        uuid,
+    )
+}
+
+fn form_metadata_fields_and_extended_presentation_in_block<'a>(
+    block: &'a str,
+    uuid: &str,
+) -> Option<(Vec<&'a str>, Option<&'a str>)> {
+    let fields = split_1c_braced_fields(block, 0)?;
+    if matches!(fields.first().map(|field| field.trim()), Some("13" | "14"))
+        && metadata_header_field_index(&fields, uuid).is_some()
+    {
+        return Some((fields, None));
+    }
+
+    for (index, field) in fields.iter().enumerate() {
+        let Some(child_fields) = split_1c_braced_fields(field.trim(), 0) else {
             continue;
         };
-        let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
-            continue;
-        };
-        if matches!(fields.first().map(|field| field.trim()), Some("13" | "14"))
-            && metadata_header_field_index(&fields, uuid).is_some()
+        if matches!(
+            child_fields.first().map(|field| field.trim()),
+            Some("13" | "14")
+        ) && metadata_header_field_index(&child_fields, uuid).is_some()
         {
-            return Some(fields);
+            let extended_presentation = fields
+                .get(index + 1)
+                .copied()
+                .filter(|field| split_1c_braced_fields(field.trim(), 0).is_some());
+            return Some((child_fields, extended_presentation));
+        }
+    }
+
+    for field in fields {
+        if !field.trim_start().starts_with('{') {
+            continue;
+        }
+        if let Some(found) =
+            form_metadata_fields_and_extended_presentation_in_block(field.trim(), uuid)
+        {
+            return Some(found);
         }
     }
     None
@@ -392,7 +433,10 @@ pub(super) fn format_form_source_xml(
             &properties.extended_presentation,
         );
         push_localized_property(&mut xml, "\t\t\t", "Explanation", &properties.explanation);
-    } else if kind == "Form" && !properties.extended_presentation.is_empty() {
+    } else if kind == "Form"
+        && (properties.extended_presentation_present
+            || !properties.extended_presentation.is_empty())
+    {
         push_localized_property(
             &mut xml,
             "\t\t\t",
