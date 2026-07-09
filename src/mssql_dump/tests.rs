@@ -4789,7 +4789,10 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     assert_eq!(item.tag, "Table");
     assert_eq!(item.name, "Rows");
     assert_eq!(item.data_path.as_deref(), Some("Rows"));
+    assert_eq!(item.table_representation, Some("List"));
+    assert_eq!(item.table_command_bar_location, None);
     assert_eq!(item.skip_on_input, Some(false));
+    assert_eq!(item.file_drag_mode, Some("AsFile"));
     assert_eq!(item.auto_refresh, Some(false));
     assert_eq!(item.auto_refresh_period.as_deref(), Some("60"));
     assert_eq!(
@@ -4802,14 +4805,23 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     );
     assert_eq!(item.use_alternation_row_color, Some(true));
     assert_eq!(item.default_item, Some(true));
+    assert_eq!(item.initial_tree_view, None);
     assert_eq!(item.choice_folders_and_items, Some("Items"));
     assert_eq!(item.restore_current_row, Some(false));
     assert_eq!(item.row_filter_nil, Some(true));
+    assert_eq!(
+        item.row_picture_data_path.as_deref(),
+        Some("Rows.DefaultPicture")
+    );
+    assert_eq!(item.top_level_parent_nil, Some(true));
     assert_eq!(item.update_on_data_change, Some("Auto"));
     assert_eq!(item.allow_getting_current_row_url, Some(true));
 
     let xml = format_form_child_items_xml(&[item], 1);
     assert!(!xml.contains("<SkipOnInput>false</SkipOnInput>"));
+    assert!(xml.contains("<Representation>List</Representation>"));
+    assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    assert!(xml.contains("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>"));
     assert!(xml.contains("<AutoRefresh>false</AutoRefresh>"));
     assert!(xml.contains("<AutoRefreshPeriod>60</AutoRefreshPeriod>"));
     assert!(xml.contains("<v8:variant xsi:type=\"v8:StandardPeriodVariant\">Custom</v8:variant>"));
@@ -4823,6 +4835,16 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
     assert!(xml.contains("<UpdateOnDataChange>Auto</UpdateOnDataChange>"));
     assert!(xml.contains("<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>"));
     assert!(
+        xml.find("<FileDragMode>AsFile</FileDragMode>").unwrap()
+            < xml.find("<DataPath>Rows</DataPath>").unwrap()
+    );
+    assert!(
+        xml.find("<DataPath>Rows</DataPath>").unwrap()
+            < xml
+                .find("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>")
+                .unwrap()
+    );
+    assert!(
         xml.find("<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>")
             .unwrap()
             < xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
@@ -4831,6 +4853,76 @@ fn extracts_real_wrapper55_table_auto_refresh_properties() {
         xml.find("<RestoreCurrentRow>false</RestoreCurrentRow>")
             .unwrap()
             < xml.find(r#"<TopLevelParent xsi:nil="true"/>"#).unwrap()
+    );
+}
+
+#[test]
+fn extracts_wrapper55_table_head_properties_from_split_slots() {
+    let mut attribute_names_by_id = BTreeMap::new();
+    attribute_names_by_id.insert("6".to_string(), "Rows".to_string());
+
+    let item = parse_form_child_item_with_attrs(
+            r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,1,{"en","Rows"}},{1,0},{1,{6}},0,1,0,0,0,1,1,0,0,0,1,0,1,0,0,1,0,1,2,2,1,1,0,0,1,0,2,1,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,13,5,{"B",0},6,{"N",60},7,{"#",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}},8,{"#",59ef2b80-c86b-11d5-a3c1-0050bae0a776,0},9,{"B",0},10,{"U"},11,{"B",0},12,{"B",0},14,{"#",eac7bfa0-10b4-4369-996c-d258871ad519,0},15,{"U"},16,{"N",41},19,{"S",""},20,{"B",1},{0}}"##,
+            None,
+            None,
+            &attribute_names_by_id,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(item.table_representation, Some("List"));
+    assert_eq!(item.table_command_bar_location, Some("Top"));
+    assert_eq!(item.default_item, Some(true));
+    assert_eq!(item.use_alternation_row_color, Some(true));
+    assert_eq!(item.initial_tree_view, Some("ExpandTopLevel"));
+    assert_eq!(item.file_drag_mode, Some("AsFile"));
+    assert_eq!(
+        item.row_picture_data_path.as_deref(),
+        Some("Rows.DefaultPicture")
+    );
+    assert_eq!(item.top_level_parent_nil, Some(true));
+    assert_eq!(item.show_root, Some(true));
+    assert_eq!(item.allow_root_choice, Some(false));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<Representation>List</Representation>"));
+    assert!(xml.contains("<CommandBarLocation>Top</CommandBarLocation>"));
+    assert!(xml.contains("<DefaultItem>true</DefaultItem>"));
+    assert!(xml.contains("<UseAlternationRowColor>true</UseAlternationRowColor>"));
+    assert!(xml.contains("<InitialTreeView>ExpandTopLevel</InitialTreeView>"));
+    assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+    assert!(xml.contains("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>"));
+    assert!(xml.contains(r#"<TopLevelParent xsi:nil="true"/>"#));
+    assert!(
+        xml.find("<Representation>List</Representation>").unwrap()
+            < xml.find("<CommandBarLocation>Top</CommandBarLocation>")
+                .unwrap()
+    );
+    assert!(
+        xml.find("<CommandBarLocation>Top</CommandBarLocation>")
+            .unwrap()
+            < xml.find("<DefaultItem>true</DefaultItem>").unwrap()
+    );
+    assert!(
+        xml.find("<UseAlternationRowColor>true</UseAlternationRowColor>")
+            .unwrap()
+            < xml.find("<InitialTreeView>ExpandTopLevel</InitialTreeView>")
+                .unwrap()
+    );
+    assert!(
+        xml.find("<FileDragMode>AsFile</FileDragMode>").unwrap()
+            < xml.find("<DataPath>Rows</DataPath>").unwrap()
+    );
+    assert!(
+        xml.find("<DataPath>Rows</DataPath>").unwrap()
+            < xml
+                .find("<RowPictureDataPath>Rows.DefaultPicture</RowPictureDataPath>")
+                .unwrap()
     );
 }
 
@@ -4950,8 +5042,8 @@ fn extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill() {
     assert_eq!(item.auto_insert_new_row, Some(true));
     assert_eq!(item.row_filter_nil, Some(true));
     assert_eq!(item.row_selection_mode, None);
-    assert_eq!(item.enable_start_drag, None);
-    assert_eq!(item.file_drag_mode, None);
+    assert_eq!(item.enable_start_drag, Some(true));
+    assert_eq!(item.file_drag_mode, Some("AsFile"));
     assert_eq!(item.child_items[1].tag, "AutoCommandBar");
     assert_eq!(item.child_items[1].autofill, Some(false));
 
@@ -4964,8 +5056,8 @@ fn extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill() {
     assert!(xml.contains(r#"<AutoCommandBar name="RowsBar" id="58">"#));
     assert!(xml.contains("<Autofill>false</Autofill>"));
     assert!(!xml.contains("<RowSelectionMode>"));
-    assert!(!xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
-    assert!(!xml.contains("<FileDragMode>"));
+    assert!(xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
+    assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
 }
 
 #[test]
@@ -8524,6 +8616,7 @@ fn formats_table_search_additions_as_direct_sections() {
         behavior: None,
         representation: None,
         table_representation: None,
+        table_command_bar_location: None,
         height_in_table_rows: None,
         row_selection_mode: None,
         enable_start_drag: None,
@@ -8537,6 +8630,7 @@ fn formats_table_search_additions_as_direct_sections() {
         command_set_excluded_commands: Vec::new(),
         use_alternation_row_color: None,
         default_item: None,
+        initial_tree_view: None,
         row_input_mode: None,
         show_root: None,
         allow_root_choice: None,
@@ -8631,6 +8725,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 behavior: None,
                 representation: None,
                 table_representation: None,
+                table_command_bar_location: None,
                 height_in_table_rows: None,
                 row_selection_mode: None,
                 enable_start_drag: None,
@@ -8644,6 +8739,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 command_set_excluded_commands: Vec::new(),
                 use_alternation_row_color: None,
                 default_item: None,
+                initial_tree_view: None,
                 row_input_mode: None,
                 show_root: None,
                 allow_root_choice: None,
@@ -8739,6 +8835,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 behavior: None,
                 representation: None,
                 table_representation: None,
+                table_command_bar_location: None,
                 height_in_table_rows: None,
                 row_selection_mode: None,
                 enable_start_drag: None,
@@ -8752,6 +8849,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 command_set_excluded_commands: Vec::new(),
                 use_alternation_row_color: None,
                 default_item: None,
+                initial_tree_view: None,
                 row_input_mode: None,
                 show_root: None,
                 allow_root_choice: None,

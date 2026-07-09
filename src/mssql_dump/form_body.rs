@@ -1,7 +1,8 @@
 use super::*;
 use crate::form_schema::{
     FORM_INPUT_FIELD_BUTTON_XML_ORDER, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FORM_TABLE_XML_ORDER, FormInputFieldXmlProperty, FormTableXmlProperty,
+    FORM_TABLE_XML_ORDER, FormInputFieldXmlProperty, FormTableOrdinaryTailKey as TableTailKey,
+    FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
 };
 
 #[allow(dead_code)]
@@ -339,6 +340,7 @@ pub(super) struct FormChildItem {
     pub(super) behavior: Option<&'static str>,
     pub(super) representation: Option<&'static str>,
     pub(super) table_representation: Option<&'static str>,
+    pub(super) table_command_bar_location: Option<&'static str>,
     pub(super) height_in_table_rows: Option<String>,
     pub(super) row_selection_mode: Option<&'static str>,
     pub(super) enable_start_drag: Option<bool>,
@@ -352,6 +354,7 @@ pub(super) struct FormChildItem {
     pub(super) command_set_excluded_commands: Vec<&'static str>,
     pub(super) use_alternation_row_color: Option<bool>,
     pub(super) default_item: Option<bool>,
+    pub(super) initial_tree_view: Option<&'static str>,
     pub(super) row_input_mode: Option<&'static str>,
     pub(super) show_root: Option<bool>,
     pub(super) allow_root_choice: Option<bool>,
@@ -3298,7 +3301,9 @@ pub(super) fn collect_form_child_item_indexes_from_field(
                         .insert(attribute_id, columns);
                 }
             }
-            if let Some(group_id) = parse_form_table_property_bag_number(&fields, "16") {
+            if let Some(group_id) =
+                parse_form_table_property_bag_number(&fields, TableBagKey::UserSettingsGroup)
+            {
                 indexes
                     .user_settings_group_id_by_table_id
                     .insert(id.to_string(), group_id);
@@ -3798,9 +3803,12 @@ pub(super) fn parse_form_child_item_with_context(
                 .and_then(|options| options.representation)
         },
         table_representation: if tag == "Table" {
-            fields
-                .get(8)
-                .and_then(|field| parse_form_table_representation(field))
+            parse_form_table_representation_from_fields(wrapper, &fields)
+        } else {
+            None
+        },
+        table_command_bar_location: if tag == "Table" {
+            parse_form_table_command_bar_location(wrapper, &fields)
         } else {
             None
         },
@@ -3855,17 +3863,9 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         file_drag_mode: if tag == "Table" {
-            if ordinary_table_layout {
-                fields
-                    .get(30)
-                    .and_then(|field| parse_form_table_file_drag_mode(field))
-            } else if parse_form_table_row_input_mode(fields.get(23).copied()).is_some() {
-                fields
-                    .get(30)
-                    .and_then(|field| parse_form_table_file_drag_mode(field))
-            } else {
-                None
-            }
+            fields
+                .get(30)
+                .and_then(|field| parse_form_table_file_drag_mode(field))
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_file_drag_mode(&fields)
         } else if tag == "PictureField" {
@@ -3874,12 +3874,12 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         auto_refresh: if tag == "Table" {
-            parse_form_table_property_bag_bool(&fields, "5")
+            parse_form_table_property_bag_bool(&fields, TableBagKey::AutoRefresh)
         } else {
             None
         },
         auto_refresh_period: if tag == "Table" {
-            parse_form_table_property_bag_number(&fields, "6")
+            parse_form_table_property_bag_number(&fields, TableBagKey::AutoRefreshPeriod)
         } else {
             None
         },
@@ -3910,13 +3910,10 @@ pub(super) fn parse_form_child_item_with_context(
             Vec::new()
         },
         use_alternation_row_color: if tag == "Table" {
-            parse_form_table_property_bag_bool(&fields, "9")
+            parse_form_table_property_bag_bool(&fields, TableBagKey::UseAlternationRowColor)
                 .filter(|value| *value)
                 .or_else(|| {
-                    (ordinary_table_layout
-                        && fields.get(14).map(|field| field.trim()) == Some("0")
-                        && fields.get(36).map(|field| field.trim()) == Some("1"))
-                    .then_some(true)
+                    parse_form_table_use_alternation_row_color_from_slots(wrapper, &fields)
                 })
         } else {
             None
@@ -3925,8 +3922,15 @@ pub(super) fn parse_form_child_item_with_context(
             if ordinary_table_layout {
                 (fields.get(16).map(|field| field.trim()) == Some("1")).then_some(true)
             } else {
-                parse_form_table_property_bag_bool(&fields, "11").filter(|value| *value)
+                parse_form_table_property_bag_bool(&fields, TableBagKey::DefaultItem)
+                    .filter(|value| *value)
+                    .or_else(|| parse_form_table_default_item_from_slots(wrapper, &fields))
             }
+        } else {
+            None
+        },
+        initial_tree_view: if tag == "Table" {
+            parse_form_table_initial_tree_view(wrapper, &fields)
         } else {
             None
         },
@@ -3962,7 +3966,7 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         restore_current_row: if tag == "Table" {
-            parse_form_table_property_bag_bool(&fields, "12")
+            parse_form_table_property_bag_bool(&fields, TableBagKey::RestoreCurrentRow)
         } else {
             None
         },
@@ -3972,14 +3976,21 @@ pub(super) fn parse_form_child_item_with_context(
                     .get(56)
                     .and_then(|field| parse_form_standalone_undefined_marker(field))
             } else {
-                parse_form_table_property_bag_undefined(&fields, "10")
+                parse_form_table_property_bag_undefined(&fields, TableBagKey::RowFilter)
             }
         } else {
             None
         },
         row_picture_data_path: if tag == "Table" {
-            parse_form_table_property_bag_string(&fields, "19")
+            parse_form_table_property_bag_string(&fields, TableBagKey::RowPictureDataPath)
                 .filter(|value| !value.is_empty())
+                .or_else(|| {
+                    parse_form_table_default_row_picture_data_path(
+                        wrapper,
+                        &fields,
+                        data_path.as_deref(),
+                    )
+                })
                 .or_else(|| {
                     ordinary_table_layout.then(|| {
                         parse_form_ordinary_table_row_picture_data_path(
@@ -4010,7 +4021,7 @@ pub(super) fn parse_form_child_item_with_context(
             false
         },
         top_level_parent_nil: if tag == "Table" && !ordinary_table_layout {
-            parse_form_table_property_bag_undefined(&fields, "15")
+            parse_form_table_property_bag_undefined(&fields, TableBagKey::TopLevelParent)
         } else {
             None
         },
@@ -4021,7 +4032,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         user_settings_group: None,
         allow_getting_current_row_url: if tag == "Table" {
-            parse_form_table_property_bag_bool(&fields, "20")
+            parse_form_table_property_bag_bool(&fields, TableBagKey::AllowGettingCurrentRowUrl)
         } else {
             None
         },
@@ -4839,7 +4850,7 @@ pub(super) fn parse_form_standalone_undefined_marker(field: &str) -> Option<bool
 
 pub(super) fn form_table_ordinary_layout_variant(fields: &[&str]) -> bool {
     fields.get(43).map(|field| field.trim()) == Some("{0}")
-        || (fields.get(55).map(|field| field.trim()) == Some("13")
+        || (fields.get(55).map(|field| field.trim()) == Some(TableTailKey::RowFilter.key())
             && fields
                 .get(56)
                 .and_then(|field| parse_form_standalone_undefined_marker(field.trim()))
@@ -5868,6 +5879,98 @@ pub(super) fn parse_form_table_representation(field: &str) -> Option<&'static st
     }
 }
 
+pub(super) fn parse_form_table_representation_from_fields(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    match wrapper {
+        "55" => fields
+            .get(8)
+            .and_then(|field| parse_form_table_representation(field))
+            .or_else(|| {
+                fields
+                    .get(13)
+                    .and_then(|field| parse_form_table_representation(field))
+            }),
+        "73" => fields
+            .get(8)
+            .and_then(|field| parse_form_table_representation(field)),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_command_bar_location(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    match wrapper {
+        "55" => fields.get(18).and_then(|field| match field.trim() {
+            "1" => Some("Top"),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_initial_tree_view(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    match wrapper {
+        "55" => fields.get(22).and_then(|field| match field.trim() {
+            "1" => Some("ExpandTopLevel"),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_use_alternation_row_color_from_slots(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<bool> {
+    (wrapper == "55"
+        && fields.get(14).map(|field| field.trim()) == Some("0")
+        && fields.get(36).map(|field| field.trim()) == Some("1"))
+    .then_some(true)
+}
+
+pub(super) fn parse_form_table_default_item_from_slots(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<bool> {
+    (wrapper == "55" && fields.get(13).map(|field| field.trim()) == Some("1")).then_some(true)
+}
+
+pub(super) fn parse_form_table_default_row_picture_data_path(
+    wrapper: &str,
+    fields: &[&str],
+    data_path: Option<&str>,
+) -> Option<String> {
+    let data_path = data_path?;
+    (wrapper == "55"
+        && fields
+            .get(43)
+            .is_some_and(|field| form_table_default_picture_marker(field)))
+    .then(|| format!("{data_path}.DefaultPicture"))
+}
+
+pub(super) fn form_table_default_picture_marker(field: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return false;
+    };
+    if fields.first().map(|field| field.trim()) != Some("1") {
+        return false;
+    }
+    let Some(payload) = fields.get(1) else {
+        return false;
+    };
+    let Some(payload_fields) = split_1c_braced_fields(payload.trim(), 0) else {
+        return false;
+    };
+    payload_fields.first().map(|field| field.trim()) == Some("10000000")
+}
+
 pub(super) fn parse_form_table_row_selection_mode(field: &str) -> Option<&'static str> {
     match field.trim() {
         "1" => Some("Cell"),
@@ -5914,7 +6017,10 @@ pub(super) fn parse_form_command_bar_source(fields: &[&str]) -> Option<&'static 
     }
 }
 
-pub(super) fn parse_form_table_property_bag_bool(fields: &[&str], key: &str) -> Option<bool> {
+pub(super) fn parse_form_table_property_bag_bool(
+    fields: &[&str],
+    key: TableBagKey,
+) -> Option<bool> {
     let value = form_table_property_bag_value(fields, key)?;
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     if fields.first().and_then(|field| parse_1c_string(field))? != "B" {
@@ -5927,7 +6033,10 @@ pub(super) fn parse_form_table_property_bag_bool(fields: &[&str], key: &str) -> 
     }
 }
 
-pub(super) fn parse_form_table_property_bag_number(fields: &[&str], key: &str) -> Option<String> {
+pub(super) fn parse_form_table_property_bag_number(
+    fields: &[&str],
+    key: TableBagKey,
+) -> Option<String> {
     let value = form_table_property_bag_value(fields, key)?;
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     if fields.first().and_then(|field| parse_1c_string(field))? != "N" {
@@ -5939,7 +6048,10 @@ pub(super) fn parse_form_table_property_bag_number(fields: &[&str], key: &str) -
         .filter(|value| value.parse::<u32>().is_ok())
 }
 
-pub(super) fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -> Option<String> {
+pub(super) fn parse_form_table_property_bag_string(
+    fields: &[&str],
+    key: TableBagKey,
+) -> Option<String> {
     let value = form_table_property_bag_value(fields, key)?;
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     if fields.first().and_then(|field| parse_1c_string(field))? != "S" {
@@ -5948,13 +6060,16 @@ pub(super) fn parse_form_table_property_bag_string(fields: &[&str], key: &str) -
     fields.get(1).and_then(|field| parse_1c_string(field))
 }
 
-pub(super) fn parse_form_table_property_bag_undefined(fields: &[&str], key: &str) -> Option<bool> {
+pub(super) fn parse_form_table_property_bag_undefined(
+    fields: &[&str],
+    key: TableBagKey,
+) -> Option<bool> {
     let value = form_table_property_bag_value(fields, key)?;
     parse_form_standalone_undefined_marker(value)
 }
 
 pub(super) fn parse_form_table_period(fields: &[&str]) -> Option<FormTablePeriod> {
-    let value = form_table_property_bag_value(fields, "7")?;
+    let value = form_table_property_bag_value(fields, TableBagKey::Period)?;
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     let payload = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
     match (
@@ -5998,7 +6113,7 @@ pub(super) fn apply_form_table_user_settings_groups(
 }
 
 pub(super) fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<&'static str> {
-    let value = form_table_property_bag_value(fields, "14")?;
+    let value = form_table_property_bag_value(fields, TableBagKey::UpdateOnDataChange)?;
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     match (
         fields.first().and_then(|field| parse_1c_string(field)),
@@ -6013,7 +6128,7 @@ pub(super) fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<
 }
 
 pub(super) fn parse_form_table_choice_folders_and_items(fields: &[&str]) -> Option<&'static str> {
-    let value = form_table_property_bag_value(fields, "8")?;
+    let value = form_table_property_bag_value(fields, TableBagKey::ChoiceFoldersAndItems)?;
     let fields = split_1c_braced_fields(value.trim(), 0)?;
     match (
         fields.first().and_then(|field| parse_1c_string(field)),
@@ -6030,7 +6145,11 @@ pub(super) fn parse_form_table_choice_folders_and_items(fields: &[&str]) -> Opti
     }
 }
 
-pub(super) fn form_table_property_bag_value<'a>(fields: &[&'a str], key: &str) -> Option<&'a str> {
+pub(super) fn form_table_property_bag_value<'a>(
+    fields: &[&'a str],
+    key: TableBagKey,
+) -> Option<&'a str> {
+    let key = key.key();
     fields.windows(2).find_map(|window| {
         (window[0].trim() == key && window[1].trim_start().starts_with('{')).then_some(window[1])
     })
@@ -8090,7 +8209,10 @@ fn format_form_table_property_xml(
             .table_representation
             .map(|value| format!("{tab}<Representation>{}</Representation>\r\n", escape_xml_text(value)))
             .unwrap_or_default(),
-        FormTableXmlProperty::CommandBarLocation => String::new(),
+        FormTableXmlProperty::CommandBarLocation => item
+            .table_command_bar_location
+            .map(|value| format!("{tab}<CommandBarLocation>{}</CommandBarLocation>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::DefaultItem => match item.default_item {
             Some(true) => format!("{tab}<DefaultItem>true</DefaultItem>\r\n"),
             _ => String::new(),
@@ -8099,7 +8221,10 @@ fn format_form_table_property_xml(
             .use_alternation_row_color
             .map(|value| format!("{tab}<UseAlternationRowColor>{}</UseAlternationRowColor>\r\n", xml_bool(value)))
             .unwrap_or_default(),
-        FormTableXmlProperty::InitialTreeView => String::new(),
+        FormTableXmlProperty::InitialTreeView => item
+            .initial_tree_view
+            .map(|value| format!("{tab}<InitialTreeView>{}</InitialTreeView>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::AutoMarkIncomplete => match item.auto_mark_incomplete {
             Some(true) => format!("{tab}<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"),
             _ => String::new(),

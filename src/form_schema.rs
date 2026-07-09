@@ -99,6 +99,56 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTablePropertyBagKey {
+    AutoRefresh,
+    AutoRefreshPeriod,
+    Period,
+    ChoiceFoldersAndItems,
+    UseAlternationRowColor,
+    RowFilter,
+    DefaultItem,
+    RestoreCurrentRow,
+    UpdateOnDataChange,
+    TopLevelParent,
+    UserSettingsGroup,
+    RowPictureDataPath,
+    AllowGettingCurrentRowUrl,
+}
+
+impl FormTablePropertyBagKey {
+    pub(crate) const fn key(self) -> &'static str {
+        match self {
+            Self::AutoRefresh => "5",
+            Self::AutoRefreshPeriod => "6",
+            Self::Period => "7",
+            Self::ChoiceFoldersAndItems => "8",
+            Self::UseAlternationRowColor => "9",
+            Self::RowFilter => "10",
+            Self::DefaultItem => "11",
+            Self::RestoreCurrentRow => "12",
+            Self::UpdateOnDataChange => "14",
+            Self::TopLevelParent => "15",
+            Self::UserSettingsGroup => "16",
+            Self::RowPictureDataPath => "19",
+            Self::AllowGettingCurrentRowUrl => "20",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableOrdinaryTailKey {
+    RowFilter,
+}
+
+impl FormTableOrdinaryTailKey {
+    pub(crate) const fn key(self) -> &'static str {
+        match self {
+            Self::RowFilter => "13",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldExtendedOptionSlot {
     Width,
     Height,

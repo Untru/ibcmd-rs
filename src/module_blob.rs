@@ -16,7 +16,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
-use crate::form_schema::FormInputFieldExtendedOptionSlot as InputFieldSlot;
+use crate::form_schema::{
+    FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormTablePropertyBagKey as TableBagKey,
+};
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
 };
@@ -250,6 +253,7 @@ struct FormXmlChildItem {
     behavior: Option<FormXmlGroupBehavior>,
     representation: Option<FormXmlGroupRepresentation>,
     table_representation: Option<String>,
+    table_command_bar_location: Option<String>,
     height_in_table_rows: Option<String>,
     row_selection_mode: Option<String>,
     enable_start_drag: Option<bool>,
@@ -260,6 +264,7 @@ struct FormXmlChildItem {
     period: Option<FormXmlTablePeriod>,
     use_alternation_row_color: Option<bool>,
     default_item: Option<bool>,
+    initial_tree_view: Option<String>,
     choice_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     restore_current_row: Option<bool>,
     row_filter_nil: Option<bool>,
@@ -4922,6 +4927,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "endDate"
                         | "UseAlternationRowColor"
                         | "DefaultItem"
+                        | "InitialTreeView"
                         | "ChoiceFoldersAndItems"
                         | "RestoreCurrentRow"
                         | "RowPictureDataPath"
@@ -5514,6 +5520,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_behavior(&path, &current_child_items)
                     || path_ends_with_for_child_group_representation(&path, &current_child_items)
                     || path_ends_with_for_child_table_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_table_command_bar_location(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_height_in_table_rows(&path, &current_child_items)
                     || path_ends_with_for_child_row_selection_mode(&path, &current_child_items)
                     || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
@@ -5529,6 +5539,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_initial_tree_view(&path, &current_child_items)
                     || path_ends_with_for_child_choice_folders_and_items(
                         &path,
                         &current_child_items,
@@ -5998,12 +6009,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
                     || path_ends_with_for_child_table_representation(&path, &current_child_items)
+                    || path_ends_with_for_child_table_command_bar_location(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_height_in_table_rows(&path, &current_child_items)
                     || path_ends_with_for_child_row_selection_mode(&path, &current_child_items)
                     || path_ends_with_for_child_enable_start_drag(&path, &current_child_items)
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_initial_tree_view(&path, &current_child_items)
                     || path_ends_with_for_child_choice_folders_and_items(
                         &path,
                         &current_child_items,
@@ -7305,6 +7321,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.table_representation = Some(text_value.trim().to_string());
                         }
                     }
+                    "CommandBarLocation"
+                        if path_ends_with_for_child_table_command_bar_location(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_command_bar_location =
+                                Some(parse_form_table_command_bar_location_xml(text_value.trim())?);
+                        }
+                    }
                     "Representation"
                         if path_ends_with_for_child_button_representation(
                             &path,
@@ -7453,6 +7480,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "ChildItem/DefaultItem",
                                 text_value.trim(),
                             )?);
+                        }
+                    }
+                    "InitialTreeView"
+                        if path_ends_with_for_child_initial_tree_view(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.initial_tree_view =
+                                Some(parse_form_table_initial_tree_view_xml(text_value.trim())?);
                         }
                     }
                     "ChoiceFoldersAndItems"
@@ -8190,6 +8228,7 @@ fn parse_form_child_item_xml(
         behavior: None,
         representation: None,
         table_representation: None,
+        table_command_bar_location: None,
         height_in_table_rows: None,
         row_selection_mode: None,
         enable_start_drag: None,
@@ -8200,6 +8239,7 @@ fn parse_form_child_item_xml(
         period: None,
         use_alternation_row_color: None,
         default_item: None,
+        initial_tree_view: None,
         choice_folders_and_items: None,
         restore_current_row: None,
         row_filter_nil: None,
@@ -8864,6 +8904,16 @@ fn path_ends_with_for_child_table_representation(
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
 }
 
+fn path_ends_with_for_child_table_command_bar_location(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "CommandBarLocation"])
+}
+
 fn path_ends_with_for_child_height_in_table_rows(
     path: &[String],
     items: &[FormXmlChildItem],
@@ -8958,6 +9008,16 @@ fn path_ends_with_for_child_default_item(path: &[String], items: &[FormXmlChildI
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
+}
+
+fn path_ends_with_for_child_initial_tree_view(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "InitialTreeView"])
 }
 
 fn path_ends_with_for_child_choice_folders_and_items(
@@ -9217,6 +9277,20 @@ fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepres
         other => Err(anyhow!(
             "unsupported Form UsualGroup Representation: {other}"
         )),
+    }
+}
+
+fn parse_form_table_command_bar_location_xml(value: &str) -> Result<String> {
+    match value {
+        "Top" => Ok(value.to_string()),
+        other => Err(anyhow!("unsupported Form Table CommandBarLocation: {other}")),
+    }
+}
+
+fn parse_form_table_initial_tree_view_xml(value: &str) -> Result<String> {
+    match value {
+        "ExpandTopLevel" => Ok(value.to_string()),
+        other => Err(anyhow!("unsupported Form Table InitialTreeView: {other}")),
     }
 }
 
@@ -10529,7 +10603,8 @@ fn patch_form_layout_table_user_settings_group(
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
     if form_layout_child_item_matches(text, &fields, item) && item.tag == "Table" {
-        if let Some(value_range) = form_layout_table_property_bag_value_range(text, &fields, "16")
+        if let Some(value_range) =
+            form_layout_table_property_bag_value_range(text, &fields, TableBagKey::UserSettingsGroup)
             && is_form_property_bag_number_value(&text[value_range.clone()])
         {
             text.replace_range(value_range, &format!(r#"{{"N",{group_id}}}"#));
@@ -12028,9 +12103,17 @@ fn patch_form_layout_child_item_entry(
     if item.tag == "Table" {
         if let Some(representation) = &item.table_representation
             && let Some(code) = form_table_representation_code(representation)
-            && let Some(representation_range) = fields.get(8)
+            && let Some(representation_range) =
+                form_layout_table_representation_range(text, fields)
         {
             replacements.push((representation_range.clone(), code.to_string()));
+        }
+        if let Some(command_bar_location) = &item.table_command_bar_location
+            && let Some(code) = form_table_command_bar_location_code(command_bar_location)
+            && let Some(command_bar_range) =
+                form_layout_table_command_bar_location_range(text, fields)
+        {
+            replacements.push((command_bar_range.clone(), code.to_string()));
         }
         if let Some(data_path) = &item.data_path
             && let Some(data_path_range) = fields.get(11)
@@ -12087,7 +12170,7 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(auto_refresh) = item.auto_refresh
             && let Some(auto_refresh_range) =
-                form_layout_table_property_bag_value_range(text, fields, "5")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::AutoRefresh)
             && is_form_property_bag_bool_value(&text[auto_refresh_range.clone()])
         {
             replacements.push((
@@ -12102,7 +12185,7 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(auto_refresh_period) = &item.auto_refresh_period
             && let Some(period_range) =
-                form_layout_table_property_bag_value_range(text, fields, "6")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::AutoRefreshPeriod)
             && is_form_property_bag_number_value(&text[period_range.clone()])
         {
             replacements.push((
@@ -12112,7 +12195,7 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(period) = &item.period
             && let Some(period_range) =
-                form_layout_table_property_bag_value_range(text, fields, "7")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::Period)
             && is_form_table_period_value(&text[period_range.clone()])
             && let Some(replacement) = format_form_table_period_value(period)
         {
@@ -12120,7 +12203,11 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(use_alternation_row_color) = item.use_alternation_row_color
             && let Some(alternation_range) =
-                form_layout_table_property_bag_value_range(text, fields, "9")
+                form_layout_table_property_bag_value_range(
+                    text,
+                    fields,
+                    TableBagKey::UseAlternationRowColor,
+                )
             && is_form_property_bag_bool_value(&text[alternation_range.clone()])
         {
             replacements.push((
@@ -12135,7 +12222,7 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(default_item) = item.default_item
             && let Some(default_item_range) =
-                form_layout_table_property_bag_value_range(text, fields, "11")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::DefaultItem)
             && is_form_property_bag_bool_value(&text[default_item_range.clone()])
         {
             replacements.push((
@@ -12148,9 +12235,20 @@ fn patch_form_layout_child_item_entry(
                 .to_string(),
             ));
         }
+        if let Some(initial_tree_view) = &item.initial_tree_view
+            && let Some(code) = form_table_initial_tree_view_code(initial_tree_view)
+            && let Some(initial_tree_view_range) =
+                form_layout_table_initial_tree_view_range(text, fields)
+        {
+            replacements.push((initial_tree_view_range.clone(), code.to_string()));
+        }
         if let Some(choice_folders_and_items) = item.choice_folders_and_items
             && let Some(choice_range) =
-                form_layout_table_property_bag_value_range(text, fields, "8")
+                form_layout_table_property_bag_value_range(
+                    text,
+                    fields,
+                    TableBagKey::ChoiceFoldersAndItems,
+                )
             && is_form_use_for_folders_and_items_value(&text[choice_range.clone()])
         {
             replacements.push((
@@ -12163,7 +12261,7 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(restore_current_row) = item.restore_current_row
             && let Some(restore_range) =
-                form_layout_table_property_bag_value_range(text, fields, "12")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::RestoreCurrentRow)
             && is_form_property_bag_bool_value(&text[restore_range.clone()])
         {
             replacements.push((
@@ -12178,14 +12276,14 @@ fn patch_form_layout_child_item_entry(
         }
         if item.row_filter_nil == Some(true)
             && let Some(row_filter_range) =
-                form_layout_table_property_bag_value_range(text, fields, "10")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::RowFilter)
             && is_form_property_bag_undefined_value(&text[row_filter_range.clone()])
         {
             replacements.push((row_filter_range.clone(), r#"{"U"}"#.to_string()));
         }
         if let Some(row_picture_data_path) = &item.row_picture_data_path
             && let Some(row_picture_range) =
-                form_layout_table_property_bag_value_range(text, fields, "19")
+                form_layout_table_property_bag_value_range(text, fields, TableBagKey::RowPictureDataPath)
             && is_form_property_bag_string_value(&text[row_picture_range.clone()])
         {
             replacements.push((
@@ -12195,7 +12293,11 @@ fn patch_form_layout_child_item_entry(
         }
         if let Some(update_on_data_change) = item.update_on_data_change
             && let Some(update_range) =
-                form_layout_table_property_bag_value_range(text, fields, "14")
+                form_layout_table_property_bag_value_range(
+                    text,
+                    fields,
+                    TableBagKey::UpdateOnDataChange,
+                )
             && is_form_update_on_data_change_value(&text[update_range.clone()])
         {
             replacements.push((
@@ -12208,7 +12310,11 @@ fn patch_form_layout_child_item_entry(
             ));
         }
         if let Some(allow_getting_current_row_url) = item.allow_getting_current_row_url
-            && let Some(url_range) = form_layout_table_property_bag_value_range(text, fields, "20")
+            && let Some(url_range) = form_layout_table_property_bag_value_range(
+                text,
+                fields,
+                TableBagKey::AllowGettingCurrentRowUrl,
+            )
             && is_form_property_bag_bool_value(&text[url_range.clone()])
         {
             replacements.push((
@@ -13511,6 +13617,20 @@ fn form_table_representation_code(value: &str) -> Option<&'static str> {
     }
 }
 
+fn form_table_command_bar_location_code(value: &str) -> Option<&'static str> {
+    match value {
+        "Top" => Some("1"),
+        _ => None,
+    }
+}
+
+fn form_table_initial_tree_view_code(value: &str) -> Option<&'static str> {
+    match value {
+        "ExpandTopLevel" => Some("1"),
+        _ => None,
+    }
+}
+
 fn form_table_row_selection_mode_code(value: &str) -> Option<&'static str> {
     match value {
         "Cell" => Some("1"),
@@ -13738,11 +13858,44 @@ fn form_data_path_ref_points_to_attribute(existing: &str, attribute_id: &str) ->
         .is_some_and(|range| path_text[range.clone()].trim() == attribute_id)
 }
 
+fn form_layout_table_representation_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    match wrapper {
+        "55" => fields
+            .get(8)
+            .filter(|range| text[(*range).clone()].trim() == "1")
+            .or_else(|| fields.get(13))
+            .cloned(),
+        "73" => fields.get(8).cloned(),
+        _ => None,
+    }
+}
+
+fn form_layout_table_command_bar_location_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    (wrapper == "55").then(|| fields.get(18).cloned()).flatten()
+}
+
+fn form_layout_table_initial_tree_view_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    (wrapper == "55").then(|| fields.get(22).cloned()).flatten()
+}
+
 fn form_layout_table_property_bag_value_range(
     text: &str,
     fields: &[Range<usize>],
-    key: &str,
+    key: TableBagKey,
 ) -> Option<Range<usize>> {
+    let key = key.key();
     fields.windows(2).find_map(|window| {
         let key_range = &window[0];
         let value_range = &window[1];
@@ -31579,6 +31732,51 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert!(parsed.layout.contains(r#"11,{"B",1}"#), "{}", parsed.layout);
         assert!(!parsed.layout.contains(r#"11,{"B",0}"#));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_form_body_xml_existing_wrapper55_table_head_properties() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br##"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{55,{1,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,1,0,"Rows",0,0,0,{1,0},{1,0},{0},0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,0}},"Old module",{0}}"##,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<Representation>List</Representation>
+			<CommandBarLocation>Top</CommandBarLocation>
+			<InitialTreeView>ExpandTopLevel</InitialTreeView>
+		</Table>
+	</ChildItems>
+</Form>
+"#;
+
+        let properties = super::parse_form_xml_body_properties(xml)?;
+        assert_eq!(
+            properties.child_items[0].table_representation.as_deref(),
+            Some("List")
+        );
+        assert_eq!(
+            properties.child_items[0]
+                .table_command_bar_location
+                .as_deref(),
+            Some("Top")
+        );
+        assert_eq!(
+            properties.child_items[0].initial_tree_view.as_deref(),
+            Some("ExpandTopLevel")
+        );
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let table_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(&parsed.layout[table_fields[8].clone()], "0");
+        assert_eq!(&parsed.layout[table_fields[13].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[18].clone()], "1");
+        assert_eq!(&parsed.layout[table_fields[22].clone()], "1");
         Ok(())
     }
 
