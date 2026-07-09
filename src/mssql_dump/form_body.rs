@@ -2607,10 +2607,7 @@ pub(super) fn normalize_form_list_settings_raw_fragment(fragment: &str) -> Strin
                 r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#,
                 "",
             )
-            .replace(
-                r#" xmlns:xs="http://www.w3.org/2001/XMLSchema""#,
-                "",
-            )
+            .replace(r#" xmlns:xs="http://www.w3.org/2001/XMLSchema""#, "")
             .replace(
                 r#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#,
                 "",
@@ -4128,7 +4125,8 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        representation_in_context_menu: if tag == "Button" && form_button_layout_is_extended(&fields)
+        representation_in_context_menu: if tag == "Button"
+            && form_button_layout_is_extended(&fields)
         {
             fields
                 .get(43)
@@ -4377,8 +4375,7 @@ pub(super) fn parse_form_child_item_with_context(
                     | "PictureField"
                     | "RadioButtonField"
                     | "TextDocumentField"
-            )
-        {
+            ) {
             fields
                 .get(FieldSlot::TitleFont.index(input_field_top_level_offset))
                 .and_then(|field| parse_form_title_font_tuple_xml(field, object_refs))
@@ -7517,13 +7514,11 @@ pub(super) fn parse_form_child_item_data_path(
             .get(11)
             .and_then(parse_bound)
             .or_else(|| main_data_path.map(ToOwned::to_owned)),
-        "InputField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => {
-            [11usize, 12]
-                .iter()
-                .filter_map(|index| fields.get(*index + input_field_offset))
-                .find_map(parse_bound)
-                .or_else(|| parent_data_path.map(|parent| format!("{parent}.{name}")))
-        }
+        "InputField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => [11usize, 12]
+            .iter()
+            .filter_map(|index| fields.get(*index + input_field_offset))
+            .find_map(parse_bound)
+            .or_else(|| parent_data_path.map(|parent| format!("{parent}.{name}"))),
         "LabelField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))

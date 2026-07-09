@@ -857,30 +857,18 @@ pub(super) fn is_offset_inside_accounting_register_attribute_list(
     text: &str,
     offset: usize,
 ) -> bool {
-    is_offset_inside_any_list_marker(
-        text,
-        offset,
-        &["{9d28ee33-9c7e-4a1b-8f13-50aa9b36607b,"],
-    )
+    is_offset_inside_any_list_marker(text, offset, &["{9d28ee33-9c7e-4a1b-8f13-50aa9b36607b,"])
 }
 
 fn is_offset_inside_chart_of_accounts_accounting_flag_list(text: &str, offset: usize) -> bool {
-    is_offset_inside_any_list_marker(
-        text,
-        offset,
-        &["{78bd1243-c4df-46c3-8138-e147465cb9a4,"],
-    )
+    is_offset_inside_any_list_marker(text, offset, &["{78bd1243-c4df-46c3-8138-e147465cb9a4,"])
 }
 
 fn is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
     text: &str,
     offset: usize,
 ) -> bool {
-    is_offset_inside_any_list_marker(
-        text,
-        offset,
-        &["{c70ca527-5042-4cad-a315-dcb4007e32a3,"],
-    )
+    is_offset_inside_any_list_marker(text, offset, &["{c70ca527-5042-4cad-a315-dcb4007e32a3,"])
 }
 
 fn is_offset_inside_any_list_marker(text: &str, offset: usize, markers: &[&str]) -> bool {

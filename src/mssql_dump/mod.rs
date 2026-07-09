@@ -3755,12 +3755,7 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
 
     for schema in raw_generated_type_schemas() {
         if schema.matches(object_code, header_index, &fields) {
-            push_indexed_generated_type_slots(
-                &mut entries,
-                &fields,
-                schema.slots,
-                &header.name,
-            );
+            push_indexed_generated_type_slots(&mut entries, &fields, schema.slots, &header.name);
         }
     }
 
@@ -3822,12 +3817,7 @@ struct RawGeneratedTypeSchema {
 }
 
 impl RawGeneratedTypeSchema {
-    fn matches(
-        self,
-        object_code: u32,
-        header_index: Option<usize>,
-        fields: &[&str],
-    ) -> bool {
+    fn matches(self, object_code: u32, header_index: Option<usize>, fields: &[&str]) -> bool {
         self.object_codes.contains(&object_code)
             && self.conditions.iter().all(|condition| match *condition {
                 RawGeneratedTypeCondition::HeaderIndex(expected) => header_index == Some(expected),
@@ -4154,13 +4144,7 @@ fn push_indexed_generated_type_slots(
     name: &str,
 ) {
     for slot in slots {
-        push_indexed_generated_type(
-            entries,
-            fields,
-            slot.field_index,
-            slot.generated_type,
-            name,
-        );
+        push_indexed_generated_type(entries, fields, slot.field_index, slot.generated_type, name);
     }
 }
 
@@ -5138,8 +5122,8 @@ fn parse_register_properties_from_text(
                 &value_types,
                 object_refs,
             );
-            let properties =
-                properties.map(|properties| parse_register_child_extra_properties(
+            let properties = properties.map(|properties| {
+                parse_register_child_extra_properties(
                     kind,
                     tag,
                     text,
@@ -5147,7 +5131,8 @@ fn parse_register_properties_from_text(
                     &header.uuid,
                     object_refs,
                     properties,
-                ));
+                )
+            });
             Some(MetadataChildObject {
                 tag,
                 header,
@@ -5255,7 +5240,8 @@ fn register_standard_attributes(
         ));
     }
     if kind == "AccountingRegister" {
-        let account_data_path = format!("AccountingRegister.{owner_name}.StandardAttribute.Account");
+        let account_data_path =
+            format!("AccountingRegister.{owner_name}.StandardAttribute.Account");
         attributes.extend([
             register_standard_attribute("Account", "DontCheck", &accounting_overrides, None),
             register_standard_attribute("Active", "DontCheck", &accounting_overrides, None),
@@ -5395,7 +5381,10 @@ fn accounting_register_standard_attribute_overrides(
                 .map(|field| parse_wrapped_localized_values(field))
                 .unwrap_or_default();
             if !tooltip.is_empty() || !synonym.is_empty() {
-                overrides.insert(name, RegisterStandardAttributeOverrides { tooltip, synonym });
+                overrides.insert(
+                    name,
+                    RegisterStandardAttributeOverrides { tooltip, synonym },
+                );
             }
         }
         index += 3;
@@ -5470,11 +5459,7 @@ fn parse_register_correspondence(kind: &str, fields: &[&str], uuid: &str) -> Opt
     parse_1c_bool_field(fields.get(header_index + 5).copied())
 }
 
-fn parse_register_period_adjustment_length(
-    kind: &str,
-    fields: &[&str],
-    uuid: &str,
-) -> Option<u32> {
+fn parse_register_period_adjustment_length(kind: &str, fields: &[&str], uuid: &str) -> Option<u32> {
     if kind != "AccountingRegister" {
         return None;
     }
@@ -5503,11 +5488,7 @@ fn parse_register_data_lock_control_mode(
     }
 }
 
-fn parse_register_enable_totals_splitting(
-    kind: &str,
-    fields: &[&str],
-    uuid: &str,
-) -> Option<bool> {
+fn parse_register_enable_totals_splitting(kind: &str, fields: &[&str], uuid: &str) -> Option<bool> {
     if kind != "AccountingRegister" {
         return None;
     }
@@ -5908,6 +5889,16 @@ fn parse_metadata_child_properties(
     value_types: &[ConstantValueType],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
+    if owner_kind == "AccountingRegister" {
+        for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
+        {
+            if let Some(properties) =
+                parse_accounting_register_child_properties_from_fields(&fields, child_uuid)
+            {
+                return Some(properties);
+            }
+        }
+    }
     for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
         if let Some(mut properties) = parse_metadata_child_properties_from_fields(
             owner_kind,
@@ -5927,6 +5918,56 @@ fn parse_metadata_child_properties(
         }
     }
     None
+}
+
+fn parse_accounting_register_child_properties_from_fields(
+    fields: &[&str],
+    child_uuid: &str,
+) -> Option<MetadataChildProperties> {
+    if fields.first().map(|field| field.trim()) != Some("27")
+        || metadata_header_field_index(fields, child_uuid).is_none()
+        || fields.len() < 18
+    {
+        return None;
+    }
+    Some(MetadataChildProperties {
+        password_mode: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(false),
+        format: parse_1c_synonyms(fields.get(3).copied().unwrap_or("{0}")),
+        edit_format: Vec::new(),
+        tooltip: parse_1c_synonyms(fields.get(4).copied().unwrap_or("{0}")),
+        mark_negatives: parse_1c_bool_field(fields.get(5).copied()).unwrap_or(false),
+        mask: fields
+            .get(6)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        multi_line: parse_1c_bool_field(fields.get(7).copied()).unwrap_or(false),
+        extended_edit: parse_1c_bool_field(fields.get(17).copied()).unwrap_or(false),
+        min_value: parse_constant_bound_value(fields.get(8).copied()),
+        max_value: parse_constant_bound_value(fields.get(9).copied()),
+        fill_from_filling_value: false,
+        emit_fill_from_filling_value: false,
+        fill_value: None,
+        emit_fill_value: false,
+        fill_checking: metadata_fill_checking_xml(fields.get(13).copied()),
+        choice_folders_and_items: Some("Items"),
+        choice_parameter_links: Some(Vec::new()),
+        choice_parameters: Some(Vec::new()),
+        quick_choice: Some("Auto"),
+        create_on_input: Some("Auto"),
+        choice_form: Some(MetadataChoiceForm::Empty),
+        link_by_type_empty: true,
+        choice_history_on_input: Some("Auto"),
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
+        use_mode: None,
+        indexing: None,
+        full_text_search: None,
+        data_history: None,
+        update_data_history_immediately_after_write: None,
+        execute_after_write_data_history_version_processing: None,
+    })
 }
 
 fn parse_metadata_child_properties_from_fields(
@@ -6174,7 +6215,8 @@ fn parse_register_child_extra_properties(
                     .and_then(|field| register_child_full_text_search_xml(field.trim()));
                 return properties;
             }
-            ("Resource", Some("2")) if fields.len() >= 6 && field_starts_with(fields.get(1), "{27") =>
+            ("Resource", Some("2"))
+                if fields.len() >= 6 && field_starts_with(fields.get(1), "{27") =>
             {
                 properties.balance = parse_1c_bool_field(fields.get(2).copied());
                 properties.accounting_flag =
@@ -6187,7 +6229,8 @@ fn parse_register_child_extra_properties(
                     .and_then(|field| register_child_full_text_search_xml(field.trim()));
                 return properties;
             }
-            ("Attribute", Some("2")) if fields.len() >= 4 && field_starts_with(fields.get(1), "{27") =>
+            ("Attribute", Some("2"))
+                if fields.len() >= 4 && field_starts_with(fields.get(1), "{27") =>
             {
                 properties.indexing = fields
                     .get(2)
