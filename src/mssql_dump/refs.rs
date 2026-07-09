@@ -942,6 +942,76 @@ pub(super) fn build_form_source_reference_index_from_texts(
     index
 }
 
+pub(super) fn build_form_owner_resolution_diagnostics_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
+    let mut forms = Vec::<MetadataHeader>::new();
+    let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
+
+    for row in rows {
+        if is_form_metadata_text(&row.text, &row.file_name) {
+            if let Some(header) = row.header.as_ref() {
+                forms.push(header.clone());
+            }
+            continue;
+        }
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
+        else {
+            continue;
+        };
+        if !metadata_kind_can_own_forms(kind) {
+            continue;
+        }
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        let Some(references) = owned_form_uuid_values(&row.text) else {
+            continue;
+        };
+        for reference in references {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .insert(owner_path.clone());
+        }
+    }
+
+    let mut diagnostics = BTreeMap::new();
+    for form in forms {
+        let owner_paths = owner_paths_by_ref.get(&form.uuid);
+        let owner_count = owner_paths.map_or(0, BTreeSet::len);
+        if owner_count == 1 {
+            continue;
+        }
+
+        let candidates = owner_paths
+            .map(|paths| {
+                paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let candidates = if candidates.is_empty() {
+            "none".to_string()
+        } else {
+            candidates.join(", ")
+        };
+        diagnostics.insert(
+            format!("{}.0", form.uuid),
+            format!(
+                "form \"{}\" ({}) owner resolution expected exactly 1 owner, found {}; candidates: {}; fallback path: CommonForms/{}.xml",
+                form.name,
+                form.uuid,
+                owner_count,
+                candidates,
+                sanitize_source_path_segment(&form.name)
+            ),
+        );
+    }
+
+    diagnostics
+}
+
 // Platform-level 1C markers for owned form lists in metadata blobs. These are
 // not configuration object UUIDs and must not be replaced with DB-specific IDs.
 #[allow(dead_code)]

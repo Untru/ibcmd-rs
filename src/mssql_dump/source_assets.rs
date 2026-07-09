@@ -368,17 +368,34 @@ pub(super) fn parse_hex_u32_bytes(bytes: &[u8]) -> Option<u32> {
 
 pub(super) fn ensure_unique_source_asset_paths(
     source_assets: &BTreeMap<String, SourceAsset>,
+    diagnostics: &BTreeMap<String, String>,
 ) -> Result<()> {
     let mut paths = BTreeMap::<String, &str>::new();
     for (file_name, asset) in source_assets {
         let path = asset.primary_path.to_string_lossy().replace('\\', "/");
         if let Some(previous_file_name) = paths.insert(path.clone(), file_name.as_str()) {
-            bail!(
+            let mut message = format!(
                 "source asset output path {path} is produced by both {previous_file_name} and {file_name}"
             );
+            append_source_asset_diagnostic(&mut message, previous_file_name, diagnostics);
+            append_source_asset_diagnostic(&mut message, file_name, diagnostics);
+            bail!("{message}");
         }
     }
     Ok(())
+}
+
+fn append_source_asset_diagnostic(
+    message: &mut String,
+    file_name: &str,
+    diagnostics: &BTreeMap<String, String>,
+) {
+    if let Some(diagnostic) = diagnostics.get(file_name) {
+        message.push_str("; ");
+        message.push_str(file_name);
+        message.push_str(": ");
+        message.push_str(diagnostic);
+    }
 }
 
 #[derive(Clone)]

@@ -484,6 +484,8 @@ fn dump_table_rows_with_options(
         &template_refs,
         &subsystem_refs,
     );
+    let source_asset_diagnostics =
+        build_form_owner_resolution_diagnostics_from_texts(&metadata_texts);
     let help_refs = if extract_metadata_xml {
         build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
     } else {
@@ -521,7 +523,7 @@ fn dump_table_rows_with_options(
         BTreeMap::new()
     };
     let configuration_module_groups = configuration_module_groups(&file_names_owned);
-    ensure_unique_source_asset_paths(&source_assets)?;
+    ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
 
     let context = DumpRowContext {
         output_dir,
@@ -1182,6 +1184,8 @@ fn dump_table_rows_streamed(
         &template_refs,
         &subsystem_refs,
     );
+    let source_asset_diagnostics =
+        build_form_owner_resolution_diagnostics_from_texts(source_asset_metadata_texts);
     timings.prepare_source_assets_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let help_refs = if extract_metadata_xml
@@ -1231,7 +1235,7 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_body_owners_ms += elapsed_ms(index_part_started);
     let configuration_module_groups = configuration_module_groups(&file_names);
-    ensure_unique_source_asset_paths(&source_assets)?;
+    ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
     timings.prepare_indexes_ms = elapsed_ms(prepare_started);
 

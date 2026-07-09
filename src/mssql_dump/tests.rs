@@ -835,11 +835,26 @@ fn rejects_duplicate_source_asset_primary_paths() {
             },
         ),
     ]);
+    let diagnostics = BTreeMap::from([
+        (
+            "first".to_string(),
+            "form \"ФормаСписка\" owner resolution expected exactly 1 owner, found 0; candidates: none".to_string(),
+        ),
+        (
+            "second".to_string(),
+            "form \"ФормаСписка\" owner resolution expected exactly 1 owner, found 2; candidates: Catalogs/Products, Catalogs/Services".to_string(),
+        ),
+    ]);
 
-    let error = ensure_unique_source_asset_paths(&source_assets)
+    let error = ensure_unique_source_asset_paths(&source_assets, &diagnostics)
         .expect_err("duplicate source asset paths must be rejected");
+    let error = error.to_string();
 
-    assert!(error.to_string().contains("produced by both"));
+    assert!(error.contains("produced by both"));
+    assert!(error.contains("first: form \"ФормаСписка\""));
+    assert!(error.contains("found 0; candidates: none"));
+    assert!(error.contains("second: form \"ФормаСписка\""));
+    assert!(error.contains("Catalogs/Products, Catalogs/Services"));
 }
 
 #[test]
