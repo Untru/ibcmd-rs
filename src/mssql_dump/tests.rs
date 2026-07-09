@@ -858,6 +858,31 @@ fn rejects_duplicate_source_asset_primary_paths() {
 }
 
 #[test]
+fn resolves_owned_default_list_form_ref_by_standard_form_name() {
+    let form_refs = BTreeMap::from([
+        (
+            "11111111-1111-4111-8111-111111111111".to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Documents/Invoice/Forms/ObjectForm.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            "22222222-2222-4222-8222-222222222222".to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Documents/Invoice/Forms/ФормаСписка.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+
+    assert_eq!(
+        owned_default_list_form_ref(&form_refs, "Documents", "Invoice"),
+        Some("Document.Invoice.Form.ФормаСписка".to_string())
+    );
+}
+
+#[test]
 fn writes_common_module_text_to_source_layout_when_metadata_is_present() {
     let root = std::env::temp_dir().join(format!(
         "ibcmd-rs-mssql-dump-test-{}",
@@ -9990,19 +10015,33 @@ fn recognizes_form_item_picture_asset_formats() {
 #[test]
 fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
     let uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let list_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     let blob = deflate_for_test(
             format!(
                 "\u{feff}{{1,\r\n{{34,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExpenseItems\",{{1,\"en\",\"Expense items\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
+    let form_refs = BTreeMap::from([(
+        list_form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from(
+                "ChartsOfCharacteristicTypes/ExpenseItems/Forms/ListForm.xml",
+            ),
+            kind: "Form",
+        },
+    )]);
 
-    let extracted = extract_metadata_source_xml(
+    let extracted = extract_metadata_source_xml_with_refs(
         &blob,
         uuid,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &form_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
     )
     .unwrap();
     let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
@@ -10014,6 +10053,13 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
     assert_eq!(properties.kind, "ChartOfCharacteristicTypes");
     assert_eq!(properties.uuid, uuid);
     assert_eq!(properties.name, "ExpenseItems");
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert!(
+        xml.contains(
+            "<DefaultListForm>ChartOfCharacteristicTypes.ExpenseItems.Form.ListForm</DefaultListForm>"
+        ),
+        "{xml}"
+    );
 }
 
 #[test]
@@ -19315,6 +19361,7 @@ fn extracts_exchange_plan_generated_types_to_metadata_xml() {
     let list_value_id = "66666666-6666-4666-8666-666666666662";
     let manager_type_id = "44444444-4444-4444-8444-444444444441";
     let manager_value_id = "44444444-4444-4444-8444-444444444442";
+    let list_form_uuid = "77777777-7777-4777-8777-777777777777";
     let blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{37,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\
@@ -19325,6 +19372,13 @@ fn extracts_exchange_plan_generated_types_to_metadata_xml() {
             )
             .as_bytes(),
         );
+    let form_refs = BTreeMap::from([(
+        list_form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("ExchangePlans/Sync/Forms/ListForm.xml"),
+            kind: "Form",
+        },
+    )]);
 
     let extracted = extract_metadata_source_xml_with_refs(
         &blob,
@@ -19332,7 +19386,7 @@ fn extracts_exchange_plan_generated_types_to_metadata_xml() {
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        &form_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
@@ -19379,11 +19433,17 @@ fn extracts_exchange_plan_generated_types_to_metadata_xml() {
         xml.find("ExchangePlanList.Sync").unwrap() < xml.find("ExchangePlanManager.Sync").unwrap()
     );
     assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+    assert!(xml.contains("<DefaultListForm>ExchangePlan.Sync.Form.ListForm</DefaultListForm>"));
     assert!(
         xml.find("<Comment>exchange comment</Comment>").unwrap()
             < xml
                 .find("<UseStandardCommands>false</UseStandardCommands>")
                 .unwrap()
+    );
+    assert!(
+        xml.find("<UseStandardCommands>false</UseStandardCommands>")
+            .unwrap()
+            < xml.find("<DefaultListForm>").unwrap()
     );
 }
 
@@ -25299,12 +25359,20 @@ fn extracts_business_process_generated_types_to_metadata_xml() {
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
     let route_point_type_id = "66666666-6666-4666-8666-666666666661";
     let route_point_value_id = "66666666-6666-4666-8666-666666666662";
+    let list_form_uuid = "77777777-7777-4777-8777-777777777777";
     let business_process_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{30,0,0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},{manager_type_id},{manager_value_id},{route_point_type_id},{route_point_value_id},\r\n{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"approval comment\"}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
+    let form_refs = BTreeMap::from([(
+        list_form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("BusinessProcesses/Approval/Forms/ListForm.xml"),
+            kind: "Form",
+        },
+    )]);
 
     let extracted = extract_metadata_source_xml_with_refs(
         &business_process_blob,
@@ -25312,7 +25380,7 @@ fn extracts_business_process_generated_types_to_metadata_xml() {
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        &form_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
@@ -25365,6 +25433,9 @@ fn extracts_business_process_generated_types_to_metadata_xml() {
     assert!(xml.contains(&format!("<xr:TypeId>{route_point_type_id}</xr:TypeId>")));
     assert!(xml.contains(&format!("<xr:ValueId>{route_point_value_id}</xr:ValueId>")));
     assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    assert!(
+        xml.contains("<DefaultListForm>BusinessProcess.Approval.Form.ListForm</DefaultListForm>")
+    );
 }
 
 #[test]
@@ -25431,12 +25502,20 @@ fn extracts_task_generated_types_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
+    let list_form_uuid = "66666666-6666-4666-8666-666666666666";
     let task_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"task comment\"}},0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},{manager_type_id},{manager_value_id}}}\r\n}}"
             )
             .as_bytes(),
         );
+    let form_refs = BTreeMap::from([(
+        list_form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Tasks/ExecutorTask/Forms/ListForm.xml"),
+            kind: "Form",
+        },
+    )]);
 
     let extracted = extract_metadata_source_xml_with_refs(
         &task_blob,
@@ -25444,7 +25523,7 @@ fn extracts_task_generated_types_to_metadata_xml() {
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        &form_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
@@ -25486,6 +25565,7 @@ fn extracts_task_generated_types_to_metadata_xml() {
     assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
     assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
     assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+    assert!(xml.contains("<DefaultListForm>Task.ExecutorTask.Form.ListForm</DefaultListForm>"));
     assert!(
         xml.find("<Comment>task comment</Comment>").unwrap()
             < xml.find("<UseStandardCommands>").unwrap(),

@@ -3136,6 +3136,11 @@ struct FunctionalOptionProperties {
     content: Vec<String>,
 }
 
+struct DefaultListFormMetadataProperties {
+    use_standard_commands: Option<bool>,
+    default_list_form: Option<String>,
+}
+
 struct SubsystemProperties {
     include_help_in_contents: bool,
     include_in_command_interface: bool,
@@ -3147,6 +3152,7 @@ struct ExchangePlanProperties {
     this_node: Option<String>,
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    default_list_form: Option<String>,
     child_objects: Vec<MetadataChildObject>,
 }
 
@@ -3421,11 +3427,13 @@ struct DocumentStandardAttributes {
 struct BusinessProcessProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    default_list_form: Option<String>,
 }
 
 struct TaskProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    default_list_form: Option<String>,
 }
 
 struct SettingsStorageProperties {
@@ -4601,10 +4609,10 @@ fn extract_metadata_source_xml_from_text_row(
         )?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
     } else if kind == "BusinessProcess" {
-        let business_process = parse_business_process_properties_from_text(text, uuid)?;
+        let business_process = parse_business_process_properties_from_text(text, uuid, form_refs)?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
     } else if kind == "Task" {
-        let task = parse_task_properties_from_text(text, uuid)?;
+        let task = parse_task_properties_from_text(text, uuid, form_refs)?;
         format_task_source_xml(&header, &task, source_version).into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid)?;
@@ -4621,7 +4629,8 @@ fn extract_metadata_source_xml_from_text_row(
         let subsystem = parse_subsystem_properties_from_text(text, uuid, subsystem_refs)?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
-        let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid, type_index)?;
+        let exchange_plan =
+            parse_exchange_plan_properties_from_text(text, uuid, type_index, form_refs)?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
         let register = parse_register_properties_from_text(
@@ -4658,6 +4667,11 @@ fn extract_metadata_source_xml_from_text_row(
         format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
     } else if kind == "FilterCriterion" {
         format_filter_criterion_source_xml(&header, source_version).into_bytes()
+    } else if metadata_kind_uses_default_list_form_properties(kind) {
+        let properties =
+            parse_default_list_form_metadata_properties_from_text(kind, text, uuid, form_refs)?;
+        format_default_list_form_metadata_source_xml(kind, &header, &properties, source_version)
+            .into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
         format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
@@ -4830,6 +4844,35 @@ fn parse_functional_option_properties_from_text(
     })
 }
 
+fn metadata_kind_uses_default_list_form_properties(kind: &str) -> bool {
+    matches!(
+        kind,
+        "ChartOfAccounts" | "ChartOfCalculationTypes" | "ChartOfCharacteristicTypes"
+    )
+}
+
+fn parse_default_list_form_metadata_properties_from_text(
+    kind: &str,
+    text: &str,
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<DefaultListFormMetadataProperties> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let fields = metadata_object_fields(text)?;
+    let header_index = metadata_header_field_index(&fields, uuid)?;
+    let owner_folder = metadata_source_folder_for_kind(kind)?;
+    Some(DefaultListFormMetadataProperties {
+        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied()),
+        default_list_form: parse_default_list_form_ref(
+            &fields,
+            &[],
+            form_refs,
+            owner_folder,
+            &header.name,
+        ),
+    })
+}
+
 fn parse_subsystem_properties_from_text(
     text: &str,
     uuid: &str,
@@ -4890,6 +4933,7 @@ fn parse_exchange_plan_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ExchangePlanProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -4948,6 +4992,13 @@ fn parse_exchange_plan_properties_from_text(
         this_node,
         generated_types,
         use_standard_commands,
+        default_list_form: parse_default_list_form_ref(
+            &fields,
+            &[header_index + 9],
+            form_refs,
+            "ExchangePlans",
+            &header.name,
+        ),
         child_objects: parse_exchange_plan_child_objects(text, uuid, type_index),
     })
 }
@@ -5105,7 +5156,7 @@ fn parse_register_properties_from_text(
     let data_lock_control_mode = parse_register_data_lock_control_mode(kind, &fields, uuid);
     let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, uuid);
     let full_text_search = parse_register_full_text_search(kind, &fields, uuid);
-    let form_refs = parse_register_form_refs(kind, &fields, uuid, form_refs);
+    let form_refs = parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs);
     let standard_attributes =
         register_standard_attributes(kind, &header.name, register_type, &fields, uuid);
     let (list_presentation, extended_list_presentation, explanation) =
@@ -5174,6 +5225,7 @@ fn parse_register_form_refs(
     kind: &str,
     fields: &[&str],
     uuid: &str,
+    owner_name: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> (
     Option<String>,
@@ -5184,22 +5236,34 @@ fn parse_register_form_refs(
     let Some(header_index) = metadata_header_field_index(fields, uuid) else {
         return (None, None, None, None);
     };
+    let owner_folder = metadata_source_folder_for_kind(kind);
+    let default_list_form_ref = |offset| {
+        owner_folder.and_then(|owner_folder| {
+            parse_default_list_form_ref(
+                fields,
+                &[header_index + offset],
+                form_refs,
+                owner_folder,
+                owner_name,
+            )
+        })
+    };
     match kind {
         "InformationRegister" => (
             parse_catalog_form_ref(fields.get(header_index + 1).copied(), form_refs),
-            parse_catalog_form_ref(fields.get(header_index + 2).copied(), form_refs),
+            default_list_form_ref(2),
             None,
             None,
         ),
         "AccountingRegister" => (
             None,
-            parse_catalog_form_ref(fields.get(header_index + 4).copied(), form_refs),
+            default_list_form_ref(4),
             None,
             parse_catalog_form_ref(fields.get(header_index + 10).copied(), form_refs),
         ),
         "AccumulationRegister" => (
             None,
-            parse_catalog_form_ref(fields.get(header_index + 2).copied(), form_refs),
+            default_list_form_ref(2),
             None,
             parse_catalog_form_ref(fields.get(header_index + 3).copied(), form_refs),
         ),
@@ -6846,9 +6910,12 @@ fn parse_document_properties_from_text(
             fields.get(header_index + 14).copied(),
             form_refs,
         ),
-        default_list_form: parse_catalog_form_ref(
-            fields.get(header_index + 15).copied(),
+        default_list_form: parse_default_list_form_ref(
+            &fields,
+            &[header_index + 15],
             form_refs,
+            "Documents",
+            &header.name,
         ),
         default_choice_form: parse_catalog_form_ref(
             fields.get(header_index + 16).copied(),
@@ -6888,6 +6955,7 @@ fn parse_document_properties_from_text(
 fn parse_business_process_properties_from_text(
     text: &str,
     uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<BusinessProcessProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -6950,10 +7018,21 @@ fn parse_business_process_properties_from_text(
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
             .unwrap_or(true),
+        default_list_form: parse_default_list_form_ref(
+            &fields,
+            &[header_index + 9],
+            form_refs,
+            "BusinessProcesses",
+            &header.name,
+        ),
     })
 }
 
-fn parse_task_properties_from_text(text: &str, uuid: &str) -> Option<TaskProperties> {
+fn parse_task_properties_from_text(
+    text: &str,
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<TaskProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
     if fields.first().map(|value| value.trim()) != Some("33")
@@ -7009,6 +7088,13 @@ fn parse_task_properties_from_text(text: &str, uuid: &str) -> Option<TaskPropert
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
             .unwrap_or(true),
+        default_list_form: parse_default_list_form_ref(
+            &fields,
+            &[header_index + 9],
+            form_refs,
+            "Tasks",
+            &header.name,
+        ),
     })
 }
 
@@ -7361,6 +7447,74 @@ fn parse_catalog_form_ref(
 ) -> Option<String> {
     let uuid = parse_non_zero_uuid(field?)?;
     form_refs.get(&uuid).and_then(form_source_reference_name)
+}
+
+fn parse_default_list_form_ref(
+    fields: &[&str],
+    candidate_indexes: &[usize],
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    owner_folder: &str,
+    owner_name: &str,
+) -> Option<String> {
+    candidate_indexes
+        .iter()
+        .filter_map(|index| fields.get(*index).copied())
+        .find_map(|field| parse_catalog_form_ref(Some(field), form_refs))
+        .or_else(|| owned_default_list_form_ref(form_refs, owner_folder, owner_name))
+}
+
+fn owned_default_list_form_ref(
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    owner_folder: &str,
+    owner_name: &str,
+) -> Option<String> {
+    const DEFAULT_LIST_FORM_NAMES: [&str; 3] = [
+        "\u{424}\u{43e}\u{440}\u{43c}\u{430}\u{421}\u{43f}\u{438}\u{441}\u{43a}\u{430}",
+        "ListForm",
+        "List",
+    ];
+
+    for preferred_name in DEFAULT_LIST_FORM_NAMES {
+        let mut matches = form_refs
+            .values()
+            .filter(|form_ref| {
+                form_ref.kind == "Form"
+                    && is_owned_metadata_child_path(
+                        &form_ref.relative_path,
+                        owner_folder,
+                        owner_name,
+                        "Forms",
+                    )
+            })
+            .filter_map(|form_ref| {
+                let name = source_path_file_stem(&form_ref.relative_path)?;
+                (name == preferred_name).then_some(form_ref)
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        if let Some(form_ref) = matches.first() {
+            return form_source_reference_name(form_ref);
+        }
+    }
+
+    None
+}
+
+fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Document" => Some("Documents"),
+        "InformationRegister" => Some("InformationRegisters"),
+        "AccumulationRegister" => Some("AccumulationRegisters"),
+        "AccountingRegister" => Some("AccountingRegisters"),
+        "CalculationRegister" => Some("CalculationRegisters"),
+        "BusinessProcess" => Some("BusinessProcesses"),
+        "Task" => Some("Tasks"),
+        "ExchangePlan" => Some("ExchangePlans"),
+        "ChartOfAccounts" => Some("ChartsOfAccounts"),
+        "ChartOfCalculationTypes" => Some("ChartsOfCalculationTypes"),
+        "ChartOfCharacteristicTypes" => Some("ChartsOfCharacteristicTypes"),
+        _ => None,
+    }
 }
 
 fn parse_metadata_template_ref(
@@ -10358,6 +10512,32 @@ fn format_full_metadata_source_xml(
     xml
 }
 
+fn format_default_list_form_metadata_source_xml(
+    kind: &str,
+    header: &MetadataHeader,
+    properties: &DefaultListFormMetadataProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml(kind, header, source_version);
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties_xml = String::new();
+        if let Some(use_standard_commands) = properties.use_standard_commands {
+            properties_xml.push_str(&format!(
+                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(use_standard_commands)
+            ));
+        }
+        push_optional_text_element(
+            &mut properties_xml,
+            "\t\t\t",
+            "DefaultListForm",
+            properties.default_list_form.as_deref(),
+        );
+        xml.insert_str(index, &properties_xml);
+    }
+    xml
+}
+
 fn format_metadata_source_xml(
     kind: &str,
     header: &MetadataHeader,
@@ -10590,13 +10770,17 @@ fn format_exchange_plan_source_xml(
         xml.insert_str(index, &internal_info);
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
-        xml.insert_str(
-            index,
-            &format!(
-                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-                xml_bool(exchange_plan.use_standard_commands)
-            ),
+        let mut properties = format!(
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+            xml_bool(exchange_plan.use_standard_commands)
         );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultListForm",
+            exchange_plan.default_list_form.as_deref(),
+        );
+        xml.insert_str(index, &properties);
     }
     if !exchange_plan.child_objects.is_empty() {
         let mut child_objects = String::new();
@@ -11298,13 +11482,17 @@ fn format_business_process_source_xml(
         xml.insert_str(index, &internal_info);
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
-        xml.insert_str(
-            index,
-            &format!(
-                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-                xml_bool(business_process.use_standard_commands)
-            ),
+        let mut properties = format!(
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+            xml_bool(business_process.use_standard_commands)
         );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultListForm",
+            business_process.default_list_form.as_deref(),
+        );
+        xml.insert_str(index, &properties);
     }
     xml
 }
@@ -11320,13 +11508,17 @@ fn format_task_source_xml(
         xml.insert_str(index, &internal_info);
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
-        xml.insert_str(
-            index,
-            &format!(
-                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-                xml_bool(task.use_standard_commands)
-            ),
+        let mut properties = format!(
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+            xml_bool(task.use_standard_commands)
         );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultListForm",
+            task.default_list_form.as_deref(),
+        );
+        xml.insert_str(index, &properties);
     }
     xml
 }
