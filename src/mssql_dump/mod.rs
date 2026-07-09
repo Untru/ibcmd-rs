@@ -9026,9 +9026,7 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "544fdbe8-5956-4512-bc62-93b4c022d291" => Some("StdPicture.ExchangePlan"),
         "003024ed-fa25-42ac-9f53-f5014e383801" => Some("StdPicture.ExecuteTask"),
         "1a4342a5-fa06-4556-8a85-e8738fc25821" => Some("StdPicture.GetURL"),
-        "3d4ad3b1-17de-4cf1-a2e4-0c2c83a5b5c2" => {
-            Some("StdPicture.ListViewModeHierarchicalList")
-        }
+        "3d4ad3b1-17de-4cf1-a2e4-0c2c83a5b5c2" => Some("StdPicture.ListViewModeHierarchicalList"),
         "64837726-d2a2-4682-a788-737423e80013" => Some("StdPicture.Picture"),
         "b4c7ab2c-bcda-4468-a28f-5fee93838c4e" => Some("StdPicture.Properties"),
         "b5a0aaba-3a83-4a71-b6f9-24aae1574681" => Some("StdPicture.SaveReportSettings"),

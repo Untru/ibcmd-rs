@@ -742,6 +742,12 @@ pub(super) fn extract_form_repost_on_write(fields: &[&str]) -> Option<bool> {
 }
 
 pub(super) fn extract_form_auto_fill_check(fields: &[&str]) -> Option<bool> {
+    if fields.first().map(|field| field.trim()) == Some("50") {
+        return (fields.get(13).map(|field| field.trim()) == Some("0")).then_some(false);
+    }
+    if fields.first().map(|field| field.trim()) != Some("59") {
+        return None;
+    }
     let value = form_root_property_bag_value(fields, "24")?;
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
@@ -4071,6 +4077,10 @@ pub(super) fn parse_form_child_item_with_context(
                     .filter(|value| *value)
                     .or_else(|| parse_form_table_default_item_from_slots(wrapper, &fields))
             }
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(13)
+                .and_then(|field| parse_form_child_item_show_title(field))
         } else if matches!(wrapper, "37" | "48")
             && matches!(
                 tag,
@@ -6231,7 +6241,7 @@ pub(super) fn parse_form_table_default_item_from_slots(
     wrapper: &str,
     fields: &[&str],
 ) -> Option<bool> {
-    (wrapper == "55" && fields.get(13).map(|field| field.trim()) == Some("1")).then_some(true)
+    (wrapper == "55" && fields.get(16).map(|field| field.trim()) == Some("1")).then_some(true)
 }
 
 pub(super) fn parse_form_table_default_row_picture_data_path(
@@ -8950,7 +8960,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(data_path)
         ));
     }
-    if item.tag != "Table" && item.default_item == Some(true) {
+    if item.tag != "Table" && item.tag != "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
     if item.visible == Some(false) {
@@ -8986,6 +8996,9 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.default_button == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultButton>true</DefaultButton>\r\n"));
+    }
+    if item.tag == "Button" && item.default_item == Some(true) {
+        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
     if item.tag != "Table" && item.read_only == Some(true) && !read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
