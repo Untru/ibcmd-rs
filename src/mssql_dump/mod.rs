@@ -4476,7 +4476,8 @@ fn extract_metadata_source_xml_from_text_row(
         let kind = form_ref
             .map(|form_ref| form_ref.kind)
             .unwrap_or("CommonForm");
-        let xml = format_form_source_xml(kind, &header, source_version).into_bytes();
+        let properties = parse_form_metadata_properties_from_text(text, kind, uuid);
+        let xml = format_form_source_xml(kind, &header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if is_template_metadata_text(text, uuid) {
@@ -8487,6 +8488,7 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "894cf65b-4109-4533-a1d7-c87b1fcc80a3" => Some("StdPicture.Write"),
         "e6fc55a0-3d58-4b15-bdd3-717453929598" => Some("StdPicture.WriteAndClose"),
         "08a45a70-c221-4339-b3b1-9f11cb22147d" => Some("StdPicture.Delete"),
+        "6e3687cf-a8d1-446a-833a-bfaf38516353" => Some("StdPicture.SwitchActivity"),
         _ => None,
     }
 }

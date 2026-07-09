@@ -2110,12 +2110,65 @@ fn formats_form_metadata_for_v220_without_palette_namespace_or_compat_mode() {
         template_type_code: None,
     };
 
-    let xml = format_form_source_xml("Form", &header, InfobaseConfigSourceVersion::V2_20);
+    let properties = FormMetadataProperties::default();
+    let xml = format_form_source_xml(
+        "Form",
+        &header,
+        &properties,
+        InfobaseConfigSourceVersion::V2_20,
+    );
 
     assert!(xml.contains(r#"version="2.20""#));
     assert!(!xml.contains("xmlns:pal="));
     assert!(!xml.contains("<UseInInterfaceCompatibilityMode>"));
-    assert!(xml.contains("<ExtendedPresentation/>"));
+    assert!(!xml.contains("<ExtendedPresentation"));
+}
+
+#[test]
+fn extracts_common_form_wrapper_properties_to_metadata_xml() {
+    let form_uuid = "11111111-1111-4111-8111-111111111111";
+    let metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n\
+{{4,\r\n\
+{{13,\r\n\
+{{3,\r\n\
+{{1,0,{form_uuid}}},\"QuoteForm\",{{1,\"en\",\"Quote form\"}},\"Uses \"\"quotes\"\"\"}},1,1,\r\n\
+{{1,\r\n\
+{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}\r\n\
+}}\r\n\
+}},\r\n\
+{{1,\"en\",\"Extended caption\"}},\r\n\
+{{1,\"en\",\"Explains form\"}},1}},0}}"
+        )
+        .as_bytes(),
+    );
+
+    let extracted = extract_metadata_source_xml(
+        &metadata,
+        form_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("CommonForms").join("QuoteForm.xml")
+    );
+    assert!(xml.contains("<Comment>Uses \"quotes\"</Comment>"));
+    assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+    assert!(xml.contains(
+        "<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>"
+    ));
+    assert!(!xml.contains("MobilePlatformApplication"));
+    assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    assert!(xml.contains("<ExtendedPresentation>"));
+    assert!(xml.contains("<v8:content>Extended caption</v8:content>"));
+    assert!(xml.contains("<Explanation>"));
+    assert!(xml.contains("<v8:content>Explains form</v8:content>"));
 }
 
 #[test]

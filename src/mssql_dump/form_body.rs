@@ -2007,6 +2007,7 @@ pub(super) fn parse_form_dynamic_list_settings(
     let mut dynamic_data_read_explicit = false;
     let mut query_text = None;
     let mut main_table = None;
+    let mut main_table_category = None;
     let mut explicit_fields = Vec::new();
     let mut fields = Vec::new();
     let mut server_state_xml = None;
@@ -2018,6 +2019,7 @@ pub(super) fn parse_form_dynamic_list_settings(
         match key.as_str() {
             "QueryText" => query_text = parse_form_setting_string(window[1]),
             "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
+            "MainTableCategory" => main_table_category = parse_form_setting_number(window[1]),
             "Field" => {
                 let parsed_fields = parse_form_dynamic_list_fields(window[1]);
                 explicit_fields.extend(parsed_fields.clone());
@@ -2067,6 +2069,7 @@ pub(super) fn parse_form_dynamic_list_settings(
             _ => {}
         }
     }
+    main_table = normalize_form_main_table_category(main_table, main_table_category.as_deref());
     fields.extend(parse_form_dynamic_list_field_map_items(&settings_fields));
     dedupe_form_dynamic_list_fields(&mut fields);
     if query_text.is_none()
@@ -2580,9 +2583,32 @@ pub(super) fn normalize_form_list_settings_section_xml(
     };
     let inner = prefix_default_xml_tags(&inner, "dcsset");
     let inner = prefix_unqualified_xsi_type_values(&inner, "dcsset");
-    Some(format!(
+    let inner = normalize_form_list_settings_raw_fragment(&inner);
+    Some(normalize_form_list_settings_raw_fragment(&format!(
         "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
-    ))
+    )))
+}
+
+pub(super) fn normalize_form_list_settings_raw_fragment(fragment: &str) -> String {
+    split_adjacent_xml_tags(
+        &fragment
+            .replace(
+                r#" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core""#,
+                "",
+            )
+            .replace(
+                r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#,
+                "",
+            )
+            .replace(
+                r#" xmlns:xs="http://www.w3.org/2001/XMLSchema""#,
+                "",
+            )
+            .replace(
+                r#" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance""#,
+                "",
+            ),
+    )
 }
 
 pub(super) fn extract_form_attributes_conditional_appearance_xml(
@@ -2763,6 +2789,26 @@ pub(super) fn normalize_form_server_state_inner_xml(xml: &str) -> String {
         "<v8:DateQualifiers>",
     )
     .replace("</DateQualifiers>", "</v8:DateQualifiers>")
+    .replace(
+        r#"<NumberQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
+        "<v8:NumberQualifiers>",
+    )
+    .replace("</NumberQualifiers>", "</v8:NumberQualifiers>")
+    .replace("<Digits>", "<v8:Digits>")
+    .replace("</Digits>", "</v8:Digits>")
+    .replace("<FractionDigits>", "<v8:FractionDigits>")
+    .replace("</FractionDigits>", "</v8:FractionDigits>")
+    .replace("<AllowedSign>", "<v8:AllowedSign>")
+    .replace("</AllowedSign>", "</v8:AllowedSign>")
+    .replace(
+        r#"<StringQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
+        "<v8:StringQualifiers>",
+    )
+    .replace("</StringQualifiers>", "</v8:StringQualifiers>")
+    .replace("<Length>", "<v8:Length>")
+    .replace("</Length>", "</v8:Length>")
+    .replace("<AllowedLength>", "<v8:AllowedLength>")
+    .replace("</AllowedLength>", "</v8:AllowedLength>")
     .replace("<DateFractions>", "<v8:DateFractions>")
     .replace("</DateFractions>", "</v8:DateFractions>")
 }
@@ -2934,6 +2980,22 @@ pub(super) fn parse_form_main_table_ref(
     fields.iter().skip(1).find_map(|value| {
         parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
     })
+}
+
+pub(super) fn normalize_form_main_table_category(
+    main_table: Option<String>,
+    category: Option<&str>,
+) -> Option<String> {
+    let main_table = main_table?;
+    match (main_table.as_str(), category) {
+        (value, Some("3"))
+            if value.starts_with("AccountingRegister.")
+                && !value.ends_with(".RecordsWithExtDimensions") =>
+        {
+            Some(format!("{value}.RecordsWithExtDimensions"))
+        }
+        _ => Some(main_table),
+    }
 }
 
 pub(super) fn extract_form_body_parameters(
@@ -7378,6 +7440,17 @@ pub(super) fn parse_form_child_item_data_path(
                 .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned())
         })
     };
+    let parse_direct_bound = |field: &&str| {
+        parse_form_bound_data_path(
+            field,
+            name,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
+        )
+    };
     let input_field_offset = matches!(
         tag,
         "InputField"
@@ -7398,13 +7471,17 @@ pub(super) fn parse_form_child_item_data_path(
             .get(11)
             .and_then(parse_bound)
             .or_else(|| main_data_path.map(ToOwned::to_owned)),
-        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => {
+        "InputField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => {
             [11usize, 12]
                 .iter()
                 .filter_map(|index| fields.get(*index + input_field_offset))
                 .find_map(parse_bound)
                 .or_else(|| parent_data_path.map(|parent| format!("{parent}.{name}")))
         }
+        "LabelField" => [11usize, 12]
+            .iter()
+            .filter_map(|index| fields.get(*index + input_field_offset))
+            .find_map(parse_direct_bound),
         "TextDocumentField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
