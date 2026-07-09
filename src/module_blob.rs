@@ -14182,13 +14182,85 @@ fn form_event_field_matches(field: &str, identifiers: &[&str]) -> bool {
 fn form_event_layout_identifiers(name: &str) -> Vec<&str> {
     let mut identifiers = vec![name];
     match name {
-        "OnOpen" => identifiers.push("3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+        "ActivationProcessing" => identifiers.push("2042ec93-3108-4190-b767-ec6c10dd9ff4"),
+        "AdditionalDetailProcessing" => identifiers.push("0b8dc702-d001-4637-a215-9f35613e096c"),
+        "AfterWrite" => identifiers.push("047d4d09-961c-4bdc-8519-eef10674c35b"),
+        "AfterWriteAtServer" => identifiers.push("213d1900-dcad-4616-9f20-3f077156a40f"),
         "BeforeClose" => identifiers.push("52dbb775-1631-4fd5-8c55-1615b5881dac"),
-        "ChoiceProcessing" => identifiers.push("1d632984-de3c-4b4b-ad9f-d69682a10182"),
+        "BeforeCollapse" => identifiers.push("a7a9dc42-29b6-4c5b-8980-6d0b87149bdd"),
+        "BeforeEditEnd" => identifiers.push("4d88756d-bad4-4fde-92e1-c1f1402ac6b2"),
+        "BeforeExpand" => identifiers.push("7c39b7bc-db0f-4410-9d98-8e5b7896995e"),
+        "BeforeLoadDataFromSettingsAtServer" => {
+            identifiers.push("e773807c-0c0c-4689-a093-231ddcd6409f")
+        }
+        "BeforeLoadUserSettingsAtServer" => {
+            identifiers.push("40925042-2517-455b-a600-d68282829334")
+        }
+        "BeforeLoadVariantAtServer" => identifiers.push("1dd89674-8b50-4240-9899-e3426b79cb02"),
+        "BeforeWrite" => identifiers.extend([
+            "9cc34712-da5f-4faa-a653-343d2085fbe8",
+            "8a5894c9-d2ff-4c1d-b433-89cc352bbfbc",
+            "b7646583-04d3-4905-8f04-8985914bd1b7",
+        ]),
+        "BeforeWriteAtServer" => identifiers.extend([
+            "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6",
+            "8f42e083-be92-4102-b1f0-fa58452c1a63",
+        ]),
+        "ChoiceProcessing" => identifiers.extend([
+            "1d632984-de3c-4b4b-ad9f-d69682a10182",
+            "8bfdb5eb-62dc-4851-8a2c-e983526356bf",
+            "f72043b8-2d79-414e-bc4e-3972fe9dbca1",
+        ]),
+        "Click" => identifiers.extend([
+            "11707a99-4eb9-4373-bc8c-84891483a034",
+            "9874537f-454c-40ae-83e9-3b9cefbc6d08",
+            "da8dfb86-c5d1-4e35-a8a4-01b167a60ad3",
+        ]),
+        "Creating" => identifiers.push("aeba313d-c467-44b3-b4a2-956340932c8f"),
+        "DetailProcessing" => identifiers.push("2988b2a5-c887-4928-94ae-5d0c9c31e999"),
+        "DocumentComplete" => identifiers.push("53325f0c-b112-4c44-ab12-5d1ee0b1f07b"),
+        "EditTextChange" => identifiers.push("14256303-d2b7-4a58-bfab-e77493d10a59"),
+        "ExternalEvent" => identifiers.push("5426e344-5740-4f23-99c1-99179a200dc5"),
+        "FillCheckProcessingAtServer" => identifiers.push("e73d6384-49d2-4885-a752-a674d6ff7742"),
+        "NavigationProcessing" => identifiers.push("93dfba16-26db-46f8-acb5-4f92f50c855f"),
+        "NewWriteProcessing" => identifiers.push("ce67decf-16b8-4d61-b347-4e6a063580dc"),
         "NotificationProcessing" => identifiers.push("3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
-        "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
         "OnChange" => identifiers.push("fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+        "OnClose" => identifiers.push("ca21cd18-35b2-4281-b5c8-016ecc8da8ac"),
+        "OnCreateAtServer" => identifiers.push("9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
         "OnGetDataAtServer" => identifiers.push("97365900-eadf-4dfd-a9aa-fbb9ecabd079"),
+        "OnLoadDataFromSettingsAtServer" => {
+            identifiers.push("79cea13e-f6fb-4483-905d-713326405771")
+        }
+        "OnLoadUserSettingsAtServer" => identifiers.push("7b15b3db-1cd0-4e1d-a74b-2c972c9e2226"),
+        "OnLoadVariantAtServer" => identifiers.push("87ce636e-9de6-4e42-9395-f0f189d08397"),
+        "OnMainServerAvailabilityChange" => {
+            identifiers.push("d6b86f20-722b-4fe6-83fa-85c6aa4c1fe5")
+        }
+        "OnOpen" => identifiers.push("3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+        "OnReadAtServer" => identifiers.push("390d5e4b-e732-4c88-8748-9e211a416984"),
+        "OnReopen" => identifiers.push("6b3175a5-c143-4179-a670-ef231dc0a688"),
+        "OnSaveDataInSettingsAtServer" => identifiers.push("1952a54f-35ad-4928-902f-df212ab38ca3"),
+        "OnSaveUserSettingsAtServer" => identifiers.push("961ee7c6-0327-422b-adcb-97a90c46753d"),
+        "OnSaveVariantAtServer" => identifiers.push("499bb7af-6262-4de4-819f-ef264d1a20ec"),
+        "OnUpdateUserSettingSetAtServer" => {
+            identifiers.push("d817bccf-504e-4133-a79a-dd16e3a4df73")
+        }
+        "OnWriteAtServer" => identifiers.push("c1bc0d3e-d35e-4207-a06b-ece68ed25314"),
+        "OnActivateField" => identifiers.push("6e973761-8683-47fa-a609-4e230950294d"),
+        "Opening" => identifiers.push("ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1"),
+        "Selection" => identifiers.extend([
+            "1282f000-23b6-4887-87f4-9e8e79db3d32",
+            "22287505-97d8-4258-a318-209e2493f7eb",
+            "3c3da18f-fc18-4f77-8c2d-96c25bec40a5",
+        ]),
+        "StartListChoice" => identifiers.push("b3b65989-73ac-4db3-b6cb-398cb41a062f"),
+        "TextEditEnd" => identifiers.push("c331eb1b-d32b-4533-844c-1276600b64e3"),
+        "URLGetProcessing" => identifiers.push("674956b3-e469-4fdc-acf5-24ebf88cf7ab"),
+        "URLProcessing" => identifiers.extend([
+            "d710ea07-5c96-4c43-ab6e-e138d3653780",
+            "e0cd9bdf-88fa-428c-9f1f-86f7f73b11e2",
+        ]),
         _ => {}
     }
     identifiers

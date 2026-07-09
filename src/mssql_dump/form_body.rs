@@ -1200,6 +1200,8 @@ pub(super) fn parse_form_event_identifier(field: &str) -> Option<String> {
 
 pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'static str> {
     match identifier {
+        "ActivationProcessing" => Some("ActivationProcessing"),
+        "AdditionalDetailProcessing" => Some("AdditionalDetailProcessing"),
         "OnOpen" => Some("OnOpen"),
         "BeforeClose" => Some("BeforeClose"),
         "OnClose" => Some("OnClose"),
@@ -1210,6 +1212,9 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "BeforeWriteAtServer" => Some("BeforeWriteAtServer"),
         "AfterWriteAtServer" => Some("AfterWriteAtServer"),
         "OnWriteAtServer" => Some("OnWriteAtServer"),
+        "BeforeCollapse" => Some("BeforeCollapse"),
+        "BeforeEditEnd" => Some("BeforeEditEnd"),
+        "BeforeExpand" => Some("BeforeExpand"),
         "OnLoadDataFromSettingsAtServer" => Some("OnLoadDataFromSettingsAtServer"),
         "BeforeLoadDataFromSettingsAtServer" => Some("BeforeLoadDataFromSettingsAtServer"),
         "OnSaveDataInSettingsAtServer" => Some("OnSaveDataInSettingsAtServer"),
@@ -1222,12 +1227,62 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "OnUpdateUserSettingSetAtServer" => Some("OnUpdateUserSettingSetAtServer"),
         "FillCheckProcessingAtServer" => Some("FillCheckProcessingAtServer"),
         "ChoiceProcessing" => Some("ChoiceProcessing"),
+        "Click" => Some("Click"),
+        "Creating" => Some("Creating"),
+        "DetailProcessing" => Some("DetailProcessing"),
+        "DocumentComplete" => Some("DocumentComplete"),
+        "EditTextChange" => Some("EditTextChange"),
         "NotificationProcessing" => Some("NotificationProcessing"),
         "ExternalEvent" => Some("ExternalEvent"),
+        "NavigationProcessing" => Some("NavigationProcessing"),
+        "NewWriteProcessing" => Some("NewWriteProcessing"),
+        "OnActivateField" => Some("OnActivateField"),
+        "Selection" => Some("Selection"),
+        "StartListChoice" => Some("StartListChoice"),
+        "TextEditEnd" => Some("TextEditEnd"),
+        "URLGetProcessing" => Some("URLGetProcessing"),
+        "URLProcessing" => Some("URLProcessing"),
         "Opening" => Some("Opening"),
         "OnReopen" => Some("OnReopen"),
         "OnActivate" => Some("OnActivate"),
         "OnMainServerAvailabilityChange" => Some("OnMainServerAvailabilityChange"),
+        "047d4d09-961c-4bdc-8519-eef10674c35b" => Some("AfterWrite"),
+        "0b8dc702-d001-4637-a215-9f35613e096c" => Some("AdditionalDetailProcessing"),
+        "14256303-d2b7-4a58-bfab-e77493d10a59" => Some("EditTextChange"),
+        "1dd89674-8b50-4240-9899-e3426b79cb02" => Some("BeforeLoadVariantAtServer"),
+        "2042ec93-3108-4190-b767-ec6c10dd9ff4" => Some("ActivationProcessing"),
+        "213d1900-dcad-4616-9f20-3f077156a40f" => Some("AfterWriteAtServer"),
+        "22287505-97d8-4258-a318-209e2493f7eb" => Some("Selection"),
+        "2988b2a5-c887-4928-94ae-5d0c9c31e999" => Some("DetailProcessing"),
+        "390d5e4b-e732-4c88-8748-9e211a416984" => Some("OnReadAtServer"),
+        "3c3da18f-fc18-4f77-8c2d-96c25bec40a5" => Some("Selection"),
+        "40925042-2517-455b-a600-d68282829334" => Some("BeforeLoadUserSettingsAtServer"),
+        "499bb7af-6262-4de4-819f-ef264d1a20ec" => Some("OnSaveVariantAtServer"),
+        "4d88756d-bad4-4fde-92e1-c1f1402ac6b2" => Some("BeforeEditEnd"),
+        "53325f0c-b112-4c44-ab12-5d1ee0b1f07b" => Some("DocumentComplete"),
+        "674956b3-e469-4fdc-acf5-24ebf88cf7ab" => Some("URLGetProcessing"),
+        "6e973761-8683-47fa-a609-4e230950294d" => Some("OnActivateField"),
+        "7b15b3db-1cd0-4e1d-a74b-2c972c9e2226" => Some("OnLoadUserSettingsAtServer"),
+        "7c39b7bc-db0f-4410-9d98-8e5b7896995e" => Some("BeforeExpand"),
+        "87ce636e-9de6-4e42-9395-f0f189d08397" => Some("OnLoadVariantAtServer"),
+        "8a5894c9-d2ff-4c1d-b433-89cc352bbfbc" => Some("BeforeWrite"),
+        "8bfdb5eb-62dc-4851-8a2c-e983526356bf" => Some("ChoiceProcessing"),
+        "8f42e083-be92-4102-b1f0-fa58452c1a63" => Some("BeforeWriteAtServer"),
+        "93dfba16-26db-46f8-acb5-4f92f50c855f" => Some("NavigationProcessing"),
+        "961ee7c6-0327-422b-adcb-97a90c46753d" => Some("OnSaveUserSettingsAtServer"),
+        "9cc34712-da5f-4faa-a653-343d2085fbe8" => Some("BeforeWrite"),
+        "a7a9dc42-29b6-4c5b-8980-6d0b87149bdd" => Some("BeforeCollapse"),
+        "aeba313d-c467-44b3-b4a2-956340932c8f" => Some("Creating"),
+        "b3b65989-73ac-4db3-b6cb-398cb41a062f" => Some("StartListChoice"),
+        "b7646583-04d3-4905-8f04-8985914bd1b7" => Some("BeforeWrite"),
+        "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6" => Some("BeforeWriteAtServer"),
+        "c1bc0d3e-d35e-4207-a06b-ece68ed25314" => Some("OnWriteAtServer"),
+        "c331eb1b-d32b-4533-844c-1276600b64e3" => Some("TextEditEnd"),
+        "ce67decf-16b8-4d61-b347-4e6a063580dc" => Some("NewWriteProcessing"),
+        "d6b86f20-722b-4fe6-83fa-85c6aa4c1fe5" => Some("OnMainServerAvailabilityChange"),
+        "d817bccf-504e-4133-a79a-dd16e3a4df73" => Some("OnUpdateUserSettingSetAtServer"),
+        "da8dfb86-c5d1-4e35-a8a4-01b167a60ad3" => Some("Click"),
+        "e0cd9bdf-88fa-428c-9f1f-86f7f73b11e2" => Some("URLProcessing"),
         "3ccc650e-f631-4cae-8e33-3eaac610b5f9" => Some("OnOpen"),
         "52dbb775-1631-4fd5-8c55-1615b5881dac" => Some("BeforeClose"),
         "6b3175a5-c143-4179-a670-ef231dc0a688" => Some("OnReopen"),
@@ -1241,6 +1296,7 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "e773807c-0c0c-4689-a093-231ddcd6409f" => Some("BeforeLoadDataFromSettingsAtServer"),
         "5426e344-5740-4f23-99c1-99179a200dc5" => Some("ExternalEvent"),
         "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1" => Some("Opening"),
+        "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange"),
         _ => None,
     }
 }
@@ -6103,7 +6159,14 @@ pub(super) fn parse_form_table_command_bar_location(
     match wrapper {
         "55" if form_table_wrapper55_uses_split_head_slots(fields) => {
             fields.get(18).and_then(|field| match field.trim() {
+                "0" => Some("None"),
                 "1" => Some("Top"),
+                _ => None,
+            })
+        }
+        "55" if form_table_wrapper55_uses_root_default_command_bar_none(fields) => {
+            fields.get(18).and_then(|field| match field.trim() {
+                "0" => Some("None"),
                 _ => None,
             })
         }
@@ -6113,6 +6176,11 @@ pub(super) fn parse_form_table_command_bar_location(
 
 pub(super) fn form_table_wrapper55_uses_split_head_slots(fields: &[&str]) -> bool {
     fields.get(8).map(|field| field.trim()) == Some("2")
+}
+
+pub(super) fn form_table_wrapper55_uses_root_default_command_bar_none(fields: &[&str]) -> bool {
+    form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_none()
+        && form_table_wrapper55_root_defaults("55", fields)
 }
 
 pub(super) fn parse_form_table_initial_tree_view(
@@ -9185,7 +9253,10 @@ pub(super) fn format_form_child_item_xml(
             if scroll_on_compress { "true" } else { "false" }
         ));
     }
-    if let Some(behavior) = item.behavior {
+    if let Some(behavior) = item
+        .behavior
+        .filter(|behavior| should_emit_form_child_behavior(item, behavior))
+    {
         xml.push_str(&format!(
             "{tab}\t<Behavior>{}</Behavior>\r\n",
             escape_xml_text(behavior)
@@ -9413,6 +9484,13 @@ pub(super) fn format_form_child_item_xml(
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
+}
+
+fn should_emit_form_child_behavior(item: &FormChildItem, behavior: &str) -> bool {
+    !(item.tag == "UsualGroup"
+        && behavior == "Usual"
+        && item.show_title == Some(false)
+        && matches!(item.representation, None | Some("WeakSeparation")))
 }
 
 pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
