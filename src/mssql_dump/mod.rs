@@ -3415,6 +3415,7 @@ struct DocumentNumberingProperties {
 
 struct DocumentStandardAttributes {
     number_type: &'static str,
+    details: BTreeMap<&'static str, CatalogStandardAttributeDetails>,
 }
 
 struct BusinessProcessProperties {
@@ -3434,6 +3435,7 @@ struct SettingsStorageProperties {
 struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    has_standard_attributes: bool,
     quick_choice: bool,
     choice_mode: &'static str,
     choice_history_on_input: &'static str,
@@ -5297,6 +5299,11 @@ fn register_standard_attributes(
         return attributes;
     }
     if matches!(kind, "AccumulationRegister" | "InformationRegister") {
+        if kind == "InformationRegister"
+            && !has_information_register_standard_attributes(fields, uuid)
+        {
+            return attributes;
+        }
         attributes.extend([
             register_standard_attribute("Active", "DontCheck", &BTreeMap::new(), None),
             register_standard_attribute("LineNumber", "DontCheck", &BTreeMap::new(), None),
@@ -5305,6 +5312,13 @@ fn register_standard_attributes(
         ]);
     }
     attributes
+}
+
+fn has_information_register_standard_attributes(fields: &[&str], uuid: &str) -> bool {
+    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
+        return true;
+    };
+    braced_field_has_entries(fields.get(header_index + 11).copied())
 }
 
 #[derive(Default)]
@@ -7124,6 +7138,7 @@ fn parse_enum_properties_from_text(
     Some(EnumProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(true),
+        has_standard_attributes: braced_field_has_entries(fields.get(18).copied()),
         quick_choice: parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true),
         choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(11).copied()).unwrap_or(2)),
         choice_history_on_input: fields
@@ -7390,16 +7405,24 @@ const CATALOG_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID: &str =
 fn parse_catalog_standard_attribute_details(
     field: Option<&str>,
 ) -> BTreeMap<&'static str, CatalogStandardAttributeDetails> {
+    parse_standard_attribute_details(field, catalog_standard_attribute_name)
+}
+
+fn parse_standard_attribute_details(
+    field: Option<&str>,
+    name_by_code: fn(&str) -> Option<&'static str>,
+) -> BTreeMap<&'static str, CatalogStandardAttributeDetails> {
     let mut details = BTreeMap::new();
     if let Some(field) = field {
-        parse_catalog_standard_attribute_details_from_field(field, &mut details);
+        parse_standard_attribute_details_from_field(field, &mut details, name_by_code);
     }
     details
 }
 
-fn parse_catalog_standard_attribute_details_from_field(
+fn parse_standard_attribute_details_from_field(
     field: &str,
     details: &mut BTreeMap<&'static str, CatalogStandardAttributeDetails>,
+    name_by_code: fn(&str) -> Option<&'static str>,
 ) {
     let Some(fields) = split_1c_braced_fields(field, 0) else {
         return;
@@ -7411,11 +7434,11 @@ fn parse_catalog_standard_attribute_details_from_field(
         };
         let Some(name) = code_fields
             .first()
-            .and_then(|code| catalog_standard_attribute_name(code.trim()))
+            .and_then(|code| name_by_code(code.trim()))
         else {
             continue;
         };
-        let detail = parse_catalog_standard_attribute_detail(fields[index + 2]);
+        let detail = parse_standard_attribute_detail(fields[index + 2]);
         if !detail.tooltip.is_empty() || !detail.synonym.is_empty() {
             details.insert(name, detail);
         }
@@ -7423,12 +7446,12 @@ fn parse_catalog_standard_attribute_details_from_field(
 
     for nested in fields {
         if nested.starts_with('{') {
-            parse_catalog_standard_attribute_details_from_field(nested, details);
+            parse_standard_attribute_details_from_field(nested, details, name_by_code);
         }
     }
 }
 
-fn parse_catalog_standard_attribute_detail(field: &str) -> CatalogStandardAttributeDetails {
+fn parse_standard_attribute_detail(field: &str) -> CatalogStandardAttributeDetails {
     let mut detail = CatalogStandardAttributeDetails::default();
     let Some(fields) = split_1c_braced_fields(field, 0) else {
         return detail;
@@ -7609,14 +7632,38 @@ fn owned_metadata_template_names_in_text_order(
 
 fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
     match code {
+        "-13" => Some("PredefinedDataName"),
+        "-10" => Some("Predefined"),
+        "-8" => Some("Ref"),
+        "-7" => Some("DeletionMark"),
+        "-6" => Some("IsFolder"),
+        "-5" => Some("Owner"),
+        "-4" => Some("Parent"),
         "-3" => Some("Description"),
         "-2" => Some("Code"),
         _ => None,
     }
 }
 
+fn document_standard_attribute_name(code: &str) -> Option<&'static str> {
+    match code {
+        "-7" => Some("Posted"),
+        "-5" => Some("Ref"),
+        "-4" => Some("DeletionMark"),
+        "-3" => Some("Date"),
+        "-2" => Some("Number"),
+        _ => None,
+    }
+}
+
 fn parse_1c_bool_field(value: Option<&str>) -> Option<bool> {
     parse_1c_bool_flag(value?.trim())
+}
+
+fn braced_field_has_entries(field: Option<&str>) -> bool {
+    split_1c_braced_fields(field.unwrap_or("{0}"), 0)
+        .and_then(|fields| fields.first().map(|value| value.trim() != "0"))
+        .unwrap_or(false)
 }
 
 fn parse_1c_u32_field(value: Option<&str>) -> Option<u32> {
@@ -7672,7 +7719,14 @@ fn parse_document_standard_attributes(
     let header_index = metadata_header_field_index(fields, uuid)?;
     let number_type =
         document_number_type_xml(parse_1c_u32_field(fields.get(header_index + 3).copied())?);
-    Some(DocumentStandardAttributes { number_type })
+    let details = parse_standard_attribute_details(
+        fields.get(header_index + 23).copied(),
+        document_standard_attribute_name,
+    );
+    Some(DocumentStandardAttributes {
+        number_type,
+        details,
+    })
 }
 
 fn parse_document_numbering_properties(
@@ -11413,7 +11467,9 @@ fn format_enum_source_xml(
         "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
         xml_bool(enumeration.use_standard_commands)
     ));
-    push_enum_standard_attributes_xml(&mut xml);
+    if enumeration.has_standard_attributes {
+        push_enum_standard_attributes_xml(&mut xml);
+    }
     xml.push_str(&format!(
         "\t\t\t<Characteristics/>\r\n\
 \t\t\t<QuickChoice>{}</QuickChoice>\r\n\
@@ -11718,8 +11774,6 @@ fn push_document_standard_attributes_xml(
 struct DocumentStandardAttribute {
     name: &'static str,
     fill_checking: &'static str,
-    synonym: Option<&'static str>,
-    tooltip: Option<&'static str>,
     fill_value: DocumentStandardAttributeFillValue,
 }
 
@@ -11735,36 +11789,26 @@ fn document_standard_attributes() -> &'static [DocumentStandardAttribute] {
         DocumentStandardAttribute {
             name: "Posted",
             fill_checking: "DontCheck",
-            synonym: None,
-            tooltip: None,
             fill_value: DocumentStandardAttributeFillValue::Nil,
         },
         DocumentStandardAttribute {
             name: "Ref",
             fill_checking: "DontCheck",
-            synonym: None,
-            tooltip: None,
             fill_value: DocumentStandardAttributeFillValue::Nil,
         },
         DocumentStandardAttribute {
             name: "DeletionMark",
             fill_checking: "DontCheck",
-            synonym: None,
-            tooltip: None,
             fill_value: DocumentStandardAttributeFillValue::BooleanFalse,
         },
         DocumentStandardAttribute {
             name: "Date",
             fill_checking: "ShowError",
-            synonym: Some("Дата"),
-            tooltip: Some("Дата документа"),
             fill_value: DocumentStandardAttributeFillValue::DateTimeZero,
         },
         DocumentStandardAttribute {
             name: "Number",
             fill_checking: "DontCheck",
-            synonym: Some("Номер"),
-            tooltip: Some("Номер документа"),
             fill_value: DocumentStandardAttributeFillValue::Number,
         },
     ]
@@ -11787,7 +11831,15 @@ fn push_document_standard_attribute_xml(
         escape_xml_text(attribute.name),
         attribute.fill_checking,
     ));
-    push_document_standard_attribute_localized_xml(xml, "ToolTip", attribute.tooltip);
+    let details = standard_attributes.details.get(attribute.name);
+    push_xr_localized_property_xml(
+        xml,
+        "\t\t\t\t\t",
+        "ToolTip",
+        details
+            .map(|details| details.tooltip.as_slice())
+            .unwrap_or_default(),
+    );
     xml.push_str(
         "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
 \t\t\t\t\t<xr:Format/>\r\n\
@@ -11800,7 +11852,14 @@ fn push_document_standard_attribute_xml(
 \t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
 \t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
     );
-    push_document_standard_attribute_localized_xml(xml, "Synonym", attribute.synonym);
+    push_xr_localized_property_xml(
+        xml,
+        "\t\t\t\t\t",
+        "Synonym",
+        details
+            .map(|details| details.synonym.as_slice())
+            .unwrap_or_default(),
+    );
     xml.push_str(
         "\t\t\t\t\t<xr:Comment/>\r\n\
 \t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
@@ -11812,26 +11871,6 @@ fn push_document_standard_attribute_xml(
 \t\t\t\t\t<xr:ChoiceParameters/>\r\n\
 \t\t\t\t</xr:StandardAttribute>\r\n",
     );
-}
-
-fn push_document_standard_attribute_localized_xml(
-    xml: &mut String,
-    name: &str,
-    value: Option<&str>,
-) {
-    if let Some(value) = value {
-        xml.push_str(&format!(
-            "\t\t\t\t\t<xr:{name}>\r\n\
-\t\t\t\t\t\t<v8:item>\r\n\
-\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n\
-\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n\
-\t\t\t\t\t\t</v8:item>\r\n\
-\t\t\t\t\t</xr:{name}>\r\n",
-            escape_xml_element_text(value)
-        ));
-    } else {
-        xml.push_str(&format!("\t\t\t\t\t<xr:{name}/>\r\n"));
-    }
 }
 
 fn push_document_standard_attribute_fill_value(

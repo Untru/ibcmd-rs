@@ -19573,6 +19573,7 @@ fn extracts_information_register_generated_types_internal_info() {
 #[test]
 fn extracts_information_register_standard_attributes() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let standard_attribute_details = "{1,{0}}";
     let blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
@@ -19582,7 +19583,7 @@ fn extracts_information_register_standard_attributes() {
 66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
 77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
 88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},1}}\r\n}}"
+{{0,\r\n{{3,\r\n{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}}\r\n}},1,0,0,0,0,1,0,0,0,0,{standard_attribute_details}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -20657,6 +20658,7 @@ fn formats_enum_with_empty_child_objects_as_self_closing_node() {
     let enumeration = EnumProperties {
         generated_types: Vec::new(),
         use_standard_commands: true,
+        has_standard_attributes: true,
         quick_choice: true,
         choice_mode: "BothWays",
         choice_history_on_input: "DontUse",
@@ -24870,6 +24872,7 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let standard_attribute_details = r##"{1,{1,2,{-3},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Дата документа"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Дата"}}},{-2},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Номер документа"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Номер"}}}}}"##;
     let document_blob = |number_type: &str| {
         let mut owner_fields = vec![
             "0".to_string(),
@@ -24885,7 +24888,7 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
         let owner_fields = owner_fields.join(",");
         deflate_for_test(
                 format!(
-                    "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"document comment\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
+                    "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"document comment\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id},{standard_attribute_details}}}\r\n}}"
                 )
                 .as_bytes(),
             )
@@ -24917,7 +24920,9 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
     assert!(xml.contains(r#"<xr:StandardAttribute name="Date">"#));
     assert!(xml.contains(r#"<xr:StandardAttribute name="Number">"#));
     assert!(xml.contains("<v8:content>Дата документа</v8:content>"));
+    assert!(xml.contains("<v8:content>Дата</v8:content>"));
     assert!(xml.contains("<v8:content>Номер документа</v8:content>"));
+    assert!(xml.contains("<v8:content>Номер</v8:content>"));
     assert!(xml.contains(r#"<xr:FillValue xsi:type="xs:boolean">false</xr:FillValue>"#));
     assert!(
         xml.contains(r#"<xr:FillValue xsi:type="xs:dateTime">0001-01-01T00:00:00</xr:FillValue>"#)
