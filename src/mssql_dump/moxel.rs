@@ -3638,6 +3638,7 @@ pub(super) fn moxel_hyper_link(value: usize) -> Option<bool> {
 pub(super) fn moxel_picture_size_mode(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("RealSize"),
+        1 => Some("Stretch"),
         2 => Some("Proportionally"),
         4 => Some("AutoSize"),
         7 => Some("ByFontSize"),

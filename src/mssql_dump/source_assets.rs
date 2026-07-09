@@ -223,6 +223,26 @@ pub(super) fn dynamic_source_asset(
             kind: SourceAssetKind::RoleRights,
         });
     }
+    if owner.kind == "AccumulationRegister"
+        && suffix == "3"
+        && parse_accumulation_register_aggregates_blob(bytes).is_some()
+    {
+        let register_name = context
+            .object_refs
+            .get(owner_uuid)
+            .and_then(|reference| reference.strip_prefix("AccumulationRegister."))
+            .map(str::to_string)
+            .or_else(|| {
+                owner
+                    .object_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })?;
+        return Some(SourceAsset {
+            primary_path: owner.object_path.join("Ext").join("Aggregates.xml"),
+            kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
+        });
+    }
     if matches!(suffix, "0" | "1")
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
             .is_some()
@@ -400,6 +420,7 @@ fn append_source_asset_diagnostic(
 
 #[derive(Clone)]
 pub(crate) enum SourceAssetKind {
+    AccumulationRegisterAggregates { register_name: String },
     CommandInterface,
     ClientApplicationInterface,
     ExchangePlanContent,
@@ -1153,6 +1174,32 @@ pub(super) fn write_source_asset(
                 context.source_version,
             )?;
         }
+        SourceAssetKind::AccumulationRegisterAggregates { register_name } => {
+            let aggregates =
+                parse_accumulation_register_aggregates_blob(bytes).with_context(|| {
+                    format!(
+                        "failed to parse accumulation register aggregates from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+            let xml = format_accumulation_register_aggregates_xml(
+                &aggregates,
+                register_name,
+                context.field_refs,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to format accumulation register aggregates for source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            write_source_xml_file(&path, xml, context.source_version)?;
+        }
         SourceAssetKind::InflatedBinary => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {
                 format!(
@@ -1351,6 +1398,209 @@ pub(super) struct PredefinedItem {
     pub(super) value_types: Vec<ConstantValueType>,
     pub(super) is_folder: bool,
     pub(super) children: Vec<PredefinedItem>,
+}
+
+pub(super) struct AccumulationRegisterAggregate {
+    pub(super) id: String,
+    pub(super) use_code: i64,
+    pub(super) periodicity_code: i64,
+    pub(super) dimensions: Vec<(String, bool)>,
+}
+
+enum AggregateColumnKind {
+    Id,
+    Number,
+    Dimension(String),
+}
+
+fn unquote_1c_token(token: &str) -> String {
+    let token = token.trim();
+    if token.len() >= 2 && token.starts_with('"') && token.ends_with('"') {
+        token[1..token.len() - 1].replace("\"\"", "\"")
+    } else {
+        token.to_string()
+    }
+}
+
+fn aggregate_dimension_uuid_from_column_name(name: &str) -> Option<String> {
+    let inner = unquote_1c_token(name);
+    let fields = split_1c_braced_fields(inner.trim(), 0)?;
+    let dimension_ref = split_1c_braced_fields(fields.last()?.trim(), 0)?;
+    let uuid = dimension_ref.get(1)?.trim();
+    if is_uuid_text(uuid) {
+        Some(uuid.to_string())
+    } else {
+        None
+    }
+}
+
+fn parse_aggregate_column_kind(field: &str) -> Option<AggregateColumnKind> {
+    let parts = split_1c_braced_fields(field.trim(), 0)?;
+    let name = parts.get(1)?;
+    let type_block = split_1c_braced_fields(parts.get(2)?.trim(), 0)?;
+    let type_spec = split_1c_braced_fields(type_block.get(1)?.trim(), 0)?;
+    match unquote_1c_token(type_spec.first()?).as_str() {
+        "#" => Some(AggregateColumnKind::Id),
+        "N" => Some(AggregateColumnKind::Number),
+        "B" => Some(AggregateColumnKind::Dimension(
+            aggregate_dimension_uuid_from_column_name(name)?,
+        )),
+        _ => None,
+    }
+}
+
+fn aggregate_ref_cell_uuid(cell: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(cell.trim(), 0)?;
+    let inner = split_1c_braced_fields(fields.last()?.trim(), 0)?;
+    let uuid = inner.get(1)?.trim();
+    if is_uuid_text(uuid) {
+        Some(uuid.to_string())
+    } else {
+        None
+    }
+}
+
+fn aggregate_number_cell(cell: &str) -> Option<i64> {
+    let fields = split_1c_braced_fields(cell.trim(), 0)?;
+    fields.get(1)?.trim().parse::<i64>().ok()
+}
+
+fn aggregate_bool_cell(cell: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(cell.trim(), 0)?;
+    Some(fields.get(1)?.trim() == "1")
+}
+
+pub(super) fn parse_accumulation_register_aggregates_blob(
+    bytes: &[u8],
+) -> Option<Vec<AccumulationRegisterAggregate>> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let top = split_1c_braced_fields(text.trim_start_matches('\u{feff}').trim(), 0)?;
+    if top.first()?.trim() != "0" {
+        return None;
+    }
+    let inner = split_1c_braced_fields(top.get(1)?.trim(), 0)?;
+    if inner.first()?.trim() != "9" {
+        return None;
+    }
+
+    let column_descriptors = split_1c_braced_fields(inner.get(1)?.trim(), 0)?;
+    let column_count = column_descriptors.first()?.trim().parse::<usize>().ok()?;
+    let mut columns = Vec::with_capacity(column_count);
+    for descriptor in column_descriptors.iter().skip(1).take(column_count) {
+        columns.push(parse_aggregate_column_kind(descriptor)?);
+    }
+
+    let data = split_1c_braced_fields(inner.get(2)?.trim(), 0)?;
+    let data_column_count = data.get(1)?.trim().parse::<usize>().ok()?;
+    let row_set = split_1c_braced_fields(data.get(2 + data_column_count * 2)?.trim(), 0)?;
+    let row_count = row_set.get(1)?.trim().parse::<usize>().ok()?;
+
+    let mut aggregates = Vec::with_capacity(row_count);
+    for row_field in row_set.iter().skip(2).take(row_count) {
+        let row = split_1c_braced_fields(row_field.trim(), 0)?;
+        let row_column_count = row.get(2)?.trim().parse::<usize>().ok()?;
+        let cells = row.get(3..3 + row_column_count)?;
+        if cells.len() != columns.len() {
+            return None;
+        }
+
+        let mut id = None;
+        let mut numbers = Vec::new();
+        let mut dimensions = Vec::new();
+        for (column, cell) in columns.iter().zip(cells) {
+            match column {
+                AggregateColumnKind::Id => id = Some(aggregate_ref_cell_uuid(cell)?),
+                AggregateColumnKind::Number => numbers.push(aggregate_number_cell(cell)?),
+                AggregateColumnKind::Dimension(uuid) => {
+                    dimensions.push((uuid.clone(), aggregate_bool_cell(cell)?));
+                }
+            }
+        }
+
+        if numbers.len() != 2 {
+            return None;
+        }
+        aggregates.push(AccumulationRegisterAggregate {
+            id: id?,
+            use_code: numbers[0],
+            periodicity_code: numbers[1],
+            dimensions,
+        });
+    }
+
+    Some(aggregates)
+}
+
+fn aggregate_use_token(code: i64) -> Option<&'static str> {
+    match code {
+        0 => Some("Auto"),
+        1 => Some("Always"),
+        _ => None,
+    }
+}
+
+fn aggregate_periodicity_token(code: i64) -> Option<&'static str> {
+    match code {
+        0 => Some("Nonperiodical"),
+        1 => Some("Auto"),
+        2 => Some("Day"),
+        3 => Some("Month"),
+        4 => Some("Quarter"),
+        5 => Some("HalfYear"),
+        6 => Some("Year"),
+        _ => None,
+    }
+}
+
+pub(super) fn format_accumulation_register_aggregates_xml(
+    aggregates: &[AccumulationRegisterAggregate],
+    register_name: &str,
+    field_refs: &BTreeMap<String, String>,
+) -> Result<String> {
+    let mut xml = String::from(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<AccumulationRegisterAggregates xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+    );
+    for aggregate in aggregates {
+        let use_token = aggregate_use_token(aggregate.use_code).with_context(|| {
+            format!(
+                "unsupported accumulation register aggregate Use code {}",
+                aggregate.use_code
+            )
+        })?;
+        let periodicity_token = aggregate_periodicity_token(aggregate.periodicity_code)
+            .with_context(|| {
+                format!(
+                    "unsupported accumulation register aggregate Periodicity code {}",
+                    aggregate.periodicity_code
+                )
+            })?;
+        xml.push_str(&format!(
+            "\t<Aggregate id=\"{}\">\r\n\
+\t\t<Use>{}</Use>\r\n\
+\t\t<Periodicity>{}</Periodicity>\r\n\
+\t\t<Dimensions>\r\n",
+            aggregate.id, use_token, periodicity_token
+        ));
+        for (dimension_uuid, included) in &aggregate.dimensions {
+            let dimension_name = field_refs.get(dimension_uuid).with_context(|| {
+                format!("unknown accumulation register aggregate dimension {dimension_uuid}")
+            })?;
+            xml.push_str(&format!(
+                "\t\t\t<Dimension ref=\"AccumulationRegister.{}.Dimension.{}\">{}</Dimension>\r\n",
+                escape_xml_text(register_name),
+                escape_xml_text(dimension_name),
+                included
+            ));
+        }
+        xml.push_str(
+            "\t\t</Dimensions>\r\n\
+\t</Aggregate>\r\n",
+        );
+    }
+    xml.push_str("</AccumulationRegisterAggregates>");
+    Ok(xml)
 }
 
 pub(super) fn parse_help_blob_pages(bytes: &[u8]) -> Option<Vec<HelpPage>> {

@@ -4798,6 +4798,8 @@ pub(super) fn parse_form_child_item_with_context(
         },
         picture_size: if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_size(&fields)
+        } else if tag == "PictureField" {
+            parse_form_picture_field_picture_size(picture_field_options.as_deref())
         } else {
             None
         },
@@ -7316,6 +7318,15 @@ pub(super) fn parse_form_picture_field_value(
         .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
 }
 
+pub(super) fn parse_form_picture_field_picture_size(
+    options: Option<&[&str]>,
+) -> Option<&'static str> {
+    options
+        .and_then(|options| options.get(8))
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .and_then(moxel_picture_size_mode)
+}
+
 pub(super) fn parse_form_picture_field_file_drag_mode(
     options: Option<&[&str]>,
 ) -> Option<&'static str> {
@@ -9184,6 +9195,16 @@ pub(super) fn format_form_child_item_xml(
             if vertical_stretch { "true" } else { "false" }
         ));
     }
+    if item.tag == "PictureField"
+        && let Some(picture_size) = item
+            .picture_size
+            .filter(|value| should_emit_form_picture_size(value))
+    {
+        xml.push_str(&format!(
+            "{tab}\t<PictureSize>{}</PictureSize>\r\n",
+            escape_xml_text(picture_size)
+        ));
+    }
     if let Some(password_mode) = item.password_mode {
         xml.push_str(&format!(
             "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
@@ -9356,7 +9377,10 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
         }
         if item.tag == "PictureDecoration" {
-            if let Some(picture_size) = item.picture_size {
+            if let Some(picture_size) = item
+                .picture_size
+                .filter(|value| should_emit_form_picture_size(value))
+            {
                 xml.push_str(&format!(
                     "{tab}\t<PictureSize>{}</PictureSize>\r\n",
                     escape_xml_text(picture_size)
@@ -9525,6 +9549,10 @@ pub(super) fn format_form_child_item_xml(
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
+}
+
+fn should_emit_form_picture_size(picture_size: &str) -> bool {
+    picture_size != "RealSize"
 }
 
 pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
