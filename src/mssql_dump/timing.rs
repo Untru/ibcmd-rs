@@ -450,6 +450,9 @@ impl MssqlDumpTimingReport {
                 self.source_asset_business_process_cpu_ms += elapsed_ms;
             }
             SourceAssetKind::Schedule => self.source_asset_schedule_cpu_ms += elapsed_ms,
+            SourceAssetKind::AccumulationRegisterAggregates { .. } => {
+                self.source_asset_other_cpu_ms += elapsed_ms;
+            }
         }
     }
 }

@@ -1,2 +1,5 @@
 /target/
 /lab/
+.tmp_verify
+.tmp*
+/.tmp_verify/
