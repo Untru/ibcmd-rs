@@ -12085,6 +12085,33 @@ fn rewrites_internal_help_links_to_metadata_references() {
 }
 
 #[test]
+fn rewrites_help_picture_sources_to_metadata_references() {
+    let common_picture_uuid = "c5b8bf21-5c8f-4e5b-8b85-bfac387ce99a";
+    let refs = BTreeMap::from([(
+        common_picture_uuid.to_string(),
+        "CommonPicture.Напоминание".to_string(),
+    )]);
+    let html = format!(
+        concat!(
+            r#"<img src="../../mdpicture/id{common}/00000000-0000-0000-0000-000000000000"></img>"#,
+            r#"<img src="../../mdpicture/id509c4a7f-6406-4388-bb8c-bc81fb5131aa/00000000-0000-0000-0000-000000000000"></img>"#,
+            r#"<img src="../../mdpicture/idn-1"></img>"#,
+            r#"<img src="../../mdpicture/id00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000000"></img>"#
+        ),
+        common = common_picture_uuid
+    );
+
+    let rewritten = String::from_utf8(rewrite_help_links(html.as_bytes(), &refs)).unwrap();
+
+    assert!(rewritten.contains(r#"<img src="CommonPicture.Напоминание">"#));
+    assert!(rewritten.contains(r#"<img src="StdPicture.BusinessProcess">"#));
+    assert!(rewritten.contains(r#"<img src="StdPicture.InputFieldSelect">"#));
+    assert!(rewritten.contains(
+        r#"<img src="../../mdpicture/id00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000000">"#
+    ));
+}
+
+#[test]
 fn normalizes_help_pages_to_lf_after_link_rewrite() {
     let refs = BTreeMap::new();
     let html = "<p>one</p>\r\n<p>two</p>\r\n";

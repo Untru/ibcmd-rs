@@ -9014,6 +9014,28 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "e6fc55a0-3d58-4b15-bdd3-717453929598" => Some("StdPicture.WriteAndClose"),
         "08a45a70-c221-4339-b3b1-9f11cb22147d" => Some("StdPicture.Delete"),
         "6e3687cf-a8d1-446a-833a-bfaf38516353" => Some("StdPicture.SwitchActivity"),
+        "7a9cd2fd-6372-4342-9a9e-3ebbd754fd83" => Some("StdPicture.AppearanceCheckBox"),
+        "0c1f7756-6143-4903-a94c-8f22c85e44de" => Some("StdPicture.Attribute"),
+        "3c904ff7-1195-4a7c-9a38-7b1f6ca49cce" => Some("StdPicture.Back"),
+        "509c4a7f-6406-4388-bb8c-bc81fb5131aa" => Some("StdPicture.BusinessProcess"),
+        "97c5a6d5-47ed-43f9-8c8c-10e9903c23d2" => Some("StdPicture.Calendar"),
+        "4ab0e87f-7d9b-4aa8-ac4b-680a78522da8" => Some("StdPicture.CreateFolder"),
+        "ee7c4a5b-2d9b-4087-ae3e-947792085f09" => {
+            Some("StdPicture.DataCompositionOutputParameters")
+        }
+        "544fdbe8-5956-4512-bc62-93b4c022d291" => Some("StdPicture.ExchangePlan"),
+        "003024ed-fa25-42ac-9f53-f5014e383801" => Some("StdPicture.ExecuteTask"),
+        "1a4342a5-fa06-4556-8a85-e8738fc25821" => Some("StdPicture.GetURL"),
+        "3d4ad3b1-17de-4cf1-a2e4-0c2c83a5b5c2" => {
+            Some("StdPicture.ListViewModeHierarchicalList")
+        }
+        "64837726-d2a2-4682-a788-737423e80013" => Some("StdPicture.Picture"),
+        "b4c7ab2c-bcda-4468-a28f-5fee93838c4e" => Some("StdPicture.Properties"),
+        "b5a0aaba-3a83-4a71-b6f9-24aae1574681" => Some("StdPicture.SaveReportSettings"),
+        "be23a908-fe1b-44df-be94-d0f6e8353abe" => Some("StdPicture.SendMessage"),
+        "03665ff1-3a05-41d1-96d3-04bda2d8ede3" => Some("StdPicture.SpreadsheetInsertComment"),
+        "2846af8d-af84-47e3-82b9-01b01f960426" => Some("StdPicture.SpreadsheetReadOnly"),
+        "3bdc16c8-6a96-4467-9442-a8e4804b3fa2" => Some("StdPicture.SyncContents"),
         _ => None,
     }
 }
