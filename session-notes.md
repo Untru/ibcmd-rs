@@ -1,41 +1,32 @@
-# Session Notes — 2026-07-01 13:31:27 +03:00
+# Session Notes - 2026-07-09 06:27:15 +03:00
 
 ## Current Task
-Replace `ibcmd` configuration import/export with direct MSSQL paths for the reference database `Srvr="localhost";Ref="ut_ibcmd"`, while keeping the GitHub issue queue aligned with the fastest path to zero-diff scoped roundtrip.
+Analyze first full-export diff between native `ibcmd` and `ibcmd-rs`: `AccumulationRegisters/BonusnyeBally.xml` is missing `<DefaultListForm/>` and `<AuxiliaryListForm/>` after `<UseStandardCommands>true</UseStandardCommands>`.
 
 ## Completed
-- Fixed duplicate form-event alias patching in `module_blob` so repeated event UUID/name entries no longer collapse distinct handlers during Form body staging.
-- Added exact native Form body reuse when the current DB blob already exports to the same `Form.xml` and `Module.bsl` with no source item assets.
-- Revalidated and closed the representative `DataProcessors/ИнтеграцияС1СДокументооборот` blocker.
-- Refreshed the representative sweep queue and confirmed the first representative default-family pass is green.
-- Added deeper sweep discovery controls: `--candidate-offset`, `--candidates-per-family`, `--stop-on-first-non-ok`.
-- Fixed scoped post-apply selected export for `Ext/Predefined.xml`, which made `Catalogs/Организации` falsely appear as `left_only=1`.
-- Added `--drop-target-db-after-run` so sweep runs can clean up temporary cloned MSSQL databases after each prefix.
-- Re-ran the second representative default-family sweep with cleanup enabled and confirmed all selected prefixes are green.
-- Updated umbrella issue `#32` with fresh evidence and opened issue `#47` for the new sweep-throughput bottleneck.
+- Inspected `src/mssql_dump/mod.rs` register metadata extraction and formatting paths.
+- Found the root cause: register form refs were parsed only for `InformationRegister`, and form-ref XML output was also gated by `kind == "InformationRegister"`.
+- Confirmed `AccumulationRegister` already uses owner metadata fields after the metadata header: `+1` for `UseStandardCommands`, `+4` for `RegisterType`, `+5/+6` for lock/search flags, so `+2/+3` are the expected default/auxiliary list-form slots.
+- Patched `parse_register_form_refs` so `AccumulationRegister` reads `DefaultListForm` from `header_index + 2` and `AuxiliaryListForm` from `header_index + 3`.
+- Patched `format_register_source_xml` so `AccumulationRegister` emits `DefaultListForm` and `AuxiliaryListForm` immediately after `UseStandardCommands` and before `RegisterType`, matching the native `ibcmd` order shown in the screenshot.
+- Added regression assertions for empty `AccumulationRegister` list-form tags and a separate test fixture for resolving real list-form UUIDs to `AccumulationRegister.<Name>.Form.<FormName>`.
 
 ## Pending
-- Speed up sweep discovery by reusing one target DB or one restore path across prefixes instead of doing a full backup/restore clone for every prefix.
-- Re-run deeper-than-second representative discovery after the sweep-throughput change.
-- Open the next parity issue only from fresh non-green evidence after the faster discovery loop is in place.
-- Review whether local `.github/workflows/ci.yml` should be committed as part of the current debt queue.
+- Do not spend time running tests until the user explicitly asks for test work.
+- If continuing this diff, inspect the generated XML output or rerun only the export/diff flow the user requests.
+- Later, when tests are allowed, run focused tests for the new accumulation-register form-ref behavior and then decide whether broader `mssql_dump` tests are worth running.
 
 ## Next Action
-Implement issue `#47`: change `infobase config sweep` so one restored target DB is reused or repeatedly restored from one prepared backup across prefixes, then rerun the second-or-deeper representative sweep with `--candidate-offset 2 --stop-on-first-non-ok --drop-target-db-after-run` to isolate the first current non-green prefix.
+Continue from the code change in `src/mssql_dump/mod.rs`: verify the first diff by regenerating or inspecting `AccumulationRegisters/BonusnyeBally.xml` only if the user asks to proceed; otherwise move to the next diff without running tests.
 
 ## Key Decisions
-- Use representative scoped roundtrip on `ut_ibcmd` as the primary completion signal, not broad stale parity buckets.
-- Prefer exact native blob reuse for unchanged complex bodies instead of chasing serializer micro-diffs when that preserves native export parity.
-- Treat sweep discovery throughput as a first-class bottleneck once first and second representative passes are green.
-- Keep GitHub issues tightly scoped from fresh measured evidence rather than continuing work from stale umbrella descriptions.
+- Treat this as a schema/parity issue, not a serializer omission: `ibcmd` emits empty list-form tags for accumulation registers even when no form UUID is set.
+- Preserve native XML ordering: `UseStandardCommands`, `DefaultListForm`, `AuxiliaryListForm`, `RegisterType`, then the remaining register properties.
+- User instruction from 2026-07-09: do not spend time on tests for now; tests will be handled later.
 
 ## Modified Files
-- `.github/workflows/ci.yml`
-- `src/cli.rs`
-- `src/infobase.rs`
-- `src/module_blob.rs`
-- `src/mssql.rs`
-- `src/mssql_dump/fetch.rs`
 - `src/mssql_dump/mod.rs`
-- `src/source_audit.rs`
 - `session-notes.md`
+
+## Working Tree Notes
+- `scripts/` is currently untracked in `git status`; it was already present before this note update and was not touched for this diff.
