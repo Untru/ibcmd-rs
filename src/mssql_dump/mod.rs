@@ -1689,6 +1689,7 @@ struct FlowchartItemProperties {
     horizontal_align: &'static str,
     explanation: Option<String>,
     task_description: Option<String>,
+    subprocess: Option<String>,
     true_port_index: Option<String>,
     false_port_index: Option<String>,
 }
@@ -1806,13 +1807,19 @@ fn parse_exchange_plan_content_blob(
     Ok(items)
 }
 
-fn parse_business_process_flowchart_blob(bytes: &[u8]) -> Option<BusinessProcessFlowchart> {
+fn parse_business_process_flowchart_blob(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<BusinessProcessFlowchart> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
-    parse_business_process_flowchart_text(text.trim_start_matches('\u{feff}'))
+    parse_business_process_flowchart_text(text.trim_start_matches('\u{feff}'), object_refs)
 }
 
-fn parse_business_process_flowchart_text(text: &str) -> Option<BusinessProcessFlowchart> {
+fn parse_business_process_flowchart_text(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<BusinessProcessFlowchart> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "5" {
         return None;
@@ -1836,6 +1843,7 @@ fn parse_business_process_flowchart_text(text: &str) -> Option<BusinessProcessFl
             &code,
             &body,
             &names,
+            object_refs,
             z_order.to_string(),
         )?);
     }
@@ -1847,6 +1855,7 @@ fn parse_flowchart_item(
     code: &str,
     body: &str,
     names: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     z_order: String,
 ) -> Option<FlowchartItem> {
     let fields = split_1c_braced_fields(body, 0)?;
@@ -1865,6 +1874,7 @@ fn parse_flowchart_item(
         horizontal_align: "Center",
         explanation: None,
         task_description: None,
+        subprocess: None,
         true_port_index: None,
         false_port_index: None,
     };
@@ -1950,6 +1960,26 @@ fn parse_flowchart_item(
             events = parse_flowchart_named_events(fields.get(3)?, &["Processing"])?;
             "Processing"
         }
+        "10" => {
+            parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
+            properties.subprocess = fields
+                .get(4)
+                .and_then(|field| parse_non_zero_uuid(field.trim()))
+                .and_then(|uuid| object_refs.get(&uuid).cloned());
+            properties.task_description = fields.get(5).and_then(|value| parse_1c_string(value));
+            events = parse_flowchart_named_events(
+                fields.get(3)?,
+                &[
+                    "BeforeCreateTasks",
+                    "OnCreateTask",
+                    "OnCreateSubBusinessProcesses",
+                    "OnExecute",
+                    "BeforeExecute",
+                    "BeforeCreateSubBusinessProcesses",
+                ],
+            )?;
+            "SubBusinessProcess"
+        }
         _ => return None,
     };
 
@@ -1969,13 +1999,13 @@ fn parse_flowchart_item(
 fn parse_flowchart_base(code: &str, body: &str) -> Option<FlowchartBase> {
     let fields = split_1c_braced_fields(body, 0)?;
     let head = split_1c_braced_fields(fields.first()?, 0)?;
-    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9") {
+    let uuid = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9" | "10") {
         head.get(2).map(|value| value.trim().to_string())
     } else {
         None
     }
     .filter(|value| is_uuid_text(value));
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9") {
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "7" | "8" | "9" | "10") {
         split_1c_braced_fields(head.first()?, 0)?
     } else {
         head
@@ -2435,7 +2465,14 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
     }
     if matches!(
         item.tag,
-        "Start" | "Activity" | "Condition" | "Completion" | "Processing" | "Split" | "Join"
+        "Start"
+            | "Activity"
+            | "Condition"
+            | "Completion"
+            | "Processing"
+            | "Split"
+            | "Join"
+            | "SubBusinessProcess"
     ) {
         xml.push_str("\t\t\t\t<Border width=\"1\" gap=\"false\">\r\n");
         xml.push_str(
@@ -2455,6 +2492,18 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
             escape_xml_text(item.properties.explanation.as_deref().unwrap_or(""))
         ));
         xml.push_str("\t\t\t\t<Group>false</Group>\r\n");
+    }
+    if item.tag == "SubBusinessProcess" {
+        if let Some(subprocess) = &item.properties.subprocess {
+            xml.push_str(&format!(
+                "\t\t\t\t<Subprocess>{}</Subprocess>\r\n",
+                escape_xml_text(subprocess)
+            ));
+        }
+        xml.push_str(&format!(
+            "\t\t\t\t<TaskDescription>{}</TaskDescription>\r\n",
+            escape_xml_text(item.properties.task_description.as_deref().unwrap_or(""))
+        ));
     }
     if item.tag == "Condition" {
         xml.push_str(&format!(
