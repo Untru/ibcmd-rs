@@ -42,6 +42,7 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
     let empty_form_refs = BTreeMap::new();
     let empty_template_refs = BTreeMap::new();
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
+    let headers_by_uuid = metadata_headers_by_uuid(rows);
     for row in rows {
         if let Some(name) = parse_configuration_reference_text(&row.text) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
@@ -65,6 +66,19 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
                     value.uuid,
                     format!("Enum.{}.EnumValue.{}", header.name, value.name),
                 );
+            }
+        }
+        if kind == "CalculationRegister" {
+            for uuid in calculation_register_recalculation_uuids_from_text(&row.text) {
+                if let Some(recalculation) = headers_by_uuid.get(&uuid) {
+                    index.insert(
+                        uuid,
+                        format!(
+                            "CalculationRegister.{}.Recalculation.{}",
+                            header.name, recalculation.name
+                        ),
+                    );
+                }
             }
         }
         for command in nested_command_headers_from_text(&row.text, &row.file_name) {
@@ -104,6 +118,16 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
         }
     }
     index
+}
+
+fn metadata_headers_by_uuid(rows: &[MetadataTextRow]) -> BTreeMap<String, MetadataHeader> {
+    rows.iter()
+        .filter_map(|row| {
+            row.header
+                .as_ref()
+                .map(|header| (header.uuid.clone(), header.clone()))
+        })
+        .collect()
 }
 
 pub(super) fn build_role_rights_object_reference_index(
@@ -606,6 +630,15 @@ pub(super) fn standalone_child_reference(
     {
         return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
     }
+    if owner_kind == "CalculationRegister"
+        && is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_calculation_register_recalculation_list(text, marker_start)
+    {
+        return Some(format!(
+            "CalculationRegister.{owner_name}.Recalculation.{}",
+            child.name
+        ));
+    }
     if owner_kind == "Task"
         && is_offset_inside_metadata_object_code(text, marker_start, 4)
         && is_offset_inside_metadata_object_code(text, marker_start, 27)
@@ -771,6 +804,51 @@ pub(super) fn is_offset_inside_register_dimension_list(text: &str, offset: usize
     scan_1c_braced_value(text, start)
         .map(|end| offset < end)
         .unwrap_or(false)
+}
+
+pub(super) fn is_offset_inside_calculation_register_recalculation_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    const RECALCULATION_LIST_MARKER: &str = "{274bf899-db0e-4df6-8ab5-67bf6371ec0b,";
+    let Some(start) = text[..offset].rfind(RECALCULATION_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
+}
+
+pub(super) fn calculation_register_recalculation_uuids_from_text(text: &str) -> Vec<String> {
+    const RECALCULATION_LIST_MARKER: &str = "{274bf899-db0e-4df6-8ab5-67bf6371ec0b,";
+    let mut uuids = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut offset = 0usize;
+    while let Some(relative_start) = text[offset..].find(RECALCULATION_LIST_MARKER) {
+        let start = offset + relative_start;
+        offset = start + RECALCULATION_LIST_MARKER.len();
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        let Some(fields) = split_1c_braced_fields(&text[start..end], 0) else {
+            continue;
+        };
+        let count = fields
+            .get(1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        for uuid in fields
+            .iter()
+            .skip(2)
+            .take(count)
+            .filter_map(|field| parse_non_zero_uuid(field.trim()))
+        {
+            if seen.insert(uuid.clone()) {
+                uuids.push(uuid);
+            }
+        }
+    }
+    uuids
 }
 
 pub(super) fn is_offset_inside_tabular_section_attribute_list(text: &str, offset: usize) -> bool {
