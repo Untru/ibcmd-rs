@@ -1416,6 +1416,7 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
     let Ok(text) = std::str::from_utf8(content) else {
         return content.to_vec();
     };
+    let text = rewrite_help_picture_refs(text, refs);
     let pattern = "../id";
     let mut output = String::with_capacity(text.len());
     let mut offset = 0usize;
@@ -1450,6 +1451,62 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
     }
     output.push_str(&text[offset..]);
     output.replace("\r\n", "\n").into_bytes()
+}
+
+pub(super) fn rewrite_help_picture_refs(text: &str, refs: &BTreeMap<String, String>) -> String {
+    let pattern = "../../mdpicture/";
+    let mut output = String::with_capacity(text.len());
+    let mut offset = 0usize;
+
+    while let Some(relative_start) = text[offset..].find(pattern) {
+        let start = offset + relative_start;
+        let Some(relative_quote_end) = text[start..].find('"') else {
+            break;
+        };
+        let value_end = start + relative_quote_end;
+        let token = &text[start + pattern.len()..value_end];
+        output.push_str(&text[offset..start]);
+        match resolve_help_picture_reference(token, refs) {
+            Some(reference) => output.push_str(&reference),
+            None => output.push_str(&text[start..value_end]),
+        }
+        offset = value_end;
+    }
+    output.push_str(&text[offset..]);
+    output
+}
+
+fn resolve_help_picture_reference(token: &str, refs: &BTreeMap<String, String>) -> Option<String> {
+    if let Some(index) = token.strip_prefix("idn-") {
+        return help_standard_picture_by_negative_index(index).map(str::to_string);
+    }
+    let uuid = token.strip_prefix("id")?.split('/').next()?;
+    if parse_non_zero_uuid(uuid).is_none() {
+        return None;
+    }
+    if let Some(reference) = refs.get(uuid)
+        && reference.starts_with("CommonPicture.")
+    {
+        return Some(reference.clone());
+    }
+    common_command_standard_picture_name(uuid).map(str::to_string)
+}
+
+fn help_standard_picture_by_negative_index(index: &str) -> Option<&'static str> {
+    match index {
+        "1" => Some("StdPicture.InputFieldSelect"),
+        "2" => Some("StdPicture.InputFieldClear"),
+        "3" => Some("StdPicture.MoveUp"),
+        "4" => Some("StdPicture.MoveDown"),
+        "5" => Some("StdPicture.InputFieldCalendar"),
+        "7" => Some("StdPicture.InputFieldOpen"),
+        "8" => Some("StdPicture.MoveLeft"),
+        "9" => Some("StdPicture.MoveRight"),
+        "10" => Some("StdPicture.CheckAll"),
+        "11" => Some("StdPicture.UncheckAll"),
+        "13" => Some("StdPicture.Print"),
+        _ => None,
+    }
 }
 
 pub(super) fn predefined_data_xsi_type(kind: &str) -> Option<&'static str> {
