@@ -154,6 +154,9 @@ pub(super) fn metadata_source_for_object_fields(
         19 => Some(("Report", "Reports")),
         20 if header_index == Some(5) => Some(("Enum", "Enums")),
         20 if header_index == Some(3) => Some(("Report", "Reports")),
+        21 if is_code21_accounting_register_fields(&fields, uuid) => {
+            Some(("AccountingRegister", "AccountingRegisters"))
+        }
         21 => Some(("CalculationRegister", "CalculationRegisters")),
         22 if header_index == Some(1) => Some(("Subsystem", "Subsystems")),
         22 if field_is_unsigned_integer(fields.get(1)) => {
@@ -172,6 +175,33 @@ pub(super) fn metadata_source_for_object_fields(
         56 | 57 => Some(("Catalog", "Catalogs")),
         _ => None,
     }
+}
+
+pub(super) fn is_code21_accounting_register_fields(fields: &[&str], uuid: &str) -> bool {
+    if fields.first().map(|field| field.trim()) != Some("21") {
+        return false;
+    }
+    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
+        return false;
+    };
+
+    field_is_unsigned_integer(fields.get(header_index + 1))
+        && field_is_unsigned_integer(fields.get(header_index + 2))
+        && fields
+            .get(header_index + 3)
+            .copied()
+            .and_then(parse_uuid_field)
+            .is_some()
+        && fields
+            .get(header_index + 4)
+            .copied()
+            .and_then(parse_uuid_field)
+            .is_some()
+        && field_is_unsigned_integer(fields.get(header_index + 5))
+        && field_is_unsigned_integer(fields.get(header_index + 6))
+        && field_is_unsigned_integer(fields.get(header_index + 7))
+        && field_is_unsigned_integer(fields.get(header_index + 8))
+        && field_starts_with(fields.get(header_index + 9), "{")
 }
 
 pub(super) fn parse_metadata_header_from_text(text: &str, uuid: &str) -> Option<MetadataHeader> {

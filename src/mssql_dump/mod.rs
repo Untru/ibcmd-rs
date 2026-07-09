@@ -3822,11 +3822,16 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
         }
     }
     if object_code == 21 {
+        let register_kind = if is_code21_accounting_register_fields(&fields, &row.file_name) {
+            "AccountingRegister"
+        } else {
+            "CalculationRegister"
+        };
         push_indexed_register_generated_type_entries(
             &mut entries,
             &fields,
-            1,
-            "CalculationRegister",
+            register_generated_type_start_index(register_kind, &fields, &row.file_name)?,
+            register_kind,
             &header.name,
         );
     }
@@ -4820,11 +4825,7 @@ fn parse_register_properties_from_text(
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
     let mut generated_types = Vec::new();
-    let register_start_index = match kind {
-        "AccountingRegister" => Some(2),
-        "AccumulationRegister" | "CalculationRegister" => Some(1),
-        _ => None,
-    };
+    let register_start_index = register_generated_type_start_index(kind, &fields, uuid);
     if let Some(start_index) = register_start_index {
         push_register_generated_type_entries(
             &mut generated_types,
@@ -5100,6 +5101,15 @@ fn push_register_generated_type_entries(
             &format!("{type_prefix}{xml_suffix}.{name}"),
             register_generated_type_category(type_prefix, suffix),
         );
+    }
+}
+
+fn register_generated_type_start_index(kind: &str, fields: &[&str], uuid: &str) -> Option<usize> {
+    match kind {
+        "AccountingRegister" if is_code21_accounting_register_fields(fields, uuid) => Some(1),
+        "AccountingRegister" => Some(2),
+        "AccumulationRegister" | "CalculationRegister" => Some(1),
+        _ => None,
     }
 }
 
