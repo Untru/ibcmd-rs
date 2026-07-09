@@ -3155,12 +3155,19 @@ struct RegisterProperties {
     use_standard_commands: bool,
     register_type: Option<&'static str>,
     include_help_in_contents: Option<bool>,
+    chart_of_accounts: Option<String>,
+    correspondence: Option<bool>,
+    period_adjustment_length: Option<u32>,
     data_lock_control_mode: Option<&'static str>,
+    enable_totals_splitting: Option<bool>,
     full_text_search: Option<&'static str>,
     default_record_form: Option<String>,
     default_list_form: Option<String>,
     auxiliary_record_form: Option<String>,
     auxiliary_list_form: Option<String>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
     standard_attributes: Vec<RegisterStandardAttribute>,
     child_objects: Vec<MetadataChildObject>,
 }
@@ -3202,6 +3209,10 @@ struct MetadataChildProperties {
     choice_form: Option<MetadataChoiceForm>,
     link_by_type_empty: bool,
     choice_history_on_input: Option<&'static str>,
+    balance: Option<bool>,
+    accounting_flag: Option<String>,
+    ext_dimension_accounting_flag: Option<String>,
+    deny_incomplete_values: Option<bool>,
     use_mode: Option<&'static str>,
     indexing: Option<&'static str>,
     full_text_search: Option<&'static str>,
@@ -3258,6 +3269,14 @@ enum MetadataChildFillValue {
 struct RegisterStandardAttribute {
     name: &'static str,
     fill_checking: &'static str,
+    tooltip: Vec<(String, String)>,
+    synonym: Vec<(String, String)>,
+    link_by_type: Option<RegisterStandardAttributeLinkByType>,
+}
+
+struct RegisterStandardAttributeLinkByType {
+    data_path: String,
+    link_item: u32,
 }
 
 struct CommonModuleFlags {
@@ -3751,20 +3770,30 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
         } else {
             "CalculationRegister"
         };
-        push_indexed_register_generated_type_entries(
-            &mut entries,
-            &fields,
-            register_generated_type_start_index(register_kind, &fields, &row.file_name)?,
-            register_kind,
-            &header.name,
-        );
+        let start_index =
+            register_generated_type_start_index(register_kind, &fields, &row.file_name)?;
+        if register_kind == "AccountingRegister" {
+            push_indexed_accounting_register_generated_type_entries(
+                &mut entries,
+                &fields,
+                start_index,
+                &header.name,
+            );
+        } else {
+            push_indexed_register_generated_type_entries(
+                &mut entries,
+                &fields,
+                start_index,
+                register_kind,
+                &header.name,
+            );
+        }
     }
     if object_code == 22 && header_index != Some(1) && field_is_unsigned_integer(fields.get(1)) {
-        push_indexed_register_generated_type_entries(
+        push_indexed_accounting_register_generated_type_entries(
             &mut entries,
             &fields,
             2,
-            "AccountingRegister",
             &header.name,
         );
     }
@@ -4253,6 +4282,23 @@ fn push_indexed_register_generated_type_entries(
     }
 }
 
+fn push_indexed_accounting_register_generated_type_entries(
+    entries: &mut Vec<(String, String)>,
+    fields: &[&str],
+    start_index: usize,
+    name: &str,
+) {
+    for (offset, suffix, _) in accounting_register_generated_type_slots() {
+        push_indexed_generated_type(
+            entries,
+            fields,
+            start_index + offset,
+            &format!("AccountingRegister{suffix}"),
+            name,
+        );
+    }
+}
+
 fn parse_uuid_field(value: &str) -> Option<String> {
     let value = value.trim();
     if is_uuid_text(value) {
@@ -4592,8 +4638,14 @@ fn extract_metadata_source_xml_from_text_row(
         let exchange_plan = parse_exchange_plan_properties_from_text(text, uuid, type_index)?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
-        let register =
-            parse_register_properties_from_text(kind, text, uuid, type_index, form_refs)?;
+        let register = parse_register_properties_from_text(
+            kind,
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            form_refs,
+        )?;
         format_register_source_xml(kind, &header, &register, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
@@ -4972,6 +5024,7 @@ fn parse_register_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<RegisterProperties> {
     if !metadata_kind_uses_register_resources(kind) {
@@ -4982,13 +5035,22 @@ fn parse_register_properties_from_text(
     let mut generated_types = Vec::new();
     let register_start_index = register_generated_type_start_index(kind, &fields, uuid);
     if let Some(start_index) = register_start_index {
-        push_register_generated_type_entries(
-            &mut generated_types,
-            &fields,
-            start_index,
-            kind,
-            &header.name,
-        );
+        if kind == "AccountingRegister" {
+            push_accounting_register_generated_type_entries(
+                &mut generated_types,
+                &fields,
+                start_index,
+                &header.name,
+            );
+        } else {
+            push_register_generated_type_entries(
+                &mut generated_types,
+                &fields,
+                start_index,
+                kind,
+                &header.name,
+            );
+        }
     }
     if kind == "InformationRegister" {
         push_generated_type_entry(
@@ -5050,11 +5112,18 @@ fn parse_register_properties_from_text(
     }
     let use_standard_commands = parse_register_use_standard_commands(kind, &fields, uuid);
     let register_type = parse_register_type(kind, &fields, uuid);
-    let include_help_in_contents = parse_register_include_help_in_contents(kind);
+    let include_help_in_contents = parse_register_include_help_in_contents(kind, &fields, uuid);
+    let chart_of_accounts = parse_register_chart_of_accounts(kind, &fields, uuid, object_refs);
+    let correspondence = parse_register_correspondence(kind, &fields, uuid);
+    let period_adjustment_length = parse_register_period_adjustment_length(kind, &fields, uuid);
     let data_lock_control_mode = parse_register_data_lock_control_mode(kind, &fields, uuid);
+    let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, uuid);
     let full_text_search = parse_register_full_text_search(kind, &fields, uuid);
     let form_refs = parse_register_form_refs(kind, &fields, uuid, form_refs);
-    let standard_attributes = register_standard_attributes(kind, register_type);
+    let standard_attributes =
+        register_standard_attributes(kind, &header.name, register_type, &fields, uuid);
+    let (list_presentation, extended_list_presentation, explanation) =
+        parse_register_presentations(kind, &fields, uuid);
     let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
@@ -5067,8 +5136,18 @@ fn parse_register_properties_from_text(
                 marker_start,
                 &header.uuid,
                 &value_types,
-                &BTreeMap::new(),
+                object_refs,
             );
+            let properties =
+                properties.map(|properties| parse_register_child_extra_properties(
+                    kind,
+                    tag,
+                    text,
+                    marker_start,
+                    &header.uuid,
+                    object_refs,
+                    properties,
+                ));
             Some(MetadataChildObject {
                 tag,
                 header,
@@ -5086,12 +5165,19 @@ fn parse_register_properties_from_text(
         use_standard_commands,
         register_type,
         include_help_in_contents,
+        chart_of_accounts,
+        correspondence,
+        period_adjustment_length,
         data_lock_control_mode,
+        enable_totals_splitting,
         full_text_search,
         default_record_form: form_refs.0,
         default_list_form: form_refs.1,
         auxiliary_record_form: form_refs.2,
         auxiliary_list_form: form_refs.3,
+        list_presentation,
+        extended_list_presentation,
+        explanation,
         standard_attributes,
         child_objects,
     })
@@ -5117,6 +5203,12 @@ fn parse_register_form_refs(
             parse_catalog_form_ref(fields.get(header_index + 2).copied(), form_refs),
             None,
             None,
+        ),
+        "AccountingRegister" => (
+            None,
+            parse_catalog_form_ref(fields.get(header_index + 4).copied(), form_refs),
+            None,
+            parse_catalog_form_ref(fields.get(header_index + 10).copied(), form_refs),
         ),
         "AccumulationRegister" => (
             None,
@@ -5147,36 +5239,247 @@ fn accumulation_register_type_xml(value: u32) -> Option<&'static str> {
 
 fn register_standard_attributes(
     kind: &str,
+    owner_name: &str,
     register_type: Option<&'static str>,
+    fields: &[&str],
+    uuid: &str,
 ) -> Vec<RegisterStandardAttribute> {
     let mut attributes = Vec::new();
+    let accounting_overrides = accounting_register_standard_attribute_overrides(kind, fields, uuid);
     if kind == "AccumulationRegister" && register_type == Some("Balance") {
-        attributes.push(RegisterStandardAttribute {
-            name: "RecordType",
-            fill_checking: "DontCheck",
-        });
+        attributes.push(register_standard_attribute(
+            "RecordType",
+            "DontCheck",
+            &BTreeMap::new(),
+            None,
+        ));
+    }
+    if kind == "AccountingRegister" {
+        let account_data_path = format!("AccountingRegister.{owner_name}.StandardAttribute.Account");
+        attributes.extend([
+            register_standard_attribute("Account", "DontCheck", &accounting_overrides, None),
+            register_standard_attribute("Active", "DontCheck", &accounting_overrides, None),
+            register_standard_attribute("LineNumber", "DontCheck", &accounting_overrides, None),
+            register_standard_attribute("Recorder", "DontCheck", &accounting_overrides, None),
+            register_standard_attribute("Period", "ShowError", &accounting_overrides, None),
+            register_standard_attribute(
+                "ExtDimension1",
+                "DontCheck",
+                &accounting_overrides,
+                Some(RegisterStandardAttributeLinkByType {
+                    data_path: account_data_path.clone(),
+                    link_item: 1,
+                }),
+            ),
+            register_standard_attribute(
+                "ExtDimensionType1",
+                "DontCheck",
+                &accounting_overrides,
+                None,
+            ),
+            register_standard_attribute(
+                "ExtDimension2",
+                "DontCheck",
+                &accounting_overrides,
+                Some(RegisterStandardAttributeLinkByType {
+                    data_path: account_data_path.clone(),
+                    link_item: 2,
+                }),
+            ),
+            register_standard_attribute(
+                "ExtDimensionType2",
+                "DontCheck",
+                &accounting_overrides,
+                None,
+            ),
+            register_standard_attribute(
+                "ExtDimension3",
+                "DontCheck",
+                &accounting_overrides,
+                Some(RegisterStandardAttributeLinkByType {
+                    data_path: account_data_path,
+                    link_item: 3,
+                }),
+            ),
+            register_standard_attribute(
+                "ExtDimensionType3",
+                "DontCheck",
+                &accounting_overrides,
+                None,
+            ),
+        ]);
+        return attributes;
     }
     if matches!(kind, "AccumulationRegister" | "InformationRegister") {
         attributes.extend([
-            RegisterStandardAttribute {
-                name: "Active",
-                fill_checking: "DontCheck",
-            },
-            RegisterStandardAttribute {
-                name: "LineNumber",
-                fill_checking: "DontCheck",
-            },
-            RegisterStandardAttribute {
-                name: "Recorder",
-                fill_checking: "DontCheck",
-            },
-            RegisterStandardAttribute {
-                name: "Period",
-                fill_checking: "ShowError",
-            },
+            register_standard_attribute("Active", "DontCheck", &BTreeMap::new(), None),
+            register_standard_attribute("LineNumber", "DontCheck", &BTreeMap::new(), None),
+            register_standard_attribute("Recorder", "DontCheck", &BTreeMap::new(), None),
+            register_standard_attribute("Period", "ShowError", &BTreeMap::new(), None),
         ]);
     }
     attributes
+}
+
+#[derive(Default)]
+struct RegisterStandardAttributeOverrides {
+    tooltip: Vec<(String, String)>,
+    synonym: Vec<(String, String)>,
+}
+
+fn register_standard_attribute(
+    name: &'static str,
+    fill_checking: &'static str,
+    overrides: &BTreeMap<&'static str, RegisterStandardAttributeOverrides>,
+    link_by_type: Option<RegisterStandardAttributeLinkByType>,
+) -> RegisterStandardAttribute {
+    let override_values = overrides.get(name);
+    RegisterStandardAttribute {
+        name,
+        fill_checking,
+        tooltip: override_values
+            .map(|values| values.tooltip.clone())
+            .unwrap_or_default(),
+        synonym: override_values
+            .map(|values| values.synonym.clone())
+            .unwrap_or_default(),
+        link_by_type,
+    }
+}
+
+fn accounting_register_standard_attribute_overrides(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> BTreeMap<&'static str, RegisterStandardAttributeOverrides> {
+    let mut overrides = BTreeMap::new();
+    if kind != "AccountingRegister" {
+        return overrides;
+    }
+    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
+        return overrides;
+    };
+    let Some(outer) = fields
+        .get(header_index + 9)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return overrides;
+    };
+    let Some(items) = outer
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return overrides;
+    };
+    let count = items
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut index = 2usize;
+    for _ in 0..count {
+        let Some(marker) = items.get(index).copied() else {
+            break;
+        };
+        let Some(name) = accounting_register_standard_attribute_name(marker) else {
+            index += 3;
+            continue;
+        };
+        if let Some(property_bag) = items.get(index + 2).copied() {
+            let bag_fields = split_1c_braced_fields(property_bag, 0).unwrap_or_default();
+            let tooltip = bag_fields
+                .get(15)
+                .map(|field| parse_wrapped_localized_values(field))
+                .unwrap_or_default();
+            let synonym = bag_fields
+                .get(37)
+                .map(|field| parse_wrapped_localized_values(field))
+                .unwrap_or_default();
+            if !tooltip.is_empty() || !synonym.is_empty() {
+                overrides.insert(name, RegisterStandardAttributeOverrides { tooltip, synonym });
+            }
+        }
+        index += 3;
+    }
+    overrides
+}
+
+fn accounting_register_standard_attribute_name(marker: &str) -> Option<&'static str> {
+    let marker_fields = split_1c_braced_fields(marker, 0)?;
+    match marker_fields.first()?.trim() {
+        "-10" => Some("Account"),
+        "-5" => Some("Active"),
+        "-4" => Some("LineNumber"),
+        "-3" => Some("Recorder"),
+        "-2" => Some("Period"),
+        "0" | "1" | "2" => {
+            let item = marker_fields.first()?.trim().parse::<u32>().ok()? + 1;
+            match marker_fields.get(1).map(|field| field.trim()) {
+                Some("91162600-3161-4326-89a0-4a7cecd5092a") => match item {
+                    1 => Some("ExtDimension1"),
+                    2 => Some("ExtDimension2"),
+                    3 => Some("ExtDimension3"),
+                    _ => None,
+                },
+                Some("b3b48b29-d652-47ab-9d21-7e06768c31b5") => match item {
+                    1 => Some("ExtDimensionType1"),
+                    2 => Some("ExtDimensionType2"),
+                    3 => Some("ExtDimensionType3"),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_wrapped_localized_values(field: &str) -> Vec<(String, String)> {
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return Vec::new();
+    };
+    for nested in fields.iter().rev() {
+        if !nested.trim_start().starts_with('{') {
+            continue;
+        }
+        let values = parse_1c_synonyms(nested);
+        if !values.is_empty() && values.iter().all(|(lang, _)| lang != "#") {
+            return values;
+        }
+    }
+    Vec::new()
+}
+
+fn parse_register_chart_of_accounts(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if kind != "AccountingRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    parse_metadata_object_ref(fields.get(header_index + 3).copied(), object_refs)
+}
+
+fn parse_register_correspondence(kind: &str, fields: &[&str], uuid: &str) -> Option<bool> {
+    if kind != "AccountingRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    parse_1c_bool_field(fields.get(header_index + 5).copied())
+}
+
+fn parse_register_period_adjustment_length(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> Option<u32> {
+    if kind != "AccountingRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    parse_1c_u32_field(fields.get(header_index + 6).copied())
 }
 
 fn parse_register_data_lock_control_mode(
@@ -5186,6 +5489,7 @@ fn parse_register_data_lock_control_mode(
 ) -> Option<&'static str> {
     let header_index = metadata_header_field_index(fields, uuid)?;
     let field_offset = match kind {
+        "AccountingRegister" => 7,
         "AccumulationRegister" | "InformationRegister" => 5,
         _ => return None,
     };
@@ -5199,16 +5503,33 @@ fn parse_register_data_lock_control_mode(
     }
 }
 
+fn parse_register_enable_totals_splitting(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> Option<bool> {
+    if kind != "AccountingRegister" {
+        return None;
+    }
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    parse_1c_bool_field(fields.get(header_index + 8).copied())
+}
+
 fn parse_register_full_text_search(
     kind: &str,
     fields: &[&str],
     uuid: &str,
 ) -> Option<&'static str> {
-    if kind != "AccumulationRegister" {
-        return None;
-    }
     let header_index = metadata_header_field_index(fields, uuid)?;
-    match fields.get(header_index + 6).map(|field| field.trim()) {
+    let field_offset = match kind {
+        "AccountingRegister" => 14,
+        "AccumulationRegister" => 6,
+        _ => return None,
+    };
+    match fields
+        .get(header_index + field_offset)
+        .map(|field| field.trim())
+    {
         Some("0") => Some("DontUse"),
         Some("1") => Some("Use"),
         _ => None,
@@ -5232,11 +5553,50 @@ fn parse_register_use_standard_commands(kind: &str, fields: &[&str], uuid: &str)
         .unwrap_or(true)
 }
 
-fn parse_register_include_help_in_contents(kind: &str) -> Option<bool> {
+fn parse_register_include_help_in_contents(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> Option<bool> {
     match kind {
         "AccumulationRegister" => Some(false),
+        "AccountingRegister" => {
+            let header_index = metadata_header_field_index(fields, uuid)?;
+            parse_1c_bool_field(fields.get(header_index + 2).copied())
+        }
         _ => None,
     }
+}
+
+fn parse_register_presentations(
+    kind: &str,
+    fields: &[&str],
+    uuid: &str,
+) -> (
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+) {
+    if kind != "AccountingRegister" {
+        return (Vec::new(), Vec::new(), Vec::new());
+    }
+    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
+        return (Vec::new(), Vec::new(), Vec::new());
+    };
+    (
+        fields
+            .get(header_index + 11)
+            .map(|field| parse_1c_synonyms(field))
+            .unwrap_or_default(),
+        fields
+            .get(header_index + 12)
+            .map(|field| parse_1c_synonyms(field))
+            .unwrap_or_default(),
+        fields
+            .get(header_index + 13)
+            .map(|field| parse_1c_synonyms(field))
+            .unwrap_or_default(),
+    )
 }
 
 fn push_register_generated_type_entries(
@@ -5259,6 +5619,24 @@ fn push_register_generated_type_entries(
     }
 }
 
+fn push_accounting_register_generated_type_entries(
+    entries: &mut Vec<GeneratedTypeEntry>,
+    fields: &[&str],
+    start_index: usize,
+    name: &str,
+) {
+    for (offset, suffix, category) in accounting_register_generated_type_slots() {
+        push_generated_type_entry(
+            entries,
+            fields,
+            start_index + offset,
+            start_index + offset + 1,
+            &format!("AccountingRegister{suffix}.{name}"),
+            category,
+        );
+    }
+}
+
 fn register_generated_type_start_index(kind: &str, fields: &[&str], uuid: &str) -> Option<usize> {
     match kind {
         "AccountingRegister" if is_code21_accounting_register_fields(fields, uuid) => Some(1),
@@ -5276,6 +5654,18 @@ fn register_generated_type_suffixes() -> &'static [(usize, &'static str)] {
         (6, "List"),
         (8, "RecordSet"),
         (10, "RecordKey"),
+    ]
+}
+
+fn accounting_register_generated_type_slots() -> &'static [(usize, &'static str, &'static str)] {
+    &[
+        (0, "Record", "Record"),
+        (2, "ExtDimensions", "ExtDimensions"),
+        (4, "RecordSet", "RecordSet"),
+        (6, "RecordKey", "RecordKey"),
+        (8, "Selection", "Selection"),
+        (10, "List", "List"),
+        (12, "Manager", "Manager"),
     ]
 }
 
@@ -5304,6 +5694,24 @@ fn register_generated_type_category(type_prefix: &str, suffix: &str) -> &'static
 fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Option<&'static str> {
     if !metadata_kind_uses_register_resources(kind) {
         return None;
+    }
+    if kind == "AccountingRegister"
+        && is_offset_inside_register_dimension_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some("Dimension");
+    }
+    if kind == "AccountingRegister"
+        && is_offset_inside_register_resource_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some("Resource");
+    }
+    if kind == "AccountingRegister"
+        && is_offset_inside_accounting_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some("Attribute");
     }
     if is_offset_inside_metadata_object_code(text, marker_start, 5)
         && is_offset_inside_register_resource_list(text, marker_start)
@@ -5595,6 +6003,10 @@ fn parse_metadata_child_properties_from_fields(
         choice_history_on_input: fields
             .get(header_index + 21)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim())),
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
         use_mode: if owner_kind == "Catalog" {
             fields
                 .get(header_index + 22)
@@ -5720,6 +6132,10 @@ fn parse_data_processor_wrapped_child_properties(
             .get(18)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
             .or(Some("Auto")),
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
         use_mode: None,
         indexing: None,
         full_text_search: None,
@@ -5727,6 +6143,72 @@ fn parse_data_processor_wrapped_child_properties(
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
+}
+
+fn parse_register_child_extra_properties(
+    owner_kind: &str,
+    tag: &str,
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+    mut properties: MetadataChildProperties,
+) -> MetadataChildProperties {
+    if owner_kind != "AccountingRegister" {
+        return properties;
+    }
+    for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
+        match (tag, fields.first().map(|field| field.trim())) {
+            ("Dimension", Some("6")) if fields.len() >= 7 => {
+                properties.balance = parse_1c_bool_field(fields.get(2).copied());
+                properties.accounting_flag =
+                    parse_metadata_object_ref(fields.get(3).copied(), object_refs);
+                properties.indexing = fields
+                    .get(4)
+                    .and_then(|field| metadata_attribute_indexing_xml(field.trim()));
+                properties.deny_incomplete_values = fields
+                    .get(5)
+                    .and_then(|field| parse_1c_bool_field(Some(*field)));
+                properties.full_text_search = fields
+                    .get(6)
+                    .and_then(|field| register_child_full_text_search_xml(field.trim()));
+                return properties;
+            }
+            ("Resource", Some("2")) if fields.len() >= 6 && field_starts_with(fields.get(1), "{27") =>
+            {
+                properties.balance = parse_1c_bool_field(fields.get(2).copied());
+                properties.accounting_flag =
+                    parse_metadata_object_ref(fields.get(3).copied(), object_refs);
+                properties.ext_dimension_accounting_flag =
+                    parse_metadata_object_ref(fields.get(4).copied(), object_refs)
+                        .or_else(|| Some(String::new()));
+                properties.full_text_search = fields
+                    .get(5)
+                    .and_then(|field| register_child_full_text_search_xml(field.trim()));
+                return properties;
+            }
+            ("Attribute", Some("2")) if fields.len() >= 4 && field_starts_with(fields.get(1), "{27") =>
+            {
+                properties.indexing = fields
+                    .get(2)
+                    .and_then(|field| metadata_attribute_indexing_xml(field.trim()));
+                properties.full_text_search = fields
+                    .get(3)
+                    .and_then(|field| register_child_full_text_search_xml(field.trim()));
+                return properties;
+            }
+            _ => {}
+        }
+    }
+    properties
+}
+
+fn register_child_full_text_search_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        _ => None,
+    }
 }
 
 fn data_processor_wrapped_quick_create_modes(
@@ -10052,6 +10534,89 @@ fn format_register_source_xml(
             "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
             xml_bool(register.use_standard_commands)
         );
+        if kind == "AccountingRegister" {
+            if let Some(include_help_in_contents) = register.include_help_in_contents {
+                properties.push_str(&format!(
+                    "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+                    xml_bool(include_help_in_contents)
+                ));
+            }
+            push_optional_text_element(
+                &mut properties,
+                "\t\t\t",
+                "ChartOfAccounts",
+                register.chart_of_accounts.as_deref(),
+            );
+            if let Some(correspondence) = register.correspondence {
+                properties.push_str(&format!(
+                    "\t\t\t<Correspondence>{}</Correspondence>\r\n",
+                    xml_bool(correspondence)
+                ));
+            }
+            if let Some(period_adjustment_length) = register.period_adjustment_length {
+                properties.push_str(&format!(
+                    "\t\t\t<PeriodAdjustmentLength>{period_adjustment_length}</PeriodAdjustmentLength>\r\n"
+                ));
+            }
+            push_optional_text_element(
+                &mut properties,
+                "\t\t\t",
+                "DefaultListForm",
+                register.default_list_form.as_deref(),
+            );
+            push_optional_text_element(
+                &mut properties,
+                "\t\t\t",
+                "AuxiliaryListForm",
+                register.auxiliary_list_form.as_deref(),
+            );
+            push_register_standard_attributes_xml(&mut properties, &register.standard_attributes);
+            push_optional_simple_property_xml(
+                &mut properties,
+                "DataLockControlMode",
+                register.data_lock_control_mode,
+            );
+            if let Some(enable_totals_splitting) = register.enable_totals_splitting {
+                properties.push_str(&format!(
+                    "\t\t\t<EnableTotalsSplitting>{}</EnableTotalsSplitting>\r\n",
+                    xml_bool(enable_totals_splitting)
+                ));
+            }
+            push_optional_simple_property_xml(
+                &mut properties,
+                "FullTextSearch",
+                register.full_text_search,
+            );
+            push_localized_property(
+                &mut properties,
+                "\t\t\t",
+                "ListPresentation",
+                &register.list_presentation,
+            );
+            push_localized_property(
+                &mut properties,
+                "\t\t\t",
+                "ExtendedListPresentation",
+                &register.extended_list_presentation,
+            );
+            push_localized_property(
+                &mut properties,
+                "\t\t\t",
+                "Explanation",
+                &register.explanation,
+            );
+            xml.insert_str(index, &properties);
+            return if register.child_objects.is_empty() {
+                xml
+            } else {
+                let mut child_objects = String::new();
+                for child in &register.child_objects {
+                    push_metadata_child_object_xml(&mut child_objects, child);
+                }
+                insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
+                xml
+            };
+        }
         if kind == "AccumulationRegister" {
             push_optional_text_element(
                 &mut properties,
@@ -10981,16 +11546,33 @@ fn push_register_standard_attributes_xml(
     xml.push_str("\t\t\t<StandardAttributes>\r\n");
     for attribute in attributes {
         xml.push_str(&format!(
-            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
-\t\t\t\t\t<xr:LinkByType/>\r\n\
-\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
+            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n",
+            escape_xml_text(attribute.name),
+        ));
+        if let Some(link_by_type) = &attribute.link_by_type {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<xr:LinkByType>\r\n\
+\t\t\t\t\t\t<xr:DataPath>{}</xr:DataPath>\r\n\
+\t\t\t\t\t\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
+\t\t\t\t\t</xr:LinkByType>\r\n",
+                escape_xml_element_text(&link_by_type.data_path),
+                link_by_type.link_item
+            ));
+        } else {
+            xml.push_str("\t\t\t\t\t<xr:LinkByType/>\r\n");
+        }
+        xml.push_str(&format!(
+            "\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
 \t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
 \t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
 \t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 \t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
-\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:ToolTip/>\r\n\
-\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
+            attribute.fill_checking,
+        ));
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
+        xml.push_str(
+            "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
 \t\t\t\t\t<xr:Format/>\r\n\
 \t\t\t\t\t<xr:ChoiceForm/>\r\n\
 \t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
@@ -10999,20 +11581,46 @@ fn push_register_standard_attributes_xml(
 \t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
 \t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
 \t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:Synonym/>\r\n\
-\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
+        );
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Synonym", &attribute.synonym);
+        xml.push_str(
+            "\t\t\t\t\t<xr:Comment/>\r\n\
 \t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
 \t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
 \t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
 \t\t\t\t\t<xr:Mask/>\r\n\
 \t\t\t\t\t<xr:ChoiceParameters/>\r\n\
 \t\t\t\t</xr:StandardAttribute>\r\n",
-            escape_xml_text(attribute.name),
-            attribute.fill_checking,
-        ));
+        );
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn push_xr_localized_property_xml(
+    xml: &mut String,
+    indent: &str,
+    name: &str,
+    values: &[(String, String)],
+) {
+    if values.is_empty() {
+        xml.push_str(&format!("{indent}<xr:{name}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{indent}<xr:{name}>\r\n"));
+    for (lang, content) in values {
+        xml.push_str(&format!("{indent}\t<v8:item>\r\n"));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(lang)
+        ));
+        xml.push_str(&format!(
+            "{indent}\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(content)
+        ));
+        xml.push_str(&format!("{indent}\t</v8:item>\r\n"));
+    }
+    xml.push_str(&format!("{indent}</xr:{name}>\r\n"));
 }
 
 fn push_document_numbering_xml(xml: &mut String, numbering: &DocumentNumberingProperties) {
@@ -11771,6 +12379,36 @@ fn push_metadata_child_properties_xml(
     if let Some(choice_history_on_input) = properties.choice_history_on_input {
         xml.push_str(&format!(
             "{indent}<ChoiceHistoryOnInput>{choice_history_on_input}</ChoiceHistoryOnInput>\r\n"
+        ));
+    }
+    if let Some(balance) = properties.balance {
+        xml.push_str(&format!(
+            "{indent}<Balance>{}</Balance>\r\n",
+            xml_bool(balance)
+        ));
+    }
+    if let Some(accounting_flag) = &properties.accounting_flag {
+        xml.push_str(&format!(
+            "{indent}<AccountingFlag>{}</AccountingFlag>\r\n",
+            escape_xml_element_text(accounting_flag)
+        ));
+    } else if properties.balance.is_some() || properties.ext_dimension_accounting_flag.is_some() {
+        xml.push_str(&format!("{indent}<AccountingFlag/>\r\n"));
+    }
+    if let Some(ext_dimension_accounting_flag) = &properties.ext_dimension_accounting_flag {
+        if ext_dimension_accounting_flag.is_empty() {
+            xml.push_str(&format!("{indent}<ExtDimensionAccountingFlag/>\r\n"));
+        } else {
+            xml.push_str(&format!(
+                "{indent}<ExtDimensionAccountingFlag>{}</ExtDimensionAccountingFlag>\r\n",
+                escape_xml_element_text(ext_dimension_accounting_flag)
+            ));
+        }
+    }
+    if let Some(deny_incomplete_values) = properties.deny_incomplete_values {
+        xml.push_str(&format!(
+            "{indent}<DenyIncompleteValues>{}</DenyIncompleteValues>\r\n",
+            xml_bool(deny_incomplete_values)
         ));
     }
     if let Some(use_mode) = properties.use_mode {

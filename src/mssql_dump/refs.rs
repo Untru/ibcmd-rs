@@ -624,6 +624,51 @@ pub(super) fn standalone_child_reference(
     ) {
         return Some(reference);
     }
+    if owner_kind == "AccountingRegister"
+        && is_offset_inside_register_dimension_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some(format!(
+            "AccountingRegister.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "AccountingRegister"
+        && is_offset_inside_register_resource_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "AccountingRegister.{owner_name}.Resource.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "AccountingRegister"
+        && is_offset_inside_accounting_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "AccountingRegister.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "ChartOfAccounts"
+        && is_offset_inside_chart_of_accounts_accounting_flag_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some(format!(
+            "ChartOfAccounts.{owner_name}.AccountingFlag.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "ChartOfAccounts"
+        && is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some(format!(
+            "ChartOfAccounts.{owner_name}.ExtDimensionAccountingFlag.{}",
+            child.name
+        ));
+    }
     if metadata_kind_uses_register_resources(owner_kind)
         && is_offset_inside_metadata_object_code(text, marker_start, 5)
         && is_offset_inside_register_resource_list(text, marker_start)
@@ -787,23 +832,66 @@ pub(super) fn metadata_kind_uses_code4_attributes(kind: &str) -> bool {
 }
 
 pub(super) fn is_offset_inside_register_resource_list(text: &str, offset: usize) -> bool {
-    const REGISTER_RESOURCE_LIST_MARKER: &str = "{b64d9a41-1642-11d6-a3c7-0050bae0a776,";
-    let Some(start) = text[..offset].rfind(REGISTER_RESOURCE_LIST_MARKER) else {
-        return false;
-    };
-    scan_1c_braced_value(text, start)
-        .map(|end| offset < end)
-        .unwrap_or(false)
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &[
+            "{b64d9a41-1642-11d6-a3c7-0050bae0a776,",
+            "{63405499-7491-4ce3-ac72-43433cbe4112,",
+        ],
+    )
 }
 
 pub(super) fn is_offset_inside_register_dimension_list(text: &str, offset: usize) -> bool {
-    const REGISTER_DIMENSION_LIST_MARKER: &str = "{b64d9a43-1642-11d6-a3c7-0050bae0a776,";
-    let Some(start) = text[..offset].rfind(REGISTER_DIMENSION_LIST_MARKER) else {
-        return false;
-    };
-    scan_1c_braced_value(text, start)
-        .map(|end| offset < end)
-        .unwrap_or(false)
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &[
+            "{b64d9a43-1642-11d6-a3c7-0050bae0a776,",
+            "{35b63b9d-0adf-4625-a047-10ae874c19a3,",
+        ],
+    )
+}
+
+pub(super) fn is_offset_inside_accounting_register_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &["{9d28ee33-9c7e-4a1b-8f13-50aa9b36607b,"],
+    )
+}
+
+fn is_offset_inside_chart_of_accounts_accounting_flag_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &["{78bd1243-c4df-46c3-8138-e147465cb9a4,"],
+    )
+}
+
+fn is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &["{c70ca527-5042-4cad-a315-dcb4007e32a3,"],
+    )
+}
+
+fn is_offset_inside_any_list_marker(text: &str, offset: usize, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| {
+        let Some(start) = text[..offset].rfind(marker) else {
+            return false;
+        };
+        scan_1c_braced_value(text, start)
+            .map(|end| offset < end)
+            .unwrap_or(false)
+    })
 }
 
 pub(super) fn is_offset_inside_calculation_register_recalculation_list(

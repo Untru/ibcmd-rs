@@ -246,6 +246,7 @@ pub(super) struct FormParameter {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormDynamicListSettings {
     pub(super) manual_query: bool,
+    pub(super) manual_query_explicit: bool,
     pub(super) auto_save_user_settings: bool,
     pub(super) dynamic_data_read: bool,
     pub(super) dynamic_data_read_explicit: bool,
@@ -371,6 +372,7 @@ pub(super) struct FormChildItem {
     pub(super) user_settings_group: Option<String>,
     pub(super) allow_getting_current_row_url: Option<bool>,
     pub(super) button_representation: Option<&'static str>,
+    pub(super) representation_in_context_menu: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) horizontal_location: Option<&'static str>,
     pub(super) location_in_command_bar: Option<&'static str>,
@@ -2003,6 +2005,7 @@ pub(super) fn parse_form_dynamic_list_settings(
     let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
     let mut auto_save_user_settings = false;
     let mut manual_query = false;
+    let mut manual_query_explicit = false;
     let mut dynamic_data_read = false;
     let mut dynamic_data_read_explicit = false;
     let mut query_text = None;
@@ -2028,7 +2031,10 @@ pub(super) fn parse_form_dynamic_list_settings(
             "AutoSaveUserSettings" => {
                 auto_save_user_settings = parse_form_setting_bool(window[1]).unwrap_or(false)
             }
-            "ManualQuery" => manual_query = parse_form_setting_bool(window[1]).unwrap_or(false),
+            "ManualQuery" => {
+                manual_query_explicit = true;
+                manual_query = parse_form_setting_bool(window[1]).unwrap_or(false);
+            }
             "DynamicalDataSelection" => {
                 dynamic_data_read_explicit = true;
                 dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
@@ -2089,6 +2095,7 @@ pub(super) fn parse_form_dynamic_list_settings(
     Some(FormDynamicListSettings {
         auto_save_user_settings,
         manual_query,
+        manual_query_explicit,
         dynamic_data_read,
         dynamic_data_read_explicit,
         query_text,
@@ -3928,9 +3935,7 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         file_drag_mode: if tag == "Table" {
-            fields
-                .get(30)
-                .and_then(|field| parse_form_table_file_drag_mode(field))
+            parse_form_table_file_drag_mode_from_fields(wrapper, &fields)
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_file_drag_mode(&fields)
         } else if tag == "PictureField" {
@@ -4120,6 +4125,14 @@ pub(super) fn parse_form_child_item_with_context(
             fields
                 .get(10)
                 .and_then(|field| parse_form_button_representation(field))
+        } else {
+            None
+        },
+        representation_in_context_menu: if tag == "Button" && form_button_layout_is_extended(&fields)
+        {
+            fields
+                .get(43)
+                .and_then(|field| parse_form_button_representation_in_context_menu(field))
         } else {
             None
         },
@@ -5378,6 +5391,17 @@ pub(super) fn parse_form_button_representation(field: &str) -> Option<&'static s
     }
 }
 
+pub(super) fn parse_form_button_representation_in_context_menu(
+    field: &str,
+) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("None"),
+        "1" => Some("AdditionalInContextMenu"),
+        "2" => Some("OnlyInContextMenu"),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_form_button_group_horizontal_align(field: &str) -> Option<&'static str> {
     match field.trim() {
         "0" => Some("Left"),
@@ -6080,12 +6104,18 @@ pub(super) fn parse_form_table_command_bar_location(
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" => fields.get(18).and_then(|field| match field.trim() {
-            "1" => Some("Top"),
-            _ => None,
-        }),
+        "55" if form_table_wrapper55_uses_split_head_slots(fields) => {
+            fields.get(18).and_then(|field| match field.trim() {
+                "1" => Some("Top"),
+                _ => None,
+            })
+        }
         _ => None,
     }
+}
+
+pub(super) fn form_table_wrapper55_uses_split_head_slots(fields: &[&str]) -> bool {
+    fields.get(8).map(|field| field.trim()) == Some("2")
 }
 
 pub(super) fn parse_form_table_initial_tree_view(
@@ -6194,6 +6224,22 @@ pub(super) fn parse_form_table_file_drag_mode(field: &str) -> Option<&'static st
         "2" => Some("AsFile"),
         _ => None,
     }
+}
+
+pub(super) fn parse_form_table_file_drag_mode_from_fields(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    if wrapper == "55"
+        && !form_table_wrapper55_uses_split_head_slots(fields)
+        && fields.get(53).map(|field| field.trim()) == Some("0")
+        && form_table_wrapper55_root_defaults(wrapper, fields)
+    {
+        return None;
+    }
+    fields
+        .get(30)
+        .and_then(|field| parse_form_table_file_drag_mode(field))
 }
 
 pub(super) fn parse_form_button_group_command_source(fields: &[&str]) -> Option<&'static str> {
@@ -9023,7 +9069,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(choice_folders_and_items)
         ));
     }
-    if let Some(vertical_stretch) = item.vertical_stretch {
+    if let Some(vertical_stretch) = item.vertical_stretch
+        && !usual_group_title_first
+    {
         xml.push_str(&format!(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
@@ -9111,6 +9159,12 @@ pub(super) fn format_form_child_item_xml(
                 xml.push_str(&format!(
                     "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
                     if horizontal_stretch { "true" } else { "false" }
+                ));
+            }
+            if let Some(vertical_stretch) = item.vertical_stretch {
+                xml.push_str(&format!(
+                    "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
+                    if vertical_stretch { "true" } else { "false" }
                 ));
             }
         } else if item.horizontal_stretch == Some(true) {
@@ -9218,6 +9272,14 @@ pub(super) fn format_form_child_item_xml(
                 ));
             }
         }
+    }
+    if item.tag == "Button"
+        && let Some(representation) = item.representation_in_context_menu
+    {
+        xml.push_str(&format!(
+            "{tab}\t<RepresentationInContextMenu>{}</RepresentationInContextMenu>\r\n",
+            escape_xml_text(representation)
+        ));
     }
     if item.tag == "CommandBar"
         && let Some(horizontal_location) = item.horizontal_location
@@ -9531,8 +9593,11 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
         }
         if let Some(settings) = &attribute.settings {
             xml.push_str("\t\t\t<Settings xsi:type=\"DynamicList\">\r\n");
-            if settings.manual_query {
-                xml.push_str("\t\t\t\t<ManualQuery>true</ManualQuery>\r\n");
+            if settings.manual_query || settings.manual_query_explicit {
+                xml.push_str(&format!(
+                    "\t\t\t\t<ManualQuery>{}</ManualQuery>\r\n",
+                    xml_bool(settings.manual_query)
+                ));
             }
             if settings.dynamic_data_read_explicit {
                 xml.push_str(&format!(
@@ -9544,7 +9609,9 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
                     }
                 ));
             }
-            if let Some(query_text) = &settings.query_text {
+            if let Some(query_text) = &settings.query_text
+                && !query_text.is_empty()
+            {
                 xml.push_str(&format!(
                     "\t\t\t\t<QueryText>{}</QueryText>\r\n",
                     escape_xml_text(query_text)

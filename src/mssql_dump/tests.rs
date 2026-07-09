@@ -3458,6 +3458,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
             settings: Some(FormDynamicListSettings {
                 auto_save_user_settings: false,
                 manual_query: true,
+                manual_query_explicit: true,
                 dynamic_data_read: true,
                 dynamic_data_read_explicit: true,
                 query_text: Some("ВЫБРАТЬ".to_string()),
@@ -3487,6 +3488,7 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
     let mut settings = FormDynamicListSettings {
         auto_save_user_settings: true,
         manual_query: false,
+        manual_query_explicit: false,
         dynamic_data_read: false,
         dynamic_data_read_explicit: false,
         query_text: None,
@@ -3562,6 +3564,7 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
     let mut settings = FormDynamicListSettings {
         auto_save_user_settings: true,
         manual_query: false,
+        manual_query_explicit: false,
         dynamic_data_read: false,
         dynamic_data_read_explicit: false,
         query_text: None,
@@ -3715,6 +3718,7 @@ fn formats_explicit_false_dynamic_data_read() {
         settings: Some(FormDynamicListSettings {
             auto_save_user_settings: false,
             manual_query: false,
+            manual_query_explicit: false,
             dynamic_data_read: false,
             dynamic_data_read_explicit: true,
             query_text: None,
@@ -8826,6 +8830,7 @@ fn formats_table_search_additions_as_direct_sections() {
         user_settings_group: None,
         allow_getting_current_row_url: None,
         button_representation: None,
+        representation_in_context_menu: None,
         group_horizontal_align: None,
         horizontal_location: None,
         location_in_command_bar: None,
@@ -8936,6 +8941,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 user_settings_group: None,
                 allow_getting_current_row_url: None,
                 button_representation: None,
+                representation_in_context_menu: None,
                 group_horizontal_align: None,
                 horizontal_location: None,
                 location_in_command_bar: None,
@@ -9047,6 +9053,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 user_settings_group: None,
                 allow_getting_current_row_url: None,
                 button_representation: None,
+                representation_in_context_menu: None,
                 group_horizontal_align: None,
                 horizontal_location: None,
                 location_in_command_bar: None,

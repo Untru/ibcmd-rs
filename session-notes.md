@@ -1,32 +1,33 @@
-# Session Notes - 2026-07-09 06:27:15 +03:00
+# Session Notes - 2026-07-09 19:16:04 +03:00
 
 ## Current Task
-Analyze first full-export diff between native `ibcmd` and `ibcmd-rs`: `AccumulationRegisters/BonusnyeBally.xml` is missing `<DefaultListForm/>` and `<AuxiliaryListForm/>` after `<UseStandardCommands>true</UseStandardCommands>`.
+Bring `ibcmd-rs` form XML export closer to native `ibcmd` for BSP forms, especially:
+`AccountingRegisters/_ДемоЖурналПроводокБухгалтерскогоУчетаБезКорреспонденции/Forms/ФормаСписка/Ext/Form.xml`.
 
 ## Completed
-- Inspected `src/mssql_dump/mod.rs` register metadata extraction and formatting paths.
-- Found the root cause: register form refs were parsed only for `InformationRegister`, and form-ref XML output was also gated by `kind == "InformationRegister"`.
-- Confirmed `AccumulationRegister` already uses owner metadata fields after the metadata header: `+1` for `UseStandardCommands`, `+4` for `RegisterType`, `+5/+6` for lock/search flags, so `+2/+3` are the expected default/auxiliary list-form slots.
-- Patched `parse_register_form_refs` so `AccumulationRegister` reads `DefaultListForm` from `header_index + 2` and `AuxiliaryListForm` from `header_index + 3`.
-- Patched `format_register_source_xml` so `AccumulationRegister` emits `DefaultListForm` and `AuxiliaryListForm` immediately after `UseStandardCommands` and before `RegisterType`, matching the native `ibcmd` order shown in the screenshot.
-- Added regression assertions for empty `AccumulationRegister` list-form tags and a separate test fixture for resolving real list-form UUIDs to `AccumulationRegister.<Name>.Form.<FormName>`.
+- Found that native `ibcmd` does not emit empty owned-form metadata `<ExtendedPresentation/>`; changed form metadata formatting so empty `ExtendedPresentation` is omitted for ordinary owned forms while parsed non-empty values are preserved.
+- Added generic parsing of button `RepresentationInContextMenu` from the extended button layout slot: `0=None`, `1=AdditionalInContextMenu`, `2=OnlyInContextMenu`.
+- Changed `DynamicList` settings formatting so explicit `ManualQuery=false` is preserved and empty `<QueryText></QueryText>` is not emitted.
+- Fixed `UsualGroup` output order so `VerticalStretch` is placed after `Title`/`HorizontalStretch`, matching the native XML ordering observed in the BSP form.
+- Narrowed wrapper `55` table `CommandBarLocation` output to the layout shape where native `ibcmd` actually emits it.
+- Narrowed wrapper `55` table `FileDragMode` suppression: omit the default `AsFile` only when the split-head layout marker is absent, root defaults match, and slot `53` says there is no explicit file-drag mode.
+- Kept constructor updates in existing tests only where required by changed structs; no new test work should be added now.
 
 ## Pending
-- Do not spend time running tests until the user explicitly asks for test work.
-- If continuing this diff, inspect the generated XML output or rerun only the export/diff flow the user requests.
-- Later, when tests are allowed, run focused tests for the new accumulation-register form-ref behavior and then decide whether broader `mssql_dump` tests are worth running.
+- Do not write tests and do not run tests until the user explicitly asks. User wants the main export logic finished first.
+- Continue reviewing remaining full-export diffs against native `ibcmd`, prioritizing model/raw-field rules over object-name special cases.
+- If more form mismatches appear, inspect raw inflated form blobs and bind XML output to slots/common model shape before patching.
 
 ## Next Action
-Continue from the code change in `src/mssql_dump/mod.rs`: verify the first diff by regenerating or inspecting `AccumulationRegisters/BonusnyeBally.xml` only if the user asks to proceed; otherwise move to the next diff without running tests.
+Continue from `src/mssql_dump/form_body.rs`: inspect the next native-vs-generated form diff, identify the raw-field pattern, then patch the general parser/formatter logic without adding or running tests.
 
 ## Key Decisions
-- Treat this as a schema/parity issue, not a serializer omission: `ibcmd` emits empty list-form tags for accumulation registers even when no form UUID is set.
-- Preserve native XML ordering: `UseStandardCommands`, `DefaultListForm`, `AuxiliaryListForm`, `RegisterType`, then the remaining register properties.
-- User instruction from 2026-07-09: do not spend time on tests for now; tests will be handled later.
+- Treat these as schema/model parity issues, not per-object exceptions.
+- Do not hardcode form names such as `ФормаСписка`; use wrapper/layout markers and raw slots shared by all forms.
+- Current user instruction from 2026-07-09: do not write tests and do not run tests now; tests will be handled later.
 
 ## Modified Files
+- `src/mssql_dump/form_body.rs`
 - `src/mssql_dump/mod.rs`
+- `src/mssql_dump/tests.rs`
 - `session-notes.md`
-
-## Working Tree Notes
-- `scripts/` is currently untracked in `git status`; it was already present before this note update and was not touched for this diff.

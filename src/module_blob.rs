@@ -21912,6 +21912,8 @@ fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str
         | "AccumulationRegisterList"
         | "AccumulationRegisterManager" => Some("AccumulationRegisters"),
         "AccountingRegisterObject"
+        | "AccountingRegisterRecord"
+        | "AccountingRegisterExtDimensions"
         | "AccountingRegisterRecordSet"
         | "AccountingRegisterRecordKey"
         | "AccountingRegisterSelection"
