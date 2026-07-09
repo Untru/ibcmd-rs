@@ -6,6 +6,27 @@ use crate::form_schema::{
     FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
 };
 
+const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
+    ("Ссылка", "Ref"),
+    ("ПометкаУдаления", "DeletionMark"),
+    ("ЭтоГруппа", "IsFolder"),
+    ("Владелец", "Owner"),
+    ("Родитель", "Parent"),
+    ("Наименование", "Description"),
+    ("Код", "Code"),
+    ("Предопределенный", "Predefined"),
+    ("ИмяПредопределенныхДанных", "PredefinedDataName"),
+    ("Проведен", "Posted"),
+    ("Дата", "Date"),
+    ("Номер", "Number"),
+    ("Период", "Period"),
+    ("Регистратор", "Recorder"),
+    ("НомерСтроки", "LineNumber"),
+    ("Активность", "Active"),
+    ("ВидДвижения", "RecordType"),
+    ("ТипЗначения", "ValueType"),
+];
+
 #[allow(dead_code)]
 pub(crate) fn extract_form_body_xml(
     bytes: &[u8],
@@ -3327,7 +3348,8 @@ pub(super) fn collect_form_child_item_indexes(
         .filter(|(binding_key, _)| !indexes.data_path_by_binding_key.contains_key(*binding_key))
         .filter_map(|(binding_key, names)| {
             let attribute_name = indexes.attribute_name_by_binding_key.get(binding_key)?;
-            let property_name = infer_form_bound_property_name(names)?;
+            let property_name =
+                normalize_form_standard_data_path_name(&infer_form_bound_property_name(names)?);
             Some((
                 binding_key.clone(),
                 format!("{attribute_name}.{property_name}"),
@@ -3476,7 +3498,7 @@ pub(super) fn collect_form_child_item_indexes_from_field(
                     let column_name = if column_key == "-2" {
                         "LineNumber".to_string()
                     } else {
-                        name.clone()
+                        normalize_form_standard_data_path_name(&name)
                     };
                     indexes
                         .table_column_names_by_binding_key
@@ -7586,7 +7608,12 @@ pub(super) fn parse_form_child_item_data_path(
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound)
-            .or_else(|| parent_data_path.map(|parent| format!("{parent}.{name}"))),
+            .or_else(|| {
+                parent_data_path.map(|parent| {
+                    let name = normalize_form_standard_data_path_name(name);
+                    format!("{parent}.{name}")
+                })
+            }),
         "LabelField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
@@ -7630,7 +7657,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(table_id)
                 .and_then(|columns| columns.get(&column))
                 .cloned()
-                .or_else(|| (column == "8").then(|| "Ссылка".to_string()))?;
+                .or_else(|| (column == "8").then(|| "Ref".to_string()))?;
             let field_name = normalize_form_table_column_name(table_name, &field_name);
             Some(format!("{table_name}.{field_name}"))
         }
@@ -7642,7 +7669,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(&table_key)
                 .and_then(|columns| columns.get(&column_key))
                 .cloned()
-                .or_else(|| (column_key == "8").then(|| "Ссылка".to_string()))?;
+                .or_else(|| (column_key == "8").then(|| "Ref".to_string()))?;
             let field_name = normalize_form_table_column_name(table_path, &field_name);
             Some(format!("{table_path}.{field_name}"))
         }
@@ -7667,7 +7694,7 @@ pub(super) fn parse_form_ordinary_table_row_picture_data_path(
 }
 
 pub(super) fn normalize_form_table_column_name(table_name: &str, field_name: &str) -> String {
-    [Some(table_name), table_name.rsplit('.').next()]
+    let field_name = [Some(table_name), table_name.rsplit('.').next()]
         .into_iter()
         .flatten()
         .find_map(|prefix| {
@@ -7679,7 +7706,15 @@ pub(super) fn normalize_form_table_column_name(table_name: &str, field_name: &st
             })
         })
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| field_name.to_string())
+        .unwrap_or_else(|| field_name.to_string());
+    normalize_form_standard_data_path_name(&field_name)
+}
+
+pub(super) fn normalize_form_standard_data_path_name(name: &str) -> String {
+    FORM_STANDARD_DATA_PATH_NAME_ALIASES
+        .iter()
+        .find_map(|(source, target)| (*source == name).then_some((*target).to_string()))
+        .unwrap_or_else(|| name.to_string())
 }
 
 pub(super) fn parse_form_binding_key(field: &str) -> Option<String> {
@@ -7814,8 +7849,8 @@ pub(super) fn parse_form_attribute_data_path(
     let attribute_id = ids.first()?.trim();
     attribute_names_by_id
         .get(attribute_id)
-        .cloned()
-        .or_else(|| Some(name.to_string()))
+        .map(|name| normalize_form_standard_data_path_name(name))
+        .or_else(|| Some(normalize_form_standard_data_path_name(name)))
 }
 
 pub(super) fn parse_form_button_command_name(
@@ -7957,7 +7992,7 @@ pub(super) fn parse_form_button_data_path(
         .and_then(|field| split_1c_braced_fields(field, 0))
         .and_then(|fields| fields.first().map(|value| value.trim().to_string()))?;
     let field_name = if column == "8" {
-        "Ссылка".to_string()
+        "Ref".to_string()
     } else {
         table_column_names_by_id
             .get(table_id)
