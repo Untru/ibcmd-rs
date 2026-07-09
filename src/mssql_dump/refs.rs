@@ -882,6 +882,15 @@ pub(super) fn build_form_source_reference_index_from_texts(
             if let Some(header) = row.header.as_ref() {
                 forms.push(header.clone());
             }
+        }
+    }
+    let form_uuids = forms
+        .iter()
+        .map(|form| form.uuid.clone())
+        .collect::<BTreeSet<_>>();
+
+    for row in rows {
+        if is_form_metadata_text(&row.text, &row.file_name) {
             continue;
         }
         let (Some(kind), Some(folder), Some(header)) =
@@ -893,7 +902,7 @@ pub(super) fn build_form_source_reference_index_from_texts(
             continue;
         }
         let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        let Some(references) = owned_form_uuid_values(&row.text) else {
+        let Some(references) = owned_form_uuid_values_matching(&row.text, &form_uuids) else {
             continue;
         };
         for reference in references {
@@ -953,6 +962,15 @@ pub(super) fn build_form_owner_resolution_diagnostics_from_texts(
             if let Some(header) = row.header.as_ref() {
                 forms.push(header.clone());
             }
+        }
+    }
+    let form_uuids = forms
+        .iter()
+        .map(|form| form.uuid.clone())
+        .collect::<BTreeSet<_>>();
+
+    for row in rows {
+        if is_form_metadata_text(&row.text, &row.file_name) {
             continue;
         }
         let (Some(kind), Some(folder), Some(header)) =
@@ -964,7 +982,7 @@ pub(super) fn build_form_owner_resolution_diagnostics_from_texts(
             continue;
         }
         let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
-        let Some(references) = owned_form_uuid_values(&row.text) else {
+        let Some(references) = owned_form_uuid_values_matching(&row.text, &form_uuids) else {
             continue;
         };
         for reference in references {

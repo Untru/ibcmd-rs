@@ -5,62 +5,84 @@ pub(super) fn is_form_metadata_text(text: &str, uuid: &str) -> bool {
         && (contains_wrapped_metadata_object_code(text, 13, uuid)
             || contains_wrapped_metadata_object_code(text, 14, uuid))
 }
-pub(super) const FORM_LIST_MARKERS: &[&str] = &[
-    "fdf816d2-1ead-11d5-b975-0050bae0a95d",
-    "fb880e93-47d7-4127-9357-a20e69c17545",
-    "13134204-f60b-11d5-a3c7-0050bae0a776",
-    "87c509ab-3d38-4d67-b379-aca796298578",
-    "b64d9a44-1642-11d6-a3c7-0050bae0a776",
-    "d5b0e5ed-256d-401c-9c36-f630cafd8a62",
-    "a3b368c0-29e2-11d6-a3c7-0050bae0a776",
-    "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
-    "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
-    "b8533c0c-2342-4db3-91a2-c2b08cbf6b23",
-    "ec81ad10-ca07-11d5-b9a5-0050bae0a95d",
-    "33f2e54b-37ce-4a7a-a569-b648d7aa4634",
-    "3f58cbfb-4172-4e54-be49-561a579bb38b",
-];
-pub(super) fn owned_form_uuid_values(text: &str) -> Option<BTreeSet<String>> {
-    owned_form_uuid_values_in_text_order(text).map(|values| values.into_iter().collect())
+
+pub(super) fn owned_form_uuid_values_matching(
+    text: &str,
+    allowed_refs: &BTreeSet<String>,
+) -> Option<BTreeSet<String>> {
+    owned_form_uuid_values_matching_in_text_order(text, allowed_refs)
+        .map(|values| values.into_iter().collect())
 }
-pub(super) fn owned_form_uuid_values_in_text_order(text: &str) -> Option<Vec<String>> {
+
+pub(super) fn owned_form_uuid_values_matching_in_text_order(
+    text: &str,
+    allowed_refs: &BTreeSet<String>,
+) -> Option<Vec<String>> {
+    counted_uuid_values_in_text_order(text, allowed_refs)
+}
+
+fn counted_uuid_values_in_text_order(
+    text: &str,
+    allowed_refs: &BTreeSet<String>,
+) -> Option<Vec<String>> {
     let mut refs = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut found_marker = false;
-    for marker in FORM_LIST_MARKERS {
-        let mut offset = 0usize;
-        while let Some(relative_index) = text[offset..].find(marker) {
-            let marker_index = offset + relative_index;
-            found_marker = true;
-            offset = marker_index + marker.len();
+    collect_counted_uuid_block_refs(text, allowed_refs, &mut refs, &mut seen).then_some(refs)
+}
 
-            let Some(block_start) = text[..marker_index].rfind('{') else {
-                continue;
-            };
-            let Some(block_end) = scan_1c_braced_value(text, block_start) else {
-                continue;
-            };
-            let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
-                continue;
-            };
-            if fields.first().map(|field| field.trim()) != Some(*marker) {
-                continue;
-            }
-            let Some(count) = fields
-                .get(1)
-                .and_then(|field| field.trim().parse::<usize>().ok())
-            else {
-                continue;
-            };
-            for field in fields.iter().skip(2).take(count) {
-                let value = field.trim().trim_matches('"').to_ascii_lowercase();
-                if is_uuid_like_ascii(value.as_bytes()) && seen.insert(value.clone()) {
+fn collect_counted_uuid_block_refs(
+    text: &str,
+    allowed_refs: &BTreeSet<String>,
+    refs: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+) -> bool {
+    let mut offset = 0usize;
+    let mut found_block = false;
+    while let Some(relative_index) = text[offset..].find('{') {
+        let block_start = offset + relative_index;
+        offset = block_start + 1;
+
+        let marker_start = block_start + 1;
+        let marker_end = marker_start + 36;
+        let Some(marker) = text.get(marker_start..marker_end) else {
+            continue;
+        };
+        if !is_uuid_like_ascii(marker.as_bytes()) {
+            continue;
+        }
+        if text.as_bytes().get(marker_end).copied() != Some(b',') {
+            continue;
+        }
+
+        let Some(block_end) = scan_1c_braced_value(text, block_start) else {
+            continue;
+        };
+        let Some(fields) = split_1c_braced_fields(&text[block_start..block_end], 0) else {
+            continue;
+        };
+        if fields.first().map(|field| field.trim()) != Some(marker) {
+            continue;
+        }
+        let Some(count) = fields
+            .get(1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        let mut block_ref_count = 0usize;
+        for field in fields.iter().skip(2).take(count) {
+            let value = field.trim().trim_matches('"').to_ascii_lowercase();
+            if is_uuid_like_ascii(value.as_bytes()) && allowed_refs.contains(&value) {
+                block_ref_count += 1;
+                if seen.insert(value.clone()) {
                     refs.push(value);
                 }
             }
         }
+        found_block |= block_ref_count > 0;
     }
-    found_marker.then_some(refs)
+
+    found_block
 }
 pub(super) fn simple_metadata_form_template_child_objects_xml(
     kind: &str,
@@ -113,7 +135,9 @@ pub(super) fn owned_metadata_form_names_in_text_order(
 ) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = BTreeSet::new();
-    if let Some(form_uuids) = owned_form_uuid_values_in_text_order(text) {
+    let known_form_uuids = form_refs.keys().cloned().collect::<BTreeSet<_>>();
+    if let Some(form_uuids) = owned_form_uuid_values_matching_in_text_order(text, &known_form_uuids)
+    {
         for uuid in form_uuids {
             let Some(form_ref) = form_refs.get(&uuid) else {
                 continue;

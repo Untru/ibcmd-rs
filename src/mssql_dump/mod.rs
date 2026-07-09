@@ -4646,7 +4646,7 @@ fn parse_exchange_plan_properties_from_text(
 ) -> Option<ExchangePlanProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("37") {
+    if !matches!(fields.first().map(|value| value.trim()), Some("36" | "37")) {
         return None;
     }
     let header_index = metadata_header_field_index(&fields, uuid)?;
@@ -5841,7 +5841,7 @@ fn parse_catalog_properties_from_text(
 ) -> Option<CatalogProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("57") {
+    if !matches!(fields.first().map(|value| value.trim()), Some("56" | "57")) {
         return None;
     }
     let mut generated_types = Vec::new();
@@ -6452,7 +6452,9 @@ fn owned_enum_form_names_in_text_order(
 ) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = BTreeSet::new();
-    if let Some(form_uuids) = owned_form_uuid_values_in_text_order(text) {
+    let known_form_uuids = form_refs.keys().cloned().collect::<BTreeSet<_>>();
+    if let Some(form_uuids) = owned_form_uuid_values_matching_in_text_order(text, &known_form_uuids)
+    {
         for uuid in form_uuids {
             let Some(form_ref) = form_refs.get(&uuid) else {
                 continue;

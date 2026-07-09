@@ -1998,7 +1998,7 @@ fn writes_form_metadata_xml_to_owner_or_common_form_layout() {
     let common_form_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
     let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{owned_form_uuid},{common_form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{owned_form_uuid}}}}}\r\n}}"
+                "{{1,\r\n{{56,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{owned_form_uuid},{common_form_uuid},{{99999999-9999-4999-8999-999999999999,1,{owned_form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -2119,21 +2119,39 @@ fn formats_form_metadata_for_v220_without_palette_namespace_or_compat_mode() {
 }
 
 #[test]
-fn extracts_owned_form_refs_from_form_list_marker() {
-    let refs = owned_form_uuid_values(
+fn extracts_owned_form_refs_from_counted_uuid_blocks() {
+    let allowed_refs = BTreeSet::from([
+        "1183ecbe-255b-4a2e-a148-17c5249498c1".to_string(),
+        "039772b1-a494-4618-b613-8ff21bad9890".to_string(),
+        "0074aea8-6dd8-4e09-b6f0-017f96173e87".to_string(),
+        "46f7d6c4-a3ac-430c-b540-373bf2239a50".to_string(),
+        "60566ede-81fd-4469-b81e-4cc957b4540d".to_string(),
+        "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
+    ]);
+    let refs = owned_form_uuid_values_matching(
         "{1,{0},1183ecbe-255b-4a2e-a148-17c5249498c1,\
-             {fdf816d2-1ead-11d5-b975-0050bae0a95d,2,\
+             {99999999-9999-4999-8999-999999999999,2,\
              1183ecbe-255b-4a2e-a148-17c5249498c1,\
              039772b1-a494-4618-b613-8ff21bad9890},\
              {13134204-f60b-11d5-a3c7-0050bae0a776,1,\
-             0074aea8-6dd8-4e09-b6f0-017f96173e87}}",
+             0074aea8-6dd8-4e09-b6f0-017f96173e87},\
+             {88888888-8888-4888-8888-888888888888,1,\
+             46f7d6c4-a3ac-430c-b540-373bf2239a50},\
+             {77777777-7777-4777-8777-777777777777,1,\
+             60566ede-81fd-4469-b81e-4cc957b4540d},\
+             {aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,1,\
+             bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb}}",
+        &allowed_refs,
     )
     .unwrap();
 
-    assert_eq!(refs.len(), 3);
+    assert_eq!(refs.len(), 6);
     assert!(refs.contains("1183ecbe-255b-4a2e-a148-17c5249498c1"));
     assert!(refs.contains("039772b1-a494-4618-b613-8ff21bad9890"));
     assert!(refs.contains("0074aea8-6dd8-4e09-b6f0-017f96173e87"));
+    assert!(refs.contains("46f7d6c4-a3ac-430c-b540-373bf2239a50"));
+    assert!(refs.contains("60566ede-81fd-4469-b81e-4cc957b4540d"));
+    assert!(refs.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
 }
 
 #[test]
@@ -2244,7 +2262,7 @@ fn writes_form_module_text_to_source_layout() {
     let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{99999999-9999-4999-8999-999999999999,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -9115,7 +9133,7 @@ fn writes_form_item_pictures_to_source_layout() {
     let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{99999999-9999-4999-8999-999999999999,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -10744,7 +10762,7 @@ fn writes_form_help_xml_and_html_to_source_layout() {
     let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let catalog_metadata = deflate_for_test(
             format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{fdf816d2-1ead-11d5-b975-0050bae0a95d,1,{form_uuid}}}}}\r\n}}"
+                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{99999999-9999-4999-8999-999999999999,1,{form_uuid}}}}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -20156,7 +20174,7 @@ fn extracts_enum_child_form_and_template_refs_from_current_indexes() {
     let print_template_uuid = "88888888-8888-4888-8888-888888888881";
     let settings_template_uuid = "88888888-8888-4888-8888-888888888882";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let enum_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{20,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\r\n{{0,\r\n{{3,\r\n{{1,0,{enum_uuid}}},\"Status\",{{1,\"en\",\"Status\"}},\"\",0,0,{zero_uuid},0}}\r\n}},0,44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,{zero_uuid},{zero_uuid},2,1,{zero_uuid},{zero_uuid},{{0}},{{0}},{{0}},{{0,{{0}}}},0}},2,\r\n{{aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,0}},{{bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0}},{{cccccccc-cccc-4ccc-cccc-cccccccccccc,0}},\r\n{{dddddddd-dddd-4ddd-dddd-ddddddddddddd,1,\r\n{{{{0,{{3,{{1,0,55555555-5555-4555-8555-555555555551}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}},0}}}},\r\n{{{form_list_marker},1,{choice_form_uuid}}},{print_template_uuid},{{{form_list_marker},2,{list_form_uuid},{choice_form_uuid}}},{settings_template_uuid}\r\n}}"
@@ -23356,7 +23374,7 @@ fn extracts_task_child_form_and_template_refs_from_current_indexes() {
     let form_uuid = "44444444-4444-4444-8444-444444444441";
     let template_uuid = "55555555-5555-4555-8555-555555555551";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let task_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,{zero_uuid},0}},0,{task_object_type_id},{task_object_value_id},{task_ref_type_id},{task_ref_value_id}}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
@@ -23437,10 +23455,10 @@ fn extracts_exchange_plan_child_form_and_template_refs_from_current_indexes() {
     let exchange_plan_uuid = "11111111-1111-4111-8111-111111111111";
     let form_uuid = "22222222-2222-4222-8222-222222222222";
     let template_uuid = "33333333-3333-4333-8333-333333333333";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let exchange_plan_blob = deflate_for_test(
             format!(
-                "{{1,\r\n{{37,\r\n{{0,\r\n{{3,\r\n{{1,0,{exchange_plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
+                "{{1,\r\n{{36,\r\n{{0,\r\n{{3,\r\n{{1,0,{exchange_plan_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
             )
             .as_bytes(),
         );
@@ -23519,7 +23537,7 @@ fn extracts_document_journal_child_form_and_template_refs_from_current_indexes()
     let form_uuid = "22222222-2222-4222-8222-222222222222";
     let template_uuid = "33333333-3333-4333-8333-333333333333";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let journal_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{26,\r\n{{3,\r\n{{1,0,{journal_uuid}}},\"Interactions\",{{1,\"en\",\"Interactions\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
@@ -23640,7 +23658,7 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     let storage_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     let command_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let report_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Refresh tip\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}},0,0,0}}\r\n}}"
@@ -24614,7 +24632,7 @@ fn extracts_document_child_forms_and_templates_to_metadata_xml() {
         .take(20)
         .collect::<Vec<_>>()
         .join(",");
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let document_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{zero_fields},{manager_type_id},{manager_value_id}}},{{{form_list_marker},3,{list_form_uuid},{common_form_uuid},{main_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{print_template_uuid}}}\r\n}}"
@@ -25181,7 +25199,7 @@ fn extracts_data_processor_child_forms_and_templates_to_metadata_xml() {
     let template_uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     let manager_type_id = "11111111-1111-4111-8111-111111111111";
     let manager_value_id = "22222222-2222-4222-8222-222222222222";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let data_processor_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{17,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\r\n{{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},{default_form_uuid},1,0,{manager_type_id},{manager_value_id},{auxiliary_form_uuid},{{0}},{{0}}}},{{{form_list_marker},2,{extra_form_uuid},{default_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}}\r\n}}"
@@ -26622,7 +26640,7 @@ fn extracts_catalog_child_forms_and_templates_to_metadata_xml() {
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = FORM_LIST_MARKERS[0];
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let catalog_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id}}},{{{form_list_marker},2,{list_form_uuid},{item_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{print_template_uuid}}}\r\n}}"

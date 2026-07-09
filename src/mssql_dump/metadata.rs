@@ -167,9 +167,9 @@ pub(super) fn metadata_source_for_object_fields(
         33 => Some(("InformationRegister", "InformationRegisters")),
         34 => Some(("ChartOfCharacteristicTypes", "ChartsOfCharacteristicTypes")),
         35 => Some(("ChartOfCalculationTypes", "ChartsOfCalculationTypes")),
-        37 => Some(("ExchangePlan", "ExchangePlans")),
+        36 | 37 => Some(("ExchangePlan", "ExchangePlans")),
         40 => Some(("Document", "Documents")),
-        57 => Some(("Catalog", "Catalogs")),
+        56 | 57 => Some(("Catalog", "Catalogs")),
         _ => None,
     }
 }
