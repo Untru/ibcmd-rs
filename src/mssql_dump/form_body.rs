@@ -742,6 +742,12 @@ pub(super) fn extract_form_repost_on_write(fields: &[&str]) -> Option<bool> {
 }
 
 pub(super) fn extract_form_auto_fill_check(fields: &[&str]) -> Option<bool> {
+    if fields.first().map(|field| field.trim()) == Some("50") {
+        return (fields.get(13).map(|field| field.trim()) == Some("0")).then_some(false);
+    }
+    if fields.first().map(|field| field.trim()) != Some("59") {
+        return None;
+    }
     let value = form_root_property_bag_value(fields, "24")?;
     let value_fields = split_1c_braced_fields(value, 0)?;
     match (
@@ -4071,6 +4077,10 @@ pub(super) fn parse_form_child_item_with_context(
                     .filter(|value| *value)
                     .or_else(|| parse_form_table_default_item_from_slots(wrapper, &fields))
             }
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
+            fields
+                .get(13)
+                .and_then(|field| parse_form_child_item_show_title(field))
         } else if matches!(wrapper, "37" | "48")
             && matches!(
                 tag,
@@ -4091,7 +4101,6 @@ pub(super) fn parse_form_child_item_with_context(
         },
         initial_tree_view: if tag == "Table" {
             parse_form_table_initial_tree_view(wrapper, &fields)
-                .or_else(|| parse_form_table_default_initial_tree_view(wrapper, &fields))
         } else {
             None
         },
@@ -5195,7 +5204,7 @@ pub(super) fn parse_form_usual_group_extended_options(
     match options.first()?.trim() {
         "29" => Some(FormUsualGroupExtendedOptions {
             group: parse_form_usual_group_property_bag_group(&options),
-            behavior: parse_form_usual_group_property_bag_behavior(fields, &options),
+            behavior: parse_form_usual_group_property_bag_behavior(&options),
             representation: options
                 .get(3)
                 .and_then(|field| parse_form_child_item_representation(field)),
@@ -5243,18 +5252,15 @@ pub(super) fn parse_form_usual_group_property_bag_group(options: &[&str]) -> Opt
 }
 
 pub(super) fn parse_form_usual_group_property_bag_behavior(
-    fields: &[&str],
     options: &[&str],
 ) -> Option<&'static str> {
-    if options.get(13).map(|value| value.trim()) == Some("1") {
-        return Some("Usual");
+    match options.get(28).map(|value| value.trim())? {
+        "0" => Some("Usual"),
+        "1" => Some("Collapsible"),
+        "2" => Some("PopUp"),
+        "3" => None,
+        _ => None,
     }
-    if fields.get(15).map(|value| value.trim()) == Some("2")
-        && options.get(13).map(|value| value.trim()) == Some("1")
-    {
-        return Some("Usual");
-    }
-    None
 }
 
 pub(super) fn parse_form_usual_group_horizontal_stretch(fields: &[&str]) -> Option<bool> {
@@ -6153,6 +6159,14 @@ pub(super) fn parse_form_search_addition_source_item(
 
 pub(super) fn parse_form_table_representation(field: &str) -> Option<&'static str> {
     match field.trim() {
+        "0" => Some("List"),
+        "2" => Some("Tree"),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_wrapper73_representation(field: &str) -> Option<&'static str> {
+    match field.trim() {
         "1" => Some("List"),
         _ => None,
     }
@@ -6164,16 +6178,20 @@ pub(super) fn parse_form_table_representation_from_fields(
 ) -> Option<&'static str> {
     match wrapper {
         "55" => fields
-            .get(8)
-            .and_then(|field| parse_form_table_representation(field))
-            .or_else(|| {
-                fields
-                    .get(13)
-                    .and_then(|field| parse_form_table_representation(field))
-            }),
+            .get(3)
+            .and_then(|field| parse_form_table_representation(field)),
         "73" => fields
             .get(8)
-            .and_then(|field| parse_form_table_representation(field)),
+            .and_then(|field| parse_form_table_wrapper73_representation(field)),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_table_command_bar_location_field(field: &str) -> Option<&'static str> {
+    match field.trim() {
+        "0" => Some("None"),
+        "2" => Some("Top"),
+        "3" => Some("Bottom"),
         _ => None,
     }
 }
@@ -6183,19 +6201,9 @@ pub(super) fn parse_form_table_command_bar_location(
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" if form_table_wrapper55_uses_split_head_slots(fields) => {
-            fields.get(18).and_then(|field| match field.trim() {
-                "0" => Some("None"),
-                "1" => Some("Top"),
-                _ => None,
-            })
-        }
-        "55" if form_table_wrapper55_uses_root_default_command_bar_none(fields) => {
-            fields.get(18).and_then(|field| match field.trim() {
-                "0" => Some("None"),
-                _ => None,
-            })
-        }
+        "55" => fields
+            .get(8)
+            .and_then(|field| parse_form_table_command_bar_location_field(field)),
         _ => None,
     }
 }
@@ -6204,34 +6212,18 @@ pub(super) fn form_table_wrapper55_uses_split_head_slots(fields: &[&str]) -> boo
     fields.get(8).map(|field| field.trim()) == Some("2")
 }
 
-pub(super) fn form_table_wrapper55_uses_root_default_command_bar_none(fields: &[&str]) -> bool {
-    form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_none()
-        && form_table_wrapper55_root_defaults("55", fields)
-}
-
 pub(super) fn parse_form_table_initial_tree_view(
     wrapper: &str,
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" => fields.get(22).and_then(|field| match field.trim() {
+        "55" => fields.get(39).and_then(|field| match field.trim() {
             "1" => Some("ExpandTopLevel"),
+            "2" => Some("ExpandAllLevels"),
             _ => None,
         }),
         _ => None,
     }
-}
-
-pub(super) fn parse_form_table_default_initial_tree_view(
-    wrapper: &str,
-    fields: &[&str],
-) -> Option<&'static str> {
-    if form_table_property_bag_value(fields, TableBagKey::TopLevelParent).is_some() {
-        return None;
-    }
-    (form_table_wrapper55_root_defaults(wrapper, fields)
-        && fields.get(22).map(|field| field.trim()) == Some("0"))
-    .then_some("ExpandTopLevel")
 }
 
 pub(super) fn parse_form_table_use_alternation_row_color_from_slots(
@@ -6248,7 +6240,7 @@ pub(super) fn parse_form_table_default_item_from_slots(
     wrapper: &str,
     fields: &[&str],
 ) -> Option<bool> {
-    (wrapper == "55" && fields.get(13).map(|field| field.trim()) == Some("1")).then_some(true)
+    (wrapper == "55" && fields.get(16).map(|field| field.trim()) == Some("1")).then_some(true)
 }
 
 pub(super) fn parse_form_table_default_row_picture_data_path(
@@ -8976,7 +8968,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(data_path)
         ));
     }
-    if item.tag != "Table" && item.default_item == Some(true) {
+    if item.tag != "Table" && item.tag != "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
     if item.visible == Some(false) {
@@ -9012,6 +9004,9 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.default_button == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultButton>true</DefaultButton>\r\n"));
+    }
+    if item.tag == "Button" && item.default_item == Some(true) {
+        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
     if item.tag != "Table" && item.read_only == Some(true) && !read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
@@ -9323,10 +9318,7 @@ pub(super) fn format_form_child_item_xml(
             if scroll_on_compress { "true" } else { "false" }
         ));
     }
-    if let Some(behavior) = item
-        .behavior
-        .filter(|behavior| should_emit_form_child_behavior(item, behavior))
-    {
+    if let Some(behavior) = item.behavior {
         xml.push_str(&format!(
             "{tab}\t<Behavior>{}</Behavior>\r\n",
             escape_xml_text(behavior)
@@ -9561,13 +9553,6 @@ pub(super) fn format_form_child_item_xml(
 
 fn should_emit_form_picture_size(picture_size: &str) -> bool {
     picture_size != "RealSize"
-}
-
-fn should_emit_form_child_behavior(item: &FormChildItem, behavior: &str) -> bool {
-    !(item.tag == "UsualGroup"
-        && behavior == "Usual"
-        && item.show_title == Some(false)
-        && matches!(item.representation, None | Some("WeakSeparation")))
 }
 
 pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
