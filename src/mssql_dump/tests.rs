@@ -5922,6 +5922,138 @@ fn extracts_table_standard_command_names_from_kind1_buttons() {
 }
 
 #[test]
+fn resolves_document_standard_commands_only_for_their_structural_owner_kind() {
+    let layout_fields = [
+        r#"{37,{101,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,6,"SheetRenamed"}"#,
+        r#"{37,{102,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,14,"SchemaRenamed"}"#,
+        r#"{37,{103,cccccccc-cccc-4ccc-cccc-cccccccccccc},0,0,0,17,"TextRenamed"}"#,
+        r#"{73,{104,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"RowsRenamed"}"#,
+    ];
+    let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
+    let owner_ids = ["101", "102", "103", "104"];
+    let cases = [
+        (
+            "101",
+            "SheetRenamed",
+            "1ba33890-92e9-42a3-95bd-a5c783f46d55",
+            "CopyToClipboard",
+        ),
+        (
+            "101",
+            "SheetRenamed",
+            "edf14e37-e755-4d1c-970c-48ed776e3a0e",
+            "PasteFromClipboard",
+        ),
+        (
+            "101",
+            "SheetRenamed",
+            "ff533ae0-46a9-4e1d-aa3a-6dffa27e076b",
+            "SearchEverywhere",
+        ),
+        (
+            "101",
+            "SheetRenamed",
+            "7eae9c22-db31-4f27-a56a-b4dd62d21a2c",
+            "ClearContent",
+        ),
+        (
+            "101",
+            "SheetRenamed",
+            "59e67a77-8141-42cf-b062-7cb92e210b6d",
+            "ClearAll",
+        ),
+        (
+            "101",
+            "SheetRenamed",
+            "ed6630f2-c296-43dd-b408-d370513fcebc",
+            "InsertComment",
+        ),
+        (
+            "101",
+            "SheetRenamed",
+            "be8800c3-8ccf-444a-bbf0-8f3078ff0ded",
+            "Properties",
+        ),
+        (
+            "102",
+            "SchemaRenamed",
+            "e2d6f793-b786-4640-a91b-8d77f73860f1",
+            "Print",
+        ),
+        (
+            "102",
+            "SchemaRenamed",
+            "1d13f9a3-402a-46cb-9c68-1709356840f2",
+            "Preview",
+        ),
+        (
+            "102",
+            "SchemaRenamed",
+            "01db2225-b62d-4112-a4b6-d39d627bf79f",
+            "PageSetup",
+        ),
+        (
+            "103",
+            "TextRenamed",
+            "b67f202a-dcf8-41f3-bda8-1ff9bed5f2ef",
+            "SelectAll",
+        ),
+    ];
+
+    for (owner_id, owner_name, uuid, suffix) in cases {
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{{owner_id},{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            Some(format!("Form.Item.{owner_name}.StandardCommand.{suffix}"))
+        );
+        for wrong_owner_id in owner_ids
+            .iter()
+            .copied()
+            .filter(|candidate| *candidate != owner_id)
+        {
+            assert_eq!(
+                parse_form_button_command_name(
+                    &format!("{{{wrong_owner_id},{uuid}}}"),
+                    &[],
+                    &BTreeMap::new(),
+                    &indexes.standard_command_owner_name_by_id,
+                ),
+                None,
+                "{uuid} resolved for owner {wrong_owner_id}"
+            );
+        }
+    }
+}
+
+#[test]
+fn preserves_table_command_fallback_for_spreadsheet_document_owners() {
+    let layout_fields = [
+        r#"{37,{101,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,6,"SheetRenamed"}"#,
+        r#"{73,{104,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"RowsRenamed"}"#,
+    ];
+    let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
+    let uuid = "88078230-1f6b-415f-99e4-ad2ff73810cf";
+
+    for (owner_id, owner_name) in [("101", "SheetRenamed"), ("104", "RowsRenamed")] {
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{{owner_id},{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            Some(format!(
+                "Form.Item.{owner_name}.StandardCommand.CopyToClipboard"
+            ))
+        );
+    }
+}
+
+#[test]
 fn extracts_form_standard_command_names_from_kind0_buttons() {
     let restore = parse_form_child_item(
             r#"{31,{108,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ТаблицаДокументовВосстановитьЗначения",{1,0},1,{0,239f0103-8de9-4fdf-b485-eb5531da7e51},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},"",-1,-1,1,0,""},1,{"Pattern"},"",2,0,1}"#,

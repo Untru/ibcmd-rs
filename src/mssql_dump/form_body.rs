@@ -3372,6 +3372,7 @@ pub(super) struct FormStandardCommandOwner {
 pub(super) enum FormStandardCommandOwnerKind {
     Table,
     SpreadsheetDocument,
+    GraphicalSchema,
     FormattedDocument,
 }
 
@@ -3468,6 +3469,19 @@ pub(super) fn collect_form_child_item_indexes_from_field(
             FormStandardCommandOwner {
                 name,
                 kind: FormStandardCommandOwnerKind::SpreadsheetDocument,
+            },
+        );
+    }
+    if let Some(wrapper) = wrapper
+        && form_graphical_schema_field_layout(wrapper, &fields)
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes.standard_command_owner_name_by_id.insert(
+            id.to_string(),
+            FormStandardCommandOwner {
+                name,
+                kind: FormStandardCommandOwnerKind::GraphicalSchema,
             },
         );
     }
@@ -3618,6 +3632,13 @@ pub(super) fn form_spreadsheet_document_field_layout(wrapper: &str, fields: &[&s
         && fields
             .get(5 + form_input_field_top_level_offset(fields))
             .is_some_and(|value| value.trim() == "6")
+}
+
+pub(super) fn form_graphical_schema_field_layout(wrapper: &str, fields: &[&str]) -> bool {
+    wrapper == "37"
+        && fields
+            .get(5 + form_input_field_top_level_offset(fields))
+            .is_some_and(|value| value.trim() == "14")
 }
 
 pub(super) fn form_formatted_document_field_layout(wrapper: &str, fields: &[&str]) -> bool {
@@ -8344,9 +8365,14 @@ pub(super) fn parse_form_button_command_name(
         FormStandardCommandOwnerKind::FormattedDocument => {
             form_formatted_document_standard_command_suffix(&uuid)
         }
-        FormStandardCommandOwnerKind::Table | FormStandardCommandOwnerKind::SpreadsheetDocument => {
-            form_table_standard_command_suffix(&uuid)
+        FormStandardCommandOwnerKind::GraphicalSchema => {
+            form_graphical_schema_standard_command_suffix(&uuid)
         }
+        FormStandardCommandOwnerKind::SpreadsheetDocument => {
+            form_spreadsheet_document_standard_command_suffix(&uuid)
+                .or_else(|| form_table_standard_command_suffix(&uuid))
+        }
+        FormStandardCommandOwnerKind::Table => form_table_standard_command_suffix(&uuid),
     }?;
     Some(format!(
         "Form.Item.{}.StandardCommand.{standard}",
@@ -8435,6 +8461,7 @@ pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static s
 
 pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "b67f202a-dcf8-41f3-bda8-1ff9bed5f2ef" => Some("SelectAll"),
         "39f6b9f1-7aa1-4a03-a01b-e127d51bc228" => Some("DecreaseIndent"),
         "4ca32834-6f9f-4dfb-89ce-6db36931c89b" => Some("Preview"),
         "56ae90b6-588f-406e-919c-cc5cc7f86297" => Some("AlignJustify"),
@@ -8446,6 +8473,30 @@ pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Opt
         "ab0ebc39-68ee-4034-b2f4-43eee55bd651" => Some("AlignCenter"),
         "d0a4d953-115b-4059-a6cb-6e67f903a4f3" => Some("IncreaseIndent"),
         "e428af27-c4f7-4577-b80e-95a79f94322d" => Some("AlignRight"),
+        _ => None,
+    }
+}
+
+pub(super) fn form_graphical_schema_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "e2d6f793-b786-4640-a91b-8d77f73860f1" => Some("Print"),
+        "1d13f9a3-402a-46cb-9c68-1709356840f2" => Some("Preview"),
+        "01db2225-b62d-4112-a4b6-d39d627bf79f" => Some("PageSetup"),
+        _ => None,
+    }
+}
+
+pub(super) fn form_spreadsheet_document_standard_command_suffix(
+    uuid: &str,
+) -> Option<&'static str> {
+    match uuid {
+        "1ba33890-92e9-42a3-95bd-a5c783f46d55" => Some("CopyToClipboard"),
+        "edf14e37-e755-4d1c-970c-48ed776e3a0e" => Some("PasteFromClipboard"),
+        "ff533ae0-46a9-4e1d-aa3a-6dffa27e076b" => Some("SearchEverywhere"),
+        "7eae9c22-db31-4f27-a56a-b4dd62d21a2c" => Some("ClearContent"),
+        "59e67a77-8141-42cf-b062-7cb92e210b6d" => Some("ClearAll"),
+        "ed6630f2-c296-43dd-b408-d370513fcebc" => Some("InsertComment"),
+        "be8800c3-8ccf-444a-bbf0-8f3078ff0ded" => Some("Properties"),
         _ => None,
     }
 }
