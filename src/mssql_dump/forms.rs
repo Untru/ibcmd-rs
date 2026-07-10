@@ -222,6 +222,7 @@ pub(super) fn metadata_kind_for_source_folder(folder: &str) -> Option<&'static s
         "BusinessProcesses" => Some("BusinessProcess"),
         "Tasks" => Some("Task"),
         "ExchangePlans" => Some("ExchangePlan"),
+        "SettingsStorages" => Some("SettingsStorage"),
         _ => None,
     }
 }

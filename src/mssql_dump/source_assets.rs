@@ -669,6 +669,7 @@ pub(super) fn form_body_asset_paths(
 
 const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
     ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
+    ("3", "Ext/Help.xml", SourceAssetKind::Help),
     (
         "4",
         "Ext/ParentConfigurations.bin",

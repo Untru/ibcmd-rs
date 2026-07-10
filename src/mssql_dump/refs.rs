@@ -43,6 +43,8 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
     let empty_template_refs = BTreeMap::new();
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
     let headers_by_uuid = metadata_headers_by_uuid(rows);
+    let recalculation_refs =
+        build_calculation_recalculation_reference_index(rows, &headers_by_uuid);
     for row in rows {
         if let Some(name) = parse_configuration_reference_text(&row.text) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
@@ -68,19 +70,6 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
                 );
             }
         }
-        if kind == "CalculationRegister" {
-            for uuid in calculation_register_recalculation_uuids_from_text(&row.text) {
-                if let Some(recalculation) = headers_by_uuid.get(&uuid) {
-                    index.insert(
-                        uuid,
-                        format!(
-                            "CalculationRegister.{}.Recalculation.{}",
-                            header.name, recalculation.name
-                        ),
-                    );
-                }
-            }
-        }
         for command in nested_command_headers_for_owner_from_text(kind, &row.text, &row.file_name) {
             index.insert(
                 command.uuid,
@@ -104,20 +93,127 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
             }
         }
         if kind == "WebService" {
-            for operation in
-                nested_web_service_operation_headers_from_text(&row.text, &row.file_name)
-            {
+            let operations =
+                nested_web_service_operation_headers_from_text(&row.text, &row.file_name);
+            for operation in &operations {
                 index.insert(
-                    operation.uuid,
+                    operation.uuid.clone(),
                     format!("WebService.{}.Operation.{}", header.name, operation.name),
                 );
             }
+            insert_web_service_parameter_refs(
+                &mut index,
+                &row.text,
+                &row.file_name,
+                &header.name,
+                &operations,
+            );
         }
         if kind == "HTTPService" {
             insert_http_service_child_role_refs(&mut index, &row.text, &header.uuid, &header.name);
         }
     }
+    index.extend(recalculation_refs.clone());
+    insert_recalculation_dimension_refs(&mut index, rows, &recalculation_refs);
     index
+}
+
+fn build_calculation_recalculation_reference_index(
+    rows: &[MetadataTextRow],
+    headers_by_uuid: &BTreeMap<String, MetadataHeader>,
+) -> BTreeMap<String, String> {
+    let mut refs = BTreeMap::new();
+    for row in rows {
+        let (Some("CalculationRegister"), Some(owner)) = (row.kind.as_deref(), row.header.as_ref())
+        else {
+            continue;
+        };
+        for uuid in calculation_register_recalculation_uuids_from_text(&row.text) {
+            let Some(recalculation) = headers_by_uuid.get(&uuid) else {
+                continue;
+            };
+            refs.insert(
+                uuid,
+                format!(
+                    "CalculationRegister.{}.Recalculation.{}",
+                    owner.name, recalculation.name
+                ),
+            );
+        }
+    }
+    refs
+}
+
+fn insert_web_service_parameter_refs(
+    index: &mut BTreeMap<String, String>,
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+    operations: &[MetadataHeader],
+) {
+    const PARAMETER_LIST_MARKER: &str = "{b78a00b2-2260-4ef5-a70c-17889cfee695,";
+
+    let operation_ids = operations
+        .iter()
+        .map(|operation| operation.uuid.as_str())
+        .collect::<BTreeSet<_>>();
+    let nested = nested_headers_with_offsets_from_text(text, owner_uuid, |_| true);
+    let operation_offsets = nested
+        .iter()
+        .filter(|(header, _)| operation_ids.contains(header.uuid.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut offset = 0usize;
+    while let Some(relative_start) = text[offset..].find(PARAMETER_LIST_MARKER) {
+        let start = offset + relative_start;
+        offset = start + PARAMETER_LIST_MARKER.len();
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        let Some((operation, _)) = operation_offsets
+            .iter()
+            .rev()
+            .find(|(_, operation_start)| *operation_start < start)
+        else {
+            continue;
+        };
+        let operation_ref = format!("WebService.{owner_name}.Operation.{}", operation.name);
+        for (parameter, parameter_start) in &nested {
+            if *parameter_start <= start
+                || *parameter_start >= end
+                || operation_ids.contains(parameter.uuid.as_str())
+            {
+                continue;
+            }
+            index.insert(
+                parameter.uuid.clone(),
+                format!("{operation_ref}.Parameter.{}", parameter.name),
+            );
+        }
+    }
+}
+
+fn insert_recalculation_dimension_refs(
+    index: &mut BTreeMap<String, String>,
+    rows: &[MetadataTextRow],
+    recalculation_refs: &BTreeMap<String, String>,
+) {
+    for row in rows {
+        let Some(owner_ref) = recalculation_refs.get(&row.file_name) else {
+            continue;
+        };
+        for (dimension, _marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |marker_start| {
+                is_offset_inside_recalculation_dimension_list(&row.text, marker_start)
+            })
+        {
+            index.insert(
+                dimension.uuid,
+                format!("{owner_ref}.Dimension.{}", dimension.name),
+            );
+        }
+    }
 }
 
 fn metadata_headers_by_uuid(rows: &[MetadataTextRow]) -> BTreeMap<String, MetadataHeader> {
@@ -675,10 +771,20 @@ pub(super) fn standalone_child_reference(
         ));
     }
     if metadata_kind_uses_register_resources(owner_kind)
-        && is_offset_inside_metadata_object_code(text, marker_start, 5)
         && is_offset_inside_register_resource_list(text, marker_start)
     {
         return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
+    }
+    if metadata_kind_uses_register_resources(owner_kind)
+        && is_offset_inside_register_dimension_list(text, marker_start)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "Sequence" && is_offset_inside_sequence_dimension_list(text, marker_start) {
+        return Some(format!("Sequence.{owner_name}.Dimension.{}", child.name));
     }
     if owner_kind == "CalculationRegister"
         && is_offset_inside_metadata_object_code(text, marker_start, 4)
@@ -767,15 +873,6 @@ pub(super) fn standalone_child_reference(
             child.name
         ));
     }
-    if metadata_kind_uses_register_resources(owner_kind)
-        && is_offset_inside_metadata_object_code(text, marker_start, 8)
-        && is_offset_inside_register_dimension_list(text, marker_start)
-    {
-        return Some(format!(
-            "{owner_kind}.{owner_name}.Dimension.{}",
-            child.name
-        ));
-    }
     if is_offset_inside_metadata_object_code(text, marker_start, 8) {
         if let Some(tabular_section) = preceding_metadata_header_for_code(text, marker_start, 11) {
             return Some(format!(
@@ -805,11 +902,9 @@ pub(super) fn tabular_section_attribute_reference(
     if !is_offset_inside_tabular_section_attribute_list(text, marker_start) {
         return None;
     }
-    let (tabular_section, tabular_end) =
+    let (tabular_section, _) =
         preceding_metadata_header_for_code_with_bounds(text, marker_start, 11)?;
-    if tabular_section.uuid == child.uuid
-        || contains_any_metadata_header_between(text, tabular_end, marker_start)
-    {
+    if tabular_section.uuid == child.uuid {
         return None;
     }
     Some(format!(
@@ -829,7 +924,10 @@ pub(super) fn metadata_kind_uses_register_resources(kind: &str) -> bool {
 }
 
 pub(super) fn metadata_kind_uses_code27_attributes(kind: &str) -> bool {
-    matches!(kind, "Report" | "Task" | "ChartOfCharacteristicTypes")
+    matches!(
+        kind,
+        "ChartOfAccounts" | "ChartOfCharacteristicTypes" | "ExchangePlan" | "Report" | "Task"
+    )
 }
 
 pub(super) fn metadata_kind_uses_code4_attributes(kind: &str) -> bool {
@@ -843,6 +941,7 @@ pub(super) fn is_offset_inside_register_resource_list(text: &str, offset: usize)
         &[
             "{b64d9a41-1642-11d6-a3c7-0050bae0a776,",
             "{63405499-7491-4ce3-ac72-43433cbe4112,",
+            "{702b33ad-843e-41aa-8064-112cd38cc92c,",
         ],
     )
 }
@@ -854,6 +953,7 @@ pub(super) fn is_offset_inside_register_dimension_list(text: &str, offset: usize
         &[
             "{b64d9a43-1642-11d6-a3c7-0050bae0a776,",
             "{35b63b9d-0adf-4625-a047-10ae874c19a3,",
+            "{b12fc850-8210-43c8-ae05-89567e698fbb,",
         ],
     )
 }
@@ -874,6 +974,14 @@ fn is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
     offset: usize,
 ) -> bool {
     is_offset_inside_any_list_marker(text, offset, &["{c70ca527-5042-4cad-a315-dcb4007e32a3,"])
+}
+
+fn is_offset_inside_sequence_dimension_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{437488c0-35e2-11d6-a3c7-0050bae0a776,"])
+}
+
+fn is_offset_inside_recalculation_dimension_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{3c456b74-4ea5-4b22-a957-e9fad9133b54,"])
 }
 
 fn is_offset_inside_any_list_marker(text: &str, offset: usize, markers: &[&str]) -> bool {
@@ -933,13 +1041,15 @@ pub(super) fn calculation_register_recalculation_uuids_from_text(text: &str) -> 
 }
 
 pub(super) fn is_offset_inside_tabular_section_attribute_list(text: &str, offset: usize) -> bool {
-    const TABULAR_SECTION_ATTRIBUTE_LIST_MARKER: &str = "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,";
-    let Some(start) = text[..offset].rfind(TABULAR_SECTION_ATTRIBUTE_LIST_MARKER) else {
-        return false;
-    };
-    scan_1c_braced_value(text, start)
-        .map(|end| offset < end)
-        .unwrap_or(false)
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &[
+            "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,",
+            "{888744e1-b616-11d4-9436-004095e12fc7,",
+            "{c339c860-29e2-11d6-a3c7-0050bae0a776,",
+        ],
+    )
 }
 
 pub(super) fn is_offset_inside_data_processor_legacy_attribute_list(

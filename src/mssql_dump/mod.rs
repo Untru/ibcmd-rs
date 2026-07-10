@@ -150,6 +150,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             &args.database,
             table,
             &selected_file_names,
+            !args.include_config_save,
             &args.output_dir,
             write_binary_rows,
             args.inflate,
@@ -610,6 +611,7 @@ fn dump_table_rows_streamed(
     database: &str,
     table: &str,
     selected_file_names: &BTreeSet<String>,
+    allow_config_dump_info: bool,
     output_dir: &Path,
     write_binary_rows: bool,
     inflate: bool,
@@ -617,7 +619,8 @@ fn dump_table_rows_streamed(
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<DumpedTable> {
-    let generate_config_dump_info = table == "Config"
+    let generate_config_dump_info = allow_config_dump_info
+        && table == "Config"
         && selected_file_names.is_empty()
         && !write_binary_rows
         && extract_module_text
@@ -1388,6 +1391,23 @@ fn dump_table_rows_streamed(
 
     if generate_config_dump_info {
         let started = Instant::now();
+        let mut emitted_source_asset_paths = BTreeMap::<String, PathBuf>::new();
+        for manifest in &manifests {
+            let Some(path) = manifest.source_asset_path.as_ref().map(PathBuf::from) else {
+                continue;
+            };
+            if let Some(previous) =
+                emitted_source_asset_paths.insert(manifest.file_name.clone(), path.clone())
+                && previous != path
+            {
+                bail!(
+                    "Config source asset {} was emitted to both {} and {}",
+                    manifest.file_name,
+                    previous.display(),
+                    path.display()
+                );
+            }
+        }
         write_config_dump_info(
             output_dir,
             source_version,
@@ -1403,6 +1423,7 @@ fn dump_table_rows_streamed(
                 subsystem_refs: &subsystem_refs,
                 module_text_paths: &module_text_paths,
                 source_assets: &source_assets,
+                emitted_source_asset_paths: &emitted_source_asset_paths,
                 configuration_module_groups: &configuration_module_groups,
             },
         )?;
@@ -3096,30 +3117,6 @@ fn preceding_metadata_header_for_code_with_bounds(
 
 fn contains_metadata_header_uuid_between(text: &str, start: usize, end: usize, uuid: &str) -> bool {
     start < end && text[start..end].contains(&format!("{{1,0,{uuid}}}"))
-}
-
-fn contains_any_metadata_header_between(text: &str, start: usize, end: usize) -> bool {
-    if start >= end {
-        return false;
-    }
-    let mut offset = start;
-    let marker = "{1,0,";
-    while offset < end {
-        let Some(relative) = text[offset..end].find(marker) else {
-            return false;
-        };
-        let marker_start = offset + relative;
-        let uuid_start = marker_start + marker.len();
-        let uuid_end = uuid_start + 36;
-        offset = uuid_start;
-        let Some(uuid) = text.get(uuid_start..uuid_end) else {
-            continue;
-        };
-        if is_uuid_text(uuid) && is_metadata_header_marker(text, uuid_end) {
-            return true;
-        }
-    }
-    false
 }
 
 fn contains_metadata_header_name_between(text: &str, start: usize, end: usize, name: &str) -> bool {
@@ -8951,6 +8948,7 @@ struct HttpServiceChildCandidate {
     end: usize,
     header: MetadataHeader,
     strings: Vec<String>,
+    is_method: bool,
 }
 
 fn parse_http_service_url_templates_from_text(
@@ -8961,13 +8959,17 @@ fn parse_http_service_url_templates_from_text(
     let method_candidates = candidates
         .iter()
         .filter_map(|candidate| {
+            if !candidate.is_method {
+                return None;
+            }
             let http_method = candidate.strings.first()?;
             let handler = candidate.strings.get(1)?;
-            is_http_service_method_name(http_method).then(|| HttpServiceChildCandidate {
+            Some(HttpServiceChildCandidate {
                 start: candidate.start,
                 end: candidate.end,
                 header: candidate.header.clone(),
                 strings: vec![http_method.clone(), handler.clone()],
+                is_method: true,
             })
         })
         .collect::<Vec<_>>();
@@ -8977,7 +8979,7 @@ fn parse_http_service_url_templates_from_text(
         .into_iter()
         .filter_map(|candidate| {
             let template = candidate.strings.first()?.clone();
-            if is_http_service_method_name(&template)
+            if candidate.is_method
                 || !is_http_service_url_template_text(&template)
                 || !seen.insert(candidate.header.uuid.clone())
             {
@@ -9034,22 +9036,46 @@ fn http_service_child_candidates_from_text(
         let Some(header_index) = metadata_header_field_index(&fields, &header.uuid) else {
             continue;
         };
-        let strings = match header_index {
-            2 => fields
-                .get(1)
-                .and_then(|field| parse_1c_quoted_string(field.trim()))
-                .map(|template| vec![template])
-                .unwrap_or_default(),
-            3 if is_http_service_method_name(&header.name) => fields
-                .get(1)
-                .and_then(|field| parse_1c_quoted_string(field.trim()))
-                .map(|handler| vec![header.name.clone(), handler])
-                .unwrap_or_default(),
-            _ => fields
-                .iter()
-                .skip(header_index + 1)
-                .filter_map(|field| parse_1c_quoted_string(field.trim()))
-                .collect::<Vec<_>>(),
+        let (strings, is_method) = match header_index {
+            2 => (
+                fields
+                    .get(1)
+                    .and_then(|field| parse_1c_quoted_string(field.trim()))
+                    .map(|template| vec![template])
+                    .unwrap_or_default(),
+                false,
+            ),
+            3 if fields.first().map(|field| field.trim()) == Some("0") => {
+                let method = fields
+                    .get(2)
+                    .and_then(|field| http_service_method_from_code(field.trim()))
+                    .or_else(|| canonical_http_service_method_name(&header.name));
+                let handler = fields
+                    .get(1)
+                    .and_then(|field| parse_1c_quoted_string(field.trim()));
+                match (method, handler) {
+                    (Some(method), Some(handler)) => (vec![method.to_string(), handler], true),
+                    _ => (Vec::new(), false),
+                }
+            }
+            _ => {
+                let strings = fields
+                    .iter()
+                    .skip(header_index + 1)
+                    .filter_map(|field| parse_1c_quoted_string(field.trim()))
+                    .collect::<Vec<_>>();
+                match (
+                    strings
+                        .first()
+                        .and_then(|method| canonical_http_service_method_name(method)),
+                    strings.get(1),
+                ) {
+                    (Some(method), Some(handler)) => {
+                        (vec![method.to_string(), handler.clone()], true)
+                    }
+                    _ => (strings, false),
+                }
+            }
         };
         if strings.is_empty() {
             continue;
@@ -9059,6 +9085,7 @@ fn http_service_child_candidates_from_text(
             end,
             header,
             strings,
+            is_method,
         });
     }
     candidates
@@ -9095,15 +9122,31 @@ fn innermost_metadata_object_fields_around_header<'a>(
     best
 }
 
-fn is_http_service_method_name(value: &str) -> bool {
-    matches!(
-        value,
-        "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS"
-    )
-}
-
 fn is_http_service_url_template_text(value: &str) -> bool {
     value.starts_with('/') || value.contains('{') || value == "*"
+}
+
+fn http_service_method_from_code(value: &str) -> Option<&'static str> {
+    match value {
+        "2" => Some("DELETE"),
+        "3" => Some("GET"),
+        "11" => Some("POST"),
+        "14" => Some("PUT"),
+        _ => None,
+    }
+}
+
+fn canonical_http_service_method_name(value: &str) -> Option<&'static str> {
+    match value {
+        "DELETE" => Some("DELETE"),
+        "GET" => Some("GET"),
+        "HEAD" => Some("HEAD"),
+        "OPTIONS" => Some("OPTIONS"),
+        "PATCH" => Some("PATCH"),
+        "POST" => Some("POST"),
+        "PUT" => Some("PUT"),
+        _ => None,
+    }
 }
 
 fn parse_integration_service_channels_from_text(

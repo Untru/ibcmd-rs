@@ -30,6 +30,7 @@ pub(super) struct ConfigDumpInfoInventory<'a> {
     pub(super) subsystem_refs: &'a BTreeMap<String, SubsystemSourceReference>,
     pub(super) module_text_paths: &'a BTreeMap<String, PathBuf>,
     pub(super) source_assets: &'a BTreeMap<String, SourceAsset>,
+    pub(super) emitted_source_asset_paths: &'a BTreeMap<String, PathBuf>,
     pub(super) configuration_module_groups: &'a BTreeSet<String>,
 }
 
@@ -84,17 +85,26 @@ pub(super) fn write_config_dump_info(
         inventory.object_refs,
         &canonical_refs,
         &version_ids,
+        inventory.configuration_module_groups,
     )?;
 
     let mut metadata = Vec::with_capacity(versions.len());
     let mut names = BTreeMap::<String, String>::new();
+    let mut unresolved_top_routes = Vec::<String>::new();
     for entry in versions {
-        let name = config_dump_top_name(
+        let name = match config_dump_top_name(
             &entry.id,
             &canonical_refs,
             inventory.module_text_paths,
             inventory.source_assets,
-        )?;
+            inventory.emitted_source_asset_paths,
+        ) {
+            Ok(name) => name,
+            Err(error) => {
+                unresolved_top_routes.push(format!("{}: {error}", entry.id));
+                continue;
+            }
+        };
         if let Some(previous_id) = names.insert(name.clone(), entry.id.clone()) {
             bail!(
                 "ConfigDumpInfo metadata name {name} is produced by both {previous_id} and {}",
@@ -113,6 +123,18 @@ pub(super) fn write_config_dump_info(
             config_version: config_version(entry.version),
             children,
         });
+    }
+    if !unresolved_top_routes.is_empty() {
+        let unresolved = unresolved_top_routes
+            .iter()
+            .take(64)
+            .cloned()
+            .collect::<Vec<_>>();
+        bail!(
+            "ConfigDumpInfo has {} entries without canonical routes [{}]",
+            unresolved_top_routes.len(),
+            unresolved.join(", ")
+        );
     }
     if !children_by_owner.is_empty() {
         let owners = children_by_owner
@@ -259,6 +281,7 @@ fn config_dump_top_name(
     canonical_refs: &BTreeMap<String, String>,
     module_text_paths: &BTreeMap<String, PathBuf>,
     source_assets: &BTreeMap<String, SourceAsset>,
+    emitted_source_asset_paths: &BTreeMap<String, PathBuf>,
 ) -> Result<String> {
     if let Some(reference) = canonical_refs.get(id) {
         return Ok(reference.clone());
@@ -269,9 +292,9 @@ fn config_dump_top_name(
     let base = canonical_refs
         .get(base_id)
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has unknown metadata owner {base_id}"))?;
-    let role_path = source_assets
+    let role_path = emitted_source_asset_paths
         .get(id)
-        .map(|asset| &asset.primary_path)
+        .or_else(|| source_assets.get(id).map(|asset| &asset.primary_path))
         .or_else(|| module_text_paths.get(id))
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no typed row-role route"))?;
     let role = role_path
@@ -287,6 +310,7 @@ fn build_config_dump_children(
     object_refs: &BTreeMap<String, String>,
     canonical_refs: &BTreeMap<String, String>,
     version_ids: &BTreeSet<&str>,
+    configuration_module_groups: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
     let indexed_child_ids = object_refs
         .keys()
@@ -295,6 +319,7 @@ fn build_config_dump_children(
         .collect::<BTreeSet<_>>();
     let mut discovered_child_ids = BTreeSet::<String>::new();
     let mut children_by_owner = BTreeMap::<String, BTreeMap<String, String>>::new();
+    let mut unresolved_child_roles = BTreeSet::<String>::new();
 
     for row in metadata_texts {
         let Some(owner_name) = canonical_refs.get(&row.file_name) else {
@@ -309,17 +334,22 @@ fn build_config_dump_children(
             if version_ids.contains(header.uuid.as_str()) {
                 continue;
             }
+            if configuration_module_groups.contains(&header.uuid) {
+                continue;
+            }
             let child_name = if let Some(child_name) = object_refs.get(&header.uuid) {
                 child_name.clone()
             } else if row.kind.as_deref() == Some("DocumentJournal") {
                 format!("{owner_name}.Column.{}", header.name)
             } else {
-                bail!(
-                    "ConfigDumpInfo child {} ({}) under {} has no canonical metadata role",
+                unresolved_child_roles.insert(format!(
+                    "{} {}: {} ({})",
+                    row.kind.as_deref().unwrap_or("<unknown>"),
+                    row.file_name,
                     header.uuid,
-                    header.name,
-                    row.file_name
-                );
+                    header.name
+                ));
+                continue;
             };
             if !child_name
                 .strip_prefix(owner_name)
@@ -342,6 +372,19 @@ fn build_config_dump_children(
                 .or_default()
                 .insert(header.uuid, child_name);
         }
+    }
+
+    if !unresolved_child_roles.is_empty() {
+        let unresolved = unresolved_child_roles
+            .iter()
+            .take(64)
+            .cloned()
+            .collect::<Vec<_>>();
+        bail!(
+            "ConfigDumpInfo has {} children without canonical metadata roles [{}]",
+            unresolved_child_roles.len(),
+            unresolved.join(", ")
+        );
     }
 
     let discovered = discovered_child_ids

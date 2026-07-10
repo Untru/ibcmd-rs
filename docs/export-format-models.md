@@ -669,7 +669,8 @@ the full diff moved to `1616 files, +31553/-221996`.
 
 ## ConfigDumpInfo aggregate
 
-Status: corpus model confirmed; implementation remains open.
+Status: implemented and confirmed by raw corpus, independent-config checks, and
+byte-exact full export.
 
 `ConfigDumpInfo.xml` is not a source asset row or a filesystem-only manifest.
 Native synthesizes it by joining the complete metadata inventory with the
@@ -690,3 +691,36 @@ nested entries sort ordinally by id. Generation is valid only for a complete
 Config source-layout export after all batches succeed. Selected, ConfigSave,
 and row-local helpers must continue not to emit this global aggregate; unknown,
 duplicate, or unmatched inventory entries must fail rather than be skipped.
+
+The complete nested-role matrix contains 5,878 entries. The structural
+classifiers resolve 5,851 directly and the established `DocumentJournal.Column`
+fallback resolves the remaining 27; there are zero missing or incorrectly
+typed roles. Covered families include WebService operation parameters,
+HTTPService URL-template methods, register and recalculation dimensions,
+Sequence dimensions, root attributes, and tabular-section attributes. List
+UUIDs used by these classifiers are platform serialization discriminators, not
+metadata object UUIDs: none matches any of the 15,713 native aggregate IDs.
+The added production rules contain no application object names or local paths.
+
+Runtime-emitted source assets participate in aggregate routing through their
+actual manifest paths. This is required for dynamic assets such as role rights;
+duplicate file-name routes with different paths are rejected. Configuration
+source suffix `3` is the typed Help asset route and emits both `Ext/Help.xml`
+and its localized HTML payload.
+
+When `--include-config-save` is enabled, the streamed Config pass is explicitly
+not allowed to create `ConfigDumpInfo.xml`: ConfigSave subsequently replaces
+the exported assets, so an aggregate derived from the earlier Config inventory
+would be inconsistent.
+
+Accepted BSP gate:
+
+- full diff improved from `1610 files, +31491/-221435` to
+  `1603 files, +31486/-204757`;
+- native and generated `ConfigDumpInfo.xml` are both 3,110,746 bytes and have
+  SHA-256
+  `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`;
+- both contain 9,835 top entries and 5,878 nested entries;
+- configuration `Ext/Help.xml` and `Ext/Help/ru.html` are byte-exact;
+- HTTPService files have zero content diff, while Form and DCS guard metrics
+  remain unchanged.
