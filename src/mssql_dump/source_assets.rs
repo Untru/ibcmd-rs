@@ -1285,14 +1285,18 @@ pub(super) fn write_source_asset(
             )?;
         }
         SourceAssetKind::CommandInterface => {
-            let entries =
-                parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
-                    .with_context(|| {
-                        format!(
-                            "failed to extract command interface from source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?;
+            let entries = parse_command_interface_blob_with_subsystem_refs(
+                bytes,
+                context.command_refs,
+                context.metadata_refs,
+                context.subsystem_refs,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract command interface from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
