@@ -9925,6 +9925,35 @@ fn omits_unresolved_and_ordinary_usual_group_title_style_slots() {
 }
 
 #[test]
+fn preserves_unstyled_usual_group_width_before_title_order() {
+    let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
+    let mut fields = split_1c_braced_fields(base, 0)
+        .unwrap()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    fields[12] = "43".to_string();
+    let field = format!("{{{}}}", fields.join(","));
+    let item = parse_form_child_item(
+        &field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let xml = format_form_child_items_xml(&[item], 1);
+
+    let width_at = xml.find("<Width>43</Width>").unwrap();
+    let title_at = xml.find("<Title>").unwrap();
+    assert!(width_at < title_at);
+    assert!(!xml.contains("<TitleTextColor>"));
+    assert!(!xml.contains("<TitleFont"));
+}
+
+#[test]
 fn omits_property_bag_usual_group_show_title_false_for_title_variant() {
     let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{8,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
 

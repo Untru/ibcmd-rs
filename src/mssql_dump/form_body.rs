@@ -9534,6 +9534,8 @@ pub(super) fn format_form_child_item_xml(
             | "ColumnGroup"
     );
     let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
+    let usual_group_has_title_style = item.tag == "UsualGroup"
+        && (item.title_text_color.is_some() || item.title_font_xml.is_some());
     let mut direct_context_menu_xml = String::new();
     let mut direct_regular_children = Vec::new();
     if is_form_field_direct_service_parent(item.tag) {
@@ -9768,7 +9770,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_horizontal_align)
         ));
     }
-    if item.tag == "UsualGroup" {
+    if usual_group_has_title_style {
         xml.push_str(&format_form_localized_section(
             "Title",
             &item.title,
@@ -9990,6 +9992,13 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if usual_group_title_first {
+        if item.tag == "UsualGroup" && !usual_group_has_title_style {
+            xml.push_str(&format_form_localized_section(
+                "Title",
+                &item.title,
+                indent + 1,
+            ));
+        }
         if item.tag == "ButtonGroup" {
             xml.push_str(&format_form_localized_section(
                 "Title",
