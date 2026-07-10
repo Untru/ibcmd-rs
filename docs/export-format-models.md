@@ -664,6 +664,32 @@ Confirmed by export:
 - Popup global source uses its own discriminator-7 typed record and item-specific
   XML order; it does not reuse the CommandBar parser.
 
+Document-field admission is also structural. Wrapper `37` accepts field
+discriminators `6`, `8`, `14`, and `15` as `SpreadSheetDocumentField`,
+`CalendarField`, `GraphicalSchemaField`, and `HTMLDocumentField` respectively;
+wrapper `48` is not admitted for these four types. The resulting population is
+exact over the current native tree: 45, 4, 1, and 24 fields.
+
+Calendar typed options use discriminator `6`. Defaults are omitted: Width 16,
+Height 9, ShowMonthsPanel false, ShowCurrentDate true, WidthInMonths 1, and
+HeightInMonths 1. Calendar field slot 10 is ToolTip, not InputHint; field 50
+value 7 is `ToolTipRepresentation=ShowBottom`. An extended-tooltip wrapper 12
+of length 34 uses slot 25 for `AutoMaxWidth`, where false is emitted and true
+is the default. HTML typed height 10 is also a default and is omitted. HTML
+option event `Click` maps structurally to `OnClick`.
+
+Two UUID-valued Calendar option events were observed only in the BSP corpus.
+The independent `buh` slice reproduced the global-command control marker but
+contained no Calendar records, so those UUID meanings were not promoted.
+Calendar typed events remain deliberately absent until portable evidence is
+available.
+
+The accepted gate changed only 63 Form.xml files. Full diff improved from
+`1564 files, +31308/-192861` to `1560 files, +31287/-190997`;
+`CommandName` improved from `+0/-23` to `+0/-11`. Every one of the 74 generated
+field nodes is an order-preserving recursive subset of native XML, and no file
+had a positive insertion delta.
+
 Supported by tests:
 
 - Focused tests cover existing standard-command and table-standard-command
