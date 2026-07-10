@@ -4575,7 +4575,7 @@ fn extracts_form_child_items_from_layout_pairs() {
     );
 }
 
-fn document_field_options_for_test(discriminator: &str) -> String {
+fn document_field_option_fields_for_test(discriminator: &str) -> Vec<String> {
     let (len, options_kind) = match discriminator {
         "6" => (32, "13"),
         "8" => (24, "6"),
@@ -4588,14 +4588,24 @@ fn document_field_options_for_test(discriminator: &str) -> String {
     options[1] = "9".to_string();
     options[2] = "8".to_string();
     if discriminator == "8" {
-        options[15] = "1".to_string();
+        options[6] = "1".to_string();
+        options[15] = "0".to_string();
         options[16] = "6".to_string();
         options[17] = "2".to_string();
     }
+    options
+}
+
+fn document_field_options_for_test(discriminator: &str) -> String {
+    let options = document_field_option_fields_for_test(discriminator);
     format!("{{{}}}", options.join(","))
 }
 
-fn document_field_record_for_test(discriminator: &str, title: &str) -> String {
+fn document_field_record_with_options_for_test(
+    discriminator: &str,
+    title: &str,
+    options: String,
+) -> String {
     let mut fields = vec!["0".to_string(); 53];
     fields[0] = "37".to_string();
     fields[1] = "{101,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
@@ -4608,8 +4618,16 @@ fn document_field_record_for_test(discriminator: &str, title: &str) -> String {
         .then_some("1")
         .unwrap_or("0")
         .to_string();
-    fields[39] = document_field_options_for_test(discriminator);
+    fields[39] = options;
     format!("{{{}}}", fields.join(","))
+}
+
+fn document_field_record_for_test(discriminator: &str, title: &str) -> String {
+    document_field_record_with_options_for_test(
+        discriminator,
+        title,
+        document_field_options_for_test(discriminator),
+    )
 }
 
 #[test]
@@ -4668,7 +4686,8 @@ fn parses_document_field_properties_from_common_and_typed_slots() {
         if discriminator == "8" {
             assert!(xml.contains("<Width>9</Width>"));
             assert!(xml.contains("<Height>8</Height>"));
-            assert!(xml.contains("<ShowCurrentDate>true</ShowCurrentDate>"));
+            assert!(xml.contains("<ShowCurrentDate>false</ShowCurrentDate>"));
+            assert!(xml.contains("<ShowMonthsPanel>true</ShowMonthsPanel>"));
             assert!(xml.contains("<WidthInMonths>6</WidthInMonths>"));
             assert!(xml.contains("<HeightInMonths>2</HeightInMonths>"));
         }
@@ -4676,6 +4695,130 @@ fn parses_document_field_properties_from_common_and_typed_slots() {
             assert!(xml.find("<ReadOnly>true</ReadOnly>").unwrap() < xml.find("<Title>").unwrap());
         }
     }
+}
+
+#[test]
+fn suppresses_document_field_defaults_and_restores_typed_events() {
+    let attribute_names = BTreeMap::from([("5".to_string(), "Payload".to_string())]);
+
+    let mut calendar_options = document_field_option_fields_for_test("8");
+    calendar_options[1] = "16".to_string();
+    calendar_options[2] = "9".to_string();
+    calendar_options[6] = "1".to_string();
+    calendar_options[14] = "{0,1,0}".to_string();
+    calendar_options[15] = "1".to_string();
+    calendar_options[16] = "1".to_string();
+    calendar_options[17] = "1".to_string();
+    let calendar = parse_form_child_item_with_attrs(
+        &document_field_record_with_options_for_test(
+            "8",
+            "{1,0}",
+            format!("{{{}}}", calendar_options.join(",")),
+        ),
+        None,
+        None,
+        &attribute_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let calendar_xml = format_form_child_items_xml(&[calendar], 1);
+    assert!(calendar_xml.contains("<ShowMonthsPanel>true</ShowMonthsPanel>"));
+    for default_property in [
+        "<Width>",
+        "<Height>",
+        "<ShowCurrentDate>",
+        "<WidthInMonths>",
+        "<HeightInMonths>",
+    ] {
+        assert!(!calendar_xml.contains(default_property));
+    }
+
+    let mut html_options = document_field_option_fields_for_test("15");
+    html_options[2] = "10".to_string();
+    html_options[5] = "{1,da8dfb86-c5d1-4e35-a8a4-01b167a60ad3,\"DocumentClicked\",0}".to_string();
+    let html = parse_form_child_item_with_attrs(
+        &document_field_record_with_options_for_test(
+            "15",
+            "{1,0}",
+            format!("{{{}}}", html_options.join(",")),
+        ),
+        None,
+        None,
+        &attribute_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let html_xml = format_form_child_items_xml(&[html], 1);
+    assert!(!html_xml.contains("<Height>10</Height>"));
+    assert!(html_xml.contains(r#"<Event name="OnClick">DocumentClicked</Event>"#));
+}
+
+#[test]
+fn parses_calendar_tooltip_extended_tooltip_and_option_events() {
+    let attribute_names = BTreeMap::from([("5".to_string(), "Payload".to_string())]);
+    let mut options = document_field_option_fields_for_test("8");
+    options[14] = concat!(
+        "{2,1490ede6-6f33-4c6d-b971-53b2541331ea,\"PeriodOutput\",",
+        "2feb1ee9-b750-4352-bb4c-67ba1c608dc6,\"DateSelected\",0}"
+    )
+    .to_string();
+    let record = document_field_record_with_options_for_test(
+        "8",
+        "{1,0}",
+        format!("{{{}}}", options.join(",")),
+    );
+    let parsed_fields = split_1c_braced_fields(&record, 0).unwrap();
+    let mut fields = parsed_fields
+        .iter()
+        .map(|field| (*field).to_string())
+        .collect::<Vec<_>>();
+    fields[10] = r#"{1,1,{"en","Calendar tip"}}"#.to_string();
+    fields[50] = "7".to_string();
+    let mut extended_tooltip = vec!["0".to_string(); 34];
+    extended_tooltip[0] = "12".to_string();
+    extended_tooltip[1] = "{102,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+    extended_tooltip[5] = "0".to_string();
+    extended_tooltip[6] = "\"DocumentFieldExtendedTooltip\"".to_string();
+    extended_tooltip[25] = "0".to_string();
+    fields[52] = format!("{{{}}}", extended_tooltip.join(","));
+
+    let item = parse_form_child_item_with_attrs(
+        &format!("{{{}}}", fields.join(",")),
+        None,
+        None,
+        &attribute_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let xml = format_form_child_items_xml(&[item], 1);
+
+    assert!(xml.contains("Calendar tip"));
+    assert_eq!(xml.matches("<ToolTip>").count(), 1);
+    assert!(xml.contains("<ToolTipRepresentation>ShowBottom</ToolTipRepresentation>"));
+    assert!(!xml.contains("<InputHint>"));
+    assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    let period_output = xml
+        .find(r#"<Event name="OnPeriodOutput">PeriodOutput</Event>"#)
+        .unwrap();
+    let selection = xml
+        .find(r#"<Event name="Selection">DateSelected</Event>"#)
+        .unwrap();
+    assert!(period_output < selection);
 }
 
 #[test]
@@ -9154,6 +9297,7 @@ fn formats_table_search_additions_as_direct_sections() {
         width: None,
         height: None,
         show_current_date: None,
+        show_months_panel: None,
         width_in_months: None,
         height_in_months: None,
         auto_max_width: None,
@@ -9269,6 +9413,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 width: None,
                 height: None,
                 show_current_date: None,
+                show_months_panel: None,
                 width_in_months: None,
                 height_in_months: None,
                 auto_max_width: None,
@@ -9385,6 +9530,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 width: None,
                 height: None,
                 show_current_date: None,
+                show_months_panel: None,
                 width_in_months: None,
                 height_in_months: None,
                 auto_max_width: None,

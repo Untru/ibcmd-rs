@@ -440,6 +440,7 @@ pub(super) struct FormChildItem {
     pub(super) width: Option<String>,
     pub(super) height: Option<String>,
     pub(super) show_current_date: Option<bool>,
+    pub(super) show_months_panel: Option<bool>,
     pub(super) width_in_months: Option<String>,
     pub(super) height_in_months: Option<String>,
     pub(super) auto_max_width: Option<bool>,
@@ -4030,7 +4031,14 @@ pub(super) fn parse_form_child_item_with_context(
     let title = parse_form_child_item_title(tag, wrapper, &fields);
     let input_hint = if tag == "InputField" {
         parse_form_input_field_input_hint(input_field_extended_options.as_deref())
-    } else if tag == "FormattedDocumentField" {
+    } else if matches!(
+        tag,
+        "FormattedDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "HTMLDocumentField"
+    ) {
         Vec::new()
     } else {
         parse_form_child_item_input_hint(wrapper, &fields)
@@ -4497,6 +4505,11 @@ pub(super) fn parse_form_child_item_with_context(
                     == Some(true))
         {
             Some("Button")
+        } else if tag == "CalendarField"
+            && !tooltip.is_empty()
+            && fields.get(50).map(|field| field.trim()) == Some("7")
+        {
+            Some("ShowBottom")
         } else {
             None
         },
@@ -4628,7 +4641,13 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        width: if matches!(tag, "CalendarField" | "GraphicalSchemaField") {
+        width: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(1))
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value != "16" && value.parse::<u32>().is_ok())
+        } else if tag == "GraphicalSchemaField" {
             document_field_options
                 .as_deref()
                 .and_then(|options| options.get(1))
@@ -4660,15 +4679,23 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        height: if matches!(
-            tag,
-            "CalendarField" | "GraphicalSchemaField" | "HTMLDocumentField"
-        ) {
+        height: if tag == "CalendarField" {
             document_field_options
                 .as_deref()
                 .and_then(|options| options.get(2))
                 .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+                .filter(|value| value != "0" && value != "9" && value.parse::<u32>().is_ok())
+        } else if matches!(tag, "GraphicalSchemaField" | "HTMLDocumentField") {
+            let default_height = (tag == "HTMLDocumentField").then_some("10");
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(2))
+                .map(|field| field.trim().to_string())
+                .filter(|value| {
+                    value != "0"
+                        && default_height != Some(value.as_str())
+                        && value.parse::<u32>().is_ok()
+                })
         } else if tag == "TextDocumentField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(23)
@@ -4703,6 +4730,16 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_deref()
                 .and_then(|options| options.get(15))
                 .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| !*value)
+        } else {
+            None
+        },
+        show_months_panel: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(6))
+                .and_then(|field| parse_form_child_item_show_title(field))
+                .filter(|value| *value)
         } else {
             None
         },
@@ -4711,7 +4748,7 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_deref()
                 .and_then(|options| options.get(16))
                 .map(|field| field.trim().to_string())
-                .filter(|value| value.parse::<u32>().is_ok())
+                .filter(|value| value != "1" && value.parse::<u32>().is_ok())
         } else {
             None
         },
@@ -4720,7 +4757,7 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_deref()
                 .and_then(|options| options.get(17))
                 .map(|field| field.trim().to_string())
-                .filter(|value| value.parse::<u32>().is_ok())
+                .filter(|value| value != "1" && value.parse::<u32>().is_ok())
         } else {
             None
         },
@@ -4987,7 +5024,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields),
         extended_tooltip_auto_max_width: parse_form_child_item_extended_tooltip_auto_max_width(
-            &fields,
+            tag, &fields,
         ),
         events: {
             let mut events = parse_form_child_item_event_fields(&fields);
@@ -4999,6 +5036,10 @@ pub(super) fn parse_form_child_item_with_context(
                     );
                 }
             }
+            append_unique_form_body_events(
+                &mut events,
+                parse_form_document_field_option_events(tag, document_field_options.as_deref()),
+            );
             if matches!(tag, "LabelDecoration" | "PictureDecoration")
                 && let Some(options) = fields
                     .get(18)
@@ -7576,6 +7617,7 @@ pub(super) fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<
 }
 
 pub(super) fn parse_form_child_item_extended_tooltip_auto_max_width(
+    tag: &str,
     fields: &[&str],
 ) -> Option<bool> {
     fields.iter().find_map(|field| {
@@ -7590,8 +7632,40 @@ pub(super) fn parse_form_child_item_extended_tooltip_auto_max_width(
         if !is_form_extended_tooltip_name(&name) {
             return None;
         }
+        if tag == "CalendarField" && nested.len() == 34 {
+            return (nested.get(25).map(|value| value.trim()) == Some("0")).then_some(false);
+        }
         parse_form_decoration_auto_max_width(&nested)
     })
+}
+
+pub(super) fn parse_form_document_field_option_events(
+    tag: &str,
+    options: Option<&[&str]>,
+) -> Vec<FormBodyEvent> {
+    let event_index = match tag {
+        "CalendarField" => 14,
+        "HTMLDocumentField" => 5,
+        _ => return Vec::new(),
+    };
+    let Some(event_fields) = options
+        .and_then(|options| options.get(event_index))
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return Vec::new();
+    };
+    let mut events = parse_form_child_item_event_record(&event_fields);
+    for event in &mut events {
+        event.name = match (tag, event.name.as_str()) {
+            ("CalendarField", "1490ede6-6f33-4c6d-b971-53b2541331ea") => {
+                "OnPeriodOutput".to_string()
+            }
+            ("CalendarField", "2feb1ee9-b750-4352-bb4c-67ba1c608dc6") => "Selection".to_string(),
+            ("HTMLDocumentField", "Click") => "OnClick".to_string(),
+            _ => event.name.clone(),
+        };
+    }
+    events
 }
 
 pub(super) fn is_form_extended_tooltip_name(name: &str) -> bool {
@@ -9500,7 +9574,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_location)
         ));
     }
-    if matches!(item.tag, "InputField" | "PictureField") {
+    if matches!(item.tag, "InputField" | "PictureField" | "CalendarField") {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
             &item.tooltip,
@@ -9596,6 +9670,12 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!(
                 "{tab}\t<ShowCurrentDate>{}</ShowCurrentDate>\r\n",
                 xml_bool(show_current_date)
+            ));
+        }
+        if let Some(show_months_panel) = item.show_months_panel {
+            xml.push_str(&format!(
+                "{tab}\t<ShowMonthsPanel>{}</ShowMonthsPanel>\r\n",
+                xml_bool(show_months_panel)
             ));
         }
         if let Some(width_in_months) = &item.width_in_months {
@@ -9968,7 +10048,10 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
-    if !matches!(item.tag, "InputField" | "PictureField" | "ButtonGroup") {
+    if !matches!(
+        item.tag,
+        "InputField" | "PictureField" | "CalendarField" | "ButtonGroup"
+    ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
             &item.tooltip,
