@@ -4505,18 +4505,10 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        horizontal_align: if matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
+        horizontal_align: if matches!(tag, "InputField" | "LabelField")
             && form_input_field_layout_is_extended(&fields)
         {
-            if matches!(tag, "InputField" | "LabelField")
-                && data_path
-                    .as_deref()
-                    .is_some_and(is_form_numeric_label_field_data_path)
-            {
-                Some("Right")
-            } else {
-                None
-            }
+            parse_form_input_field_horizontal_align(&fields)
         } else {
             None
         },
@@ -5699,8 +5691,9 @@ pub(super) fn parse_form_input_field_title_location(field: &str) -> Option<&'sta
     }
 }
 
-pub(super) fn is_form_numeric_label_field_data_path(path: &str) -> bool {
-    matches!(path, "СоставЗаказа.Количество" | "СоставЗаказа.Сумма")
+pub(super) fn parse_form_input_field_horizontal_align(fields: &[&str]) -> Option<&'static str> {
+    let index = 23 + form_input_field_top_level_offset(fields);
+    (fields.get(index)?.trim() == "2").then_some("Right")
 }
 
 pub(super) fn parse_form_table_has_drag_events(fields: &[&str]) -> bool {

@@ -6823,6 +6823,61 @@ fn extracts_label_and_checkbox_title_location_from_layout_code() {
 }
 
 #[test]
+fn extracts_input_field_right_align_from_native_slot_for_renamed_path() {
+    let table_name_by_id = BTreeMap::from([("7".to_string(), "RenamedRows".to_string())]);
+    let table_column_names_by_id = BTreeMap::from([(
+        "7".to_string(),
+        BTreeMap::from([("8".to_string(), "RenamedAmount".to_string())]),
+    )]);
+    let layouts = [
+        r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"AmountField",1,0,{1,0},{1,0},{2,{7},{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}"#,
+        r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{"B",0},0}},2,"AmountField",1,0,{1,0},{1,0},{2,{7},{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}"#,
+    ];
+
+    for layout in layouts {
+        let item = parse_form_child_item(
+            layout,
+            None,
+            None,
+            &table_name_by_id,
+            &table_column_names_by_id,
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.data_path.as_deref(), Some("RenamedRows.RenamedAmount"));
+        assert_eq!(item.horizontal_align, Some("Right"));
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(xml.contains("<HorizontalAlign>Right</HorizontalAlign>"));
+    }
+}
+
+#[test]
+fn does_not_force_input_field_right_align_for_named_path_with_default_slot() {
+    let table_name_by_id = BTreeMap::from([("3".to_string(), "СоставЗаказа".to_string())]);
+    let table_column_names_by_id = BTreeMap::from([(
+        "3".to_string(),
+        BTreeMap::from([("2".to_string(), "Количество".to_string())]),
+    )]);
+    let item = parse_form_child_item(
+        r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"AmountField",1,0,{1,0},{1,0},{2,{3},{2}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0}"#,
+        None,
+        None,
+        &table_name_by_id,
+        &table_column_names_by_id,
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.data_path.as_deref(), Some("СоставЗаказа.Количество"));
+    assert_eq!(item.horizontal_align, None);
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(!xml.contains("<HorizontalAlign>"));
+}
+
+#[test]
 fn extracts_form_input_field_enter_on_input_from_layout_code() {
     let item = parse_form_child_item(
             r#"{48,{78,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Field",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,2}"#,
