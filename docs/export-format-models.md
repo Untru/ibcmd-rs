@@ -171,6 +171,16 @@ Corpus evidence:
   `1591 files, +31369/-193822` and the DCS slice from
   `10 files, +40/-66` to `9 files, +40/-40`. All DCS and cross-group guards
   remained unchanged.
+- A DCS core `value` whose expanded `xsi:type` is the data-UI `Picture` type
+  canonicalizes its `ref` as `v8ui:<local>` only when the reference QName also
+  resolves to the data-UI namespace. The input prefix text is irrelevant.
+  Bare references, references in another namespace, other value types, and
+  other elements remain unchanged. In the accepted gate, all 30 residual
+  Picture pairs disappeared exactly: the full diff moved from
+  `1569 files, +31338/-192968` to `1565 files, +31308/-192938`, and the 66-file
+  DCS slice moved from `9 files, +40/-40` to `5 files, +10/-10`. All 66 DCS
+  documents parse, no dynamic Picture prefix remains, and Form, ConfigDumpInfo,
+  and Help guardrails stayed unchanged.
 
 Rejected hypothesis:
 
