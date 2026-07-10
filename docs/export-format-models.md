@@ -16,7 +16,8 @@ Status terms:
 
 ## DCS template `settings` / `settingsVariant`
 
-Status: settings binding and QName scope allocation are `confirmed by export`.
+Status: settings binding, QName scope allocation, area side tables, and Color
+reference resolution are `confirmed by export`.
 
 Model:
 
@@ -140,10 +141,23 @@ Corpus evidence:
   `StyleItem` object in the current configuration, not a platform identifier.
   BSP contains 14 unique referenced StyleItems and independent UT contains nine;
   every observed UUID resolves through metadata and none is a platform constant.
-  The future color gate must use the existing metadata-derived `object_refs`
-  index and accept only `StyleItem.*`. Hardcoding these UUIDs or native names is
-  prohibited. Direct literals and already-qualified style/web values are
-  negative controls and must remain unchanged.
+  Resolution uses the metadata-derived `object_refs` index and accepts only a
+  nonempty `StyleItem.*` reference. There is no UUID-to-name table. Direct schema
+  and settings values become `style:<name>`. Values copied from an area side
+  table are resolved by namespace URI and serialized with a local structural
+  `d8p1` declaration; this also repairs the lost scope of already-qualified
+  style/web values. Direct literals and already-qualified values remain
+  unchanged. Unknown or non-StyleItem UUIDs do not use a fallback; dependent
+  additional area documents stay fail-closed.
+- The accepted Color gate moved the full diff from
+  `1599 files, +31470/-201297` to `1592 files, +31369/-193848`, entirely inside
+  the DCS slice. That slice moved from `17 files, +141/-7515` to
+  `10 files, +40/-66`. All 66 documents parse; both large side-table documents
+  have native-equal appearance and Color counts. Raw Color UUIDs, unscoped
+  `d4p2` Color QNames, root storage appearances, `appIndex`, and inner storage
+  wrappers are all zero. TypeId, TypeSet, settingsVariant, settings name, Form,
+  ConfigDumpInfo, and configuration Help guardrails did not regress. Production
+  additions contain no database UUID, object name, or local path literals.
 
 Rejected hypothesis:
 
