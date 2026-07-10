@@ -2408,6 +2408,89 @@ fn writes_form_module_text_to_source_layout() {
 }
 
 #[test]
+fn writes_direct_code14_form_to_owned_source_layout() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let form_uuid = "44444444-4444-4444-8444-444444444441";
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let owner_metadata = deflate_for_test(
+        format!(
+            "{{1,{{33,{{3,{{1,0,{owner_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0}},{{{form_list_marker},1,{form_uuid}}}}}"
+        )
+        .as_bytes(),
+    );
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,{{14,{{3,{{1,0,{form_uuid}}},\"ChoiceForm\",{{1,\"en\",\"Choice form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},0}}"
+        )
+        .as_bytes(),
+    );
+    let form_body = deflate_for_test(
+        b"{4,{0},\"Procedure Run()\r\n\tMessage(\"\"Hi\"\");\r\nEndProcedure\r\n\",{0}}",
+    );
+    let row = |file_name: String, data: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+    let rows = vec![
+        row(owner_uuid.to_string(), &owner_metadata),
+        row(form_uuid.to_string(), &form_metadata),
+        row(format!("{form_uuid}.0"), &form_body),
+    ];
+
+    let dumped = dump_table_rows_with_source_version(
+        &root,
+        "Config",
+        rows,
+        false,
+        true,
+        true,
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+
+    let metadata_path = "Tasks/ExecutorTask/Forms/ChoiceForm.xml";
+    let source_path = "Tasks/ExecutorTask/Forms/ChoiceForm/Ext/Form.xml";
+    let module_path = "Tasks/ExecutorTask/Forms/ChoiceForm/Ext/Form/Module.bsl";
+    assert!(root.join(metadata_path).exists());
+    assert!(root.join(source_path).exists());
+    assert!(root.join(module_path).exists());
+    assert!(!root.join("FilterCriteria/ChoiceForm.xml").exists());
+    assert!(!root.join("FilterCriteria").exists());
+
+    let metadata_xml = fs::read_to_string(root.join(metadata_path)).unwrap();
+    assert!(metadata_xml.contains(&format!(r#"<Form uuid="{form_uuid}">"#)));
+    assert!(!metadata_xml.contains("<FilterCriterion"));
+    let source_xml = fs::read_to_string(root.join(source_path)).unwrap();
+    assert!(source_xml.contains("version=\"2.21\""));
+
+    let metadata_row = dumped
+        .rows
+        .iter()
+        .find(|row| row.file_name == form_uuid)
+        .unwrap();
+    assert_eq!(
+        metadata_row.metadata_xml_path.as_deref(),
+        Some(metadata_path)
+    );
+    let body_row = dumped
+        .rows
+        .iter()
+        .find(|row| row.file_name == format!("{form_uuid}.0"))
+        .unwrap();
+    assert_eq!(body_row.source_asset_path.as_deref(), Some(source_path));
+    assert_eq!(body_row.module_text_path.as_deref(), Some(module_path));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn skips_zero_length_form_module_text() {
     let form_body = deflate_for_test(b"{4,{0},\"\",{0}}");
 
@@ -11405,7 +11488,7 @@ fn parses_common_command_parameter_type_pattern() {
         ),
     ]);
 
-    let types = parse_common_command_parameter_type_names(
+    let types = parse_common_command_parameter_types(
         &format!(
             r##"{{"Pattern",{{"#",{catalog_type_uuid}}},{{"#",{defined_type_uuid}}},{{"S",25,0}}}}"##
         ),
@@ -11413,13 +11496,18 @@ fn parses_common_command_parameter_type_pattern() {
     );
 
     assert_eq!(
-        types,
-        vec![
-            "cfg:CatalogRef.Products".to_string(),
-            "cfg:DefinedType.TradeOffer".to_string(),
-            "xs:string".to_string()
+        types.iter().map(metadata_type_xml_name).collect::<Vec<_>>(),
+        [
+            "cfg:CatalogRef.Products",
+            "cfg:DefinedType.TradeOffer",
+            "xs:string",
         ]
     );
+    assert!(matches!(
+        types.get(1),
+        Some(ConstantValueType::ReferenceTypeSet { reference })
+            if reference == "cfg:DefinedType.TradeOffer"
+    ));
 
     let mut xml = String::new();
     format_common_command_parameter_type_xml(&mut xml, &types);
@@ -12474,6 +12562,119 @@ fn writes_predefined_data_to_source_layout() {
     );
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn non_streamed_information_register_resolves_predefined_design_time_refs() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    let baseline_root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&baseline_root).unwrap();
+
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let catalog_object_type_id = "11111111-1111-4111-8111-111111111111";
+    let catalog_object_value_id = "11111111-1111-4111-8111-111111111112";
+    let catalog_ref_type_id = "22222222-2222-4222-8222-222222222221";
+    let catalog_ref_value_id = "22222222-2222-4222-8222-222222222222";
+    let catalog_selection_type_id = "33333333-3333-4333-8333-333333333331";
+    let catalog_selection_value_id = "33333333-3333-4333-8333-333333333332";
+    let catalog_list_type_id = "44444444-4444-4444-8444-444444444441";
+    let catalog_list_value_id = "44444444-4444-4444-8444-444444444442";
+    let catalog_manager_type_id = "55555555-5555-4555-8555-555555555551";
+    let catalog_manager_value_id = "55555555-5555-4555-8555-555555555552";
+    let item_uuid = "66666666-6666-4666-8666-666666666666";
+    let predefined_type_uuid = "ae135932-4f94-44df-92c1-c91f15a92848";
+    let register_uuid = "77777777-7777-4777-8777-777777777777";
+    let resource_uuid = "88888888-8888-4888-8888-888888888888";
+
+    let catalog_metadata = deflate_for_test(
+        format!(
+            "{{1,{{57,{catalog_object_type_id},{catalog_object_value_id},{catalog_ref_type_id},{catalog_ref_value_id},{catalog_selection_type_id},{catalog_selection_value_id},{catalog_list_type_id},{catalog_list_value_id},{{0,{{3,{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{catalog_manager_type_id},{catalog_manager_value_id}}}}}}}"
+        )
+        .as_bytes(),
+    );
+    let predefined = deflate_for_test(
+        format!(
+            "{{0,{{1,{{7}},{{2,{{1,1,{{2,0,5,{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Items\"}},{{\"S\",\"\"}},1,{{1,1,{{2,1,7,{{\"#\",{predefined_type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},{{\"#\",{predefined_type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Item\"}},{{\"S\",\"I\"}},{{\"S\",\"Item\"}},{{\"N\",0}},0}}}}}}}}}}}}}},-1,3}}}}"
+        )
+        .as_bytes(),
+    );
+
+    let mut common_fields = split_1c_braced_fields(
+        &information_register_common_child_for_test(resource_uuid),
+        0,
+    )
+    .unwrap()
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+    common_fields[16] = format!(
+        "{{0,1,\"Filter.Owner\",{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{catalog_ref_type_id},{item_uuid}}}}}}}"
+    );
+    let common = format!("{{{}}}", common_fields.join(","));
+    let register_metadata = deflate_for_test(
+        format!(
+            "{{1,{{33,90000000-0000-4000-8000-000000000001,90000000-0000-4000-8000-000000000002,90000000-0000-4000-8000-000000000003,90000000-0000-4000-8000-000000000004,90000000-0000-4000-8000-000000000005,90000000-0000-4000-8000-000000000006,90000000-0000-4000-8000-000000000007,90000000-0000-4000-8000-000000000008,90000000-0000-4000-8000-000000000009,90000000-0000-4000-8000-000000000010,90000000-0000-4000-8000-000000000011,90000000-0000-4000-8000-000000000012,90000000-0000-4000-8000-000000000013,90000000-0000-4000-8000-000000000014,{{0,{{3,{{1,0,{register_uuid}}},\"Rates\",{{1,\"en\",\"Rates\"}},\"\"}},{{7,{common},0,1,1}}}}}}}}"
+        )
+        .as_bytes(),
+    );
+    let row = |file_name: String, data: &Vec<u8>| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+    let non_ir_rows = vec![
+        row(catalog_uuid.to_string(), &catalog_metadata),
+        row(format!("{catalog_uuid}.1c"), &predefined),
+    ];
+    dump_table_rows_with_source_version(
+        &baseline_root,
+        "Config",
+        non_ir_rows.clone(),
+        false,
+        false,
+        true,
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let mut rows = non_ir_rows;
+    rows.push(row(register_uuid.to_string(), &register_metadata));
+    let dumped = dump_table_rows_with_source_version(
+        &root,
+        "Config",
+        rows,
+        false,
+        false,
+        true,
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+
+    assert_eq!(dumped.metadata_xml_rows, 2);
+    let register_xml = fs::read_to_string(root.join("InformationRegisters/Rates.xml")).unwrap();
+    assert!(
+        register_xml.contains(
+            r#"<app:value xsi:type="xr:DesignTimeRef">Catalog.Products.Item</app:value>"#
+        )
+    );
+    assert_eq!(
+        fs::read(root.join("Catalogs/Products.xml")).unwrap(),
+        fs::read(baseline_root.join("Catalogs/Products.xml")).unwrap()
+    );
+    assert_eq!(
+        fs::read(root.join("Catalogs/Products/Ext/Predefined.xml")).unwrap(),
+        fs::read(baseline_root.join("Catalogs/Products/Ext/Predefined.xml")).unwrap()
+    );
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(baseline_root);
 }
 
 #[test]
@@ -22296,6 +22497,7 @@ fn routes_and_serializes_calculation_register_recalculation() {
         &BTreeMap::new(),
         &object_refs,
         &object_refs,
+        &object_refs,
         &recalculation_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -22355,6 +22557,7 @@ fn undeclared_code4_continues_through_common_picture_serializer() {
     let extracted = extract_metadata_source_xml_with_recalculation_refs(
         &blob,
         picture_uuid,
+        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -22710,6 +22913,8 @@ fn parses_exact_information_register_legacy_and_new_child_wrappers() {
             tag,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            false,
         )
         .unwrap_or_else(|| panic!("failed to parse {tag}: {wrapper}"));
 
@@ -22758,8 +22963,11 @@ fn parses_information_register_variable_collections_without_partial_results() {
     let value_uuid = "33333333-3333-4333-8333-333333333333";
     let second_value_uuid = "44444444-4444-4444-8444-444444444444";
     let unresolved_path_uuid = "55555555-5555-4555-8555-555555555555";
-    let value_type_uuid = "66666666-6666-4666-8666-666666666666";
-    let array_type_uuid = "77777777-7777-4777-8777-777777777777";
+    let cross_owner_value_uuid = "66666666-6666-4666-8666-666666666666";
+    let child_owner_uuid = "77777777-7777-4777-8777-777777777777";
+    let root_value_uuid = "88888888-8888-4888-8888-888888888888";
+    let value_type_uuid = DESIGN_TIME_REF_TYPE_UUID;
+    let array_type_uuid = FIXED_ARRAY_TYPE_UUID;
     let mut object_refs = BTreeMap::new();
     let mut type_index = BTreeMap::new();
     object_refs.insert(
@@ -22775,11 +22983,21 @@ fn parses_information_register_variable_collections_without_partial_results() {
         second_value_uuid.to_string(),
         "Enum.Status.EnumValue.Closed".to_string(),
     );
+    object_refs.insert(
+        cross_owner_value_uuid.to_string(),
+        "Enum.OtherStatus.EnumValue.Active".to_string(),
+    );
+    object_refs.insert(
+        child_owner_uuid.to_string(),
+        "Enum.Status.EnumValue.Active".to_string(),
+    );
+    object_refs.insert(root_value_uuid.to_string(), "Enum.Status".to_string());
 
     let links = parse_information_register_choice_parameter_links(
         &format!("{{5006,2,\"First\",2,{{-2}},{{0,{path_uuid}}},0,\"Second\",1,{{-3}},1}}"),
         "Rates",
         &object_refs,
+        false,
     )
     .unwrap();
     assert_eq!(links.len(), 2);
@@ -22794,10 +23012,20 @@ fn parses_information_register_variable_collections_without_partial_results() {
     );
     assert_eq!(links[1].value_change, "DontChange");
 
+    let raw_links = parse_information_register_choice_parameter_links(
+        &format!("{{5006,1,\"First\",1,{{0,{path_uuid}}},0}}"),
+        "Rates",
+        &object_refs,
+        true,
+    )
+    .unwrap();
+    assert_eq!(raw_links[0].data_path, format!("0:{path_uuid}"));
+
     let link_by_type = parse_information_register_link_by_type(
         &format!("{{3,2,{{0,{unresolved_path_uuid}}},{{0}},3}}"),
         "Rates",
         &object_refs,
+        false,
     )
     .unwrap()
     .unwrap();
@@ -22806,6 +23034,15 @@ fn parses_information_register_variable_collections_without_partial_results() {
         format!("0:{unresolved_path_uuid}/0")
     );
     assert_eq!(link_by_type.link_item, 3);
+    let raw_link_by_type = parse_information_register_link_by_type(
+        &format!("{{3,1,{{0,{path_uuid}}},0}}"),
+        "Rates",
+        &object_refs,
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(raw_link_by_type.data_path, format!("0:{path_uuid}"));
 
     let reference = format!("{{\"#\",{value_type_uuid},{{0,{owner_uuid},{value_uuid}}}}}");
     let second_reference =
@@ -22852,6 +23089,45 @@ fn parses_information_register_variable_collections_without_partial_results() {
         Some(MetadataChildFillValue::DesignTimeRef(ref value))
             if value == "Enum.Status.EmptyRef"
     ));
+    let cross_owner_reference =
+        format!("{{\"#\",{value_type_uuid},{{0,{owner_uuid},{cross_owner_value_uuid}}}}}");
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &cross_owner_reference,
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_fill_value(&cross_owner_reference, &type_index, &object_refs,)
+            .is_none()
+    );
+    let root_self_reference =
+        format!("{{\"#\",{value_type_uuid},{{0,{owner_uuid},{root_value_uuid}}}}}");
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &root_self_reference,
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_fill_value(&root_self_reference, &type_index, &object_refs,)
+            .is_none()
+    );
+    let child_empty_reference = format!(
+        "{{\"#\",{value_type_uuid},{{0,{child_owner_uuid},00000000-0000-0000-0000-000000000000}}}}"
+    );
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &child_empty_reference,
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
 
     let mut xml = String::new();
     push_metadata_child_choice_parameters_xml(&mut xml, "\t", &parameters);
@@ -22859,6 +23135,210 @@ fn parses_information_register_variable_collections_without_partial_results() {
     assert!(xml.contains(r#"<app:value xsi:type="xs:string">value</app:value>"#));
     assert!(xml.contains(r#"<app:value xsi:nil="true"/>"#));
     assert!(xml.contains(r#"<app:value xsi:type="v8:FixedArray">"#));
+}
+
+#[test]
+fn parses_information_register_choice_form_reference_variants_fail_closed() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let form_uuid = "22222222-2222-4222-8222-222222222222";
+    let wrong_kind_uuid = "33333333-3333-4333-8333-333333333333";
+    let unknown_uuid = "44444444-4444-4444-8444-444444444444";
+    let other_owner_form_uuid = "55555555-5555-4555-8555-555555555555";
+    let mut type_index = BTreeMap::new();
+    let object_refs = BTreeMap::new();
+    let mut form_refs = BTreeMap::new();
+    type_index.insert(
+        owner_uuid.to_string(),
+        "cfg:CatalogRef.Products".to_string(),
+    );
+    form_refs.insert(
+        form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Products/Forms/Choice.xml"),
+            kind: "Form",
+        },
+    );
+    form_refs.insert(
+        wrong_kind_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Products/Templates/Choice.xml"),
+            kind: "Template",
+        },
+    );
+    form_refs.insert(
+        other_owner_form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/OtherProducts/Forms/Choice.xml"),
+            kind: "Form",
+        },
+    );
+
+    assert!(matches!(
+        parse_information_register_choice_form(
+            form_uuid,
+            &type_index,
+            &object_refs,
+            &form_refs,
+        ),
+        Some(MetadataChoiceForm::Reference(ref value))
+            if value == "Catalog.Products.Form.Choice"
+    ));
+    let typed = format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{form_uuid}}}}}");
+    assert!(matches!(
+        parse_information_register_choice_form(&typed, &type_index, &object_refs, &form_refs),
+        Some(MetadataChoiceForm::Reference(ref value))
+            if value == "Catalog.Products.Form.Choice"
+    ));
+    assert!(parse_information_register_choice_form(
+        unknown_uuid,
+        &type_index,
+        &object_refs,
+        &form_refs,
+    )
+    .is_none());
+    assert!(
+        parse_information_register_choice_form(
+            wrong_kind_uuid,
+            &type_index,
+            &object_refs,
+            &form_refs,
+        )
+        .is_none()
+    );
+    let other_owner =
+        format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{other_owner_form_uuid}}}}}");
+    assert!(parse_information_register_choice_form(
+        &other_owner,
+        &type_index,
+        &object_refs,
+        &form_refs,
+    )
+    .is_none());
+    assert!(
+        parse_information_register_choice_form(
+            &typed.replace(DESIGN_TIME_REF_TYPE_UUID, FIXED_ARRAY_TYPE_UUID),
+            &type_index,
+            &object_refs,
+            &form_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn information_register_typed_envelopes_require_exact_platform_type_ids() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let value_uuid = "22222222-2222-4222-8222-222222222222";
+    let foreign_type_uuid = "33333333-3333-4333-8333-333333333333";
+    let mut type_index = BTreeMap::new();
+    let mut object_refs = BTreeMap::new();
+    type_index.insert(owner_uuid.to_string(), "cfg:EnumRef.Status".to_string());
+    object_refs.insert(
+        value_uuid.to_string(),
+        "Enum.Status.EnumValue.Active".to_string(),
+    );
+    let payload = format!("{{0,{owner_uuid},{value_uuid}}}");
+    let design_time_ref = format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{payload}}}");
+
+    assert!(matches!(
+        parse_information_register_choice_parameter_value(
+            &design_time_ref,
+            &type_index,
+            &object_refs,
+        ),
+        Some(MetadataChoiceParameterValue::DesignTimeRef(ref value))
+            if value == "Enum.Status.EnumValue.Active"
+    ));
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &format!("{{\"#\",{foreign_type_uuid},{payload}}}"),
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{1,{design_time_ref}}}}}"),
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{payload}}}"),
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+    let wrong_inner = format!("{{\"#\",{foreign_type_uuid},{payload}}}");
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{1,{wrong_inner}}}}}"),
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_fill_value(
+            &format!("{{\"#\",{foreign_type_uuid},{payload}}}"),
+            &type_index,
+            &object_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn information_register_collection_counts_fail_closed_on_overflow() {
+    let max = usize::MAX;
+    assert!(parse_information_register_localized_value(&format!("{{{max}}}")).is_none());
+    assert!(
+        parse_information_register_choice_parameter_links(
+            &format!("{{5006,{max}}}"),
+            "Rates",
+            &BTreeMap::new(),
+            false,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_choice_parameter_links(
+            &format!("{{5006,1,\"Link\",{max},{{0}},0}}"),
+            "Rates",
+            &BTreeMap::new(),
+            false,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_link_by_type(
+            &format!("{{3,{max},0}}"),
+            "Rates",
+            &BTreeMap::new(),
+            false,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_choice_parameters(
+            &format!("{{0,{max}}}"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{{max}}}}}"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -22877,6 +23357,8 @@ fn information_register_child_payload_fails_closed_on_shape_errors() {
             "Dimension",
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            false,
         )
         .is_none()
     );
@@ -22886,6 +23368,7 @@ fn information_register_child_payload_fails_closed_on_shape_errors() {
             "{5006,1,\"Broken\",2,{0},0}",
             "Rates",
             &BTreeMap::new(),
+            false,
         )
         .is_none()
     );
@@ -22925,10 +23408,10 @@ fn classifies_information_register_type_sets_and_preserves_partition_order() {
         characteristic_type_id.to_string(),
         "cfg:Characteristic.Custom".to_string(),
     );
-    let value_types = information_register_stable_partition_types(
+    let value_types = stable_partition_metadata_types(
         parse_information_register_type_pattern(
             &format!(
-                "{{\"Pattern\",{{\"#\",{defined_type_id}}},{{\"S\"}},{{\"#\",{specific_type_id}}},{{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}},{{\"#\",474c3bf6-08b5-4ddc-a2ad-989cedf11583}},{{\"B\"}},{{\"#\",{characteristic_type_id}}}}}"
+                "{{\"Pattern\",{{\"#\",{defined_type_id}}},{{\"S\"}},{{\"#\",{specific_type_id}}},{{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}},{{\"#\",474c3bf6-08b5-4ddc-a2ad-989cedf11583}},{{\"B\"}},{{\"#\",{characteristic_type_id}}},{{\"#\",280f5f0e-9c8a-49cc-bf6d-4d296cc17a63}}}}"
             ),
             &type_index,
         )
@@ -22953,6 +23436,7 @@ fn classifies_information_register_type_sets_and_preserves_partition_order() {
             "cfg:CatalogRef",
             "cfg:EnumRef",
             "cfg:Characteristic.Custom",
+            "cfg:AnyIBRef",
         ]
     );
     assert!(
@@ -22965,6 +23449,10 @@ fn classifies_information_register_type_sets_and_preserves_partition_order() {
     assert!(xml.contains("<v8:Type>cfg:CatalogRef.Items</v8:Type>"));
     assert!(xml.contains("<v8:TypeSet>cfg:CatalogRef</v8:TypeSet>"));
     assert!(xml.contains("<v8:TypeSet>cfg:EnumRef</v8:TypeSet>"));
+    assert!(
+        format_constant_type_xml(&value_types[3])
+            .contains("<v8:TypeSet>cfg:DefinedType.Custom</v8:TypeSet>")
+    );
     assert!(
         xml.find("<v8:Type>xs:string</v8:Type>").unwrap()
             < xml
@@ -22982,13 +23470,22 @@ fn classifies_information_register_type_sets_and_preserves_partition_order() {
 }
 
 #[test]
-fn parses_detailed_information_register_command_without_descriptor_picture() {
+fn parses_detailed_information_register_command_picture_and_parameter_types() {
     let command_uuid = "11111111-1111-4111-8111-111111111111";
-    let parameter_type_id = "22222222-2222-4222-8222-222222222222";
-    let command = format!(
-        "{{9,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},2,{{1,\"en\",\"Run command\"}},1,{{0,0,0}},0,{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},{{\"Pattern\",{{\"#\",{parameter_type_id}}}}},{{3,{{1,0,{command_uuid}}},\"Run\",{{1,\"en\",\"Run\"}},\"comment\",0,0,00000000-0000-0000-0000-000000000000,0}},1,1,0}}"
+    let specific_type_id = "22222222-2222-4222-8222-222222222222";
+    let defined_type_id = "33333333-3333-4333-8333-333333333333";
+    let characteristic_type_id = "44444444-4444-4444-8444-444444444444";
+    let picture_uuid = "55555555-5555-4555-8555-555555555555";
+    let unknown_picture_uuid = "66666666-6666-4666-8666-666666666666";
+    let empty_descriptor = r#"{4,0,{0},"",-1,-1,1,0,""}"#;
+    let type_pattern = format!(
+        "{{\"Pattern\",{{\"#\",{defined_type_id}}},{{\"#\",474c3bf6-08b5-4ddc-a2ad-989cedf11583}},{{\"#\",{specific_type_id}}},{{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}},{{\"#\",{characteristic_type_id}}},{{\"#\",280f5f0e-9c8a-49cc-bf6d-4d296cc17a63}},{{\"B\"}}}}"
     );
-    let fields = split_1c_braced_fields(&command, 0).unwrap();
+    let command = |descriptor: &str| {
+        format!(
+            "{{9,{descriptor},2,{{1,\"en\",\"Run command\"}},1,{{0,0,0}},0,{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},{type_pattern},{{3,{{1,0,{command_uuid}}},\"Run\",{{1,\"en\",\"Run\"}},\"comment\",0,0,00000000-0000-0000-0000-000000000000,0}},1,1,0}}"
+        )
+    };
     let header = MetadataHeader {
         uuid: command_uuid.to_string(),
         name: "Run".to_string(),
@@ -22998,24 +23495,65 @@ fn parses_detailed_information_register_command_without_descriptor_picture() {
     };
     let mut type_index = BTreeMap::new();
     type_index.insert(
-        parameter_type_id.to_string(),
+        specific_type_id.to_string(),
         "cfg:CatalogRef.Items".to_string(),
     );
-    let properties = parse_information_register_child_command_properties_from_fields(
-        &fields,
-        &header,
-        &type_index,
-        &BTreeMap::new(),
-    )
-    .unwrap();
+    type_index.insert(
+        defined_type_id.to_string(),
+        "cfg:DefinedType.Custom".to_string(),
+    );
+    type_index.insert(
+        characteristic_type_id.to_string(),
+        "cfg:Characteristic.Custom".to_string(),
+    );
+    let parse_command = |descriptor: &str, object_refs: &BTreeMap<String, String>| {
+        let value = command(descriptor);
+        let fields = split_1c_braced_fields(&value, 0).unwrap();
+        parse_information_register_child_command_properties_from_fields(
+            &fields,
+            &header,
+            &type_index,
+            object_refs,
+        )
+    };
+    let properties = parse_command(empty_descriptor, &BTreeMap::new()).unwrap();
 
     assert_eq!(properties.group.as_deref(), Some("ActionsPanelTools"));
     assert_eq!(properties.representation, "PictureAndText");
     assert_eq!(properties.parameter_use_mode, "Multiple");
     assert!(properties.modifies_data);
-    assert_eq!(properties.command_parameter_types, ["cfg:CatalogRef.Items"]);
+    let parameter_type_names = properties
+        .command_parameter_types
+        .iter()
+        .map(metadata_type_xml_name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parameter_type_names,
+        [
+            "cfg:CatalogRef.Items",
+            "xs:boolean",
+            "cfg:DefinedType.Custom",
+            "cfg:EnumRef",
+            "cfg:CatalogRef",
+            "cfg:Characteristic.Custom",
+            "cfg:AnyIBRef",
+        ]
+    );
+    assert!(matches!(
+        properties.command_parameter_types[0],
+        ConstantValueType::Reference { .. }
+    ));
+    assert!(matches!(
+        properties.command_parameter_types[1],
+        ConstantValueType::Boolean
+    ));
+    assert!(
+        properties.command_parameter_types[2..]
+            .iter()
+            .all(|value| matches!(value, ConstantValueType::ReferenceTypeSet { .. }))
+    );
     assert_eq!(properties.picture_ref, None);
-    assert!(!properties.picture_load_transparent);
+    assert!(properties.picture_load_transparent);
 
     let metadata_command = MetadataChildCommand {
         header: header.clone(),
@@ -23025,6 +23563,18 @@ fn parses_detailed_information_register_command_without_descriptor_picture() {
     push_metadata_child_command_xml(&mut xml, &metadata_command);
     assert!(xml.contains("<Group>ActionsPanelTools</Group>"));
     assert!(xml.contains("<v8:Type>cfg:CatalogRef.Items</v8:Type>"));
+    assert!(xml.contains("<v8:Type>xs:boolean</v8:Type>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:DefinedType.Custom</v8:TypeSet>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:EnumRef</v8:TypeSet>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:CatalogRef</v8:TypeSet>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:Characteristic.Custom</v8:TypeSet>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:AnyIBRef</v8:TypeSet>"));
+    assert!(
+        xml.find("<v8:Type>xs:boolean</v8:Type>").unwrap()
+            < xml
+                .find("<v8:TypeSet>cfg:DefinedType.Custom</v8:TypeSet>")
+                .unwrap()
+    );
     assert!(xml.contains("<ParameterUseMode>Multiple</ParameterUseMode>"));
     assert!(xml.contains("<ModifiesData>true</ModifiesData>"));
     assert!(xml.contains("<Representation>PictureAndText</Representation>"));
@@ -23045,14 +23595,80 @@ fn parses_detailed_information_register_command_without_descriptor_picture() {
     assert!(owner_xml.find("<Resource/>").unwrap() < owner_xml.find("<Form>").unwrap());
     assert!(owner_xml.find("<Form>").unwrap() < owner_xml.find("<Command ").unwrap());
 
-    let malformed = command.replacen("{4,0,{0}", "{4,0,0", 1);
-    let malformed_fields = split_1c_braced_fields(&malformed, 0).unwrap();
+    let mut picture_refs = BTreeMap::new();
+    picture_refs.insert(picture_uuid.to_string(), "CommonPicture.Run".to_string());
+    let picture_descriptor = format!("{{4,1,{{0,{picture_uuid}}},\"\",-1,-1,0,0,\"\"}}");
+    let picture_properties = parse_command(&picture_descriptor, &picture_refs).unwrap();
+    assert_eq!(
+        picture_properties.picture_ref.as_deref(),
+        Some("CommonPicture.Run")
+    );
+    assert!(!picture_properties.picture_load_transparent);
+    let picture_command = MetadataChildCommand {
+        header: header.clone(),
+        properties: Some(picture_properties),
+    };
+    let mut picture_xml = String::new();
+    push_metadata_child_command_xml(&mut picture_xml, &picture_command);
+    assert!(picture_xml.contains("<xr:Ref>CommonPicture.Run</xr:Ref>"));
+    assert!(picture_xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
+
+    let print_descriptor =
+        format!("{{4,1,{{{STD_PICTURE_PRINT_DESCRIPTOR_CODE}}},\"\",-1,-1,1,0,\"\"}}");
+    let print_properties = parse_command(&print_descriptor, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        print_properties.picture_ref.as_deref(),
+        Some("StdPicture.Print")
+    );
+    assert!(print_properties.picture_load_transparent);
+    for (uuid, expected) in [
+        (
+            "46598f81-5f95-4485-9b33-bfe4fd1276d0",
+            "StdPicture.SpreadsheetShowHeaders",
+        ),
+        ("caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb", "StdPicture.Setting"),
+    ] {
+        let descriptor = format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,1,0,\"\"}}");
+        let properties = parse_command(&descriptor, &BTreeMap::new()).unwrap();
+        assert_eq!(properties.picture_ref.as_deref(), Some(expected));
+        assert!(properties.picture_load_transparent);
+    }
+
+    let malformed_descriptors = [
+        r#"{5,0,{0},"",-1,-1,1,0,""}"#,
+        r#"{4,2,{0},"",-1,-1,1,0,""}"#,
+        r#"{4,0,{1},"",-1,-1,1,0,""}"#,
+        r#"{4,0,{0},"caption",-1,-1,1,0,""}"#,
+        r#"{4,0,{0},"",0,-1,1,0,""}"#,
+        r#"{4,0,{0},"",-1,0,1,0,""}"#,
+        r#"{4,0,{0},"",-1,-1,0,0,""}"#,
+        r#"{4,0,{0},"",-1,-1,2,0,""}"#,
+        r#"{4,0,{0},"",-1,-1,1,1,""}"#,
+        r#"{4,0,{0},"",-1,-1,1,0,"tail"}"#,
+        r#"{4,0,{0},"",-1,-1,1,0,"",0}"#,
+    ];
+    for descriptor in malformed_descriptors {
+        assert!(
+            parse_information_register_command_picture_descriptor(descriptor, &BTreeMap::new())
+                .is_none(),
+            "accepted {descriptor}"
+        );
+    }
     assert!(
-        parse_information_register_child_command_properties_from_fields(
-            &malformed_fields,
-            &header,
-            &type_index,
-            &BTreeMap::new(),
+        parse_information_register_command_picture_descriptor(
+            &format!("{{4,1,{{0,{unknown_picture_uuid}}},\"\",-1,-1,1,0,\"\"}}"),
+            &picture_refs,
+        )
+        .is_none()
+    );
+    picture_refs.insert(
+        unknown_picture_uuid.to_string(),
+        "Catalog.Products".to_string(),
+    );
+    assert!(
+        parse_information_register_command_picture_descriptor(
+            &format!("{{4,1,{{0,{unknown_picture_uuid}}},\"\",-1,-1,1,0,\"\"}}"),
+            &picture_refs,
         )
         .is_none()
     );
@@ -27747,6 +28363,202 @@ fn extracts_task_child_form_and_template_refs_from_current_indexes() {
     );
     assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
     assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
+}
+
+#[test]
+fn selected_form_owner_rows_are_resolved_from_metadata_inventory() {
+    let task_uuid = "11111111-1111-4111-8111-111111111111";
+    let form_uuid = "44444444-4444-4444-8444-444444444441";
+    let unrelated_uuid = "55555555-5555-4555-8555-555555555551";
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let task_blob = deflate_for_test(
+        format!(
+            "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0}},\r\n{{{form_list_marker},1,{form_uuid}}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let unrelated_blob = deflate_for_test(
+        format!(
+            "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{unrelated_uuid}}},\"OtherTask\",{{1,\"en\",\"Other task\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let row = |file_name: &str, data: &[u8]| ConfigRow {
+        file_name: file_name.to_string(),
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+
+    let owners = selected_form_owner_metadata_rows(
+        &[
+            row(task_uuid, &task_blob),
+            row(unrelated_uuid, &unrelated_blob),
+        ],
+        &BTreeSet::from([form_uuid.to_string()]),
+    );
+
+    assert_eq!(owners.len(), 1);
+    assert_eq!(owners[0].file_name, task_uuid);
+}
+
+#[test]
+fn direct_code14_forms_are_indexed_only_with_one_metadata_owner() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let form_uuid = "44444444-4444-4444-8444-444444444441";
+    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let owner_text = format!(
+        "{{1,{{33,{{3,{{1,0,{owner_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0}},{{{form_list_marker},1,{form_uuid}}}}}"
+    );
+    let form_text = format!(
+        "{{1,{{14,{{3,{{1,0,{form_uuid}}},\"ChoiceForm\",{{1,\"en\",\"Choice form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},0}}"
+    );
+    let criterion_text = format!(
+        "{{1,{{14,{owner_uuid},{{2,{{3,{{1,0,{form_uuid}}},\"Criterion\",{{1,\"en\",\"Criterion\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\"}}}}}},0}}"
+    );
+    assert!(is_direct_code14_form_metadata_text(&form_text, form_uuid));
+    assert!(!is_direct_code14_form_metadata_text(
+        &form_text.replace(
+            FORM_APPLICATION_USE_PURPOSE_TYPE_UUID,
+            "99999999-9999-4999-8999-999999999999",
+        ),
+        form_uuid,
+    ));
+    assert!(!is_direct_code14_form_metadata_text(
+        &criterion_text,
+        form_uuid
+    ));
+
+    let rows = vec![
+        metadata_text_row_from_text(owner_uuid, owner_text).unwrap(),
+        metadata_text_row_from_text(form_uuid, form_text).unwrap(),
+    ];
+    let refs = build_direct_code14_form_source_reference_index(&rows);
+    let form_ref = refs.get(form_uuid).unwrap();
+    assert_eq!(
+        form_ref.relative_path,
+        PathBuf::from("Tasks/ExecutorTask/Forms/ChoiceForm.xml")
+    );
+    assert_eq!(form_ref.kind, "Form");
+
+    let form_blob = deflate_for_test(rows[1].text.as_bytes());
+    let extracted = extract_metadata_source_xml(
+        &form_blob,
+        form_uuid,
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("Tasks/ExecutorTask/Forms/ChoiceForm.xml")
+    );
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert!(xml.contains(&format!(r#"<Form uuid="{form_uuid}">"#)));
+    assert!(!xml.contains("<FilterCriterion"));
+
+    let mut ambiguous_rows = rows;
+    let second_owner_uuid = "22222222-2222-4222-8222-222222222222";
+    let second_owner_text = format!(
+        "{{1,{{33,{{3,{{1,0,{second_owner_uuid}}},\"OtherTask\",{{1,\"en\",\"Other task\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0}},{{{form_list_marker},1,{form_uuid}}}}}"
+    );
+    ambiguous_rows.push(metadata_text_row_from_text(second_owner_uuid, second_owner_text).unwrap());
+    assert!(build_direct_code14_form_source_reference_index(&ambiguous_rows).is_empty());
+    assert!(
+        extract_metadata_source_xml(
+            &form_blob,
+            form_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let criterion_blob = deflate_for_test(criterion_text.as_bytes());
+    let criterion = extract_metadata_source_xml(
+        &criterion_blob,
+        form_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        criterion.relative_path,
+        PathBuf::from("FilterCriteria/Criterion.xml")
+    );
+    let criterion_xml = String::from_utf8(criterion.xml).unwrap();
+    assert!(criterion_xml.contains(&format!(r#"<FilterCriterion uuid="{form_uuid}">"#)));
+    assert!(!criterion_xml.contains("<Form uuid="));
+}
+
+#[test]
+fn selected_information_register_predefined_owner_resolves_generated_type_to_metadata_owner() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let generated_ref_type_uuid = "22222222-2222-4222-8222-222222222222";
+    let metadata_owner_uuid = "33333333-3333-4333-8333-333333333333";
+    let value_uuid = "44444444-4444-4444-8444-444444444444";
+    let row = MetadataTextRow {
+        file_name: register_uuid.to_string(),
+        text: format!(
+            "{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{generated_ref_type_uuid},{value_uuid}}}}}"
+        ),
+        object_code: Some(33),
+        header: None,
+        kind: Some("InformationRegister".to_string()),
+        folder: Some("InformationRegisters"),
+    };
+    let selected = BTreeSet::from([register_uuid.to_string()]);
+    let type_index = BTreeMap::from([(
+        generated_ref_type_uuid.to_string(),
+        "cfg:CatalogRef.Types".to_string(),
+    )]);
+    let object_refs =
+        BTreeMap::from([(metadata_owner_uuid.to_string(), "Catalog.Types".to_string())]);
+    let body_owners = BTreeMap::from([(
+        metadata_owner_uuid.to_string(),
+        BodyOwnerSourceReference {
+            kind: "Catalog".to_string(),
+            object_path: PathBuf::from("Catalogs/Types"),
+        },
+    )]);
+
+    assert_eq!(
+        selected_information_register_predefined_owner_ids(
+            std::slice::from_ref(&row),
+            &selected,
+            &type_index,
+            &object_refs,
+            &body_owners,
+        ),
+        BTreeSet::from([metadata_owner_uuid.to_string()])
+    );
+    let duplicate_owner_uuid = "55555555-5555-4555-8555-555555555555";
+    let mut ambiguous_object_refs = object_refs.clone();
+    ambiguous_object_refs.insert(
+        duplicate_owner_uuid.to_string(),
+        "Catalog.Types".to_string(),
+    );
+    let mut ambiguous_body_owners = body_owners;
+    ambiguous_body_owners.insert(
+        duplicate_owner_uuid.to_string(),
+        BodyOwnerSourceReference {
+            kind: "Catalog".to_string(),
+            object_path: PathBuf::from("Catalogs/OtherTypes"),
+        },
+    );
+    assert!(
+        selected_information_register_predefined_owner_ids(
+            &[row],
+            &selected,
+            &type_index,
+            &ambiguous_object_refs,
+            &ambiguous_body_owners,
+        )
+        .is_empty()
+    );
 }
 
 #[test]

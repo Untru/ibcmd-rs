@@ -78,6 +78,13 @@ const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc4
 const STD_PICTURE_SHOW_DATA_UUID: &str = "a064544f-6037-48ca-b19f-8ad63e43af23";
 const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013c85";
 
+// Platform protocol type IDs used by serialized metadata values.
+const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
+const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
+const FORM_APPLICATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
+// Platform picture descriptor code for StdPicture.Print.
+const STD_PICTURE_PRINT_DESCRIPTOR_CODE: &str = "-13";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MssqlDumpConfigReport {
     pub database: String,
@@ -303,6 +310,7 @@ struct DumpRowContext<'a> {
     type_index: &'a BTreeMap<String, String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
+    metadata_object_refs: &'a BTreeMap<String, String>,
     configuration_root_object_refs: &'a BTreeMap<String, String>,
     recalculation_refs: &'a BTreeMap<String, CalculationRecalculationReference>,
     predefined_item_refs: &'a BTreeMap<String, String>,
@@ -444,7 +452,7 @@ fn dump_table_rows_with_options(
     let refs_for_standalone =
         extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
     let form_refs = if refs_for_standalone {
-        build_form_source_reference_index_from_texts(&metadata_texts)
+        build_complete_form_source_reference_index(&metadata_texts)
     } else {
         BTreeMap::new()
     };
@@ -556,6 +564,32 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
+    let information_register_file_names = metadata_texts
+        .iter()
+        .filter(|row| row.kind.as_deref() == Some("InformationRegister"))
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    let information_register_owner_ids = selected_information_register_predefined_owner_ids(
+        &metadata_texts,
+        &information_register_file_names,
+        &type_index,
+        &object_refs,
+        &body_owners,
+    );
+    let information_register_body_owners = body_owners
+        .iter()
+        .filter(|(uuid, _)| information_register_owner_ids.contains(*uuid))
+        .map(|(uuid, owner)| (uuid.clone(), owner.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let information_register_predefined_item_refs = build_predefined_item_reference_index(
+        &rows,
+        &information_register_body_owners,
+        &type_index,
+        &object_refs,
+    )?;
+    let mut metadata_object_refs = object_refs.clone();
+    metadata_object_refs.extend(predefined_item_refs.clone());
+    metadata_object_refs.extend(information_register_predefined_item_refs);
     let configuration_module_groups = configuration_module_groups(&file_names_owned);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
 
@@ -575,6 +609,7 @@ fn dump_table_rows_with_options(
         type_index: &type_index,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        metadata_object_refs: &metadata_object_refs,
         configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
@@ -897,6 +932,7 @@ fn dump_table_rows_streamed(
         && !selected_metadata_rows.is_empty()
     {
         let metadata_texts_started = Instant::now();
+        let selected_form_file_names = form_metadata_file_names(&selected_metadata_rows);
         let direct_metadata_file_names = selected_metadata_direct_reference_file_names(
             &build_metadata_text_rows(&selected_metadata_rows),
         );
@@ -912,6 +948,8 @@ fn dump_table_rows_streamed(
                 table,
                 &direct_metadata_file_names,
             )?;
+            let mut direct_form_file_names = form_metadata_file_names(&direct_metadata_rows);
+            direct_form_file_names.extend(selected_form_file_names.iter().cloned());
             let elapsed = elapsed_ms(metadata_fetch_started);
             timings.prepare_metadata_fetch_ms += elapsed;
             timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -924,7 +962,7 @@ fn dump_table_rows_streamed(
                 .filter(|file_name| !resolved.contains(file_name))
                 .collect::<BTreeSet<_>>();
             metadata_rows = merge_config_rows_by_file_name(metadata_rows, direct_metadata_rows);
-            if !unresolved.is_empty() {
+            if !unresolved.is_empty() || !direct_form_file_names.is_empty() {
                 let metadata_fetch_started = Instant::now();
                 let broad_metadata_rows =
                     fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
@@ -937,8 +975,29 @@ fn dump_table_rows_streamed(
                 if !owner_rows.is_empty() {
                     metadata_rows = merge_config_rows_by_file_name(metadata_rows, owner_rows);
                 }
+                let form_owner_rows = selected_form_owner_metadata_rows(
+                    &broad_metadata_rows,
+                    &direct_form_file_names,
+                );
+                if !form_owner_rows.is_empty() {
+                    metadata_rows = merge_config_rows_by_file_name(metadata_rows, form_owner_rows);
+                }
                 timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
             }
+        } else if !selected_form_file_names.is_empty() {
+            let metadata_fetch_started = Instant::now();
+            let broad_metadata_rows =
+                fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+            let elapsed = elapsed_ms(metadata_fetch_started);
+            timings.prepare_metadata_fetch_ms += elapsed;
+            timings.prepare_metadata_fetch_bcp_ms += elapsed;
+            let metadata_texts_started = Instant::now();
+            let form_owner_rows =
+                selected_form_owner_metadata_rows(&broad_metadata_rows, &selected_form_file_names);
+            if !form_owner_rows.is_empty() {
+                metadata_rows = merge_config_rows_by_file_name(metadata_rows, form_owner_rows);
+            }
+            timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
         }
     }
     if !selected_file_names.is_empty() && !broad_metadata_indexes {
@@ -1154,7 +1213,7 @@ fn dump_table_rows_streamed(
             || build_selected_local_refs))
         || needs_standalone_refs
     {
-        build_form_source_reference_index_from_texts(&index_metadata_texts)
+        build_complete_form_source_reference_index(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
@@ -1326,6 +1385,56 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
+    let information_register_file_names = if selected_file_names.is_empty() {
+        index_metadata_texts
+            .iter()
+            .filter(|row| row.kind.as_deref() == Some("InformationRegister"))
+            .map(|row| row.file_name.clone())
+            .collect::<BTreeSet<_>>()
+    } else {
+        selected_file_names.clone()
+    };
+    let owner_ids = selected_information_register_predefined_owner_ids(
+        &index_metadata_texts,
+        &information_register_file_names,
+        &type_index,
+        &object_refs,
+        &body_owners,
+    );
+    let required_body_owners = body_owners
+        .iter()
+        .filter(|(uuid, _)| owner_ids.contains(*uuid))
+        .map(|(uuid, owner)| (uuid.clone(), owner.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let body_file_names = predefined_data_body_file_names(&required_body_owners);
+    let metadata_fetch_started = Instant::now();
+    let rows = if body_file_names.is_empty() {
+        Vec::new()
+    } else {
+        fetch_config_rows_bcp(
+            sqlcmd,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &body_file_names,
+        )?
+    };
+    let elapsed = elapsed_ms(metadata_fetch_started);
+    timings.prepare_metadata_fetch_ms += elapsed;
+    if !body_file_names.is_empty() {
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
+    }
+    let information_register_predefined_item_refs = build_predefined_item_reference_index(
+        &rows,
+        &required_body_owners,
+        &type_index,
+        &object_refs,
+    )?;
+    let mut metadata_object_refs = object_refs.clone();
+    metadata_object_refs.extend(predefined_item_refs.clone());
+    metadata_object_refs.extend(information_register_predefined_item_refs);
     let configuration_module_groups = configuration_module_groups(&file_names);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
@@ -1347,6 +1456,7 @@ fn dump_table_rows_streamed(
         type_index: &type_index,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        metadata_object_refs: &metadata_object_refs,
         configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
@@ -1551,9 +1661,215 @@ fn build_metadata_text_rows(rows: &[ConfigRow]) -> Vec<MetadataTextRow> {
         .filter(|row| !row.file_name.contains('.'))
         .filter_map(|row| {
             let bytes = decode_hex(&row.binary_hex).ok()?;
-            metadata_text_row_from_blob(&row.file_name, &bytes)
+            let mut metadata = metadata_text_row_from_blob(&row.file_name, &bytes)?;
+            if is_direct_code14_form_metadata_text(&metadata.text, &metadata.file_name) {
+                metadata.kind = Some("Form".to_string());
+                metadata.folder = None;
+            }
+            Some(metadata)
         })
         .collect()
+}
+
+fn form_metadata_file_names(rows: &[ConfigRow]) -> BTreeSet<String> {
+    build_metadata_text_rows(rows)
+        .into_iter()
+        .filter(|row| {
+            is_form_metadata_text(&row.text, &row.file_name)
+                || is_direct_code14_form_metadata_text(&row.text, &row.file_name)
+        })
+        .map(|row| row.file_name)
+        .collect()
+}
+
+fn is_direct_code14_form_metadata_text(text: &str, uuid: &str) -> bool {
+    if parse_metadata_object_code(text) != Some(14) {
+        return false;
+    }
+    let Some(fields) = metadata_object_fields(text) else {
+        return false;
+    };
+    fields.len() == 6
+        && fields.first().map(|field| field.trim()) == Some("14")
+        && metadata_header_field_index(&fields, uuid) == Some(1)
+        && information_register_bool(fields[2]).is_some()
+        && information_register_bool(fields[3]).is_some()
+        && direct_form_application_purposes_are_valid(fields[4])
+        && information_register_bool(fields[5]).is_some()
+}
+
+fn direct_form_application_purposes_are_valid(value: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(value, 0) else {
+        return false;
+    };
+    let Some(count) = fields
+        .first()
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return false;
+    };
+    if count.checked_add(1) != Some(fields.len()) {
+        return false;
+    }
+    fields.iter().skip(1).all(|field| {
+        let Some(item) = split_1c_braced_fields(field, 0) else {
+            return false;
+        };
+        item.len() == 3
+            && item.first().map(|field| field.trim()) == Some(r##""#""##)
+            && item
+                .get(1)
+                .and_then(|field| parse_uuid_field(field.trim()))
+                .as_deref()
+                == Some(FORM_APPLICATION_USE_PURPOSE_TYPE_UUID)
+            && matches!(item.get(2).map(|field| field.trim()), Some("1" | "2"))
+    })
+}
+
+fn build_direct_code14_form_source_reference_index(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, FormSourceReference> {
+    let forms = rows
+        .iter()
+        .filter(|row| is_direct_code14_form_metadata_text(&row.text, &row.file_name))
+        .filter_map(|row| row.header.clone())
+        .collect::<Vec<_>>();
+    let form_uuids = forms
+        .iter()
+        .map(|form| form.uuid.clone())
+        .collect::<BTreeSet<_>>();
+    if form_uuids.is_empty() {
+        return BTreeMap::new();
+    }
+
+    let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
+    for row in rows {
+        if is_form_metadata_text(&row.text, &row.file_name)
+            || is_direct_code14_form_metadata_text(&row.text, &row.file_name)
+        {
+            continue;
+        }
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
+        else {
+            continue;
+        };
+        if !metadata_kind_can_own_forms(kind) {
+            continue;
+        }
+        let Some(references) = owned_form_uuid_values_matching(&row.text, &form_uuids) else {
+            continue;
+        };
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        for reference in references {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .insert(owner_path.clone());
+        }
+    }
+
+    forms
+        .into_iter()
+        .filter_map(|form| {
+            let owner_paths = owner_paths_by_ref.get(&form.uuid)?;
+            let mut owners = owner_paths.iter();
+            let owner = owners.next()?;
+            if owners.next().is_some() {
+                return None;
+            }
+            Some((
+                form.uuid,
+                FormSourceReference {
+                    relative_path: owner
+                        .join("Forms")
+                        .join(sanitize_source_path_segment(&form.name))
+                        .with_extension("xml"),
+                    kind: "Form",
+                },
+            ))
+        })
+        .collect()
+}
+
+fn build_complete_form_source_reference_index(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, FormSourceReference> {
+    let mut refs = build_form_source_reference_index_from_texts(rows);
+    refs.extend(build_direct_code14_form_source_reference_index(rows));
+    refs
+}
+
+fn selected_form_owner_metadata_rows(
+    rows: &[ConfigRow],
+    form_file_names: &BTreeSet<String>,
+) -> Vec<ConfigRow> {
+    if form_file_names.is_empty() {
+        return Vec::new();
+    }
+    let owner_file_names = build_metadata_text_rows(rows)
+        .into_iter()
+        .filter(|row| {
+            row.kind.as_deref().is_some_and(metadata_kind_can_own_forms)
+                && owned_form_uuid_values_matching(&row.text, form_file_names)
+                    .is_some_and(|references| !references.is_empty())
+        })
+        .map(|row| row.file_name)
+        .collect::<BTreeSet<_>>();
+    rows.iter()
+        .filter(|row| owner_file_names.contains(&row.file_name))
+        .cloned()
+        .collect()
+}
+
+fn selected_information_register_predefined_owner_ids(
+    rows: &[MetadataTextRow],
+    selected_file_names: &BTreeSet<String>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+) -> BTreeSet<String> {
+    let mut owners = BTreeSet::new();
+    for row in rows {
+        if row.kind.as_deref() != Some("InformationRegister")
+            || !selected_file_names.contains(&row.file_name)
+        {
+            continue;
+        }
+        let mut pending = vec![row.text.as_str()];
+        while let Some(value) = pending.pop() {
+            if let Some((owner_uuid, value_uuid)) =
+                parse_information_register_design_time_ref_ids(value)
+                && !information_register_uuid_is_zero(&owner_uuid)
+                && !information_register_uuid_is_zero(&value_uuid)
+                && !object_refs.contains_key(&value_uuid)
+            {
+                if let Some(owner_reference) = information_register_design_time_owner_reference(
+                    &owner_uuid,
+                    type_index,
+                    object_refs,
+                ) {
+                    let mut matches = body_owners
+                        .keys()
+                        .filter(|candidate| object_refs.get(*candidate) == Some(&owner_reference));
+                    if let (Some(owner_metadata_uuid), None) =
+                        (matches.next().cloned(), matches.next())
+                    {
+                        owners.insert(owner_metadata_uuid);
+                    }
+                }
+            }
+            let Some(fields) = split_1c_braced_fields(value, 0) else {
+                continue;
+            };
+            pending.extend(
+                fields
+                    .into_iter()
+                    .filter(|field| field.trim_start().starts_with('{')),
+            );
+        }
+    }
+    owners
 }
 
 fn merge_config_rows_by_file_name(
@@ -1704,6 +2020,7 @@ fn dump_table_row_bytes(
                 row,
                 context.type_index,
                 context.object_refs,
+                context.metadata_object_refs,
                 context.configuration_root_object_refs,
                 context.recalculation_refs,
                 context.functional_option_refs,
@@ -1718,6 +2035,7 @@ fn dump_table_row_bytes(
                 file_name,
                 context.type_index,
                 context.object_refs,
+                context.metadata_object_refs,
                 context.configuration_root_object_refs,
                 context.recalculation_refs,
                 context.functional_option_refs,
@@ -2751,7 +3069,7 @@ fn module_body_paths_from_texts(
         };
         paths.extend(entries);
     }
-    let form_refs = build_form_source_reference_index_from_texts(metadata_texts);
+    let form_refs = build_complete_form_source_reference_index(metadata_texts);
     paths.extend(form_module_body_paths(&form_refs, &file_names));
 
     paths
@@ -3064,10 +3382,11 @@ fn parse_information_register_child_command_properties_from_fields(
         || fields.get(4)?.trim() != "1"
         || fields.get(6)?.trim() != "0"
         || fields.get(12)?.trim() != "0"
-        || !information_register_command_internal_descriptor_is_valid(fields.get(1)?)
     {
         return None;
     }
+    let (picture_ref, picture_load_transparent) =
+        parse_information_register_command_picture_descriptor(fields.get(1)?, object_refs)?;
     let header_fields = split_1c_braced_fields(fields.get(9)?, 0)?;
     if header_fields.len() != 9
         || header_fields.first()?.trim() != "3"
@@ -3100,11 +3419,9 @@ fn parse_information_register_child_command_properties_from_fields(
         return None;
     }
     let group = parse_common_command_group_value(fields.get(7)?, object_refs)?;
-    let command_parameter_types =
-        parse_information_register_type_pattern(fields.get(8)?, type_index)?
-            .iter()
-            .map(metadata_type_xml_name)
-            .collect();
+    let command_parameter_types = stable_partition_metadata_types(
+        parse_information_register_type_pattern(fields.get(8)?, type_index)?,
+    );
     let parameter_use_mode = match fields.get(11)?.trim() {
         "0" => "Single",
         "1" => "Multiple",
@@ -3113,8 +3430,8 @@ fn parse_information_register_child_command_properties_from_fields(
 
     Some(CommonCommandProperties {
         representation,
-        picture_ref: None,
-        picture_load_transparent: false,
+        picture_ref,
+        picture_load_transparent,
         tooltip: parse_information_register_localized_value(fields.get(3)?)?,
         shortcut,
         include_help_in_contents: false,
@@ -3126,36 +3443,47 @@ fn parse_information_register_child_command_properties_from_fields(
     })
 }
 
-fn information_register_command_internal_descriptor_is_valid(value: &str) -> bool {
-    let Some(fields) = split_1c_braced_fields(value, 0) else {
-        return false;
-    };
-    fields.len() == 9
-        && fields.first().map(|field| field.trim()) == Some("4")
-        && fields
-            .get(1)
-            .is_some_and(|field| field.trim().parse::<i32>().is_ok())
-        && fields
-            .get(2)
-            .is_some_and(|field| parse_information_register_localized_value(field).is_some())
-        && fields
-            .get(3)
-            .is_some_and(|field| parse_1c_quoted_string(field.trim()).is_some())
-        && fields
-            .get(4)
-            .is_some_and(|field| field.trim().parse::<i32>().is_ok())
-        && fields
-            .get(5)
-            .is_some_and(|field| field.trim().parse::<i32>().is_ok())
-        && fields
-            .get(6)
-            .is_some_and(|field| information_register_bool(field).is_some())
-        && fields
-            .get(7)
-            .is_some_and(|field| information_register_bool(field).is_some())
-        && fields
-            .get(8)
-            .is_some_and(|field| parse_1c_quoted_string(field.trim()).is_some())
+fn parse_information_register_command_picture_descriptor(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(Option<String>, bool)> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.len() != 9
+        || fields.first()?.trim() != "4"
+        || parse_1c_quoted_string(fields.get(3)?.trim())?.as_str() != ""
+        || fields.get(4)?.trim() != "-1"
+        || fields.get(5)?.trim() != "-1"
+        || fields.get(7)?.trim() != "0"
+        || parse_1c_quoted_string(fields.get(8)?.trim())?.as_str() != ""
+    {
+        return None;
+    }
+
+    let load_transparent = information_register_bool(fields.get(6)?)?;
+    let reference = split_1c_braced_fields(fields.get(2)?, 0)?;
+    match fields.get(1)?.trim() {
+        "0" if reference.len() == 1 && reference.first()?.trim() == "0" && load_transparent => {
+            Some((None, load_transparent))
+        }
+        "1" if reference.len() == 1
+            && reference.first()?.trim() == STD_PICTURE_PRINT_DESCRIPTOR_CODE =>
+        {
+            Some((Some("StdPicture.Print".to_string()), load_transparent))
+        }
+        "1" if reference.len() == 2 && reference.first()?.trim() == "0" => {
+            let uuid = parse_non_zero_uuid(reference.get(1)?.trim())?;
+            if let Some(picture) = common_command_standard_picture_name(&uuid) {
+                return Some((Some(picture.to_string()), load_transparent));
+            }
+            let picture = object_refs.get(&uuid)?;
+            let name = picture.strip_prefix("CommonPicture.")?;
+            if name.is_empty() || name.contains('.') {
+                return None;
+            }
+            Some((Some(picture.clone()), load_transparent))
+        }
+        _ => None,
+    }
 }
 
 fn parse_information_register_command_shortcut(value: &str) -> Option<Option<String>> {
@@ -3846,7 +4174,7 @@ struct CommonCommandProperties {
     shortcut: Option<String>,
     include_help_in_contents: bool,
     group: Option<String>,
-    command_parameter_types: Vec<String>,
+    command_parameter_types: Vec<ConstantValueType>,
     parameter_use_mode: &'static str,
     modifies_data: bool,
     on_main_server_unavailable_behavior: &'static str,
@@ -4961,6 +5289,7 @@ fn extract_metadata_source_xml_with_refs(
         type_index,
         object_refs,
         object_refs,
+        object_refs,
         &BTreeMap::new(),
         functional_option_refs,
         form_refs,
@@ -4975,6 +5304,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    information_register_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
@@ -4991,6 +5321,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
         &row,
         type_index,
         object_refs,
+        information_register_object_refs,
         configuration_root_object_refs,
         recalculation_refs,
         functional_option_refs,
@@ -5005,6 +5336,7 @@ fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    information_register_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
@@ -5162,19 +5494,27 @@ fn extract_metadata_source_xml_from_text_row(
             format_functional_option_source_xml(header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    if is_form_metadata_text(text, uuid) {
+    let direct_code14_form = is_direct_code14_form_metadata_text(text, uuid);
+    if is_form_metadata_text(text, uuid) || direct_code14_form {
         let header = row.header.as_ref()?;
         let form_ref = form_refs.get(uuid);
-        let relative_path = form_ref
-            .map(|form_ref| form_ref.relative_path.clone())
-            .unwrap_or_else(|| {
-                PathBuf::from("CommonForms")
-                    .join(sanitize_source_path_segment(&header.name))
-                    .with_extension("xml")
-            });
-        let kind = form_ref
-            .map(|form_ref| form_ref.kind)
-            .unwrap_or("CommonForm");
+        let (relative_path, kind) = if direct_code14_form {
+            let form_ref = form_ref.filter(|form_ref| form_ref.kind == "Form")?;
+            (form_ref.relative_path.clone(), form_ref.kind)
+        } else {
+            (
+                form_ref
+                    .map(|form_ref| form_ref.relative_path.clone())
+                    .unwrap_or_else(|| {
+                        PathBuf::from("CommonForms")
+                            .join(sanitize_source_path_segment(&header.name))
+                            .with_extension("xml")
+                    }),
+                form_ref
+                    .map(|form_ref| form_ref.kind)
+                    .unwrap_or("CommonForm"),
+            )
+        };
         let properties = parse_form_metadata_properties_from_text(text, kind, uuid);
         let xml = format_form_source_xml(kind, &header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
@@ -5299,13 +5639,19 @@ fn extract_metadata_source_xml_from_text_row(
             parse_exchange_plan_properties_from_text(text, uuid, type_index, form_refs)?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
+        let register_object_refs = if kind == "InformationRegister" {
+            information_register_object_refs
+        } else {
+            object_refs
+        };
         let register = parse_register_properties_from_text(
             kind,
             text,
             uuid,
             type_index,
-            object_refs,
+            register_object_refs,
             form_refs,
+            source_version,
         )?;
         format_register_source_xml(kind, &header, &register, source_version).into_bytes()
     } else if kind == "Language" {
@@ -5932,6 +6278,7 @@ fn parse_register_properties_from_text(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Option<RegisterProperties> {
     if !metadata_kind_uses_register_resources(kind) {
         return None;
@@ -6025,7 +6372,7 @@ fn parse_register_properties_from_text(
     let data_lock_control_mode = parse_register_data_lock_control_mode(kind, &fields, uuid);
     let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, uuid);
     let full_text_search = parse_register_full_text_search(kind, &fields, uuid);
-    let form_refs = parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs);
+    let register_form_refs = parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs);
     let standard_attributes =
         register_standard_attributes(kind, &header.name, register_type, &fields, uuid);
     let (list_presentation, extended_list_presentation, explanation) =
@@ -6044,6 +6391,8 @@ fn parse_register_properties_from_text(
                     tag,
                     type_index,
                     object_refs,
+                    form_refs,
+                    source_version == InfobaseConfigSourceVersion::V2_21,
                 ) {
                     Some((value_types, properties)) => {
                         let emit_empty_type = tag == "Attribute" && value_types.is_empty();
@@ -6106,10 +6455,10 @@ fn parse_register_properties_from_text(
         data_lock_control_mode,
         enable_totals_splitting,
         full_text_search,
-        default_record_form: form_refs.0,
-        default_list_form: form_refs.1,
-        auxiliary_record_form: form_refs.2,
-        auxiliary_list_form: form_refs.3,
+        default_record_form: register_form_refs.0,
+        default_list_form: register_form_refs.1,
+        auxiliary_record_form: register_form_refs.2,
+        auxiliary_list_form: register_form_refs.3,
         list_presentation,
         extended_list_presentation,
         explanation,
@@ -6913,6 +7262,8 @@ fn parse_information_register_child_payload(
     tag: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
 ) -> Option<(Vec<ConstantValueType>, MetadataChildProperties)> {
     let mut parsed =
         metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
@@ -6925,6 +7276,8 @@ fn parse_information_register_child_payload(
                     tag,
                     type_index,
                     object_refs,
+                    form_refs,
+                    preserve_raw_data_paths,
                 )
             });
     let value = parsed.next()?;
@@ -6941,6 +7294,8 @@ fn parse_information_register_child_payload_from_fields(
     tag: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
 ) -> Option<(Vec<ConstantValueType>, MetadataChildProperties)> {
     let (expected_tag, common_field) = match (fields.first()?.trim(), fields.len()) {
         ("7", 5) | ("8", 7) => ("Resource", fields.get(1)?),
@@ -6976,14 +7331,17 @@ fn parse_information_register_child_payload_from_fields(
         return None;
     }
 
-    let value_types = information_register_stable_partition_types(
-        parse_information_register_type_pattern(typed_header.get(2)?, type_index)?,
-    );
+    let value_types = stable_partition_metadata_types(parse_information_register_type_pattern(
+        typed_header.get(2)?,
+        type_index,
+    )?);
     let mut properties = parse_information_register_common_child_properties(
         &common_fields,
         owner_name,
         type_index,
         object_refs,
+        form_refs,
+        preserve_raw_data_paths,
     )?;
 
     match (fields.first()?.trim(), fields.len()) {
@@ -7105,7 +7463,7 @@ fn parse_information_register_type_pattern_element(
                 .cloned()
                 .or_else(|| information_register_builtin_reference(&type_id).map(str::to_string))
                 .or_else(|| builtin_type_reference(&type_id).map(str::to_string))?;
-            if information_register_reference_is_type_set(&reference) {
+            if metadata_reference_is_type_set(&reference) {
                 Some(ConstantValueType::ReferenceTypeSet { reference })
             } else {
                 Some(ConstantValueType::Reference { reference })
@@ -7124,16 +7482,14 @@ fn information_register_builtin_reference(type_id: &str) -> Option<&'static str>
         .find_map(|(candidate, reference)| (*candidate == type_id).then_some(*reference))
 }
 
-fn information_register_reference_is_type_set(reference: &str) -> bool {
+fn metadata_reference_is_type_set(reference: &str) -> bool {
     reference.starts_with("cfg:DefinedType.")
         || reference.starts_with("cfg:Characteristic.")
         || reference == "cfg:AnyIBRef"
         || (reference.starts_with("cfg:") && reference.ends_with("Ref") && !reference.contains('.'))
 }
 
-fn information_register_stable_partition_types(
-    value_types: Vec<ConstantValueType>,
-) -> Vec<ConstantValueType> {
+fn stable_partition_metadata_types(value_types: Vec<ConstantValueType>) -> Vec<ConstantValueType> {
     let (mut ordinary, type_sets): (Vec<_>, Vec<_>) = value_types
         .into_iter()
         .partition(|value_type| !matches!(value_type, ConstantValueType::ReferenceTypeSet { .. }));
@@ -7146,14 +7502,20 @@ fn parse_information_register_common_child_properties(
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
 ) -> Option<MetadataChildProperties> {
     if fields.len() != 23 || fields.first()?.trim() != "27" {
         return None;
     }
     let min_value = parse_information_register_bound(fields.get(8)?)?;
     let max_value = parse_information_register_bound(fields.get(9)?)?;
-    let link_by_type =
-        parse_information_register_link_by_type(fields.get(15)?, owner_name, object_refs)?;
+    let link_by_type = parse_information_register_link_by_type(
+        fields.get(15)?,
+        owner_name,
+        object_refs,
+        preserve_raw_data_paths,
+    )?;
     Some(MetadataChildProperties {
         password_mode: information_register_bool(fields.get(2)?)?,
         format: parse_information_register_localized_value(fields.get(3)?)?,
@@ -7188,6 +7550,7 @@ fn parse_information_register_common_child_properties(
             fields.get(14)?,
             owner_name,
             object_refs,
+            preserve_raw_data_paths,
         )?),
         choice_parameters: Some(parse_information_register_choice_parameters(
             fields.get(16)?,
@@ -7210,6 +7573,7 @@ fn parse_information_register_common_child_properties(
             fields.get(11)?,
             type_index,
             object_refs,
+            form_refs,
         )?),
         link_by_type_empty: link_by_type.is_none(),
         link_by_type,
@@ -7269,7 +7633,8 @@ fn information_register_new_child_tail_is_valid(value: &str) -> bool {
 fn parse_information_register_localized_value(value: &str) -> Option<Vec<(String, String)>> {
     let fields = split_1c_braced_fields(value, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
-    if fields.len() != 1 + count * 2 {
+    let expected_len = count.checked_mul(2)?.checked_add(1)?;
+    if fields.len() != expected_len {
         return None;
     }
     let mut result = Vec::with_capacity(count);
@@ -7343,16 +7708,64 @@ fn parse_information_register_choice_form(
     value: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<MetadataChoiceForm> {
-    if parse_uuid_field(value.trim()).is_some_and(|uuid| information_register_uuid_is_zero(&uuid)) {
-        return Some(MetadataChoiceForm::Empty);
+    if let Some(uuid) = parse_uuid_field(value.trim()) {
+        if information_register_uuid_is_zero(&uuid) {
+            return Some(MetadataChoiceForm::Empty);
+        }
+        return information_register_form_reference(&uuid, form_refs)
+            .map(MetadataChoiceForm::Reference);
     }
-    let reference = parse_information_register_design_time_ref(value, type_index, object_refs)?;
-    if reference.is_empty() {
-        Some(MetadataChoiceForm::Empty)
-    } else {
-        Some(MetadataChoiceForm::Reference(reference))
+    let (owner_uuid, form_uuid) = parse_information_register_design_time_ref_ids(value)?;
+    let owner_is_zero = information_register_uuid_is_zero(&owner_uuid);
+    let form_is_zero = information_register_uuid_is_zero(&form_uuid);
+    match (owner_is_zero, form_is_zero) {
+        (true, true) => Some(MetadataChoiceForm::Empty),
+        (false, false) => {
+            let owner = information_register_design_time_owner_reference(
+                &owner_uuid,
+                type_index,
+                object_refs,
+            )?;
+            let reference = information_register_form_reference(&form_uuid, form_refs)?;
+            let expected_prefix = format!("{owner}.Form.");
+            reference
+                .strip_prefix(&expected_prefix)
+                .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+                .then_some(MetadataChoiceForm::Reference(reference))
+        }
+        _ => None,
     }
+}
+
+fn information_register_form_reference(
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<String> {
+    let form = form_refs.get(uuid)?;
+    if !matches!(form.kind, "Form" | "CommonForm") {
+        return None;
+    }
+    let reference = form_source_reference_name(form)?;
+    information_register_form_reference_is_valid(&reference).then_some(reference)
+}
+
+fn information_register_form_reference_is_valid(reference: &str) -> bool {
+    if let Some(name) = reference.strip_prefix("CommonForm.") {
+        return !name.is_empty() && !name.contains('.');
+    }
+    let Some((owner, form)) = reference.split_once(".Form.") else {
+        return false;
+    };
+    let Some((kind, owner_name)) = owner.split_once('.') else {
+        return false;
+    };
+    metadata_kind_can_own_forms(kind)
+        && !owner_name.is_empty()
+        && !owner_name.contains('.')
+        && !form.is_empty()
+        && !form.contains('.')
 }
 
 fn parse_information_register_design_time_ref(
@@ -7360,10 +7773,69 @@ fn parse_information_register_design_time_ref(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    let (owner_uuid, value_uuid) = parse_information_register_design_time_ref_ids(value)?;
+    let owner_is_zero = information_register_uuid_is_zero(&owner_uuid);
+    let value_is_zero = information_register_uuid_is_zero(&value_uuid);
+    match (owner_is_zero, value_is_zero) {
+        (true, true) => Some(String::new()),
+        (false, true) => {
+            let owner = information_register_design_time_owner_reference(
+                &owner_uuid,
+                type_index,
+                object_refs,
+            )?;
+            information_register_owner_reference_is_valid(&owner)
+                .then(|| format!("{owner}.EmptyRef"))
+        }
+        (false, false) => {
+            let owner = information_register_design_time_owner_reference(
+                &owner_uuid,
+                type_index,
+                object_refs,
+            )?;
+            let value = object_refs.get(&value_uuid)?.clone();
+            information_register_reference_belongs_to_owner(&owner, &value).then_some(value)
+        }
+        (true, false) => None,
+    }
+}
+
+fn information_register_owner_reference_is_valid(owner: &str) -> bool {
+    let mut owner_parts = owner.split('.');
+    let (Some(owner_kind), Some(owner_name), None) =
+        (owner_parts.next(), owner_parts.next(), owner_parts.next())
+    else {
+        return false;
+    };
+    if owner_kind.is_empty() || owner_name.is_empty() {
+        return false;
+    }
+    true
+}
+
+fn information_register_reference_belongs_to_owner(owner: &str, value: &str) -> bool {
+    if !information_register_owner_reference_is_valid(owner) {
+        return false;
+    }
+    let mut owner_parts = owner.split('.');
+    let owner_kind = owner_parts.next().expect("validated owner kind");
+    let owner_name = owner_parts.next().expect("validated owner name");
+    let mut value_parts = value.split('.');
+    if value_parts.next() != Some(owner_kind) || value_parts.next() != Some(owner_name) {
+        return false;
+    }
+    value_parts.next().is_some_and(|part| !part.is_empty())
+        && value_parts.all(|part| !part.is_empty())
+}
+
+fn parse_information_register_design_time_ref_ids(value: &str) -> Option<(String, String)> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.len() != 3
         || fields.first()?.trim() != r##""#""##
-        || parse_non_zero_uuid(fields.get(1)?.trim()).is_none()
+        || !fields
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(DESIGN_TIME_REF_TYPE_UUID)
     {
         return None;
     }
@@ -7373,20 +7845,7 @@ fn parse_information_register_design_time_ref(
     }
     let owner_uuid = parse_uuid_field(reference.get(1)?.trim())?;
     let value_uuid = parse_uuid_field(reference.get(2)?.trim())?;
-    let owner_is_zero = information_register_uuid_is_zero(&owner_uuid);
-    let value_is_zero = information_register_uuid_is_zero(&value_uuid);
-    match (owner_is_zero, value_is_zero) {
-        (true, true) => Some(String::new()),
-        (false, true) => {
-            information_register_design_time_owner_reference(&owner_uuid, type_index, object_refs)
-                .map(|owner| format!("{owner}.EmptyRef"))
-        }
-        (false, false) => {
-            information_register_design_time_owner_reference(&owner_uuid, type_index, object_refs)?;
-            object_refs.get(&value_uuid).cloned()
-        }
-        (true, false) => None,
-    }
+    Some((owner_uuid, value_uuid))
 }
 
 fn information_register_design_time_owner_reference(
@@ -7413,26 +7872,36 @@ fn parse_information_register_choice_parameter_links(
     value: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
+    preserve_raw_data_paths: bool,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != "5006" {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let remaining = fields.len().checked_sub(2)?;
+    if remaining < count.checked_mul(4)? {
+        return None;
+    }
     let mut index = 2usize;
     let mut result = Vec::with_capacity(count);
     for _ in 0..count {
         let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
-        let path_count = fields.get(index + 1)?.trim().parse::<usize>().ok()?;
+        let path_count = fields
+            .get(index.checked_add(1)?)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
         if path_count == 0 {
             return None;
         }
-        index += 2;
+        index = index.checked_add(2)?;
         let path_end = index.checked_add(path_count)?;
         let path = parse_information_register_data_path(
             fields.get(index..path_end)?,
             owner_name,
             object_refs,
+            preserve_raw_data_paths,
         )?;
         index = path_end;
         let value_change = match fields.get(index)?.trim() {
@@ -7440,7 +7909,7 @@ fn parse_information_register_choice_parameter_links(
             "1" => "DontChange",
             _ => return None,
         };
-        index += 1;
+        index = index.checked_add(1)?;
         result.push(MetadataChoiceParameterLink {
             name,
             data_path: path,
@@ -7454,13 +7923,15 @@ fn parse_information_register_link_by_type(
     value: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
+    preserve_raw_data_paths: bool,
 ) -> Option<Option<MetadataChildLinkByType>> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != "3" {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if fields.len() != count + 3 {
+    let expected_len = count.checked_add(3)?;
+    if fields.len() != expected_len {
         return None;
     }
     let link_item = fields.last()?.trim().parse::<u32>().ok()?;
@@ -7470,11 +7941,13 @@ fn parse_information_register_link_by_type(
     if count == 0 {
         return (link_item == 0).then_some(None);
     }
+    let path_end = 2usize.checked_add(count)?;
     Some(Some(MetadataChildLinkByType {
         data_path: parse_information_register_data_path(
-            fields.get(2..2 + count)?,
+            fields.get(2..path_end)?,
             owner_name,
             object_refs,
+            preserve_raw_data_paths,
         )?,
         link_item,
     }))
@@ -7484,6 +7957,7 @@ fn parse_information_register_data_path(
     fields: &[&str],
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
+    preserve_raw_data_paths: bool,
 ) -> Option<String> {
     fields
         .iter()
@@ -7493,12 +7967,16 @@ fn parse_information_register_data_path(
                 ("0", 1) => Some("0".to_string()),
                 ("0", 2) => {
                     let uuid = parse_uuid_field(segment.get(1)?.trim())?;
-                    Some(
-                        object_refs
-                            .get(&uuid)
-                            .cloned()
-                            .unwrap_or_else(|| format!("0:{uuid}")),
-                    )
+                    if preserve_raw_data_paths {
+                        Some(format!("0:{uuid}"))
+                    } else {
+                        Some(
+                            object_refs
+                                .get(&uuid)
+                                .cloned()
+                                .unwrap_or_else(|| format!("0:{uuid}")),
+                        )
+                    }
                 }
                 ("-2", 1) => Some(format!(
                     "InformationRegister.{owner_name}.StandardAttribute.Period"
@@ -7523,7 +8001,8 @@ fn parse_information_register_choice_parameters(
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if fields.len() != 2 + count * 2 {
+    let expected_len = count.checked_mul(2)?.checked_add(2)?;
+    if fields.len() != expected_len {
         return None;
     }
     let mut result = Vec::with_capacity(count);
@@ -7555,16 +8034,18 @@ fn parse_information_register_choice_parameter_value(
             information_register_bool(fields.get(1)?).map(MetadataChoiceParameterValue::Boolean)
         }
         r##""#""## if fields.len() == 3 => {
-            if parse_non_zero_uuid(fields.get(1)?.trim()).is_none() {
-                return None;
-            }
-            let nested = split_1c_braced_fields(fields.get(2)?, 0)?;
-            if nested.first()?.trim() == "0" && nested.len() == 3 {
+            let type_id = fields.get(1)?.trim();
+            if type_id.eq_ignore_ascii_case(DESIGN_TIME_REF_TYPE_UUID) {
                 return parse_information_register_design_time_ref(value, type_index, object_refs)
                     .map(MetadataChoiceParameterValue::DesignTimeRef);
             }
+            if !type_id.eq_ignore_ascii_case(FIXED_ARRAY_TYPE_UUID) {
+                return None;
+            }
+            let nested = split_1c_braced_fields(fields.get(2)?, 0)?;
             let count = nested.first()?.trim().parse::<usize>().ok()?;
-            if nested.len() != count + 1 {
+            let expected_len = count.checked_add(1)?;
+            if nested.len() != expected_len {
                 return None;
             }
             nested
@@ -10663,8 +11144,7 @@ fn parse_common_command_properties_from_text(
     let group = fields
         .get(7)
         .and_then(|field| parse_common_command_group_value(field, object_refs));
-    let command_parameter_types =
-        parse_common_command_parameter_type_names(fields.get(8)?, type_index);
+    let command_parameter_types = parse_common_command_parameter_types(fields.get(8)?, type_index);
     let parameter_use_mode =
         common_command_parameter_use_mode_xml(fields.get(11)?.trim().parse().ok()?);
     let modifies_data = fields
@@ -10882,6 +11362,8 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "03665ff1-3a05-41d1-96d3-04bda2d8ede3" => Some("StdPicture.SpreadsheetInsertComment"),
         "2846af8d-af84-47e3-82b9-01b01f960426" => Some("StdPicture.SpreadsheetReadOnly"),
         "3bdc16c8-6a96-4467-9442-a8e4804b3fa2" => Some("StdPicture.SyncContents"),
+        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"),
+        "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb" => Some("StdPicture.Setting"),
         _ => None,
     }
 }
@@ -10903,14 +11385,21 @@ fn parse_common_command_group_value(
     common_command_group_name(uuid).map(str::to_string)
 }
 
-fn parse_common_command_parameter_type_names(
+fn parse_common_command_parameter_types(
     value: &str,
     type_index: &BTreeMap<String, String>,
-) -> Vec<String> {
+) -> Vec<ConstantValueType> {
     parse_metadata_type_pattern(value, type_index)
         .unwrap_or_default()
-        .iter()
-        .map(metadata_type_xml_name)
+        .into_iter()
+        .map(|value_type| match value_type {
+            ConstantValueType::Reference { reference }
+                if reference.starts_with("cfg:DefinedType.") =>
+            {
+                ConstantValueType::ReferenceTypeSet { reference }
+            }
+            value_type => value_type,
+        })
         .collect()
 }
 
@@ -14909,13 +15398,13 @@ fn format_common_command_picture_xml_with_indent(
     xml.push_str(&format!("{indent}</Picture>\r\n"));
 }
 
-fn format_common_command_parameter_type_xml(xml: &mut String, types: &[String]) {
+fn format_common_command_parameter_type_xml(xml: &mut String, types: &[ConstantValueType]) {
     format_common_command_parameter_type_xml_with_indent(xml, types, "\t\t\t");
 }
 
 fn format_common_command_parameter_type_xml_with_indent(
     xml: &mut String,
-    types: &[String],
+    types: &[ConstantValueType],
     indent: &str,
 ) {
     if types.is_empty() {
@@ -14924,14 +15413,14 @@ fn format_common_command_parameter_type_xml_with_indent(
     }
     xml.push_str(&format!("{indent}<CommandParameterType>\r\n"));
     for value_type in types {
-        let tag_name = if value_type.starts_with("cfg:DefinedType.") {
+        let tag_name = if matches!(value_type, ConstantValueType::ReferenceTypeSet { .. }) {
             "TypeSet"
         } else {
             "Type"
         };
         xml.push_str(&format!(
             "{indent}\t<v8:{tag_name}>{}</v8:{tag_name}>\r\n",
-            escape_xml_text(value_type)
+            escape_xml_text(&metadata_type_xml_name(value_type))
         ));
     }
     xml.push_str(&format!("{indent}</CommandParameterType>\r\n"));
@@ -16189,12 +16678,18 @@ fn format_constant_type_xml(value_type: &ConstantValueType) -> String {
 \t\t\t\t</v8:DateQualifiers>\r\n\
 \t\t\t</Type>\r\n"
         ),
-        ConstantValueType::Reference { reference, .. }
-        | ConstantValueType::ReferenceTypeSet { reference, .. } => {
+        ConstantValueType::Reference { reference, .. } => {
             let tag = constant_reference_type_tag(reference);
             let namespace_attr = metadata_type_xml_namespace_attr(value_type);
             format!(
                 "\t\t\t<Type>\r\n\t\t\t\t<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n\t\t\t</Type>\r\n",
+                escape_xml_text(reference)
+            )
+        }
+        ConstantValueType::ReferenceTypeSet { reference, .. } => {
+            let namespace_attr = metadata_type_xml_namespace_attr(value_type);
+            format!(
+                "\t\t\t<Type>\r\n\t\t\t\t<v8:TypeSet{namespace_attr}>{}</v8:TypeSet>\r\n\t\t\t</Type>\r\n",
                 escape_xml_text(reference)
             )
         }

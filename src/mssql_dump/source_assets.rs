@@ -2056,7 +2056,7 @@ fn parse_predefined_rowset_schema<'a>(
 ) -> Option<(PredefinedRowsetSchema, &'a str)> {
     let schema_fields = split_1c_braced_fields(schema_value, 0)?;
     let column_count = schema_fields.first()?.trim().parse::<usize>().ok()?;
-    if schema_fields.len() != column_count + 1 {
+    if schema_fields.len() != column_count.checked_add(1)? {
         return None;
     }
 
@@ -2110,6 +2110,18 @@ fn parse_predefined_rowset_schema<'a>(
         },
         item_list,
     ))
+}
+
+#[cfg(test)]
+mod predefined_rowset_schema_tests {
+    use super::parse_predefined_rowset_schema;
+
+    #[test]
+    fn column_count_overflow_fails_closed() {
+        let schema = format!("{{{}}}", usize::MAX);
+
+        assert!(parse_predefined_rowset_schema(&schema, "{2,0,{0}}").is_none());
+    }
 }
 
 fn predefined_column_is_boolean(value: &str) -> bool {
