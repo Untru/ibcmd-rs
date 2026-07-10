@@ -439,6 +439,9 @@ pub(super) struct FormChildItem {
     pub(super) font_xml: Option<String>,
     pub(super) width: Option<String>,
     pub(super) height: Option<String>,
+    pub(super) show_current_date: Option<bool>,
+    pub(super) width_in_months: Option<String>,
+    pub(super) height_in_months: Option<String>,
     pub(super) auto_max_width: Option<bool>,
     pub(super) max_width: Option<String>,
     pub(super) auto_max_height: Option<bool>,
@@ -3538,7 +3541,15 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         }
         if matches!(
             tag,
-            "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "TextDocumentField"
+            "InputField"
+                | "LabelField"
+                | "CheckBoxField"
+                | "PictureField"
+                | "TextDocumentField"
+                | "CalendarField"
+                | "GraphicalSchemaField"
+                | "SpreadSheetDocumentField"
+                | "HTMLDocumentField"
         ) {
             for binding in form_child_item_binding_fields(tag, &fields) {
                 if let Some(binding_key) = parse_form_bound_data_binding_key(binding)
@@ -3874,6 +3885,10 @@ pub(super) fn parse_form_child_item_with_context(
             | "PictureField"
             | "RadioButtonField"
             | "TextDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "HTMLDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(&fields)
@@ -3988,6 +4003,17 @@ pub(super) fn parse_form_child_item_with_context(
     let label_field_options = (tag == "LabelField")
         .then(|| parse_form_label_field_options(&fields, object_refs))
         .flatten();
+    let document_field_options_kind = match tag {
+        "CalendarField" => Some("6"),
+        "GraphicalSchemaField" | "HTMLDocumentField" => Some("3"),
+        _ => None,
+    };
+    let document_field_options = document_field_options_kind.and_then(|options_kind| {
+        fields
+            .get(39)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
+    });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
@@ -4406,8 +4432,14 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        read_only: if matches!(tag, "InputField" | "TextDocumentField" | "LabelField")
-            && form_input_field_layout_is_extended(&fields)
+        read_only: if matches!(
+            tag,
+            "InputField"
+                | "TextDocumentField"
+                | "LabelField"
+                | "GraphicalSchemaField"
+                | "HTMLDocumentField"
+        ) && form_input_field_layout_is_extended(&fields)
         {
             fields
                 .get(14 + input_field_top_level_offset)
@@ -4444,6 +4476,10 @@ pub(super) fn parse_form_child_item_with_context(
                 | "PictureField"
                 | "RadioButtonField"
                 | "TextDocumentField"
+                | "CalendarField"
+                | "GraphicalSchemaField"
+                | "SpreadSheetDocumentField"
+                | "HTMLDocumentField"
         ) && form_input_field_layout_is_extended(&fields)
         {
             fields
@@ -4592,7 +4628,13 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        width: if tag == "UsualGroup" {
+        width: if matches!(tag, "CalendarField" | "GraphicalSchemaField") {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(1))
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if tag == "UsualGroup" {
             parse_form_usual_group_width(&fields)
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_width(input_field_extended_options.as_deref())
@@ -4618,7 +4660,16 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        height: if tag == "TextDocumentField" && form_input_field_layout_is_extended(&fields) {
+        height: if matches!(
+            tag,
+            "CalendarField" | "GraphicalSchemaField" | "HTMLDocumentField"
+        ) {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(2))
+                .map(|field| field.trim().to_string())
+                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if tag == "TextDocumentField" && form_input_field_layout_is_extended(&fields) {
             fields
                 .get(23)
                 .map(|field| field.trim().to_string())
@@ -4644,6 +4695,32 @@ pub(super) fn parse_form_child_item_with_context(
                 .get(13)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0")
+        } else {
+            None
+        },
+        show_current_date: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(15))
+                .and_then(|field| parse_form_child_item_show_title(field))
+        } else {
+            None
+        },
+        width_in_months: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(16))
+                .map(|field| field.trim().to_string())
+                .filter(|value| value.parse::<u32>().is_ok())
+        } else {
+            None
+        },
+        height_in_months: if tag == "CalendarField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(17))
+                .map(|field| field.trim().to_string())
+                .filter(|value| value.parse::<u32>().is_ok())
         } else {
             None
         },
@@ -4961,6 +5038,10 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "RadioButtonField"
             | "TextDocumentField"
             | "FormattedDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "HTMLDocumentField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -7366,7 +7447,11 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
             "3" => Some("CheckBoxField"),
             "4" => Some("PictureField"),
             "5" => Some("RadioButtonField"),
+            "6" => (wrapper == "37").then_some("SpreadSheetDocumentField"),
             "7" => Some("TextDocumentField"),
+            "8" => (wrapper == "37").then_some("CalendarField"),
+            "14" => (wrapper == "37").then_some("GraphicalSchemaField"),
+            "15" => (wrapper == "37").then_some("HTMLDocumentField"),
             "17" => Some("FormattedDocumentField"),
             _ => None,
         },
@@ -7834,6 +7919,10 @@ pub(super) fn parse_form_child_item_data_path(
             | "RadioButtonField"
             | "TextDocumentField"
             | "FormattedDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "HTMLDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(fields)
@@ -7860,6 +7949,13 @@ pub(super) fn parse_form_child_item_data_path(
                     format!("{parent}.{name}")
                 })
             }),
+        "CalendarField"
+        | "GraphicalSchemaField"
+        | "SpreadSheetDocumentField"
+        | "HTMLDocumentField" => [11usize, 12]
+            .iter()
+            .filter_map(|index| fields.get(*index + input_field_offset))
+            .find_map(parse_bound),
         "LabelField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
@@ -8069,6 +8165,10 @@ pub(super) fn form_child_item_binding_fields<'a>(tag: &str, fields: &'a [&'a str
             | "PictureField"
             | "RadioButtonField"
             | "TextDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "HTMLDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(fields)
@@ -8078,8 +8178,16 @@ pub(super) fn form_child_item_binding_fields<'a>(tag: &str, fields: &'a [&'a str
     .unwrap_or(0);
     match tag {
         "Table" => fields.get(11).copied().into_iter().collect(),
-        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
-        | "TextDocumentField" => [11usize, 12]
+        "InputField"
+        | "LabelField"
+        | "CheckBoxField"
+        | "PictureField"
+        | "RadioButtonField"
+        | "TextDocumentField"
+        | "CalendarField"
+        | "GraphicalSchemaField"
+        | "SpreadSheetDocumentField"
+        | "HTMLDocumentField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset).copied())
             .collect(),
@@ -9225,6 +9333,10 @@ pub(super) fn format_form_child_item_xml(
             | "PictureField"
             | "RadioButtonField"
             | "TextDocumentField"
+            | "CalendarField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "HTMLDocumentField"
             | "ColumnGroup"
     );
     let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
@@ -9340,7 +9452,10 @@ pub(super) fn format_form_child_item_xml(
     }
     let read_only_before_title = item.tag != "Table"
         && item.read_only == Some(true)
-        && matches!(item.tag, "InputField" | "LabelField");
+        && matches!(
+            item.tag,
+            "InputField" | "LabelField" | "GraphicalSchemaField" | "HTMLDocumentField"
+        );
     if read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
@@ -9475,6 +9590,26 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<Height>{}</Height>\r\n",
             escape_xml_text(height)
         ));
+    }
+    if item.tag == "CalendarField" {
+        if let Some(show_current_date) = item.show_current_date {
+            xml.push_str(&format!(
+                "{tab}\t<ShowCurrentDate>{}</ShowCurrentDate>\r\n",
+                xml_bool(show_current_date)
+            ));
+        }
+        if let Some(width_in_months) = &item.width_in_months {
+            xml.push_str(&format!(
+                "{tab}\t<WidthInMonths>{}</WidthInMonths>\r\n",
+                escape_xml_text(width_in_months)
+            ));
+        }
+        if let Some(height_in_months) = &item.height_in_months {
+            xml.push_str(&format!(
+                "{tab}\t<HeightInMonths>{}</HeightInMonths>\r\n",
+                escape_xml_text(height_in_months)
+            ));
+        }
     }
     if item.tag == "LabelDecoration"
         && let Some(skip_on_input) = item.skip_on_input
