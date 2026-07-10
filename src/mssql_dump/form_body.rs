@@ -5038,7 +5038,10 @@ pub(super) fn parse_form_child_item_with_context(
             }
             append_unique_form_body_events(
                 &mut events,
-                parse_form_document_field_option_events(tag, document_field_options.as_deref()),
+                parse_form_html_document_field_option_events(
+                    tag,
+                    document_field_options.as_deref(),
+                ),
             );
             if matches!(tag, "LabelDecoration" | "PictureDecoration")
                 && let Some(options) = fields
@@ -7639,29 +7642,23 @@ pub(super) fn parse_form_child_item_extended_tooltip_auto_max_width(
     })
 }
 
-pub(super) fn parse_form_document_field_option_events(
+pub(super) fn parse_form_html_document_field_option_events(
     tag: &str,
     options: Option<&[&str]>,
 ) -> Vec<FormBodyEvent> {
-    let event_index = match tag {
-        "CalendarField" => 14,
-        "HTMLDocumentField" => 5,
-        _ => return Vec::new(),
-    };
+    if tag != "HTMLDocumentField" {
+        return Vec::new();
+    }
     let Some(event_fields) = options
-        .and_then(|options| options.get(event_index))
+        .and_then(|options| options.get(5))
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))
     else {
         return Vec::new();
     };
     let mut events = parse_form_child_item_event_record(&event_fields);
     for event in &mut events {
-        event.name = match (tag, event.name.as_str()) {
-            ("CalendarField", "1490ede6-6f33-4c6d-b971-53b2541331ea") => {
-                "OnPeriodOutput".to_string()
-            }
-            ("CalendarField", "2feb1ee9-b750-4352-bb4c-67ba1c608dc6") => "Selection".to_string(),
-            ("HTMLDocumentField", "Click") => "OnClick".to_string(),
+        event.name = match event.name.as_str() {
+            "Click" => "OnClick".to_string(),
             _ => event.name.clone(),
         };
     }

@@ -4698,7 +4698,7 @@ fn parses_document_field_properties_from_common_and_typed_slots() {
 }
 
 #[test]
-fn suppresses_document_field_defaults_and_restores_typed_events() {
+fn suppresses_document_field_defaults_and_restores_html_typed_events() {
     let attribute_names = BTreeMap::from([("5".to_string(), "Payload".to_string())]);
 
     let mut calendar_options = document_field_option_fields_for_test("8");
@@ -4764,14 +4764,9 @@ fn suppresses_document_field_defaults_and_restores_typed_events() {
 }
 
 #[test]
-fn parses_calendar_tooltip_extended_tooltip_and_option_events() {
+fn parses_calendar_tooltip_and_extended_tooltip() {
     let attribute_names = BTreeMap::from([("5".to_string(), "Payload".to_string())]);
-    let mut options = document_field_option_fields_for_test("8");
-    options[14] = concat!(
-        "{2,1490ede6-6f33-4c6d-b971-53b2541331ea,\"PeriodOutput\",",
-        "2feb1ee9-b750-4352-bb4c-67ba1c608dc6,\"DateSelected\",0}"
-    )
-    .to_string();
+    let options = document_field_option_fields_for_test("8");
     let record = document_field_record_with_options_for_test(
         "8",
         "{1,0}",
@@ -4812,13 +4807,6 @@ fn parses_calendar_tooltip_extended_tooltip_and_option_events() {
     assert!(xml.contains("<ToolTipRepresentation>ShowBottom</ToolTipRepresentation>"));
     assert!(!xml.contains("<InputHint>"));
     assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
-    let period_output = xml
-        .find(r#"<Event name="OnPeriodOutput">PeriodOutput</Event>"#)
-        .unwrap();
-    let selection = xml
-        .find(r#"<Event name="Selection">DateSelected</Event>"#)
-        .unwrap();
-    assert!(period_output < selection);
 }
 
 #[test]
