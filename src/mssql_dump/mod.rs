@@ -4100,7 +4100,7 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
         ],
     },
     RawGeneratedTypeSchema {
-        object_codes: &[37],
+        object_codes: &[36, 37],
         conditions: &[],
         slots: &[
             RawGeneratedTypeSlot {

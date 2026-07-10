@@ -25235,6 +25235,49 @@ fn builds_object_family_generated_type_index_entries() {
 }
 
 #[test]
+fn builds_exchange_plan_code_36_generated_type_index_entries() {
+    let exchange_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let object_type_id = "11111111-1111-4111-8111-111111111111";
+    let ref_type_id = "22222222-2222-4222-8222-222222222222";
+    let selection_type_id = "33333333-3333-4333-8333-333333333333";
+    let list_type_id = "44444444-4444-4444-8444-444444444444";
+    let manager_type_id = "55555555-5555-4555-8555-555555555555";
+    let blob = deflate_for_test(
+        format!(
+            "{{1,\r\n{{36,{object_type_id},11111111-1111-4111-8111-111111111112,\
+{ref_type_id},22222222-2222-4222-8222-222222222223,\
+{selection_type_id},33333333-3333-4333-8333-333333333334,\
+{list_type_id},44444444-4444-4444-8444-444444444445,\
+{manager_type_id},55555555-5555-4555-8555-555555555556,\r\n\
+{{0,\r\n{{3,\r\n{{1,0,{exchange_uuid}}},\"Sync\",{{1,\"en\",\"Sync\"}},\"\"}}\r\n}},0}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let rows = vec![ConfigRow {
+        file_name: exchange_uuid.to_string(),
+        part_no: 0,
+        data_size: blob.len() as i64,
+        binary_hex: encode_hex_for_test(&blob),
+    }];
+
+    let index = build_metadata_type_index(&rows);
+
+    for (type_id, generated_type) in [
+        (object_type_id, "ExchangePlanObject"),
+        (ref_type_id, "ExchangePlanRef"),
+        (selection_type_id, "ExchangePlanSelection"),
+        (list_type_id, "ExchangePlanList"),
+        (manager_type_id, "ExchangePlanManager"),
+    ] {
+        let expected = format!("cfg:{generated_type}.Sync");
+        assert_eq!(
+            index.get(type_id).map(String::as_str),
+            Some(expected.as_str())
+        );
+    }
+}
+
+#[test]
 fn extracts_document_generated_types_to_metadata_xml() {
     let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let object_type_id = "11111111-1111-4111-8111-111111111111";
