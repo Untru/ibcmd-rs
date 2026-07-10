@@ -9768,22 +9768,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_horizontal_align)
         ));
     }
-    if item.tag == "UsualGroup" {
-        xml.push_str(&format_form_localized_section(
-            "Title",
-            &item.title,
-            indent + 1,
-        ));
-        if let Some(title_text_color) = &item.title_text_color {
-            xml.push_str(&format!(
-                "{tab}\t<TitleTextColor>{}</TitleTextColor>\r\n",
-                escape_xml_text(title_text_color)
-            ));
-        }
-        if let Some(title_font_xml) = &item.title_font_xml {
-            xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
-        }
-    }
     if item.tag != "Button"
         && let Some(width) = &item.width
     {
@@ -9990,12 +9974,23 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if usual_group_title_first {
+        xml.push_str(&format_form_localized_section(
+            "Title",
+            &item.title,
+            indent + 1,
+        ));
+        if item.tag == "UsualGroup" {
+            if let Some(title_text_color) = &item.title_text_color {
+                xml.push_str(&format!(
+                    "{tab}\t<TitleTextColor>{}</TitleTextColor>\r\n",
+                    escape_xml_text(title_text_color)
+                ));
+            }
+            if let Some(title_font_xml) = &item.title_font_xml {
+                xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
+            }
+        }
         if item.tag == "ButtonGroup" {
-            xml.push_str(&format_form_localized_section(
-                "Title",
-                &item.title,
-                indent + 1,
-            ));
             xml.push_str(&format_form_localized_section(
                 "ToolTip",
                 &item.tooltip,
