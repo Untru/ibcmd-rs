@@ -1731,8 +1731,15 @@ pub(super) fn extract_configuration_source_xml(
     }
     let mut header = parse_metadata_header_from_text(text, header_uuid)?;
     header.uuid = uuid.to_string();
-    let properties =
+    let mut properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
+    properties.used_mobile_application_functionalities =
+        parse_configuration_used_mobile_application_functionalities(
+            text,
+            uuid,
+            source_version.as_str(),
+        )
+        .unwrap_or_default();
     let root_layout = parse_configuration_root_layout(text, uuid);
     let child_objects = root_layout
         .is_none()
@@ -1822,6 +1829,7 @@ pub(super) fn parse_configuration_properties_from_text(
             object_refs,
             "SettingsStorage.",
         ),
+        used_mobile_application_functionalities: Vec::new(),
         compatibility_mode: fields
             .get(43)
             .and_then(|field| configuration_compatibility_mode_xml(field.trim())),
@@ -1854,6 +1862,188 @@ pub(super) fn parse_configuration_default_roles(
 pub(super) fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
     let start = text.find("{68,")?;
     split_1c_braced_fields(text, start)
+}
+
+const CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES: [(u32, &str); 38] = [
+    (0, "Biometrics"),
+    (1, "Location"),
+    (2, "BackgroundLocation"),
+    (3, "BluetoothPrinters"),
+    (4, "WiFiPrinters"),
+    (5, "Contacts"),
+    (6, "Calendars"),
+    (7, "PushNotifications"),
+    (8, "LocalNotifications"),
+    (9, "InAppPurchases"),
+    (10, "PersonalComputerFileExchange"),
+    (11, "Ads"),
+    (12, "NumberDialing"),
+    (13, "CallProcessing"),
+    (14, "CallLog"),
+    (15, "AutoSendSMS"),
+    (16, "ReceiveSMS"),
+    (17, "SMSLog"),
+    (18, "Camera"),
+    (19, "Microphone"),
+    (20, "MusicLibrary"),
+    (21, "PictureAndVideoLibraries"),
+    (22, "AudioPlaybackAndVibration"),
+    (23, "BackgroundAudioPlaybackAndVibration"),
+    (24, "InstallPackages"),
+    (25, "OSBackup"),
+    (26, "ApplicationUsageStatistics"),
+    (27, "BarcodeScanning"),
+    (32, "BackgroundAudioRecording"),
+    (33, "AllFilesAccess"),
+    (34, "Videoconferences"),
+    (35, "NFC"),
+    (36, "DocumentScanning"),
+    (37, "SpeechToText"),
+    (38, "Geofences"),
+    (39, "IncomingShareRequests"),
+    (40, "AllIncomingShareRequestsTypesProcessing"),
+    (41, "TextToSpeech"),
+];
+
+pub(super) fn parse_configuration_used_mobile_application_functionalities(
+    text: &str,
+    uuid: &str,
+    source_version: &str,
+) -> Option<Vec<ConfigurationMobileApplicationFunctionality>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let raw_fields = split_1c_braced_fields(fields.get(53)?.trim(), 0)?;
+    if raw_fields.first()?.trim() != "2" {
+        return None;
+    }
+    let count = raw_fields.get(1)?.trim().parse::<usize>().ok()?;
+    if raw_fields.len() != count.checked_add(3)? {
+        return None;
+    }
+    let expected_count = match source_version {
+        "2.17" | "2.20" => 37,
+        "2.21" => 38,
+        _ => return None,
+    };
+    if count != expected_count {
+        return None;
+    }
+
+    let trailing = parse_1c_bool_flag(raw_fields.last()?.trim())?;
+    let mut functionalities = Vec::with_capacity(38);
+    for ((expected_id, name), field) in CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+        .iter()
+        .take(count)
+        .zip(raw_fields.iter().skip(2).take(count))
+    {
+        let pair = split_1c_braced_fields(field.trim(), 0)?;
+        if pair.len() != 2 || pair.first()?.trim().parse::<u32>().ok()? != *expected_id {
+            return None;
+        }
+        functionalities.push(ConfigurationMobileApplicationFunctionality {
+            name,
+            use_functionality: parse_1c_bool_flag(pair.get(1)?.trim())?,
+        });
+    }
+
+    match (source_version, count) {
+        ("2.17", 37) => {}
+        ("2.20", 37) => functionalities.push(ConfigurationMobileApplicationFunctionality {
+            name: "TextToSpeech",
+            use_functionality: trailing,
+        }),
+        ("2.21", 38) => {}
+        _ => return None,
+    }
+    Some(functionalities)
+}
+
+fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
+    parse_configuration_root_layout(text, uuid)?;
+    let root_fields = split_1c_braced_fields(text, 0)?;
+    let contained_fields = split_1c_braced_fields(root_fields.get(3)?.trim(), 0)?;
+    if contained_fields.len() != 2 {
+        return None;
+    }
+    let payload_fields = split_1c_braced_fields(contained_fields.get(1)?.trim(), 0)?;
+    if payload_fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    let fields = split_1c_braced_fields(payload_fields.get(1)?.trim(), 0)?;
+    match (fields.first()?.trim(), fields.len()) {
+        ("67", 60) => {}
+        ("68", 61) if fields.get(60)?.trim() == "1" => {}
+        ("76", 77) => {}
+        _ => return None,
+    }
+    let mut object_ids = configuration_contained_object_ids(root_fields.get(3)?.trim()).into_iter();
+    let object_id = object_ids.next()?;
+    if object_ids.next().is_some() {
+        return None;
+    }
+    is_configuration_root_property_header(fields.get(1)?.trim(), &object_id).then_some(fields)
+}
+
+fn is_configuration_root_property_header(field: &str, object_id: &str) -> bool {
+    let Some(wrapper) = split_1c_braced_fields(field, 0) else {
+        return false;
+    };
+    if wrapper.len() != 2 || wrapper.first().map(|field| field.trim()) != Some("0") {
+        return false;
+    }
+    let Some(header) = wrapper
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    if header.len() != 9
+        || header.first().map(|field| field.trim()) != Some("3")
+        || header
+            .get(2)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_none()
+        || !is_configuration_root_synonym_field(header.get(3).copied())
+        || header
+            .get(4)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_none()
+        || header.get(5).map(|field| field.trim()) != Some("0")
+        || header.get(6).map(|field| field.trim()) != Some("0")
+        || header.get(7).map(|field| field.trim()) != Some("00000000-0000-0000-0000-000000000000")
+        || header.get(8).map(|field| field.trim()) != Some("0")
+    {
+        return false;
+    }
+    let Some(identity) = header
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    identity.len() == 3
+        && identity.first().map(|field| field.trim()) == Some("1")
+        && identity.get(1).map(|field| field.trim()) == Some("0")
+        && identity.get(2).map(|field| field.trim()) == Some(object_id)
+}
+
+fn is_configuration_root_synonym_field(field: Option<&str>) -> bool {
+    let Some(fields) = field.and_then(|field| split_1c_braced_fields(field.trim(), 0)) else {
+        return false;
+    };
+    let Some(count) = fields
+        .first()
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return false;
+    };
+    let Some(expected_len) = count.checked_mul(2).and_then(|value| value.checked_add(1)) else {
+        return false;
+    };
+    fields.len() == expected_len
+        && fields
+            .iter()
+            .skip(1)
+            .all(|field| parse_1c_quoted_string(field.trim()).is_some())
 }
 
 const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;

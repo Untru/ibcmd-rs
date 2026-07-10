@@ -23250,6 +23250,87 @@ fn flat_configuration_fixture() -> (String, String, BTreeMap<String, String>) {
     (uuid.to_string(), text, object_refs)
 }
 
+fn configuration_mobile_functionality_ids(count: usize) -> Vec<u32> {
+    let mut ids = (0..=27).collect::<Vec<_>>();
+    ids.extend(32..=if count == 37 { 40 } else { 41 });
+    ids
+}
+
+fn configuration_mobile_raw(
+    declared_count: usize,
+    ids: &[u32],
+    non_bool_index: Option<usize>,
+    trailing: Option<&str>,
+) -> String {
+    let mut fields = vec!["2".to_string(), declared_count.to_string()];
+    fields.extend(ids.iter().enumerate().map(|(index, id)| {
+        let value = if non_bool_index == Some(index) {
+            "2"
+        } else if index % 3 == 0 {
+            "1"
+        } else {
+            "0"
+        };
+        format!("{{{id},{value}}}")
+    }));
+    if let Some(trailing) = trailing {
+        fields.push(trailing.to_string());
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn flat_configuration_mobile_text(
+    code: u32,
+    field_count: usize,
+    mobile_raw: &str,
+) -> (String, String) {
+    let (uuid, text, _) = flat_configuration_fixture();
+    let object_id = "20000000-0000-4000-8000-000000000001";
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let mut fields = vec!["0".to_string(); field_count];
+    fields[0] = code.to_string();
+    fields[1] = format!(
+        "{{0,{{3,{{1,0,{object_id}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,{zero_uuid},0}}}}"
+    );
+    fields[53] = mobile_raw.to_string();
+    if code == 68 && field_count > 60 {
+        fields[60] = "1".to_string();
+    }
+    let properties = format!("{{{}}}", fields.join(","));
+    let start = text.find("{67,").unwrap();
+    let end = scan_1c_braced_value(&text, start).unwrap();
+    (
+        uuid,
+        format!("{}{}{}", &text[..start], properties, &text[end..]),
+    )
+}
+
+fn configuration_mobile_property_line_count(xml: &str) -> usize {
+    let start = xml
+        .find("\t\t\t<UsedMobileApplicationFunctionalities>\r\n")
+        .unwrap();
+    let end_tag = "\t\t\t</UsedMobileApplicationFunctionalities>\r\n";
+    let end = xml[start..].find(end_tag).unwrap() + start + end_tag.len();
+    xml[start..end].lines().count()
+}
+
+fn replace_flat_configuration_property_field(text: &str, index: usize, value: &str) -> String {
+    let start = ["{67,", "{68,", "{76,"]
+        .iter()
+        .filter_map(|marker| text.find(marker))
+        .min()
+        .unwrap();
+    let end = scan_1c_braced_value(text, start).unwrap();
+    let mut fields = split_1c_braced_fields(text, start)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    fields[index] = value.to_string();
+    let properties = format!("{{{}}}", fields.join(","));
+    format!("{}{}{}", &text[..start], properties, &text[end..])
+}
+
 #[test]
 fn extracts_flat_configuration_internal_info_and_reference_children() {
     let (uuid, text, object_refs) = flat_configuration_fixture();
@@ -23378,6 +23459,238 @@ fn flat_configuration_layout_rejects_count_mismatches_and_root_control_rows() {
             InfobaseConfigSourceVersion::V2_20,
         )
         .is_none()
+    );
+}
+
+#[test]
+fn extracts_configuration_used_mobile_application_functionalities_for_proven_layouts() {
+    let raw37 = configuration_mobile_raw(
+        37,
+        &configuration_mobile_functionality_ids(37),
+        None,
+        Some("1"),
+    );
+    let raw38 = configuration_mobile_raw(
+        38,
+        &configuration_mobile_functionality_ids(38),
+        None,
+        Some("0"),
+    );
+
+    let (uuid, text) = flat_configuration_mobile_text(67, 60, &raw37);
+    let v17 =
+        parse_configuration_used_mobile_application_functionalities(&text, &uuid, "2.17").unwrap();
+    assert_eq!(v17.len(), 37);
+    assert_eq!(v17.first().map(|item| item.name), Some("Biometrics"));
+    assert_eq!(
+        v17.last().map(|item| item.name),
+        Some("AllIncomingShareRequestsTypesProcessing")
+    );
+    let mut v17_properties = ConfigurationProperties::default();
+    v17_properties.used_mobile_application_functionalities = v17;
+    let v17_xml = format_configuration_source_xml(
+        &MetadataHeader {
+            uuid: uuid.clone(),
+            name: "DemoApp".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        &v17_properties,
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    assert_eq!(configuration_mobile_property_line_count(&v17_xml), 150);
+    assert!(!v17_xml.contains("TextToSpeech"));
+
+    for (code, field_count) in [(67, 60), (68, 61), (76, 77)] {
+        let (uuid, v20_text) = flat_configuration_mobile_text(code, field_count, &raw37);
+        let v20_xml = extract_configuration_source_xml(
+            &v20_text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert_eq!(configuration_mobile_property_line_count(&v20_xml), 154);
+        assert_eq!(
+            v20_xml.matches("\t\t\t\t<app:functionality>\r\n").count(),
+            38
+        );
+        assert!(v20_xml.contains(
+            "<app:functionality>TextToSpeech</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>"
+        ));
+        assert!(
+            v20_xml.find("<Comment/>").unwrap()
+                < v20_xml
+                    .find("<UsedMobileApplicationFunctionalities>")
+                    .unwrap()
+        );
+        assert!(
+            v20_xml
+                .find("</UsedMobileApplicationFunctionalities>")
+                .unwrap()
+                < v20_xml.find("</Properties>").unwrap()
+        );
+
+        let (uuid, v21_text) = flat_configuration_mobile_text(code, field_count, &raw38);
+        let v21_xml = extract_configuration_source_xml(
+            &v21_text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        assert_eq!(configuration_mobile_property_line_count(&v21_xml), 154);
+        assert_eq!(
+            v21_xml.matches("\t\t\t\t<app:functionality>\r\n").count(),
+            38
+        );
+        assert!(v21_xml.contains(
+            "<app:functionality>TextToSpeech</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>"
+        ));
+    }
+}
+
+#[test]
+fn configuration_used_mobile_application_functionalities_fail_closed() {
+    let ids37 = configuration_mobile_functionality_ids(37);
+    let ids38 = configuration_mobile_functionality_ids(38);
+    let valid37 = configuration_mobile_raw(37, &ids37, None, Some("0"));
+    let valid38 = configuration_mobile_raw(38, &ids38, None, Some("0"));
+
+    let mut reordered = ids37.clone();
+    reordered.swap(0, 1);
+    let mut duplicate = ids37.clone();
+    duplicate[1] = duplicate[0];
+    let mut unknown = ids37.clone();
+    unknown[1] = 99;
+    let malformed_raws = [
+        (
+            "declared count",
+            configuration_mobile_raw(36, &ids37, None, Some("0")),
+        ),
+        (
+            "missing pair",
+            configuration_mobile_raw(37, &ids37[..36], None, Some("0")),
+        ),
+        (
+            "extra pair",
+            configuration_mobile_raw(37, &ids38, None, Some("0")),
+        ),
+        (
+            "reordered",
+            configuration_mobile_raw(37, &reordered, None, Some("0")),
+        ),
+        (
+            "duplicate",
+            configuration_mobile_raw(37, &duplicate, None, Some("0")),
+        ),
+        (
+            "unknown",
+            configuration_mobile_raw(37, &unknown, None, Some("0")),
+        ),
+        (
+            "pair bool",
+            configuration_mobile_raw(37, &ids37, Some(4), Some("0")),
+        ),
+        (
+            "missing trailing",
+            configuration_mobile_raw(37, &ids37, None, None),
+        ),
+        (
+            "trailing bool",
+            configuration_mobile_raw(37, &ids37, None, Some("2")),
+        ),
+        (
+            "malformed trailing",
+            configuration_mobile_raw(37, &ids37, None, Some("{0}")),
+        ),
+    ];
+    for (case, raw) in malformed_raws {
+        let (uuid, text) = flat_configuration_mobile_text(67, 60, &raw);
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(
+            !xml.contains("UsedMobileApplicationFunctionalities"),
+            "{case}: {xml}"
+        );
+        assert!(!xml.contains("<app:functionality>"), "{case}: {xml}");
+    }
+
+    for (case, code, field_count, raw, source_version) in [
+        ("67 field count", 67, 61, valid37.as_str(), "2.20"),
+        ("68 field count", 68, 60, valid38.as_str(), "2.21"),
+        ("76 field count", 76, 76, valid38.as_str(), "2.21"),
+        ("2.17 count", 68, 61, valid38.as_str(), "2.17"),
+        ("2.20 count", 76, 77, valid38.as_str(), "2.20"),
+        ("2.21 count", 67, 60, valid37.as_str(), "2.21"),
+        ("unknown source version", 67, 60, valid37.as_str(), "9.99"),
+    ] {
+        let (uuid, text) = flat_configuration_mobile_text(code, field_count, raw);
+        assert!(
+            parse_configuration_used_mobile_application_functionalities(
+                &text,
+                &uuid,
+                source_version
+            )
+            .is_none(),
+            "{case}"
+        );
+    }
+
+    let (uuid, wrong_tail) = flat_configuration_mobile_text(68, 61, &valid38);
+    let wrong_tail = replace_flat_configuration_property_field(&wrong_tail, 60, "0");
+    assert!(
+        parse_configuration_used_mobile_application_functionalities(&wrong_tail, &uuid, "2.21")
+            .is_none()
+    );
+
+    let overflow_raw = format!("{{2,{},0}}", usize::MAX);
+    let (uuid, overflow_text) = flat_configuration_mobile_text(67, 60, &overflow_raw);
+    assert!(
+        parse_configuration_used_mobile_application_functionalities(&overflow_text, &uuid, "2.20")
+            .is_none()
+    );
+
+    let (uuid, synonym_overflow) = flat_configuration_mobile_text(67, 60, &valid37);
+    let synonym_overflow =
+        synonym_overflow.replacen(r#"{1,"en","Demo app"}"#, &format!("{{{}}}", usize::MAX), 1);
+    assert!(
+        parse_configuration_used_mobile_application_functionalities(
+            &synonym_overflow,
+            &uuid,
+            "2.20"
+        )
+        .is_none()
+    );
+
+    let invalid_slot = "{0}";
+    let (uuid, mut decoy) = flat_configuration_mobile_text(67, 60, invalid_slot);
+    let second_id = "20000000-0000-4000-8000-000000000002";
+    let marker = format!("{{1,0,{second_id}}}");
+    let prefix = format!("{{{marker}}}");
+    let replacement = format!("{{{marker},{valid37}}}");
+    decoy = decoy.replacen(&prefix, &replacement, 1);
+    assert_ne!(
+        decoy,
+        flat_configuration_mobile_text(67, 60, invalid_slot).1
+    );
+    let xml = extract_configuration_source_xml(
+        &decoy,
+        &uuid,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    assert!(xml.contains("<InternalInfo>"), "{xml}");
+    assert!(
+        !xml.contains("UsedMobileApplicationFunctionalities"),
+        "{xml}"
     );
 }
 

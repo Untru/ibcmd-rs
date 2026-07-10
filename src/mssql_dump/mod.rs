@@ -3759,7 +3759,14 @@ struct ConfigurationProperties {
     reports_user_settings_storage: Option<ConfigurationRootReference>,
     reports_variants_storage: Option<ConfigurationRootReference>,
     form_data_settings_storage: Option<ConfigurationRootReference>,
+    used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
     compatibility_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationMobileApplicationFunctionality {
+    name: &'static str,
+    use_functionality: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -11384,6 +11391,25 @@ fn format_configuration_source_xml(
         "FormDataSettingsStorage",
         properties.form_data_settings_storage.as_ref(),
     );
+    if !properties
+        .used_mobile_application_functionalities
+        .is_empty()
+    {
+        insert.push_str("\t\t\t<UsedMobileApplicationFunctionalities>\r\n");
+        for functionality in &properties.used_mobile_application_functionalities {
+            insert.push_str("\t\t\t\t<app:functionality>\r\n");
+            insert.push_str(&format!(
+                "\t\t\t\t\t<app:functionality>{}</app:functionality>\r\n",
+                escape_xml_element_text(functionality.name)
+            ));
+            insert.push_str(&format!(
+                "\t\t\t\t\t<app:use>{}</app:use>\r\n",
+                xml_bool(functionality.use_functionality)
+            ));
+            insert.push_str("\t\t\t\t</app:functionality>\r\n");
+        }
+        insert.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
+    }
     push_optional_simple_property_xml(
         &mut insert,
         "CompatibilityMode",
