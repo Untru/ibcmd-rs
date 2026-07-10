@@ -3159,6 +3159,10 @@ struct SubsystemProperties {
     include_help_in_contents: bool,
     include_in_command_interface: bool,
     use_one_command: bool,
+    explanation: Vec<(String, String)>,
+    picture_ref: Option<String>,
+    picture_load_transparent: bool,
+    content: Vec<String>,
     child_subsystems: Vec<String>,
 }
 
@@ -4640,7 +4644,8 @@ fn extract_metadata_source_xml_from_text_row(
         format_functional_options_parameter_source_xml(&header, &properties, source_version)
             .into_bytes()
     } else if kind == "Subsystem" {
-        let subsystem = parse_subsystem_properties_from_text(text, uuid, subsystem_refs)?;
+        let subsystem =
+            parse_subsystem_properties_from_text(text, uuid, object_refs, subsystem_refs)?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
         let exchange_plan =
@@ -4890,6 +4895,7 @@ fn parse_default_list_form_metadata_properties_from_text(
 fn parse_subsystem_properties_from_text(
     text: &str,
     uuid: &str,
+    object_refs: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<SubsystemProperties> {
     let fields = metadata_object_fields(text)?;
@@ -4898,60 +4904,68 @@ fn parse_subsystem_properties_from_text(
     {
         return None;
     }
-    let first_scalar = fields
-        .get(2)
-        .and_then(|field| parse_1c_bool_field(Some(*field)));
-    let second_scalar = fields
-        .get(3)
-        .and_then(|field| parse_1c_bool_field(Some(*field)));
-    let third_scalar = fields
-        .get(4)
-        .and_then(|field| parse_1c_bool_field(Some(*field)));
-    let (include_help_in_contents, include_in_command_interface, use_one_command) =
-        if third_scalar.is_some() {
-            (
-                second_scalar.unwrap_or(false),
-                third_scalar.unwrap_or(true),
-                first_scalar.unwrap_or(false),
-            )
-        } else if second_scalar.is_some() {
-            (
-                first_scalar.unwrap_or(false),
-                second_scalar.unwrap_or(true),
-                false,
-            )
-        } else {
-            (false, first_scalar.unwrap_or(true), false)
-        };
+    let root_fields = split_1c_braced_fields(text, 0)?;
+    let (picture_ref, picture_load_transparent) =
+        parse_command_group_picture_value(fields.get(5)?, object_refs)?;
     Some(SubsystemProperties {
-        include_help_in_contents,
-        include_in_command_interface,
-        use_one_command,
-        child_subsystems: parse_subsystem_child_references(&fields, uuid, subsystem_refs),
+        include_help_in_contents: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(false),
+        include_in_command_interface: parse_1c_bool_field(fields.get(4).copied()).unwrap_or(true),
+        use_one_command: parse_1c_bool_field(fields.get(8).copied()).unwrap_or(false),
+        explanation: fields
+            .get(6)
+            .map(|field| parse_1c_synonyms(field))
+            .unwrap_or_default(),
+        picture_ref,
+        picture_load_transparent,
+        content: parse_subsystem_content(fields.get(7).copied(), object_refs),
+        child_subsystems: parse_subsystem_child_references(
+            root_fields.get(3).copied(),
+            subsystem_refs,
+        ),
     })
 }
 
+fn parse_subsystem_content(
+    field: Option<&str>,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(fields) = field.and_then(|field| split_1c_braced_fields(field, 0)) else {
+        return Vec::new();
+    };
+    if fields.first().map(|field| field.trim()) != Some("0") {
+        return Vec::new();
+    }
+    let count = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .collect()
+}
+
 fn parse_subsystem_child_references(
-    fields: &[&str],
-    uuid: &str,
+    field: Option<&str>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut children = Vec::new();
-    for field in fields.iter().skip(3) {
-        for child_uuid in uuid_like_values_in_text_order(field) {
-            if child_uuid == uuid || !seen.insert(child_uuid.clone()) {
-                continue;
-            }
-            let Some(subsystem_ref) = subsystem_refs.get(&child_uuid) else {
-                continue;
-            };
-            if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
-                children.push(reference);
-            }
-        }
-    }
-    children
+    let Some(fields) = field.and_then(|field| split_1c_braced_fields(field, 0)) else {
+        return Vec::new();
+    };
+    let count = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_uuid_field(field.trim()))
+        .filter_map(|uuid| subsystem_refs.get(&uuid))
+        .filter_map(|subsystem_ref| source_path_file_stem(&subsystem_ref.relative_path))
+        .collect()
 }
 
 fn parse_exchange_plan_properties_from_text(
@@ -10774,21 +10788,51 @@ fn format_subsystem_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("Subsystem", header, source_version);
     if let Some(offset) = xml.find("\t\t</Properties>") {
-        xml.insert_str(
-            offset,
-            &format!(
-                "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+        let mut properties = format!(
+            "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
 \t\t\t<IncludeInCommandInterface>{}</IncludeInCommandInterface>\r\n\
 \t\t\t<UseOneCommand>{}</UseOneCommand>\r\n",
-                xml_bool(subsystem.include_help_in_contents),
-                xml_bool(subsystem.include_in_command_interface),
-                xml_bool(subsystem.use_one_command)
-            ),
+            xml_bool(subsystem.include_help_in_contents),
+            xml_bool(subsystem.include_in_command_interface),
+            xml_bool(subsystem.use_one_command)
         );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "Explanation",
+            &subsystem.explanation,
+        );
+        if let Some(reference) = &subsystem.picture_ref {
+            properties.push_str(&format!(
+                "\t\t\t<Picture>\r\n\
+\t\t\t\t<xr:Ref>{}</xr:Ref>\r\n\
+\t\t\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+\t\t\t</Picture>\r\n",
+                escape_xml_text(reference),
+                xml_bool(subsystem.picture_load_transparent)
+            ));
+        } else {
+            properties.push_str("\t\t\t<Picture/>\r\n");
+        }
+        if subsystem.content.is_empty() {
+            properties.push_str("\t\t\t<Content/>\r\n");
+        } else {
+            properties.push_str("\t\t\t<Content>\r\n");
+            for reference in &subsystem.content {
+                properties.push_str(&format!(
+                    "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                    escape_xml_text(reference)
+                ));
+            }
+            properties.push_str("\t\t\t</Content>\r\n");
+        }
+        xml.insert_str(offset, &properties);
     }
-    if !subsystem.child_subsystems.is_empty()
-        && let Some(offset) = xml.find("\t</Subsystem>")
-    {
+    if let Some(offset) = xml.find("\t</Subsystem>") {
+        if subsystem.child_subsystems.is_empty() {
+            xml.insert_str(offset, "\t\t<ChildObjects/>\r\n");
+            return xml;
+        }
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
         for reference in &subsystem.child_subsystems {
             child_objects.push_str(&format!(
