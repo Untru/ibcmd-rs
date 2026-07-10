@@ -442,9 +442,16 @@ Confirmed by export:
 - Broadly admitting the full FormattedDocumentField subtree was rejected. It
   improved `CommandName` to `+0/-26` but increased full insertions from 32044
   to 32051. Exact rollback comparison isolated one false localized `Title`
-  block and one false `VerticalScroll` property (seven diff lines total); the
+  block and an order-only `VerticalScroll` line (seven added lines total); the
   accepted baseline `1629 files, +32044/-222947`, `CommandName +0/-39` was
-  restored before further work.
+  restored before further work. The follow-up native audit proved that
+  `FormattedDocumentField` Title is slot 9 only, while slot 10 is ToolTip and
+  is not InputHint. It also proved the root order `VerticalScroll`,
+  `CommandSet`, `UseForFoldersAndItems` with matrices 20/20, 6/6, and 20/20
+  respectively and zero reverse-order cases. The accepted structural gate
+  moved the then-current full diff from `1616 files, +31553/-221996` to
+  `1616 files, +31526/-221470`; `CommandName` improved from `+0/-39` to
+  `+0/-26` and `CommandSource` remained `+0/-0`.
 - `679b62d9-ff72-4329-bf3a-c0c32b311dd2` maps to
   `Form.StandardCommand.Cancel`.
 - `f3613d5c-20c6-46e5-b4d5-7d712ece1296` maps to
@@ -638,6 +645,13 @@ The accepted gate restored the complete 442-line ChartOfAccounts payload and
 diff, while the full diff moved from `1629 files, +32044/-222947` to
 `1627 files, +32044/-222487`. Added production lines contained no UUID literals,
 Cyrillic object names, or object/path special cases.
+
+The remaining generic Predefined diff was lexical and closed exactly over all
+314 items: 276 empty `Code` values require `<Code/>`, 207 empty `Description`
+values require `<Description/>`, and eight descriptions retain literal quotes
+in XML element text. The counts sum to all 491 remaining line pairs. After the
+canonical text-element gate, all 19 Predefined files had zero content diff and
+the full diff moved to `1616 files, +31553/-221996`.
 
 ## ConfigDumpInfo aggregate
 
