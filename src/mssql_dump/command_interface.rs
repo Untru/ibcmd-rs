@@ -57,20 +57,6 @@ pub(super) fn parse_command_interface_blob(
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
 ) -> Option<CommandInterface> {
-    parse_command_interface_blob_with_subsystem_refs(
-        bytes,
-        command_refs,
-        metadata_refs,
-        &BTreeMap::new(),
-    )
-}
-
-pub(super) fn parse_command_interface_blob_with_subsystem_refs(
-    bytes: &[u8],
-    command_refs: &BTreeMap<String, String>,
-    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
-    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
-) -> Option<CommandInterface> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
@@ -78,20 +64,100 @@ pub(super) fn parse_command_interface_blob_with_subsystem_refs(
         return None;
     }
 
-    parse_command_interface_sectioned_fields(&fields, command_refs, metadata_refs, subsystem_refs)
+    parse_command_interface_order_fields(&fields, command_refs, metadata_refs)
+        .or_else(|| parse_command_interface_subsystems_order_fields(&fields, metadata_refs))
+        .or_else(|| parse_command_interface_visibility_fields(&fields, command_refs, metadata_refs))
 }
 
-pub(super) fn parse_command_interface_sectioned_fields(
+pub(super) fn parse_command_interface_order_fields(
     fields: &[&str],
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
-    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<CommandInterface> {
-    let mut index = 1usize;
+    if fields.get(1)?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(4)?.trim().parse::<usize>().ok()?;
+    let default_group_uuid = fields.get(5)?.trim();
+    if !is_uuid_text(default_group_uuid) {
+        return None;
+    }
+    let mut commands_order = Vec::with_capacity(count);
+    let mut groups_order = Vec::<String>::new();
+    let mut index = 6usize;
+    for _ in 0..count {
+        let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
+        index += 1;
+        let code = command_ref.first()?.trim();
+        let uuid = command_ref.get(1).map(|value| value.trim())?;
+        if !code.chars().all(|ch| ch.is_ascii_digit()) || !is_uuid_text(uuid) {
+            return None;
+        }
+        let group_uuid = match fields.get(index)?.trim() {
+            "0" => default_group_uuid,
+            value => value,
+        };
+        index += 1;
+        if !is_uuid_text(group_uuid) {
+            return None;
+        }
+        let name = command_interface_command_name(code, uuid, command_refs, metadata_refs);
+        let command_group = command_interface_group_name(group_uuid, metadata_refs);
+        if !groups_order.iter().any(|group| group == &command_group) {
+            groups_order.push(command_group.clone());
+        }
+        commands_order.push(CommandInterfaceOrderEntry {
+            name,
+            command_group,
+        });
+    }
 
-    // Each section starts with a 0/1 presence marker; present sections add a count.
-    let count = parse_command_interface_section_count(fields, &mut index)?;
+    Some(CommandInterface {
+        commands_order,
+        commands_placement: Vec::new(),
+        groups_order,
+        commands_visibility: Vec::new(),
+        subsystems_order: Vec::new(),
+    })
+}
+
+pub(super) fn parse_command_interface_subsystems_order_fields(
+    fields: &[&str],
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
+    if fields.get(1)?.trim() != "0"
+        || fields.get(2)?.trim() != "0"
+        || fields.get(3)?.trim() != "0"
+        || fields.get(4)?.trim() != "1"
+    {
+        return None;
+    }
+    let count = fields.get(5)?.trim().parse::<usize>().ok()?;
+    let mut subsystems_order = Vec::with_capacity(count);
+    let mut index = 6usize;
+    for _ in 0..count {
+        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
+        subsystems_order.push(command_interface_subsystem_name(&uuid, metadata_refs));
+        index += 1;
+    }
+
+    Some(CommandInterface {
+        commands_order: Vec::new(),
+        commands_placement: Vec::new(),
+        groups_order: Vec::new(),
+        commands_visibility: Vec::new(),
+        subsystems_order,
+    })
+}
+
+pub(super) fn parse_command_interface_visibility_fields(
+    fields: &[&str],
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<CommandInterface> {
+    let count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut commands_visibility = Vec::with_capacity(count);
+    let mut index = 3usize;
     for _ in 0..count {
         let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
         index += 1;
@@ -112,93 +178,110 @@ pub(super) fn parse_command_interface_sectioned_fields(
         commands_visibility.push(CommandInterfaceVisibilityEntry { name, common });
     }
 
-    let count = parse_command_interface_section_count(fields, &mut index)?;
-    let mut commands_placement = Vec::with_capacity(count);
-    for _ in 0..count {
-        let name = parse_command_interface_command_name_field(
-            fields.get(index)?,
-            command_refs,
-            metadata_refs,
-        )?;
-        index += 1;
-        let command_group = command_interface_group_name(fields.get(index)?.trim(), metadata_refs);
-        index += 1;
-        let placement = command_interface_placement_name(fields.get(index)?.trim())?;
-        index += 1;
-        commands_placement.push(CommandInterfacePlacementEntry {
-            name,
-            command_group,
-            placement,
-        });
-    }
-
-    let count = parse_command_interface_section_count(fields, &mut index)?;
-    let mut commands_order = Vec::with_capacity(count);
-    for _ in 0..count {
-        let command_group = command_interface_group_name(fields.get(index)?.trim(), metadata_refs);
-        index += 1;
-        let name = parse_command_interface_command_name_field(
-            fields.get(index)?,
-            command_refs,
-            metadata_refs,
-        )?;
-        index += 1;
-        commands_order.push(CommandInterfaceOrderEntry {
-            name,
-            command_group,
-        });
-    }
-
-    let count = parse_command_interface_section_count(fields, &mut index)?;
-    let mut subsystems_order = Vec::with_capacity(count);
-    for _ in 0..count {
-        let uuid = parse_non_zero_uuid(fields.get(index)?.trim())?;
-        subsystems_order.push(command_interface_subsystem_name(
-            &uuid,
-            metadata_refs,
-            subsystem_refs,
-        ));
-        index += 1;
-    }
-
-    let count = parse_command_interface_section_count(fields, &mut index)?;
-    let mut groups_order = Vec::with_capacity(count);
-    for _ in 0..count {
-        groups_order.push(command_interface_group_name(
-            fields.get(index)?.trim(),
-            metadata_refs,
-        ));
-        index += 1;
-    }
-
-    if fields.get(index)?.trim() != "0" || index + 1 != fields.len() {
-        return None;
-    }
+    let commands_placement =
+        parse_command_interface_placement_tail(fields, &mut index, command_refs, metadata_refs)
+            .unwrap_or_default();
+    let commands_order =
+        parse_command_interface_order_tail(fields, &mut index, command_refs, metadata_refs)
+            .unwrap_or_default();
+    let groups_order = parse_command_interface_groups_order_tail(fields, &mut index, metadata_refs)
+        .unwrap_or_default();
 
     Some(CommandInterface {
         commands_order,
         commands_placement,
         groups_order,
         commands_visibility,
-        subsystems_order,
+        subsystems_order: Vec::new(),
     })
 }
 
-pub(super) fn parse_command_interface_section_count(
+pub(super) fn parse_command_interface_placement_tail(
     fields: &[&str],
     index: &mut usize,
-) -> Option<usize> {
-    let marker = fields.get(*index)?.trim();
-    *index += 1;
-    match marker {
-        "0" => Some(0),
-        "1" => {
-            let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
-            *index += 1;
-            Some(count)
-        }
-        _ => None,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<CommandInterfacePlacementEntry>> {
+    if fields.get(*index)?.trim() != "1" {
+        return None;
     }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = parse_command_interface_command_name_field(
+            fields.get(*index)?,
+            command_refs,
+            metadata_refs,
+        )?;
+        *index += 1;
+        let command_group = command_interface_group_name(fields.get(*index)?.trim(), metadata_refs);
+        *index += 1;
+        let placement = command_interface_placement_name(fields.get(*index)?.trim())?;
+        *index += 1;
+        entries.push(CommandInterfacePlacementEntry {
+            name,
+            command_group,
+            placement,
+        });
+    }
+    Some(entries)
+}
+
+pub(super) fn parse_command_interface_order_tail(
+    fields: &[&str],
+    index: &mut usize,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<CommandInterfaceOrderEntry>> {
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let command_group = command_interface_group_name(fields.get(*index)?.trim(), metadata_refs);
+        *index += 1;
+        let name = parse_command_interface_command_name_field(
+            fields.get(*index)?,
+            command_refs,
+            metadata_refs,
+        )?;
+        *index += 1;
+        entries.push(CommandInterfaceOrderEntry {
+            name,
+            command_group,
+        });
+    }
+    Some(entries)
+}
+
+pub(super) fn parse_command_interface_groups_order_tail(
+    fields: &[&str],
+    index: &mut usize,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+) -> Option<Vec<String>> {
+    if fields.get(*index)?.trim() == "0" {
+        *index += 1;
+    }
+    if fields.get(*index)?.trim() != "1" {
+        return None;
+    }
+    *index += 1;
+    let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
+    *index += 1;
+    let mut groups = Vec::with_capacity(count);
+    for _ in 0..count {
+        groups.push(command_interface_group_name(
+            fields.get(*index)?.trim(),
+            metadata_refs,
+        ));
+        *index += 1;
+    }
+    Some(groups)
 }
 
 pub(super) fn parse_command_interface_command_name_field(
@@ -258,14 +341,7 @@ pub(super) fn command_interface_group_name(
 pub(super) fn command_interface_subsystem_name(
     uuid: &str,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
-    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> String {
-    if let Some(name) = subsystem_refs
-        .get(uuid)
-        .and_then(subsystem_source_reference_name)
-    {
-        return name;
-    }
     metadata_refs
         .get(uuid)
         .filter(|reference| reference.kind == "Subsystem")
@@ -487,11 +563,16 @@ pub(super) fn command_interface_command_name(
         return name.clone();
     }
     if let Some(metadata) = metadata_refs.get(uuid) {
-        if let Some(standard) = command_interface_standard_command_for_code(&metadata.kind, code) {
+        if matches!(code, "0" | "100")
+            && let Some(standard) = command_interface_standard_command(&metadata.kind)
+        {
             return format!(
                 "{}.{}.StandardCommand.{standard}",
                 metadata.kind, metadata.name
             );
+        }
+        if code == "1" {
+            return format!("{}.{}.StandardCommand.Create", metadata.kind, metadata.name);
         }
     }
 
@@ -514,22 +595,6 @@ pub(super) fn command_interface_standard_command(kind: &str) -> Option<&'static 
         | "ExchangePlan"
         | "InformationRegister"
         | "Task" => Some("OpenList"),
-        _ => None,
-    }
-}
-
-pub(super) fn command_interface_standard_command_for_code(
-    kind: &str,
-    code: &str,
-) -> Option<&'static str> {
-    match (code, kind) {
-        ("0" | "100", "Constant") => Some("Open"),
-        ("0" | "100", "CalculationRegister") => Some("OpenList"),
-        ("0" | "100", _) => command_interface_standard_command(kind),
-        ("1", "BusinessProcess" | "Catalog" | "Document") => Some("Create"),
-        ("1", "ChartOfCharacteristicTypes") => Some("CreateFolder"),
-        ("2", "Catalog") => Some("CreateFolder"),
-        ("2", "ChartOfCharacteristicTypes") => Some("Create"),
         _ => None,
     }
 }
@@ -582,16 +647,6 @@ pub(super) fn format_command_interface_xml(command_interface: &CommandInterface)
         }
         xml.push_str("\t</CommandsOrder>\r\n");
     }
-    if !command_interface.subsystems_order.is_empty() {
-        xml.push_str("\t<SubsystemsOrder>\r\n");
-        for subsystem in &command_interface.subsystems_order {
-            xml.push_str(&format!(
-                "\t\t<Subsystem>{}</Subsystem>\r\n",
-                escape_xml_text(subsystem)
-            ));
-        }
-        xml.push_str("\t</SubsystemsOrder>\r\n");
-    }
     if !command_interface.groups_order.is_empty() {
         xml.push_str("\t<GroupsOrder>\r\n");
         for group in &command_interface.groups_order {
@@ -601,6 +656,16 @@ pub(super) fn format_command_interface_xml(command_interface: &CommandInterface)
             ));
         }
         xml.push_str("\t</GroupsOrder>\r\n");
+    }
+    if !command_interface.subsystems_order.is_empty() {
+        xml.push_str("\t<SubsystemsOrder>\r\n");
+        for subsystem in &command_interface.subsystems_order {
+            xml.push_str(&format!(
+                "\t\t<Subsystem>{}</Subsystem>\r\n",
+                escape_xml_text(subsystem)
+            ));
+        }
+        xml.push_str("\t</SubsystemsOrder>\r\n");
     }
     xml.push_str("</CommandInterface>");
     xml
