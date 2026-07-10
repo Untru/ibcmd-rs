@@ -292,6 +292,7 @@ struct DumpRowContext<'a> {
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
     object_refs: &'a BTreeMap<String, String>,
+    predefined_item_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
@@ -517,8 +518,15 @@ fn dump_table_rows_with_options(
     } else {
         StandaloneContentReferences::default()
     };
-    let body_owners = if extract_metadata_xml {
+    let body_owners = if extract_metadata_xml || needs_source_layout_refs {
         build_body_owner_source_index_from_texts(&metadata_texts, &subsystem_refs)
+    } else {
+        BTreeMap::new()
+    };
+    let needs_predefined_item_refs =
+        predefined_data_needs_item_references(&file_names_owned, &body_owners);
+    let predefined_item_refs = if needs_predefined_item_refs {
+        build_predefined_item_reference_index(&rows, &body_owners, &type_index, &object_refs)?
     } else {
         BTreeMap::new()
     };
@@ -540,6 +548,7 @@ fn dump_table_rows_with_options(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,
@@ -1226,14 +1235,42 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_standalone_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let body_owners = if extract_metadata_xml
-        && (source_reference_needs.body_owners || build_selected_local_refs)
+    let body_owners = if (extract_metadata_xml
+        && (source_reference_needs.body_owners || build_selected_local_refs))
+        || needs_source_layout_refs
     {
         build_body_owner_source_index_from_texts(&index_metadata_texts, &subsystem_refs)
     } else {
         BTreeMap::new()
     };
     timings.prepare_body_owners_ms += elapsed_ms(index_part_started);
+    let needs_predefined_item_refs =
+        predefined_data_needs_item_references(&file_names, &body_owners);
+    let predefined_item_refs = if needs_predefined_item_refs {
+        let predefined_body_file_names = predefined_data_body_file_names(&body_owners);
+        let metadata_fetch_started = Instant::now();
+        let rows = if predefined_body_file_names.is_empty() {
+            Vec::new()
+        } else {
+            fetch_config_rows_bcp(
+                sqlcmd,
+                server,
+                user,
+                password,
+                database,
+                table,
+                &predefined_body_file_names,
+            )?
+        };
+        let elapsed = elapsed_ms(metadata_fetch_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        if !predefined_body_file_names.is_empty() {
+            timings.prepare_metadata_fetch_bcp_ms += elapsed;
+        }
+        build_predefined_item_reference_index(&rows, &body_owners, &type_index, &object_refs)?
+    } else {
+        BTreeMap::new()
+    };
     let configuration_module_groups = configuration_module_groups(&file_names);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
@@ -1254,6 +1291,7 @@ fn dump_table_rows_streamed(
         metadata_refs: &metadata_refs,
         type_index: &type_index,
         object_refs: &object_refs,
+        predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
         field_refs: &field_refs,

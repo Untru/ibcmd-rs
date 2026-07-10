@@ -426,12 +426,20 @@ pub(crate) enum PredefinedDataRowsetLayout {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum PredefinedItemLayout {
+    Generic,
+    Account,
+    Calculation,
+}
+
+#[derive(Clone, Copy)]
 pub(crate) struct PredefinedDataSourceModel {
     suffix: &'static str,
     xsi_type: &'static str,
     root_tag: &'static str,
     rowset_layout: PredefinedDataRowsetLayout,
     unwrap_single_root: bool,
+    item_layout: PredefinedItemLayout,
 }
 
 #[derive(Clone)]
@@ -1270,16 +1278,24 @@ pub(super) fn write_source_asset(
                         asset.primary_path.display()
                     )
                 })?;
+            let xml = format_predefined_data_xml(
+                *model,
+                &items,
+                context.object_refs,
+                context.predefined_item_refs,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to serialize predefined data from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
                     .with_context(|| format!("failed to create {}", parent.display()))?;
             }
-            write_source_xml_file(
-                &path,
-                format_predefined_data_xml(model.xsi_type, &items),
-                context.source_version,
-            )?;
+            write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::RoleRights => {
             let rights =
@@ -1416,9 +1432,49 @@ pub(super) struct PredefinedItem {
     pub(super) name: String,
     pub(super) code: String,
     pub(super) description: String,
-    pub(super) value_types: Vec<ConstantValueType>,
-    pub(super) is_folder: bool,
+    pub(super) data: PredefinedItemData,
     pub(super) children: Vec<PredefinedItem>,
+}
+
+#[derive(Clone)]
+pub(super) enum PredefinedItemData {
+    Generic {
+        value_types: Vec<ConstantValueType>,
+        is_folder: bool,
+    },
+    Account {
+        account_type: PredefinedAccountType,
+        off_balance: bool,
+        order: String,
+        accounting_flags: Vec<PredefinedFlag>,
+        ext_dimension_types: Vec<PredefinedExtDimensionType>,
+    },
+    Calculation {
+        action_period_is_base: bool,
+        displaced: Vec<String>,
+        base: Vec<String>,
+        leading: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PredefinedAccountType {
+    Active,
+    Passive,
+    ActivePassive,
+}
+
+#[derive(Clone)]
+pub(super) struct PredefinedFlag {
+    pub(super) reference_uuid: String,
+    pub(super) value: bool,
+}
+
+#[derive(Clone)]
+pub(super) struct PredefinedExtDimensionType {
+    pub(super) item_uuid: String,
+    pub(super) turnover: bool,
+    pub(super) accounting_flags: Vec<PredefinedFlag>,
 }
 
 pub(super) struct AccumulationRegisterAggregate {
@@ -1789,6 +1845,7 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
             root_tag: "0",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
             unwrap_single_root: true,
+            item_layout: PredefinedItemLayout::Generic,
         },
     ),
     (
@@ -1799,6 +1856,7 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
             root_tag: "1",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
             unwrap_single_root: true,
+            item_layout: PredefinedItemLayout::Generic,
         },
     ),
     (
@@ -1809,6 +1867,7 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
             root_tag: "2",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
             unwrap_single_root: true,
+            item_layout: PredefinedItemLayout::Account,
         },
     ),
     (
@@ -1819,6 +1878,7 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
             root_tag: "9",
             rowset_layout: PredefinedDataRowsetLayout::Root,
             unwrap_single_root: false,
+            item_layout: PredefinedItemLayout::Calculation,
         },
     ),
 ];
@@ -1827,6 +1887,88 @@ pub(super) fn predefined_data_source_model(kind: &str) -> Option<PredefinedDataS
     PREDEFINED_DATA_SOURCE_MODELS
         .iter()
         .find_map(|(candidate, model)| (*candidate == kind).then_some(*model))
+}
+
+pub(super) fn predefined_data_needs_item_references(
+    file_names: &BTreeSet<String>,
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+) -> bool {
+    body_owners.iter().any(|(owner_uuid, owner)| {
+        let Some(model) = predefined_data_source_model(&owner.kind) else {
+            return false;
+        };
+        matches!(
+            model.item_layout,
+            PredefinedItemLayout::Account | PredefinedItemLayout::Calculation
+        ) && file_names.contains(&format!("{owner_uuid}.{}", model.suffix))
+    })
+}
+
+pub(super) fn predefined_data_body_file_names(
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+) -> BTreeSet<String> {
+    body_owners
+        .iter()
+        .filter_map(|(owner_uuid, owner)| {
+            predefined_data_source_model(&owner.kind)
+                .map(|model| format!("{owner_uuid}.{}", model.suffix))
+        })
+        .collect()
+}
+
+pub(super) fn build_predefined_item_reference_index(
+    rows: &[ConfigRow],
+    body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>> {
+    let rows_by_file_name = rows
+        .iter()
+        .filter(|row| !row.binary_hex.is_empty())
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut index = BTreeMap::new();
+
+    for (owner_uuid, owner) in body_owners {
+        let Some(model) = predefined_data_source_model(&owner.kind) else {
+            continue;
+        };
+        let file_name = format!("{owner_uuid}.{}", model.suffix);
+        let Some(row) = rows_by_file_name.get(file_name.as_str()) else {
+            continue;
+        };
+        let bytes = decode_hex(&row.binary_hex)
+            .with_context(|| format!("failed to decode predefined data row {file_name}"))?;
+        let Some(items) = parse_predefined_data_blob_with_model(&bytes, type_index, model) else {
+            continue;
+        };
+        let owner_reference = object_refs.get(owner_uuid).with_context(|| {
+            format!("missing metadata reference for predefined data owner {owner_uuid}")
+        })?;
+        insert_predefined_item_references(&mut index, owner_reference, &items)?;
+    }
+
+    Ok(index)
+}
+
+fn insert_predefined_item_references(
+    index: &mut BTreeMap<String, String>,
+    owner_reference: &str,
+    items: &[PredefinedItem],
+) -> Result<()> {
+    for item in items {
+        let reference = format!("{owner_reference}.{}", item.name);
+        if let Some(previous) = index.insert(item.id.clone(), reference.clone())
+            && previous != reference
+        {
+            bail!(
+                "predefined item {} resolves to both {previous} and {reference}",
+                item.id
+            );
+        }
+        insert_predefined_item_references(index, owner_reference, &item.children)?;
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -1864,26 +2006,381 @@ fn parse_predefined_data_blob_inner(
         return None;
     }
 
-    let root_items = match model.rowset_layout {
+    let (schema_value, rowset_value) = match model.rowset_layout {
         PredefinedDataRowsetLayout::NestedTable => {
             let table_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
-            table_fields
-                .iter()
-                .find_map(|field| parse_predefined_rowset_roots(field, type_index))?
+            (*table_fields.get(1)?, *table_fields.get(2)?)
         }
-        PredefinedDataRowsetLayout::Root => fields
-            .iter()
-            .skip(1)
-            .find_map(|field| parse_predefined_rowset_roots(field, type_index))?,
+        PredefinedDataRowsetLayout::Root => (*fields.get(1)?, *fields.get(2)?),
     };
-    if model.unwrap_single_root {
-        let [root_item] = root_items.as_slice() else {
-            return None;
-        };
-        Some(root_item.children.clone())
-    } else {
-        Some(root_items)
+
+    match model.item_layout {
+        PredefinedItemLayout::Generic => {
+            let root_items = parse_predefined_rowset_roots(rowset_value, type_index)?;
+            if model.unwrap_single_root {
+                let [root_item] = root_items.as_slice() else {
+                    return None;
+                };
+                Some(root_item.children.clone())
+            } else {
+                Some(root_items)
+            }
+        }
+        PredefinedItemLayout::Account => {
+            parse_account_predefined_rowset(schema_value, rowset_value)
+        }
+        PredefinedItemLayout::Calculation => {
+            parse_calculation_predefined_rowset(schema_value, rowset_value)
+        }
     }
+}
+
+struct PredefinedRowsetColumn {
+    id: i64,
+    reference_uuid: Option<String>,
+    is_boolean: bool,
+}
+
+struct PredefinedRowsetSchema {
+    columns: Vec<PredefinedRowsetColumn>,
+    value_offsets: BTreeMap<i64, usize>,
+}
+
+fn parse_predefined_rowset_schema<'a>(
+    schema_value: &str,
+    rowset_value: &'a str,
+) -> Option<(PredefinedRowsetSchema, &'a str)> {
+    let schema_fields = split_1c_braced_fields(schema_value, 0)?;
+    let column_count = schema_fields.first()?.trim().parse::<usize>().ok()?;
+    if schema_fields.len() != column_count + 1 {
+        return None;
+    }
+
+    let mut columns = Vec::with_capacity(column_count);
+    for descriptor in schema_fields.iter().skip(1) {
+        let fields = split_1c_braced_fields(descriptor, 0)?;
+        let id = fields.first()?.trim().parse::<i64>().ok()?;
+        let raw_reference = unquote_1c_token(fields.get(1)?.trim());
+        let reference_uuid = if raw_reference.is_empty() {
+            None
+        } else {
+            Some(parse_uuid_field(&raw_reference)?)
+        };
+        columns.push(PredefinedRowsetColumn {
+            id,
+            reference_uuid,
+            is_boolean: fields
+                .get(2)
+                .is_some_and(|value| predefined_column_is_boolean(value)),
+        });
+    }
+
+    let rowset_fields = split_1c_braced_fields(rowset_value, 0)?;
+    if rowset_fields.first()?.trim() != "2"
+        || rowset_fields.get(1)?.trim().parse::<usize>().ok()? != column_count
+    {
+        return None;
+    }
+    let mappings_end = 2usize.checked_add(column_count.checked_mul(2)?)?;
+    let mut value_offsets = BTreeMap::new();
+    for mapping in rowset_fields.get(2..mappings_end)?.chunks_exact(2) {
+        let value_offset = mapping[0].trim().parse::<usize>().ok()?;
+        let column_id = mapping[1].trim().parse::<i64>().ok()?;
+        if value_offsets.insert(column_id, value_offset).is_some() {
+            return None;
+        }
+    }
+    if value_offsets.len() != column_count {
+        return None;
+    }
+    let item_list = *rowset_fields.get(mappings_end)?;
+    let item_list_fields = split_1c_braced_fields(item_list, 0)?;
+    if item_list_fields.first()?.trim() != "1" {
+        return None;
+    }
+
+    Some((
+        PredefinedRowsetSchema {
+            columns,
+            value_offsets,
+        },
+        item_list,
+    ))
+}
+
+fn predefined_column_is_boolean(value: &str) -> bool {
+    let Some(pattern) = split_1c_braced_fields(value, 0) else {
+        return false;
+    };
+    if pattern.first().map(|value| unquote_1c_token(value)) != Some("Pattern".to_string()) {
+        return false;
+    }
+    pattern
+        .get(1)
+        .and_then(|value| split_1c_braced_fields(value, 0))
+        .and_then(|fields| fields.first().map(|value| unquote_1c_token(value)))
+        .as_deref()
+        == Some("B")
+}
+
+fn parse_predefined_item_fields<'a>(value: &'a str) -> Option<(Vec<&'a str>, Option<&'a str>)> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let value_count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    let after_values = 3usize.checked_add(value_count)?;
+    let child_list = match fields.get(after_values)?.trim() {
+        "0" => None,
+        "1" => Some(*fields.get(after_values + 1)?),
+        _ => return None,
+    };
+    Some((fields, child_list))
+}
+
+fn predefined_rowset_item_value<'a>(
+    fields: &[&'a str],
+    schema: &PredefinedRowsetSchema,
+    column_id: i64,
+) -> Option<&'a str> {
+    let value_offset = *schema.value_offsets.get(&column_id)?;
+    fields.get(3usize.checked_add(value_offset)?).copied()
+}
+
+fn parse_predefined_item_list(
+    value: &str,
+    mut parse_item: impl FnMut(&str) -> Option<PredefinedItem>,
+) -> Option<Vec<PredefinedItem>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let items = fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .map(|field| parse_item(field))
+        .collect::<Option<Vec<_>>>()?;
+    (items.len() == count).then_some(items)
+}
+
+fn parse_account_predefined_rowset(
+    schema_value: &str,
+    rowset_value: &str,
+) -> Option<Vec<PredefinedItem>> {
+    let (schema, root_list) = parse_predefined_rowset_schema(schema_value, rowset_value)?;
+    let root_fields = split_1c_braced_fields(root_list, 0)?;
+    if root_fields.first()?.trim() != "1" || root_fields.get(1)?.trim() != "1" {
+        return None;
+    }
+    let (_, child_list) = parse_predefined_item_fields(root_fields.get(2)?)?;
+    parse_account_predefined_children(child_list?, &schema)
+}
+
+fn parse_account_predefined_children(
+    value: &str,
+    schema: &PredefinedRowsetSchema,
+) -> Option<Vec<PredefinedItem>> {
+    parse_predefined_item_list(value, |item| parse_account_predefined_item(item, schema))
+}
+
+fn parse_account_predefined_item(
+    value: &str,
+    schema: &PredefinedRowsetSchema,
+) -> Option<PredefinedItem> {
+    const FIXED_COLUMNS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 10_000, 20_000];
+
+    let (fields, child_list) = parse_predefined_item_fields(value)?;
+    let id = parse_predefined_uuid_value(predefined_rowset_item_value(&fields, schema, 0)?)?;
+    let name = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 1)?)?;
+    let code = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 2)?)?;
+    let description =
+        parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 3)?)?;
+    let account_type =
+        match parse_predefined_number_value(predefined_rowset_item_value(&fields, schema, 4)?)? {
+            0 => PredefinedAccountType::Active,
+            1 => PredefinedAccountType::Passive,
+            2 => PredefinedAccountType::ActivePassive,
+            _ => return None,
+        };
+    let off_balance =
+        parse_predefined_bool_value(predefined_rowset_item_value(&fields, schema, 5)?)?;
+    let ext_dimension_types =
+        parse_predefined_ext_dimension_types(predefined_rowset_item_value(&fields, schema, 6)?)?;
+    let order =
+        parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 10_000)?)?;
+    if parse_predefined_number_value(predefined_rowset_item_value(&fields, schema, 20_000)?)? != 0 {
+        return None;
+    }
+
+    let accounting_flags = parse_predefined_dynamic_flags(&fields, schema, FIXED_COLUMNS)?;
+    let children = match child_list {
+        Some(value) => parse_account_predefined_children(value, schema)?,
+        None => Vec::new(),
+    };
+
+    Some(PredefinedItem {
+        id,
+        name,
+        code,
+        description,
+        data: PredefinedItemData::Account {
+            account_type,
+            off_balance,
+            order,
+            accounting_flags,
+            ext_dimension_types,
+        },
+        children,
+    })
+}
+
+fn parse_predefined_dynamic_flags(
+    fields: &[&str],
+    schema: &PredefinedRowsetSchema,
+    fixed_columns: &[i64],
+) -> Option<Vec<PredefinedFlag>> {
+    schema
+        .columns
+        .iter()
+        .filter(|column| !fixed_columns.contains(&column.id))
+        .map(|column| {
+            if !column.is_boolean {
+                return None;
+            }
+            Some(PredefinedFlag {
+                reference_uuid: column.reference_uuid.clone()?,
+                value: parse_predefined_bool_value(predefined_rowset_item_value(
+                    fields, schema, column.id,
+                )?)?,
+            })
+        })
+        .collect()
+}
+
+fn parse_predefined_ext_dimension_types(value: &str) -> Option<Vec<PredefinedExtDimensionType>> {
+    let outer = split_1c_braced_fields(value, 0)?;
+    if outer.first()?.trim() != r##""#""## {
+        return None;
+    }
+    let payload = split_1c_braced_fields(outer.get(2)?, 0)?;
+    if payload.first()?.trim() != "9" {
+        return None;
+    }
+    let (schema, item_list) = parse_predefined_rowset_schema(payload.get(1)?, payload.get(2)?)?;
+    let list_fields = split_1c_braced_fields(item_list, 0)?;
+    let count = list_fields.get(1)?.trim().parse::<usize>().ok()?;
+    let items = list_fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .map(|item| {
+            let (fields, child_list) = parse_predefined_item_fields(item)?;
+            if child_list.is_some() {
+                return None;
+            }
+            Some(PredefinedExtDimensionType {
+                item_uuid: parse_predefined_uuid_value(predefined_rowset_item_value(
+                    &fields, &schema, 0,
+                )?)?,
+                turnover: parse_predefined_bool_value(predefined_rowset_item_value(
+                    &fields, &schema, 1,
+                )?)?,
+                accounting_flags: parse_predefined_dynamic_flags(&fields, &schema, &[0, 1])?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (items.len() == count).then_some(items)
+}
+
+fn parse_calculation_predefined_rowset(
+    schema_value: &str,
+    rowset_value: &str,
+) -> Option<Vec<PredefinedItem>> {
+    let (schema, item_list) = parse_predefined_rowset_schema(schema_value, rowset_value)?;
+    parse_predefined_item_list(item_list, |item| {
+        parse_calculation_predefined_item(item, &schema)
+    })
+}
+
+fn parse_calculation_predefined_item(
+    value: &str,
+    schema: &PredefinedRowsetSchema,
+) -> Option<PredefinedItem> {
+    let (fields, child_list) = parse_predefined_item_fields(value)?;
+    if child_list.is_some()
+        || schema
+            .columns
+            .iter()
+            .any(|column| column.reference_uuid.is_some())
+    {
+        return None;
+    }
+    let id = parse_predefined_uuid_value(predefined_rowset_item_value(&fields, schema, 1)?)?;
+    let name = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 2)?)?;
+    let code = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 3)?)?;
+    let description =
+        parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 4)?)?;
+    let action_period_is_base =
+        parse_predefined_bool_value(predefined_rowset_item_value(&fields, schema, 5)?)?;
+    let displaced =
+        parse_predefined_item_reference_list(predefined_rowset_item_value(&fields, schema, 6)?)?;
+    let base =
+        parse_predefined_item_reference_list(predefined_rowset_item_value(&fields, schema, 7)?)?;
+    let leading =
+        parse_predefined_item_reference_list(predefined_rowset_item_value(&fields, schema, 8)?)?;
+    if parse_predefined_number_value(predefined_rowset_item_value(&fields, schema, 9)?)? != 0 {
+        return None;
+    }
+
+    Some(PredefinedItem {
+        id,
+        name,
+        code,
+        description,
+        data: PredefinedItemData::Calculation {
+            action_period_is_base,
+            displaced,
+            base,
+            leading,
+        },
+        children: Vec::new(),
+    })
+}
+
+fn parse_predefined_item_reference_list(value: &str) -> Option<Vec<String>> {
+    let outer = split_1c_braced_fields(value, 0)?;
+    if outer.first()?.trim() != r##""#""## {
+        return None;
+    }
+    let payload = split_1c_braced_fields(outer.get(2)?, 0)?;
+    if payload.first()?.trim() != "9" {
+        return None;
+    }
+    let (schema, item_list) = parse_predefined_rowset_schema(payload.get(1)?, payload.get(2)?)?;
+    if schema
+        .columns
+        .iter()
+        .any(|column| column.id != 1 || column.reference_uuid.is_some() || column.is_boolean)
+    {
+        return None;
+    }
+    let list_fields = split_1c_braced_fields(item_list, 0)?;
+    let count = list_fields.get(1)?.trim().parse::<usize>().ok()?;
+    let items = list_fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .map(|item| {
+            let (fields, child_list) = parse_predefined_item_fields(item)?;
+            if child_list.is_some() {
+                return None;
+            }
+            parse_predefined_uuid_value(predefined_rowset_item_value(&fields, &schema, 1)?)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (items.len() == count).then_some(items)
 }
 
 pub(super) fn parse_predefined_rowset_roots(
@@ -1961,8 +2458,10 @@ pub(super) fn parse_predefined_item(
         name,
         code,
         description,
-        value_types,
-        is_folder,
+        data: PredefinedItemData::Generic {
+            value_types,
+            is_folder,
+        },
         children,
     })
 }
@@ -2016,6 +2515,14 @@ pub(super) fn parse_predefined_bool_value(value: &str) -> Option<bool> {
         return None;
     }
     parse_1c_bool_flag(fields.get(1)?.trim())
+}
+
+pub(super) fn parse_predefined_number_value(value: &str) -> Option<i64> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""N""# {
+        return None;
+    }
+    fields.get(1)?.trim().parse().ok()
 }
 
 pub(super) fn parse_predefined_string_value(value: &str) -> Option<String> {
@@ -2231,43 +2738,247 @@ pub(super) fn format_help_xml(pages: &[HelpPage]) -> String {
     xml
 }
 
-pub(super) fn format_predefined_data_xml(xsi_type: &str, items: &[PredefinedItem]) -> String {
+pub(super) fn format_predefined_data_xml(
+    model: PredefinedDataSourceModel,
+    items: &[PredefinedItem],
+    object_refs: &BTreeMap<String, String>,
+    predefined_item_refs: &BTreeMap<String, String>,
+) -> Result<String> {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <PredefinedData xmlns=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"{}\" version=\"2.20\">\r\n",
-        escape_xml_text(xsi_type)
+        escape_xml_text(model.xsi_type)
     );
     for item in items {
-        push_predefined_item_xml(&mut xml, item, 1);
+        push_predefined_item_xml(
+            &mut xml,
+            item,
+            model.item_layout,
+            object_refs,
+            predefined_item_refs,
+            1,
+        )?;
     }
     xml.push_str("</PredefinedData>\r\n");
-    xml
+    Ok(xml)
 }
 
-pub(super) fn push_predefined_item_xml(xml: &mut String, item: &PredefinedItem, indent: usize) {
+pub(super) fn push_predefined_item_xml(
+    xml: &mut String,
+    item: &PredefinedItem,
+    layout: PredefinedItemLayout,
+    object_refs: &BTreeMap<String, String>,
+    predefined_item_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Result<()> {
     let tab = "\t".repeat(indent);
     xml.push_str(&format!(
         "{tab}<Item id=\"{}\">\r\n\
 {tab}\t<Name>{}</Name>\r\n\
 {tab}\t<Code>{}</Code>\r\n\
-{tab}\t<Description>{}</Description>\r\n\
-{}\
-{tab}\t<IsFolder>{}</IsFolder>\r\n",
+{tab}\t<Description>{}</Description>\r\n",
         escape_xml_text(&item.id),
         escape_xml_text(&item.name),
         escape_xml_text(&item.code),
         escape_xml_text(&item.description),
-        format_predefined_type_xml(&item.value_types, indent + 1),
-        xml_bool(item.is_folder),
     ));
+
+    match (&item.data, layout) {
+        (
+            PredefinedItemData::Generic {
+                value_types,
+                is_folder,
+            },
+            PredefinedItemLayout::Generic,
+        ) => {
+            xml.push_str(&format_predefined_type_xml(value_types, indent + 1));
+            xml.push_str(&format!(
+                "{tab}\t<IsFolder>{}</IsFolder>\r\n",
+                xml_bool(*is_folder)
+            ));
+        }
+        (
+            PredefinedItemData::Account {
+                account_type,
+                off_balance,
+                order,
+                accounting_flags,
+                ext_dimension_types,
+            },
+            PredefinedItemLayout::Account,
+        ) => {
+            let account_type = match account_type {
+                PredefinedAccountType::Active => "Active",
+                PredefinedAccountType::Passive => "Passive",
+                PredefinedAccountType::ActivePassive => "ActivePassive",
+            };
+            xml.push_str(&format!(
+                "{tab}\t<AccountType>{account_type}</AccountType>\r\n\
+{tab}\t<OffBalance>{}</OffBalance>\r\n\
+{tab}\t<Order>{}</Order>\r\n",
+                xml_bool(*off_balance),
+                escape_xml_text(order),
+            ));
+            push_predefined_flags_xml(xml, accounting_flags, object_refs, indent + 1)?;
+            push_predefined_ext_dimension_types_xml(
+                xml,
+                ext_dimension_types,
+                object_refs,
+                predefined_item_refs,
+                indent + 1,
+            )?;
+        }
+        (
+            PredefinedItemData::Calculation {
+                action_period_is_base,
+                displaced,
+                base,
+                leading,
+            },
+            PredefinedItemLayout::Calculation,
+        ) => {
+            xml.push_str(&format!(
+                "{tab}\t<ActionPeriodIsBase>{}</ActionPeriodIsBase>\r\n",
+                xml_bool(*action_period_is_base)
+            ));
+            push_predefined_calculation_type_refs_xml(
+                xml,
+                "Displaced",
+                displaced,
+                predefined_item_refs,
+                indent + 1,
+            )?;
+            push_predefined_calculation_type_refs_xml(
+                xml,
+                "Base",
+                base,
+                predefined_item_refs,
+                indent + 1,
+            )?;
+            push_predefined_calculation_type_refs_xml(
+                xml,
+                "Leading",
+                leading,
+                predefined_item_refs,
+                indent + 1,
+            )?;
+        }
+        _ => bail!(
+            "predefined item {} does not match its source model",
+            item.id
+        ),
+    }
+
     if !item.children.is_empty() {
         xml.push_str(&format!("{tab}\t<ChildItems>\r\n"));
         for child in &item.children {
-            push_predefined_item_xml(xml, child, indent + 2);
+            push_predefined_item_xml(
+                xml,
+                child,
+                layout,
+                object_refs,
+                predefined_item_refs,
+                indent + 2,
+            )?;
         }
         xml.push_str(&format!("{tab}\t</ChildItems>\r\n"));
     }
     xml.push_str(&format!("{tab}</Item>\r\n"));
+    Ok(())
+}
+
+fn push_predefined_flags_xml(
+    xml: &mut String,
+    flags: &[PredefinedFlag],
+    object_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Result<()> {
+    if flags.is_empty() {
+        return Ok(());
+    }
+    let tab = "\t".repeat(indent);
+    xml.push_str(&format!("{tab}<AccountingFlags>\r\n"));
+    for flag in flags {
+        let reference = object_refs.get(&flag.reference_uuid).with_context(|| {
+            format!(
+                "missing metadata reference for predefined accounting flag {}",
+                flag.reference_uuid
+            )
+        })?;
+        xml.push_str(&format!(
+            "{tab}\t<Flag ref=\"{}\">{}</Flag>\r\n",
+            escape_xml_text(reference),
+            xml_bool(flag.value),
+        ));
+    }
+    xml.push_str(&format!("{tab}</AccountingFlags>\r\n"));
+    Ok(())
+}
+
+fn push_predefined_ext_dimension_types_xml(
+    xml: &mut String,
+    ext_dimension_types: &[PredefinedExtDimensionType],
+    object_refs: &BTreeMap<String, String>,
+    predefined_item_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Result<()> {
+    let tab = "\t".repeat(indent);
+    if ext_dimension_types.is_empty() {
+        xml.push_str(&format!("{tab}<ExtDimensionTypes/>\r\n"));
+        return Ok(());
+    }
+
+    xml.push_str(&format!("{tab}<ExtDimensionTypes>\r\n"));
+    for ext_dimension_type in ext_dimension_types {
+        let reference = predefined_item_refs
+            .get(&ext_dimension_type.item_uuid)
+            .with_context(|| {
+                format!(
+                    "missing predefined item reference for ext dimension type {}",
+                    ext_dimension_type.item_uuid
+                )
+            })?;
+        xml.push_str(&format!(
+            "{tab}\t<ExtDimensionType name=\"{}\">\r\n\
+{tab}\t\t<Turnover>{}</Turnover>\r\n",
+            escape_xml_text(reference),
+            xml_bool(ext_dimension_type.turnover),
+        ));
+        push_predefined_flags_xml(
+            xml,
+            &ext_dimension_type.accounting_flags,
+            object_refs,
+            indent + 2,
+        )?;
+        xml.push_str(&format!("{tab}\t</ExtDimensionType>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</ExtDimensionTypes>\r\n"));
+    Ok(())
+}
+
+fn push_predefined_calculation_type_refs_xml(
+    xml: &mut String,
+    element_name: &str,
+    item_uuids: &[String],
+    predefined_item_refs: &BTreeMap<String, String>,
+    indent: usize,
+) -> Result<()> {
+    if item_uuids.is_empty() {
+        return Ok(());
+    }
+    let tab = "\t".repeat(indent);
+    xml.push_str(&format!("{tab}<{element_name}>\r\n"));
+    for item_uuid in item_uuids {
+        let reference = predefined_item_refs.get(item_uuid).with_context(|| {
+            format!("missing predefined calculation type reference {item_uuid}")
+        })?;
+        xml.push_str(&format!(
+            "{tab}\t<CalculationType>{}</CalculationType>\r\n",
+            escape_xml_text(reference),
+        ));
+    }
+    xml.push_str(&format!("{tab}</{element_name}>\r\n"));
+    Ok(())
 }
 
 pub(super) fn format_predefined_type_xml(
